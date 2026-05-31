@@ -258,8 +258,12 @@ class TestDefaultBaseSubcommand:
         skill_md = Path(__file__).parents[1] / "SKILL.md"
         assert skill_md.exists(), f"SKILL.md not found at {skill_md}"
         content = skill_md.read_text()
-        assert '--base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"' in content, \
-            "SKILL.md Step 9 gh pr create block is missing --base substitution"
+        # base is resolved via ship.py default-base, then consumed as --base "$base"
+        # (resolution must NOT be inline inside the worktree subshell — see Step 9 note).
+        assert 'base="$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"' in content, \
+            "SKILL.md Step 9 must resolve the base via ship.py default-base"
+        assert '--base "$base"' in content, \
+            "SKILL.md Step 9 gh pr create block must consume the resolved base"
 
 
 # ------------------------------------------------------------------ AC5(e) worktree-first spec resolution
@@ -340,7 +344,8 @@ class TestSkillMdStructure:
     def test_gh_pr_create_has_base_flag(self):
         skill_md = Path(__file__).parents[1] / "SKILL.md"
         content = skill_md.read_text()
-        assert '--base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"' in content
+        assert 'base="$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"' in content
+        assert '--base "$base"' in content
 
     def test_gh_pr_create_appears_in_step_9(self):
         skill_md = Path(__file__).parents[1] / "SKILL.md"
@@ -352,7 +357,13 @@ class TestSkillMdStructure:
         assert step10_start != -1
         step9_section = content[step9_start:step10_start]
         assert "gh pr create" in step9_section, "gh pr create not found in Step 9"
-        assert '--base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"' in step9_section
+        assert '--base "$base"' in step9_section
+        # The fix: base is resolved in the main-repo cwd, BEFORE cd-ing into the
+        # worktree subshell (ship.py refuses to run from inside .worktrees/).
+        base_line = step9_section.find('base="$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"')
+        subshell = step9_section.find("(cd <worktree_path> && gh pr create")
+        assert base_line != -1 and subshell != -1 and base_line < subshell, \
+            "default-base must be resolved before the worktree subshell"
 
 
 # ------------------------------------------------------------------ AC5(j) cmd_cleanup regression guard

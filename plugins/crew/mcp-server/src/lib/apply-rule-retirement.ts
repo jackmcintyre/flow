@@ -209,7 +209,10 @@ export function makeRuleRetirementApplyHandler(
         removeRuleNode(doc, ruleIdx);
         updatedRules = data.rules.filter((_, i) => i !== ruleIdx);
       } else {
-        // relax — demote to advisory
+        // relax — demote to advisory. NB: the standards projection (6.5b) does not
+        // read `level`, so regenerating after a relax yields the same criteria —
+        // only the bumped version/timestamp differ. docs/standards.md is still in
+        // changedPaths and re-committed (intended; AC-compliant).
         const prior = data.rules[ruleIdx]!;
         const relaxed = DisciplineRuleSchema.parse({
           id: prior.id,
