@@ -28,6 +28,7 @@
  * (Story 6.4 — FR61, Architecture §Skill calibration loop)
  */
 import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
+import { makeRuleRetirementApplyHandler } from "./apply-rule-retirement.js";
 import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
 /**
  * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
@@ -38,11 +39,11 @@ import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
  *
  * Registered handlers:
  *   - `rule`                                          → Story 6.5
+ *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *
  * Still fail closed (no handler) until their story registers them:
- *   - `rule-retirement`                               → Story 6.6
  *   - `team-change`                                   → Story 6.10
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
@@ -57,6 +58,8 @@ export function createProductionRegistry() {
     const registry = new Map();
     // Story 6.5 — the first real handler.
     registry.set("rule", makeRuleApplyHandler());
+    // Story 6.6 — rule-retirement handler.
+    registry.set("rule-retirement", makeRuleRetirementApplyHandler());
     // Story 6.7 — the skill-* handlers.
     for (const handler of createSkillProposalHandlers()) {
         registry.set(handler.type, handler);
