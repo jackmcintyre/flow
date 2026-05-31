@@ -338,9 +338,13 @@ Run from the main repo cwd — do NOT `cd` into the worktree. Bash-tool cwd pers
 
 ```bash
 git -C <worktree_path> push -u origin "story/<story_key>"
+# Resolve the base in the MAIN repo cwd — NOT inside the subshell below. ship.py
+# refuses to run from inside .worktrees/, so a `$(… default-base)` evaluated after
+# `cd <worktree_path>` returns empty and gh silently falls back to the default branch.
+base="$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"
 (cd <worktree_path> && gh pr create \
   --title "feat(<epic_num>): <title>" \
-  --base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)" \
+  --base "$base" \
   --body-file /tmp/ship-<story_key>.body.md)
 ```
 

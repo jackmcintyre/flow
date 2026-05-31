@@ -66,9 +66,6 @@ export const STANDARDS_REL_PATH = "docs/standards.md";
  */
 export const STANDARDS_SEED_VERSION = "0.1.0";
 
-/** Tool name threaded into the managed-fs role-trace for the standards write. */
-const TOOL_NAME = "acceptProposal";
-
 // ---------------------------------------------------------------------------
 // Cap — read from the schema, never hard-coded
 // ---------------------------------------------------------------------------
