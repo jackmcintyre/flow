@@ -213,12 +213,37 @@ def load_status() -> dict:
     return yaml.safe_load(STATUS_FILE.read_text())
 
 
-def save_status(data: dict) -> None:
-    """Atomic write — tmp file then rename."""
-    data["last_updated"] = dt.date.today().isoformat()
-    tmp = STATUS_FILE.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(data, sort_keys=False))
-    tmp.replace(STATUS_FILE)
+def _set_status_value(target: Path, key: str, old: str, new: str) -> None:
+    """Flip ``<key>: <old>`` to ``<key>: <new>`` in a sprint-status YAML file
+    and bump ``last_updated``, preserving every comment and all formatting.
+
+    PyYAML's load/dump round-trip silently strips inline ``# ...`` comments, and
+    sprint-status.yaml carries load-bearing rationale comments (rescope/sequence
+    notes). So rather than re-serialise the parsed document, rewrite only the
+    single status line (and the last_updated scalar) via anchored regex
+    substitutions on the raw text. Atomic: tmp file then rename.
+    """
+    raw = target.read_text()
+
+    status_pat = re.compile(
+        r"^(?P<pre>[ \t]*" + re.escape(key) + r":[ \t]+)"
+        + re.escape(old)
+        + r"(?P<post>[ \t]*(?:#.*)?)$",
+        re.MULTILINE,
+    )
+    raw, n = status_pat.subn(lambda m: m.group("pre") + new + m.group("post"), raw)
+    if n != 1:
+        die(f"set-status: expected exactly one '{key}: {old}' line, found {n}")
+
+    today = dt.date.today().isoformat()
+    raw, _ = re.subn(
+        r"^last_updated:[ \t]*.*$", f"last_updated: '{today}'", raw,
+        count=1, flags=re.MULTILINE,
+    )
+
+    tmp = target.with_suffix(".yaml.tmp")
+    tmp.write_text(raw)
+    tmp.replace(target)
 
 
 def story_keys(dev_status: dict) -> list[str]:
@@ -452,11 +477,7 @@ def cmd_set_status(args) -> None:
             "noop": True, "target": str(target),
         }))
         return
-    data["development_status"][args.key] = args.new_status
-    data["last_updated"] = dt.date.today().isoformat()
-    tmp = target.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(data, sort_keys=False))
-    tmp.replace(target)
+    _set_status_value(target, args.key, old, args.new_status)
     print(json.dumps({
         "key": args.key, "from": old, "to": args.new_status,
         "target": str(target),
@@ -650,8 +671,7 @@ def cmd_cleanup(args) -> None:
     data = load_status()
     dev = data.get("development_status") or {}
     if key in dev and dev[key] != "done":
-        dev[key] = "done"
-        save_status(data)
+        _set_status_value(STATUS_FILE, key, dev[key], "done")
         summary["status"] = "done (written)"
     elif key in dev:
         summary["status"] = "done (already)"
