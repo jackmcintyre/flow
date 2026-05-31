@@ -50,6 +50,7 @@ import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest, } from "../schemas/execution-manifest.js";
 import { TelemetryEventSchema } from "../schemas/telemetry-events.js";
 import { parseRuleRegistry } from "../schemas/discipline-rules.js";
+import { computeFailureClassFireCounts, } from "../lib/failure-class-fire-counts.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
 /**
@@ -60,12 +61,23 @@ const TELEMETRY_FILE_REGEX = /\.jsonl$/;
  *   telemetry lines, it is not skippable.
  */
 export async function gatherRetroInputs(opts) {
-    const { targetRepoRoot } = opts;
+    const { targetRepoRoot, fireCountConfig } = opts;
     const doneManifests = await gatherDoneManifests(targetRepoRoot);
     const telemetrySummary = await gatherTelemetry(targetRepoRoot);
     const priorProposals = await gatherPriorProposals(targetRepoRoot);
     const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
-    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry };
+    // Compute fire-count signal for the analyst. Only available when the registry
+    // exists; null in the 6a phase.
+    let fireCountSignal = null;
+    if (ruleRegistry !== null) {
+        const registryTyped = ruleRegistry;
+        const result = computeFailureClassFireCounts({ doneManifests, telemetrySummary, ruleRegistry: registryTyped }, fireCountConfig);
+        fireCountSignal = {
+            promotionCandidates: result.promotionCandidates,
+            retirementCandidates: result.retirementCandidates,
+        };
+    }
+    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal };
 }
 // ---------------------------------------------------------------------------
 // done/ manifests

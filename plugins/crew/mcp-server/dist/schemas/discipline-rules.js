@@ -153,7 +153,9 @@ export function appendRuleNode(doc, rule) {
  * Replace the rule at `index` in the document's `rules` sequence with `rule`
  * (edit-in-place on a `target_failure_class` match). Comments on OTHER rules
  * survive; the edited rule's node is replaced wholesale with a fresh node
- * carrying the merged fields.
+ * carrying the merged fields. The original node's `commentBefore` (the comment
+ * that precedes the rule item in the YAML sequence) is preserved on the new
+ * node so hand-authored annotations survive a relax/edit operation.
  */
 export function replaceRuleNode(doc, index, rule) {
     const seq = doc.get("rules", true);
@@ -164,5 +166,28 @@ export function replaceRuleNode(doc, index, rule) {
             zodMessage: `cannot replace rule at index ${index}: 'rules' is not a sequence`,
         });
     }
-    seq.set(index, doc.createNode(rule));
+    // Preserve the existing node's comment (if any) on the replacement node so
+    // hand-authored annotations survive an edit-in-place (relax or text update).
+    const existing = seq.items[index];
+    const newNode = doc.createNode(rule);
+    if (existing?.commentBefore !== undefined) {
+        newNode.commentBefore = existing.commentBefore;
+    }
+    seq.set(index, newNode);
+}
+/**
+ * Remove the rule at `index` from the document's `rules` sequence.
+ * Comments on OTHER rules survive; the removed rule's node is deleted.
+ * Used by the rule-retirement apply handler (Story 6.6).
+ */
+export function removeRuleNode(doc, index) {
+    const seq = doc.get("rules", true);
+    if (!isSeq(seq)) {
+        throw new RuleRegistryMalformedError({
+            sourcePath: "docs/discipline-rules.yaml",
+            yamlPath: "rules",
+            zodMessage: `cannot remove rule at index ${index}: 'rules' is not a sequence`,
+        });
+    }
+    seq.delete(index);
 }

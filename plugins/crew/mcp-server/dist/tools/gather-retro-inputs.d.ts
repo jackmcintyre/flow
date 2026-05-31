@@ -46,6 +46,7 @@
  */
 import { type ExecutionManifest } from "../schemas/execution-manifest.js";
 import { type TelemetryEvent } from "../schemas/telemetry-events.js";
+import { type PromotionCandidate, type RetirementCandidate, type FireCountConfig } from "../lib/failure-class-fire-counts.js";
 /**
  * The deterministic input bundle handed to the retro-analyst subagent.
  */
@@ -65,10 +66,26 @@ export interface RetroInputs {
     }>;
     /** Parsed discipline-rules registry, or null when the file is absent. */
     ruleRegistry: unknown | null;
+    /**
+     * Deterministic fire-count signal derived by `computeFailureClassFireCounts`
+     * (Story 6.6). The retro-analyst MUST draft proposals from these computed
+     * candidates — it MUST NOT recount fires in prose.
+     *
+     * `null` when the rule registry is absent (6a phase: no registry yet).
+     */
+    fireCountSignal: {
+        promotionCandidates: PromotionCandidate[];
+        retirementCandidates: RetirementCandidate[];
+    } | null;
 }
 export interface GatherRetroInputsOptions {
     /** Absolute path to the target repository root. */
     targetRepoRoot: string;
+    /**
+     * Optional config for the fire-count helper. Undocumented omissions use
+     * defaults (promotionThreshold=3, retirementWindows=5, relaxFloor=1).
+     */
+    fireCountConfig?: FireCountConfig;
 }
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.

@@ -53,7 +53,13 @@ import {
   type ExecutionManifest,
 } from "../schemas/execution-manifest.js";
 import { TelemetryEventSchema, type TelemetryEvent } from "../schemas/telemetry-events.js";
-import { parseRuleRegistry } from "../schemas/discipline-rules.js";
+import { parseRuleRegistry, type DisciplineRule } from "../schemas/discipline-rules.js";
+import {
+  computeFailureClassFireCounts,
+  type PromotionCandidate,
+  type RetirementCandidate,
+  type FireCountConfig,
+} from "../lib/failure-class-fire-counts.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -74,11 +80,27 @@ export interface RetroInputs {
   priorProposals: Array<{ path: string; iso_timestamp: string }>;
   /** Parsed discipline-rules registry, or null when the file is absent. */
   ruleRegistry: unknown | null;
+  /**
+   * Deterministic fire-count signal derived by `computeFailureClassFireCounts`
+   * (Story 6.6). The retro-analyst MUST draft proposals from these computed
+   * candidates — it MUST NOT recount fires in prose.
+   *
+   * `null` when the rule registry is absent (6a phase: no registry yet).
+   */
+  fireCountSignal: {
+    promotionCandidates: PromotionCandidate[];
+    retirementCandidates: RetirementCandidate[];
+  } | null;
 }
 
 export interface GatherRetroInputsOptions {
   /** Absolute path to the target repository root. */
   targetRepoRoot: string;
+  /**
+   * Optional config for the fire-count helper. Undocumented omissions use
+   * defaults (promotionThreshold=3, retirementWindows=5, relaxFloor=1).
+   */
+  fireCountConfig?: FireCountConfig;
 }
 
 /**
@@ -91,14 +113,29 @@ export interface GatherRetroInputsOptions {
 export async function gatherRetroInputs(
   opts: GatherRetroInputsOptions,
 ): Promise<RetroInputs> {
-  const { targetRepoRoot } = opts;
+  const { targetRepoRoot, fireCountConfig } = opts;
 
   const doneManifests = await gatherDoneManifests(targetRepoRoot);
   const telemetrySummary = await gatherTelemetry(targetRepoRoot);
   const priorProposals = await gatherPriorProposals(targetRepoRoot);
   const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry };
+  // Compute fire-count signal for the analyst. Only available when the registry
+  // exists; null in the 6a phase.
+  let fireCountSignal: RetroInputs["fireCountSignal"] = null;
+  if (ruleRegistry !== null) {
+    const registryTyped = ruleRegistry as { rules: DisciplineRule[] };
+    const result = computeFailureClassFireCounts(
+      { doneManifests, telemetrySummary, ruleRegistry: registryTyped },
+      fireCountConfig,
+    );
+    fireCountSignal = {
+      promotionCandidates: result.promotionCandidates,
+      retirementCandidates: result.retirementCandidates,
+    };
+  }
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal };
 }
 
 // ---------------------------------------------------------------------------

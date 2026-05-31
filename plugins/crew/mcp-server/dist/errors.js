@@ -1635,3 +1635,46 @@ export class StandardsCapExceededError extends DomainError {
         this.cap = opts.cap;
     }
 }
+/**
+ * `rule-retirement` apply handler was given a `target_rule_id` that does not
+ * match any rule in `docs/discipline-rules.yaml`. Raised BEFORE any write so
+ * the working tree is left clean. The operator must check whether the rule was
+ * already removed (e.g. by a previous retirement apply) or whether the proposal
+ * was authored against a stale registry snapshot.
+ *
+ * Story 6.6 — FR64a (rule-retirement apply path).
+ */
+export class RuleNotFoundError extends DomainError {
+    targetRuleId;
+    registryPath;
+    constructor(opts) {
+        super(`rule-retirement refused: no rule with id '${opts.targetRuleId}' found in ` +
+            `'${opts.registryPath}'. The rule may have been removed by a prior retirement ` +
+            `apply, or the proposal was authored against a stale registry snapshot. ` +
+            `No file was written. (Story 6.6 / FR64a)`);
+        this.targetRuleId = opts.targetRuleId;
+        this.registryPath = opts.registryPath;
+    }
+}
+/**
+ * Retiring the last rule in `docs/discipline-rules.yaml` would leave the
+ * registry empty, causing `regenerate-standards` to write a `docs/standards.md`
+ * with zero criteria — violating the `StandardsDocSchema` `.min(1)` constraint.
+ * Raised BEFORE any write; the working tree is left clean.
+ *
+ * The operator must either add replacement rules before retiring the last one,
+ * or change `recommended_action` to `relax` (demote to advisory) rather than
+ * `retire` if the rule should merely be softened.
+ *
+ * Story 6.6 — FR64a (rule-retirement apply path).
+ */
+export class RetirementWouldEmptyRegistryError extends DomainError {
+    targetRuleId;
+    constructor(opts) {
+        super(`rule-retirement refused: retiring rule '${opts.targetRuleId}' would leave the ` +
+            `registry empty, producing an invalid docs/standards.md (minimum 1 criterion required). ` +
+            `Add a replacement rule before retiring this one, or use 'relax' instead to demote ` +
+            `it to advisory level. (Story 6.6 / FR64a)`);
+        this.targetRuleId = opts.targetRuleId;
+    }
+}

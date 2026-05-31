@@ -123,6 +123,14 @@ export declare function appendRuleNode(doc: Document, rule: DisciplineRule): voi
  * Replace the rule at `index` in the document's `rules` sequence with `rule`
  * (edit-in-place on a `target_failure_class` match). Comments on OTHER rules
  * survive; the edited rule's node is replaced wholesale with a fresh node
- * carrying the merged fields.
+ * carrying the merged fields. The original node's `commentBefore` (the comment
+ * that precedes the rule item in the YAML sequence) is preserved on the new
+ * node so hand-authored annotations survive a relax/edit operation.
  */
 export declare function replaceRuleNode(doc: Document, index: number, rule: DisciplineRule): void;
+/**
+ * Remove the rule at `index` from the document's `rules` sequence.
+ * Comments on OTHER rules survive; the removed rule's node is deleted.
+ * Used by the rule-retirement apply handler (Story 6.6).
+ */
+export declare function removeRuleNode(doc: Document, index: number): void;

@@ -95,6 +95,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // pre-existing state. Test file only; the production regeneration writes
   // standards.md exclusively through writeManagedFile (with MCP tool context).
   path.join(SRC_DIR, "tools", "__tests__", "regenerate-standards.test.ts"),
+  // Story 6.6: apply-rule-retirement tests seed registry + standards fixtures
+  // directly to tmpdir via raw fs.writeFile/mkdir so the handler + gate can be
+  // driven against pre-existing state (including comment-survival assertions).
+  // Test file only; the production retirement handler routes every write through
+  // writeManagedFile (with MCP tool context) and makes no commit of its own.
+  path.join(SRC_DIR, "tools", "__tests__", "apply-rule-retirement.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

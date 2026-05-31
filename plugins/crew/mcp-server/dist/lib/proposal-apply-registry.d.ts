@@ -83,11 +83,11 @@ export type ProposalApplyRegistry = Map<RetroProposal["type"], ProposalApplyHand
  *
  * Registered handlers:
  *   - `rule`                                          → Story 6.5
+ *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *
  * Still fail closed (no handler) until their story registers them:
- *   - `rule-retirement`                               → Story 6.6
  *   - `team-change`                                   → Story 6.10
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *

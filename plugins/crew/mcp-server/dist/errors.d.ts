@@ -1380,3 +1380,38 @@ export declare class StandardsCapExceededError extends DomainError {
         cap: number;
     });
 }
+/**
+ * `rule-retirement` apply handler was given a `target_rule_id` that does not
+ * match any rule in `docs/discipline-rules.yaml`. Raised BEFORE any write so
+ * the working tree is left clean. The operator must check whether the rule was
+ * already removed (e.g. by a previous retirement apply) or whether the proposal
+ * was authored against a stale registry snapshot.
+ *
+ * Story 6.6 — FR64a (rule-retirement apply path).
+ */
+export declare class RuleNotFoundError extends DomainError {
+    readonly targetRuleId: string;
+    readonly registryPath: string;
+    constructor(opts: {
+        targetRuleId: string;
+        registryPath: string;
+    });
+}
+/**
+ * Retiring the last rule in `docs/discipline-rules.yaml` would leave the
+ * registry empty, causing `regenerate-standards` to write a `docs/standards.md`
+ * with zero criteria — violating the `StandardsDocSchema` `.min(1)` constraint.
+ * Raised BEFORE any write; the working tree is left clean.
+ *
+ * The operator must either add replacement rules before retiring the last one,
+ * or change `recommended_action` to `relax` (demote to advisory) rather than
+ * `retire` if the rule should merely be softened.
+ *
+ * Story 6.6 — FR64a (rule-retirement apply path).
+ */
+export declare class RetirementWouldEmptyRegistryError extends DomainError {
+    readonly targetRuleId: string;
+    constructor(opts: {
+        targetRuleId: string;
+    });
+}
