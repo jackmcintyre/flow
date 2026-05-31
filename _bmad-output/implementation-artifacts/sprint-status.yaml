@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-31'
+last_updated: '2026-06-01'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -105,7 +105,7 @@ development_status:
   6-4-accept-proposal-id-skill-diff-then-confirm-gate: done
   6-5-rule-registry-parser-and-apply-rule-proposal: done
   6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: done
-  6-6-promotion-threshold-and-rule-retirement: ready-for-dev
+  6-6-promotion-threshold-and-rule-retirement: done
   6-7-skill-proposal-application-create-revise-supersede-retire: done
   6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: done
   6-14-hand-editable-persona-files-defaults-template-minimal-valid: backlog  # tracked 2026-05-31 (operator decision); usability prereq for 6.9 — author + slot before 6.9; sequence: persona/team cluster waits behind native cutover (Epic 10/10.6), decision #5 HARMONIZE. See SCP 2026-05-31 native-refoundation.
