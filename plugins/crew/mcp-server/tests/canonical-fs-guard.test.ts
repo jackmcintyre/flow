@@ -89,6 +89,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // Test file only; the production skill handlers route every write through
   // writeManagedFile and remove the live file via fs.rm (not a write binding).
   path.join(SRC_DIR, "tools", "__tests__", "apply-skill-proposal.test.ts"),
+  // Story 6.5b: regenerate-standards tests seed registry and standards doc
+  // fixtures (discipline-rules.yaml, docs/standards.md) directly to tmpdir
+  // via raw fs.writeFile/mkdir so the handler + gate can be driven against
+  // pre-existing state. Test file only; the production regeneration writes
+  // standards.md exclusively through writeManagedFile (with MCP tool context).
+  path.join(SRC_DIR, "tools", "__tests__", "regenerate-standards.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

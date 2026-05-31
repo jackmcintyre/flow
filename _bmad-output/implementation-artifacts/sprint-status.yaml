@@ -104,7 +104,7 @@ development_status:
   6-3-retro-proposal-markdown-with-seven-proposal-types: done
   6-4-accept-proposal-id-skill-diff-then-confirm-gate: done
   6-5-rule-registry-parser-and-apply-rule-proposal: done
-  6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: ready-for-dev
+  6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: done
   6-6-promotion-threshold-and-rule-retirement: ready-for-dev
   6-7-skill-proposal-application-create-revise-supersede-retire: done
   6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: done

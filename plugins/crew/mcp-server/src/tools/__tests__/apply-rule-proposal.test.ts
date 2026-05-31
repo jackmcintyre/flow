@@ -165,8 +165,10 @@ describe("makeRuleApplyHandler — append against a seeded registry (AC2)", () =
       role: "operator",
     });
 
-    // Returns exactly the one repo-relative path.
-    expect(result.changedPaths).toEqual([REGISTRY_REL]);
+    // Returns both changed paths: the registry and the regenerated standards doc.
+    expect(result.changedPaths).toContain(REGISTRY_REL);
+    expect(result.changedPaths).toContain("docs/standards.md");
+    expect(result.changedPaths).toHaveLength(2);
 
     const after = await readRegistry();
     const { data } = parseRuleRegistry(after);
@@ -211,7 +213,10 @@ describe("makeRuleApplyHandler — append against a seeded registry (AC2)", () =
       targetRepoRoot: tmpRoot,
       role: "operator",
     });
-    expect(result.changedPaths).toEqual([REGISTRY_REL]);
+    // Returns both changed paths: the registry and the regenerated standards doc.
+    expect(result.changedPaths).toContain(REGISTRY_REL);
+    expect(result.changedPaths).toContain("docs/standards.md");
+    expect(result.changedPaths).toHaveLength(2);
 
     const { data } = parseRuleRegistry(await readRegistry());
     expect(data.rules).toHaveLength(1);

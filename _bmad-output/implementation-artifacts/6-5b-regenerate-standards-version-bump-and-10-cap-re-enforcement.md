@@ -1,7 +1,7 @@
 # Story 6.5b: `regenerate-standards`, version bump, and ≤10-cap re-enforcement
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 ## Story
 

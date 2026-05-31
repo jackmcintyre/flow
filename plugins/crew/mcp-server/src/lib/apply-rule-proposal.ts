@@ -1,9 +1,10 @@
 /**
- * The `rule`-kind `ProposalApplyHandler` — Story 6.5 (FR62).
+ * The `rule`-kind `ProposalApplyHandler` — Story 6.5 (FR62) + Story 6.5b (FR48).
  *
  * This is the **first real handler** registered into the Story 6.4
  * `/accept-proposal` gate. It takes an accepted `rule` proposal and appends (or
- * edits) a rule in `docs/discipline-rules.yaml`:
+ * edits) a rule in `docs/discipline-rules.yaml`, then regenerates
+ * `docs/standards.md` from the updated registry (Story 6.5b).
  *
  *  - `text` + `target_failure_class` are COPIED from the proposal.
  *  - `level` is mapped from the proposal's `recommended_promotion_level`.
@@ -17,11 +18,19 @@
  * rather than appending a duplicate. This keeps the invariant that the registry
  * never holds two rules for one failure class. A new class is appended.
  *
- * **No commit. No standards regeneration.** The handler only mutates the working
- * tree (through `writeManagedFile` with the MCP tool context) and returns the
- * single repo-relative path it changed — the gate (`acceptProposal`) owns the
- * commit + proposal stamp + telemetry. `docs/standards.md` is intentionally NOT
- * touched here (Story 6.5b owns regeneration).
+ * **Cap-rollback ordering (Story 6.5b).** Order inside `apply`:
+ *   1. Snapshot the current `docs/discipline-rules.yaml` bytes.
+ *   2. Append/edit the rule (working-tree write).
+ *   3. Call `regenerateStandards` against the post-append registry.
+ *   4. If it raises `StandardsCapExceededError`: restore the registry snapshot
+ *      (working-tree rollback) and re-raise. The gate sees the throw, commits
+ *      nothing, stamps nothing, emits no telemetry.
+ *   5. Otherwise: write the regenerated `docs/standards.md` and return BOTH
+ *      changed paths `["docs/discipline-rules.yaml", "docs/standards.md"]`.
+ *
+ * **No commit.** The handler only mutates the working tree and returns the
+ * repo-relative paths it changed — the gate (`acceptProposal`) owns the
+ * commit + proposal stamp + telemetry.
  *
  * **Idempotency is the gate's, not the handler's.** The handler is not
  * re-entrant-safe on its own; the gate's persisted-`applied` no-op (Story 6.4
@@ -31,13 +40,21 @@
  * seam in `schemas/discipline-rules.ts` (the `yaml` Document API). Existing rules
  * and human-authored comments survive the append/edit byte-for-byte.
  *
- * (Story 6.5 — FR62, Architecture §Skill calibration loop)
+ * (Story 6.5 — FR62; Story 6.5b — FR48, Architecture §Skill calibration loop)
  */
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ulid as generateUlid } from "ulid";
 import { writeManagedFile } from "./managed-fs.js";
+import {
+  regenerateStandards,
+  bumpPatchVersion,
+  STANDARDS_REL_PATH,
+  STANDARDS_SEED_VERSION,
+} from "./regenerate-standards.js";
+import { lookupStandards } from "../state/lookup-standards.js";
+import { StandardsDocMissingError } from "../errors.js";
 import type {
   HandlerContext,
   ProposalApplyHandler,
@@ -63,12 +80,22 @@ const TOOL_NAME = "acceptProposal";
  * Test seams: a clock for `introduced_at` and a ULID minter for `id`, so
  * AC2/AC3 can assert deterministic field values. Production passes neither and
  * the real `new Date()` / `ulid` are used.
+ *
+ * Story 6.5b extends the seam with `standardsNow` (the clock injected into
+ * `regenerateStandards`) so tests can assert byte-identical output across two
+ * regenerations.
  */
 export interface RuleApplyHandlerSeams {
   /** Returns "now" for `introduced_at`. Defaults to `() => new Date()`. */
   now?: () => Date;
   /** Mints a fresh ULID for `id`. Defaults to the `ulid` package. */
   mintUlid?: () => string;
+  /**
+   * Returns "now" as an ISO-8601 string for the `updated` field in the
+   * regenerated `docs/standards.md`. Defaults to `() => new Date()`.
+   * Distinct from `now` so tests can control the two clocks independently.
+   */
+  standardsNow?: () => Date;
 }
 
 /**
@@ -166,6 +193,7 @@ export function makeRuleApplyHandler(
   const seams: Required<RuleApplyHandlerSeams> = {
     now: seamsIn.now ?? (() => new Date()),
     mintUlid: seamsIn.mintUlid ?? generateUlid,
+    standardsNow: seamsIn.standardsNow ?? (() => new Date()),
   };
 
   return {
@@ -185,13 +213,16 @@ export function makeRuleApplyHandler(
     ): Promise<ProposalApplyResult> {
       assertRuleProposal(proposal);
 
-      const raw = await readRegistryRaw(ctx.targetRepoRoot);
-      const { doc, data } = parseRuleRegistry(raw, REGISTRY_REL_PATH);
+      // Step 1: snapshot the registry bytes for cap-rollback.
+      const preAppendRaw = await readRegistryRaw(ctx.targetRepoRoot);
+
+      const { doc, data } = parseRuleRegistry(preAppendRaw, REGISTRY_REL_PATH);
 
       const existingIdx = data.rules.findIndex(
         (r) => r.target_failure_class === proposal.target_failure_class,
       );
 
+      let updatedRules: typeof data.rules;
       if (existingIdx >= 0) {
         // Edit-in-place on a failure-class match: keep the existing id +
         // introduced_at, replace text + level.
@@ -204,21 +235,65 @@ export function makeRuleApplyHandler(
           level: proposal.recommended_promotion_level,
         });
         replaceRuleNode(doc, existingIdx, edited);
+        updatedRules = data.rules.map((r, i) => (i === existingIdx ? edited : r));
       } else {
         const rule = buildRuleFromProposal(proposal, seams);
         appendRuleNode(doc, rule);
+        updatedRules = [...data.rules, rule];
       }
 
+      // Step 2: write the updated registry.
       const contents = serializeRuleRegistry(doc);
-      const absPath = path.join(ctx.targetRepoRoot, REGISTRY_REL_PATH);
+      const absRegistryPath = path.join(ctx.targetRepoRoot, REGISTRY_REL_PATH);
       await writeManagedFile({
-        absPath,
+        absPath: absRegistryPath,
         contents,
         targetRepoRoot: ctx.targetRepoRoot,
         mcpToolContext: { toolName: TOOL_NAME, role: ctx.role },
       });
 
-      return { changedPaths: [REGISTRY_REL_PATH] };
+      // Step 3: determine the target version for the regenerated standards doc.
+      // Read the prior standards doc to get the prior version; fall back to the
+      // seed version if the doc does not exist yet.
+      let priorVersion: string;
+      try {
+        const prior = await lookupStandards(ctx.targetRepoRoot);
+        priorVersion = prior.version;
+      } catch (err) {
+        if (err instanceof StandardsDocMissingError) {
+          priorVersion = STANDARDS_SEED_VERSION;
+        } else {
+          throw err;
+        }
+      }
+      const targetVersion = bumpPatchVersion(priorVersion);
+
+      // Step 4: regenerate. If the cap is exceeded, restore the registry
+      // snapshot and re-raise (working-tree rollback).
+      try {
+        await regenerateStandards({
+          registry: { rules: updatedRules },
+          targetVersion,
+          updatedTimestamp: seams.standardsNow().toISOString(),
+          targetRepoRoot: ctx.targetRepoRoot,
+          mcpToolContext: { toolName: TOOL_NAME, role: ctx.role },
+        });
+      } catch (err) {
+        // Cap-exceeded rollback: restore the registry to its pre-append state.
+        // The gate's partial-failure posture (throw from apply → no commit/stamp/
+        // telemetry) does the rest.
+        const rollbackContents = preAppendRaw ?? "rules: []\n";
+        await writeManagedFile({
+          absPath: absRegistryPath,
+          contents: rollbackContents,
+          targetRepoRoot: ctx.targetRepoRoot,
+          mcpToolContext: { toolName: TOOL_NAME, role: ctx.role },
+        });
+        throw err;
+      }
+
+      // Step 5: return both changed paths so the gate commits them together.
+      return { changedPaths: [REGISTRY_REL_PATH, STANDARDS_REL_PATH] };
     },
   };
 }

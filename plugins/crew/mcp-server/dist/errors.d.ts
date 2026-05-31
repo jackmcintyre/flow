@@ -1357,3 +1357,26 @@ export declare class SkillNotFoundError extends DomainError {
         skillPath: string;
     });
 }
+/**
+ * `regenerate-standards` would project more than the hard cap of criteria
+ * from the current rule registry. The apply handler raises this BEFORE writing
+ * `docs/standards.md` and the caller (the `rule`-apply handler) is responsible
+ * for rolling back the registry to its pre-append snapshot so the working tree
+ * is left byte-identical to its pre-accept state.
+ *
+ * `criteriaCount` is the number of criteria the projection WOULD produce (the
+ * number that exceeds the cap); `cap` is the hard limit read from
+ * `StandardsDocSchema` (currently `10`, FR46).
+ *
+ * Mirrors `StandardsDocMalformedError`'s constructor shape.
+ *
+ * Story 6.5b — `regenerate-standards` version bump + ≤10-cap re-enforcement.
+ */
+export declare class StandardsCapExceededError extends DomainError {
+    readonly criteriaCount: number;
+    readonly cap: number;
+    constructor(opts: {
+        criteriaCount: number;
+        cap: number;
+    });
+}
