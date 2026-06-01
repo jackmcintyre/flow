@@ -25,6 +25,7 @@ import {
   readBacklogInventory,
   type BacklogInventoryEntry,
 } from "./read-backlog-inventory.js";
+import { shortHandle } from "../lib/short-handle.js";
 
 /**
  * One row of the dashboard snapshot — a backlog item with its epic, state, and
@@ -120,7 +121,8 @@ function renderRow(entry: BacklogDashboardEntry): string {
   const readiness = entry.ready ? "ready" : "not ready";
   const claim = entry.claimable ? "claimable" : "not claimable";
   const withdrawn = entry.withdrawn ? " [withdrawn]" : "";
-  return `  - ${entry.ref} — ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
+  const handle = shortHandle(entry.ref);
+  return `  - [${handle}] ${entry.ref} — ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
 }
 
 /**

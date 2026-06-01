@@ -159,7 +159,9 @@ async function runDrain(opts = {}) {
 /** The six per-story progress labels the heartbeat emits. */
 const PROGRESS_LABEL = /^seam progress-(start|done):/;
 function isProgressLogLine(l) {
-    return /^bmad:8\.21 (dev-build|review|gate): (start|done)/.test(l);
+    // Progress lines use the short handle (local part of the ref).
+    // bmad:8.21 → short handle "8.21"
+    return /^8\.21 (dev-build|review|gate): (start|done)/.test(l);
 }
 describe("drain observability seams are non-fatal (Story 8.21)", () => {
     it("AC1: a progress seam that hard-throws does not escape; the story still reaches its bucket", async () => {

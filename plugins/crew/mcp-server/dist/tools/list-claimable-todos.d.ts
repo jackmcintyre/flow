@@ -20,6 +20,14 @@
 export interface ClaimableCandidate {
     /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
     ref: string;
+    /**
+     * Short human-friendly display handle derived from the ref.
+     * For a `native:<ULID>` ref this is the first 8 characters of the ULID.
+     * For any other ref (e.g. `bmad:8.18`) this is the local part after the
+     * first `:`. Always non-empty. Use this on operator-facing surfaces instead
+     * of the full ref.
+     */
+    shortHandle: string;
     /** Human-readable title from the manifest. */
     title: string;
     /** Dependency refs from the manifest. */

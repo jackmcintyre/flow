@@ -26347,6 +26347,14 @@ function mintSessionUlid() {
 }
 
 // src/lib/format-drain-progress.ts
+function _shortHandle(ref) {
+  const colon = ref.indexOf(":");
+  const localPart = colon === -1 ? ref : ref.slice(colon + 1);
+  if (ref.startsWith("native:")) {
+    return localPart.slice(0, 8);
+  }
+  return localPart;
+}
 var LONG_PHASES = /* @__PURE__ */ new Set(["dev-build"]);
 var LONG_PHASE_MARKER = "(longest phase \u2014 a multi-minute gap here is expected)";
 function formatElapsed(elapsedMs) {
@@ -26360,11 +26368,12 @@ function formatElapsed(elapsedMs) {
   return `${minutes}m ${seconds}s`;
 }
 function formatDrainProgress(ref, phase, transition, elapsedMs = 0) {
+  const handle = _shortHandle(ref);
   if (transition === "start") {
-    const base = `${ref} ${phase}: start`;
+    const base = `${handle} ${phase}: start`;
     return LONG_PHASES.has(phase) ? `${base} ${LONG_PHASE_MARKER}` : base;
   }
-  return `${ref} ${phase}: done in ${formatElapsed(elapsedMs)}`;
+  return `${handle} ${phase}: done in ${formatElapsed(elapsedMs)}`;
 }
 
 // src/tools/drain-phase-progress.ts
@@ -35983,6 +35992,18 @@ function toDisplayName2(role) {
 var import_yaml8 = __toESM(require_dist(), 1);
 import { promises as fs17 } from "node:fs";
 import * as path28 from "node:path";
+
+// src/lib/short-handle.ts
+function shortHandle(ref) {
+  const colon = ref.indexOf(":");
+  const localPart = colon === -1 ? ref : ref.slice(colon + 1);
+  if (ref.startsWith("native:")) {
+    return localPart.slice(0, 8);
+  }
+  return localPart;
+}
+
+// src/tools/list-claimable-todos.ts
 async function listClaimableTodos(opts) {
   const { targetRepoRoot } = opts;
   const stateRoot = path28.join(targetRepoRoot, ".crew", "state");
@@ -36032,6 +36053,7 @@ async function listClaimableTodos(opts) {
     }
     candidates.push({
       ref: manifest.ref,
+      shortHandle: shortHandle(manifest.ref),
       title: manifest.title,
       depends_on: manifest.depends_on,
       depsReady,

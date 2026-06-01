@@ -21,6 +21,7 @@
  * ref order), and does NOT define the readiness flag (Story 9.1).
  */
 import { readBacklogInventory, } from "./read-backlog-inventory.js";
+import { shortHandle } from "../lib/short-handle.js";
 /**
  * Derive the epic key from a story ref. Refs are `<adapter>:<source-id>`; the
  * BMad source-id is `<epic>.<story>` (`bmad:9.5` → epic `"9"`). A ref whose
@@ -76,7 +77,8 @@ function renderRow(entry) {
     const readiness = entry.ready ? "ready" : "not ready";
     const claim = entry.claimable ? "claimable" : "not claimable";
     const withdrawn = entry.withdrawn ? " [withdrawn]" : "";
-    return `  - ${entry.ref} — ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
+    const handle = shortHandle(entry.ref);
+    return `  - [${handle}] ${entry.ref} — ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
 }
 /**
  * Pure renderer: format the snapshot as grouped-by-epic text. NO file IO, NO

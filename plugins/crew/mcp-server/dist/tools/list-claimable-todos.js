@@ -22,6 +22,7 @@ import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { isClaimable } from "../state/manifest-state-machine.js";
+import { shortHandle } from "../lib/short-handle.js";
 /**
  * List all claimable candidates from `<targetRepoRoot>/.crew/state/to-do/`
  * in stable alphabetical ref order, along with the count of in-progress manifests.
@@ -88,6 +89,7 @@ export async function listClaimableTodos(opts) {
         }
         candidates.push({
             ref: manifest.ref,
+            shortHandle: shortHandle(manifest.ref),
             title: manifest.title,
             depends_on: manifest.depends_on,
             depsReady,

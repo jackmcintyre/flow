@@ -28,7 +28,7 @@ A target repo with `.crew/config.yaml` resolved and at least one scanned backlog
 1. Identify the target repo root (the current Claude Code workspace root) as `targetRepoRoot`.
 2. Call the `listClaimableTodos` MCP tool with `{ targetRepoRoot }`. It returns `todos: [{ ref, title, depends_on, depsReady, ready }]` for every un-claimed backlog item, plus `inProgressCount`.
 3. Render the backlog as a readable table or list. For each item show:
-   - `ref` and `title`
+   - `shortHandle` alongside `ref` and `title` — display the short handle (`shortHandle` field from each `ClaimableCandidate`) as the primary identifier on each line (e.g. `[01KT1NR9] native:01KT1NR9… — My story title`). The short handle is always non-empty and is much more readable at a glance than the full ref.
    - **ready** — `ready` (blessed, claimable) or `not ready` (behind the brake)
    - **deps** — `deps ready` when `depsReady` is true; otherwise `waiting on: <unmet depends_on refs>`
    - A one-line note that an item is only claimed by the drain when it is BOTH `ready` AND `deps ready`.
