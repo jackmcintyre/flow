@@ -23,6 +23,17 @@ export const WriteNativeStoryInputSchema = z.object({
       z.object({
         text: z.string().min(1),
         kind: z.enum(["integration", "unit"]),
+        /**
+         * Story 10.1 — every native AC carries a structured verification
+         * directive. REQUIRED on the native write path (mirrors the
+         * three-site `kind` enum precedent: parser, this schema, manifest
+         * schema). `target` is non-empty; resolvability of the path is the
+         * 10.3 T0-6 check, not enforced here.
+         */
+        verification: z.object({
+          type: z.enum(["vitest", "artifact"]),
+          target: z.string().min(1),
+        }),
       }),
     )
     .min(1),
@@ -68,6 +79,10 @@ export function renderNativeStoryBody(input: WriteNativeStoryInput): string {
     const tag = ac.kind === "integration" ? " (integration)" : "";
     lines.push(`**AC${i + 1}${tag}:**`);
     lines.push(ac.text);
+    // Story 10.1 — emit the per-AC verification directive as a single line
+    // directly under the AC body. `parseNativeStory` consumes exactly this
+    // shape (`<type>: <target>`), closing the render→parse round-trip.
+    lines.push(`${ac.verification.type}: ${ac.verification.target}`);
     lines.push("");
   }
 

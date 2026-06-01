@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { parseExecutionManifest } from "../execution-manifest.js";
 import { MalformedExecutionManifestError } from "../../errors.js";
 
@@ -288,5 +289,130 @@ describe("ready field (Story 9.1)", () => {
         { absPath: "/fake/path.yaml" },
       ),
     ).toThrow(MalformedExecutionManifestError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// per-AC verification field (Story 10.1 — AC3: optional + additive on the
+// manifest AC object; native carries it, legacy / BMad omit it)
+// ---------------------------------------------------------------------------
+
+describe("acceptance_criteria.verification field (Story 10.1)", () => {
+  // A legacy manifest whose ACs predate the verification field — exactly the
+  // BASE_MANIFEST shape (no `verification` key on the AC).
+  const LEGACY_AC_MANIFEST = {
+    ...BASE_MANIFEST,
+    acceptance_criteria: [
+      { text: "Given x, when y, then z.", kind: "integration" as const },
+    ],
+  };
+
+  // A native-scanned manifest carrying the verification field through from the
+  // SourceStory.
+  const NATIVE_AC_MANIFEST = {
+    ...BASE_MANIFEST,
+    acceptance_criteria: [
+      {
+        text: "Given x, when y, then z.",
+        kind: "integration" as const,
+        verification: { type: "vitest" as const, target: "src/__tests__/x.test.ts" },
+      },
+    ],
+  };
+
+  it("parses a legacy manifest whose AC omits verification (additive — no regression)", () => {
+    const manifest = parseExecutionManifest(LEGACY_AC_MANIFEST, {
+      absPath: "/fake/path.yaml",
+    });
+    expect(manifest.acceptance_criteria[0]!.verification).toBeUndefined();
+  });
+
+  it("parses a native manifest whose AC carries verification and preserves type + target", () => {
+    const manifest = parseExecutionManifest(NATIVE_AC_MANIFEST, {
+      absPath: "/fake/path.yaml",
+    });
+    expect(manifest.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: "src/__tests__/x.test.ts",
+    });
+  });
+
+  it("accepts an artifact verification type as well as vitest", () => {
+    const manifest = parseExecutionManifest(
+      {
+        ...BASE_MANIFEST,
+        acceptance_criteria: [
+          {
+            text: "Given x, when y, then z.",
+            kind: "integration" as const,
+            verification: { type: "artifact" as const, target: "build/out.json" },
+          },
+        ],
+      },
+      { absPath: "/fake/path.yaml" },
+    );
+    expect(manifest.acceptance_criteria[0]!.verification).toEqual({
+      type: "artifact",
+      target: "build/out.json",
+    });
+  });
+
+  it("rejects an unknown verification type (strict enum)", () => {
+    expect(() =>
+      parseExecutionManifest(
+        {
+          ...BASE_MANIFEST,
+          acceptance_criteria: [
+            {
+              text: "Given x, when y, then z.",
+              kind: "integration" as const,
+              verification: { type: "jest", target: "src/__tests__/x.test.ts" },
+            },
+          ],
+        },
+        { absPath: "/fake/path.yaml" },
+      ),
+    ).toThrow(MalformedExecutionManifestError);
+  });
+
+  it("rejects an empty verification target (min(1))", () => {
+    expect(() =>
+      parseExecutionManifest(
+        {
+          ...BASE_MANIFEST,
+          acceptance_criteria: [
+            {
+              text: "Given x, when y, then z.",
+              kind: "integration" as const,
+              verification: { type: "vitest", target: "" },
+            },
+          ],
+        },
+        { absPath: "/fake/path.yaml" },
+      ),
+    ).toThrow(MalformedExecutionManifestError);
+  });
+
+  it("round-trips through yaml.stringify with the verification field intact", () => {
+    const parsed = parseExecutionManifest(NATIVE_AC_MANIFEST, {
+      absPath: "/fake/path.yaml",
+    });
+    const reparsed = parseExecutionManifest(yamlParse(yamlStringify(parsed)), {
+      absPath: "/fake/path.yaml",
+    });
+    expect(reparsed.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: "src/__tests__/x.test.ts",
+    });
+  });
+
+  it("round-trips through yaml.stringify with the verification field absent (legacy)", () => {
+    const parsed = parseExecutionManifest(LEGACY_AC_MANIFEST, {
+      absPath: "/fake/path.yaml",
+    });
+    const reparsed = parseExecutionManifest(yamlParse(yamlStringify(parsed)), {
+      absPath: "/fake/path.yaml",
+    });
+    expect(reparsed.acceptance_criteria[0]!.verification).toBeUndefined();
   });
 });

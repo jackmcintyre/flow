@@ -45,7 +45,22 @@ export interface PlanningAdapter {
   validateAgainstDiscipline(story: SourceStory): SourceStory | DisciplineViolation;
 }
 
-export type AC = { text: string; kind: "integration" | "unit" };
+/**
+ * A single acceptance criterion.
+ *
+ * `verification` (Story 10.1) is the structured, machine-readable directive for
+ * *how* the AC is checked — `{ type: "vitest" | "artifact", target: "<path>" }`.
+ * It is **optional at the type level on purpose**: only the native write/parse
+ * path (`parseNativeStory` / `writeNativeStory`) requires it. BMad ACs and any
+ * already-persisted manifest leave it `undefined`. (Extracting `verification`
+ * from BMad prose markers is the 10.5 ingest seam; checking that `target`
+ * resolves to a real file is Tier-0 check T0-6, added in 10.3.)
+ */
+export type AC = {
+  text: string;
+  kind: "integration" | "unit";
+  verification?: { type: "vitest" | "artifact"; target: string };
+};
 
 /**
  * A single planning-discipline rule violation found by

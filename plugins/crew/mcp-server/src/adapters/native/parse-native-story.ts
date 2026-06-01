@@ -125,11 +125,26 @@ function splitTopLevelSections(lines: string[], startIdx: number): Map<string, S
 }
 
 /**
+ * A candidate verification-directive line within an AC block.
+ *
+ * Story 10.1 promotes the already-conventional `vitest: <path>` / `artifact:
+ * <path>` marker line to a parsed field. A *candidate* marker is a standalone
+ * line of the shape `<token>: <target>` whose leading token is a bare
+ * lowercase word (`[a-z][a-z0-9-]*`) — distinct from the Given/When/Then prose,
+ * which is written with bold `**Given**` markers and never starts a line with a
+ * bare `word:` token. Capturing the token loosely lets the parser reject an
+ * unknown type (e.g. `jest:`) with a *named* error rather than silently
+ * misreading it as prose and then reporting a confusing "missing directive".
+ */
+const VERIFICATION_LINE_RE = /^([a-z][a-z0-9-]*):\s*(.*)$/;
+
+/**
  * Parse AC blocks from the body lines of the `## Acceptance Criteria` section.
  *
  * Expected shape per line:
  *   `**AC1:**` or `**AC2 (integration):**`
- * followed by `**Given** … **When** … **Then** …` prose.
+ * followed by `**Given** … **When** … **Then** …` prose, then exactly one
+ * verification line — `vitest: <path>` or `artifact: <path>` (Story 10.1).
  *
  * The `(integration)` parenthetical tag → `kind: "integration"`.
  * Any other tag (including `(user-surface)`) or no tag → `kind: "unit"`.
@@ -151,13 +166,29 @@ function parseAcceptanceCriteria(bodyLines: string[], absPath: string): AC[] {
   if (current) acs.push(current);
 
   return acs.map((ac) => {
-    const text = ac.body
+    const cleanedLines = ac.body
       .join("\n")
       .replace(/<!--[\s\S]*?-->/g, "")
       .split("\n")
-      .map((l) => l.replace(/\s+$/, ""))
-      .join("\n")
-      .trim();
+      .map((l) => l.replace(/\s+$/, ""));
+
+    // Extract the verification-directive line(s). A candidate marker is a
+    // standalone `<token>: <target>` line (see VERIFICATION_LINE_RE); the
+    // remaining lines are the Given/When/Then prose. Capturing candidates with
+    // an unknown type here (rather than leaving them in the prose) lets the
+    // parser fail with a *named* type error.
+    const verificationLines: { type: string; target: string }[] = [];
+    const proseLines: string[] = [];
+    for (const line of cleanedLines) {
+      const vm = VERIFICATION_LINE_RE.exec(line.trim());
+      if (vm) {
+        verificationLines.push({ type: vm[1]!, target: vm[2]!.trim() });
+        continue;
+      }
+      proseLines.push(line);
+    }
+
+    const text = proseLines.join("\n").trim();
 
     // Require Given/When/Then prose.
     if (!/\*\*Given\*\*/.test(text) || !/\*\*When\*\*/.test(text) || !/\*\*Then\*\*/.test(text)) {
@@ -168,9 +199,53 @@ function parseAcceptanceCriteria(bodyLines: string[], absPath: string): AC[] {
       });
     }
 
+    // Require exactly one verification line per AC. Story 10.1: fail-closed on
+    // absence, wrong type, empty target, or more than one line. (Resolvability
+    // of the target — that the path names a real file — is deferred to T0-6,
+    // Story 10.3.)
+    if (verificationLines.length === 0) {
+      throw new MalformedNativeStoryError({
+        path: absPath,
+        section: `## Acceptance Criteria / AC${ac.idx}`,
+        reason:
+          `AC${ac.idx} is missing its verification directive — ` +
+          `expected exactly one 'vitest: <path>' or 'artifact: <path>' line`,
+      });
+    }
+    if (verificationLines.length > 1) {
+      throw new MalformedNativeStoryError({
+        path: absPath,
+        section: `## Acceptance Criteria / AC${ac.idx}`,
+        reason:
+          `AC${ac.idx} has ${verificationLines.length} verification directives — ` +
+          `expected exactly one 'vitest: <path>' or 'artifact: <path>' line (one AC, one check)`,
+      });
+    }
+    const v = verificationLines[0]!;
+    if (v.type !== "vitest" && v.type !== "artifact") {
+      throw new MalformedNativeStoryError({
+        path: absPath,
+        section: `## Acceptance Criteria / AC${ac.idx}`,
+        reason:
+          `AC${ac.idx} verification directive type '${v.type}' is invalid — ` +
+          `expected 'vitest' or 'artifact'`,
+      });
+    }
+    if (v.target.length === 0) {
+      throw new MalformedNativeStoryError({
+        path: absPath,
+        section: `## Acceptance Criteria / AC${ac.idx}`,
+        reason: `AC${ac.idx} verification directive '${v.type}:' has an empty target path`,
+      });
+    }
+    const verification: AC["verification"] = {
+      type: v.type,
+      target: v.target,
+    };
+
     const tag = (ac.tag ?? "").toLowerCase();
     const kind: AC["kind"] = tag === "integration" ? "integration" : "unit";
-    return { text, kind };
+    return { text, kind, verification };
   });
 }
 

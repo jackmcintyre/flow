@@ -13,6 +13,13 @@ export declare const WriteNativeStoryInputSchema: z.ZodObject<{
             integration: "integration";
             unit: "unit";
         }>;
+        verification: z.ZodObject<{
+            type: z.ZodEnum<{
+                artifact: "artifact";
+                vitest: "vitest";
+            }>;
+            target: z.ZodString;
+        }, z.core.$strip>;
     }, z.core.$strip>>;
     implementation_notes: z.ZodOptional<z.ZodString>;
     depends_on: z.ZodArray<z.ZodString>;

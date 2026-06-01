@@ -135,4 +135,31 @@ describe("parseBmadStory — AC heading shapes (Story 5.17 AC1)", () => {
         expect(result.acceptance_criteria[2].kind).toBe("unit");
         expect(result.acceptance_criteria[3].kind).toBe("integration");
     });
+    // -------------------------------------------------------------------------
+    // Story 10.1 AC4 — the shared AC type gained an optional `verification`
+    // field. The BMad parser compiles against the updated type and its existing
+    // AC extraction is unchanged: BMad ACs parse with `verification` left
+    // `undefined`. (Extracting verification from BMad prose markers is the 10.5
+    // ingest seam.)
+    // -------------------------------------------------------------------------
+    it("(Story 10.1) BMad ACs parse with verification left undefined", () => {
+        const content = makeStory([
+            "**AC1:**",
+            "**Given** a repo,",
+            "**When** the user runs the command,",
+            "**Then** the build passes.",
+            "",
+            "**AC2 (integration):**",
+            "**Given** a live MCP server,",
+            "**When** the adapter scans stories,",
+            "**Then** the manifest is populated.",
+        ].join("\n"));
+        const fakePath = "/repo/_bmad-output/implementation-artifacts/1-2-bmad-verification.md";
+        const storyContent = content.replace("# Story 1.1:", "# Story 1.2:");
+        const result = parseBmadStory(fakePath, storyContent);
+        expect(result.acceptance_criteria).toHaveLength(2);
+        for (const ac of result.acceptance_criteria) {
+            expect(ac.verification).toBeUndefined();
+        }
+    });
 });

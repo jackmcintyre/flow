@@ -45,6 +45,7 @@ function passingCandidate() {
             {
                 text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated and read back unchanged.",
                 kind: "integration",
+                verification: { type: "vitest", target: "src/__tests__/ledger.integration.test.ts" },
             },
         ],
         depends_on: [],
@@ -62,6 +63,7 @@ function failingCandidate() {
             {
                 text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated.",
                 kind: "unit",
+                verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
             },
         ],
         depends_on: [],
