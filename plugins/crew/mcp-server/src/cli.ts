@@ -51,6 +51,7 @@ import { scanOrphanedInProgress } from "./tools/scan-orphaned-in-progress.js";
 import { reattachOrphan } from "./tools/reattach-orphan.js";
 import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
 import { reapStaleWorktrees } from "./tools/reap-stale-worktrees.js";
+import { markStoryReady } from "./tools/mark-story-ready.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -85,6 +86,11 @@ const TOOLS: Record<string, ToolFn> = {
   reattachOrphan,
   blockOrphanNoTranscript,
   reapStaleWorktrees,
+  // Story 9.1 readiness brake (the "bless" mutation). The drain runs MCP-free, so
+  // blessing the next story needed a hand-written `node` helper until this was a
+  // first-class CLI seam (Epic 10 drain fix-plan, Fix 1). Now `/crew:ready` and the
+  // cutover scan→bless step round-trip through the same one-shot transport.
+  markStoryReady,
 };
 
 function emit(obj: unknown): void {
