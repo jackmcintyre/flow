@@ -284,3 +284,83 @@ describe("AC4 (4m): schema-strict assertions", () => {
         expect(result.success).toBe(true);
     });
 });
+// ---------------------------------------------------------------------------
+// Story 10.4 AC4 — author-time classification (declared paths, no git diff)
+//
+// Confirms `classifyRiskTier` is separable from a real PR diff: fed
+// `commitMessages: []` and `diffSize: 0` (the author-time mode `scanSources`
+// uses), it still matches `path_patterns` rules from the declared `changedPaths`
+// and returns a meaningful tier — not just `fallback`.
+// ---------------------------------------------------------------------------
+describe("Story 10.4 AC4: author-time path-pattern classification (no diff)", () => {
+    it("a path set matching a high-tier path_patterns rule returns high with the matched rule id, with commitMessages:[] and diffSize:0", async () => {
+        await seedSpec(pluginRoot, makeSpec(`  high:
+    - id: high.migration
+      path_patterns:
+        - "**/migrations/**"
+  low:
+    - id: low.docs
+      path_patterns:
+        - "docs/**"
+`));
+        const result = await classifyRiskTier({
+            targetRepoRoot,
+            pluginRoot,
+            storyId: "native:test-10-4-high",
+            // DECLARED paths only — no diff exists yet (author time).
+            changedPaths: ["db/migrations/0042_users.sql"],
+            commitMessages: [],
+            diffSize: 0,
+        });
+        expect(result.tier).toBe("high");
+        expect(result.matched_rule).toBe("high.migration");
+        // The matched rule id is in the evidence (matched_rule) and the path that
+        // triggered it is in evidence.paths.
+        expect(result.evidence.paths).toEqual(["db/migrations/0042_users.sql"]);
+        expect(result.evidence.diff_size).toBe(0);
+    });
+    it("a path set matching only a low-tier rule returns low (not fallback) at author time", async () => {
+        await seedSpec(pluginRoot, makeSpec(`  high:
+    - id: high.migration
+      path_patterns:
+        - "**/migrations/**"
+  low:
+    - id: low.docs
+      path_patterns:
+        - "docs/**"
+`));
+        const result = await classifyRiskTier({
+            targetRepoRoot,
+            pluginRoot,
+            storyId: "native:test-10-4-low",
+            changedPaths: ["docs/guide.md"],
+            commitMessages: [],
+            diffSize: 0,
+        });
+        expect(result.tier).toBe("low");
+        expect(result.matched_rule).toBe("low.docs");
+        // Author-time classification is meaningful — NOT the fallback tier.
+        expect(result.matched_rule).not.toBe("fallback");
+    });
+    it("a path set matching no rule lands at the fallback tier (still correct with no signal)", async () => {
+        await seedSpec(pluginRoot, makeSpec(`  high:
+    - id: high.migration
+      path_patterns:
+        - "**/migrations/**"
+  low:
+    - id: low.docs
+      path_patterns:
+        - "docs/**"
+`));
+        const result = await classifyRiskTier({
+            targetRepoRoot,
+            pluginRoot,
+            storyId: "native:test-10-4-fallback",
+            changedPaths: ["src/some-feature.ts"],
+            commitMessages: [],
+            diffSize: 0,
+        });
+        expect(result.tier).toBe("medium");
+        expect(result.matched_rule).toBe("fallback");
+    });
+});

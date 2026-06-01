@@ -731,4 +731,108 @@ describe("Story 10.3 AC1/AC3 — Tier-0 fail-closed at scan (native workspace)",
     expect(result.createdRefs).toContain(`native:${ULID_B}`);
     expect(result.blockedRefs).not.toContain(`native:${ULID_B}`);
   });
+
+  // -------------------------------------------------------------------------
+  // Story 10.4 — author-time risk_tier stamping at native to-do/ creation.
+  //
+  // These tests rely on the SHIPPED default risk-tiering spec (no target-repo
+  // override is seeded), so a story citing only `docs/**` / `*.md` paths lands
+  // `low`, a story citing a `migrations/**` / `*.sql` path lands `high`, and a
+  // story citing only plain source lands the `medium` fallback. The cited
+  // sources are seeded on disk so T0-5 resolvability passes and the story is
+  // not blocked before it can be stamped.
+  // -------------------------------------------------------------------------
+  describe("Story 10.4 — author-time risk_tier stamped on native to-do/ manifest", () => {
+    function parseToDo(ulid: string): Promise<ReturnType<typeof parseExecutionManifest>> {
+      return fs
+        .readFile(toDoPathOf(ulid), "utf8")
+        .then((raw) =>
+          parseExecutionManifest(yamlParse(raw), { absPath: toDoPathOf(ulid) }),
+        );
+    }
+
+    it("AC1 — a native story citing migrations/**:high; citing only docs/**:low; persisted with evidence", async () => {
+      // High: cite a migration path (matches high.schema-or-migration via the
+      // migration change-type detected from the migrations/** path).
+      await seedFile("db/migrations/0001_add_table.sql");
+      await seedFile("build/out.json"); // artifact: verification target must resolve
+      await writeStory(
+        ULID_A,
+        nativeBody({ citedLines: ["- db/migrations/0001_add_table.sql"] }),
+      );
+
+      // Low: cite only docs/markdown paths (all-paths-match low.docs-only).
+      await seedFile("docs/guide.md");
+      await seedFile("README.md");
+      await writeStory(
+        ULID_B,
+        nativeBody({ citedLines: ["- docs/guide.md", "- README.md"] }),
+      );
+
+      const result = await scanSources({ targetRepoRoot: nativeScratch });
+      expect(result.createdRefs).toContain(`native:${ULID_A}`);
+      expect(result.createdRefs).toContain(`native:${ULID_B}`);
+
+      const high = await parseToDo(ULID_A);
+      expect(high.risk_tier).toBe("high");
+      // Non-fallback evidence — a real rule matched, not the fallback sentinel.
+      expect(high.risk_tier_evidence).toBeDefined();
+      expect(high.risk_tier_evidence?.matched_rule).not.toBe("fallback");
+      expect(high.risk_tier_evidence?.diff_size).toBe(0);
+
+      const low = await parseToDo(ULID_B);
+      expect(low.risk_tier).toBe("low");
+      expect(low.risk_tier_evidence).toBeDefined();
+      expect(low.risk_tier_evidence?.matched_rule).not.toBe("fallback");
+    });
+
+    it("AC2 — scanSources runs classifyRiskTier in author-time mode (diff_size 0) and stamps the tier + evidence", async () => {
+      await seedFile("docs/notes.md");
+      await seedFile("build/out.json");
+      await writeStory(ULID_A, nativeBody({ citedLines: ["- docs/notes.md"] }));
+
+      await scanSources({ targetRepoRoot: nativeScratch });
+
+      const manifest = await parseToDo(ULID_A);
+      // Stamped from the declared cited source (author-time path signal).
+      expect(manifest.risk_tier).toBe("low");
+      expect(manifest.risk_tier_evidence?.diff_size).toBe(0);
+      // The cited path is reflected in the evidence paths.
+      expect(manifest.risk_tier_evidence?.paths).toContain("docs/notes.md");
+    });
+
+    it("AC2 — a native story whose cited paths match no rule lands the medium fallback (still persisted)", async () => {
+      await seedFile("src/some-feature.ts");
+      await seedFile("build/out.json");
+      await writeStory(ULID_A, nativeBody({ citedLines: ["- src/some-feature.ts"] }));
+
+      await scanSources({ targetRepoRoot: nativeScratch });
+
+      const manifest = await parseToDo(ULID_A);
+      expect(manifest.risk_tier).toBe("medium");
+      expect(manifest.risk_tier_evidence?.matched_rule).toBe("fallback");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 10.4 AC2 — BMad non-regression: a BMad story (no cited_sources) is NOT
+// stamped. risk_tier stays undefined; the manifest is otherwise unchanged.
+// ---------------------------------------------------------------------------
+
+it("Story 10.4 AC2 — a BMad story with no cited_sources is NOT stamped (risk_tier undefined)", async () => {
+  const result = await scanSources({ targetRepoRoot: scratch });
+  expect(result.createdRefs).toContain("bmad:1.1");
+
+  const manifestPath11 = path.join(scratch, ".crew", "state", "to-do", "bmad:1.1.yaml");
+  const parsed11 = parseExecutionManifest(
+    yamlParse(await fs.readFile(manifestPath11, "utf8")),
+    { absPath: manifestPath11 },
+  );
+  // No author-time path signal → no stamp. Both fields stay absent.
+  expect(parsed11.risk_tier).toBeUndefined();
+  expect(parsed11.risk_tier_evidence).toBeUndefined();
+  // The on-disk YAML does not even carry the key.
+  const raw11 = await fs.readFile(manifestPath11, "utf8");
+  expect(raw11).not.toContain("risk_tier");
 });

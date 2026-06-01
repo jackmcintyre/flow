@@ -82,12 +82,29 @@ export interface JudgeDraft {
    * POSIX-style relative paths the draft expects to touch, fed to the risk
    * classifier for the Considered-lens bar. Optional — an empty list is a
    * conservative "no signal" input.
+   *
+   * Only consulted when `riskTier` (below) is absent. When the manifest already
+   * carries a persisted `risk_tier` (Story 10.4), pass it as `riskTier` and the
+   * panel uses it directly — it does NOT recompute over these paths.
    */
   changedPaths?: string[];
   /** Commit-subject signals for the classifier (usually empty at draft time). */
   commitMessages?: string[];
   /** Authored-source diff size for the classifier. Defaults to 0 at draft time. */
   diffSize?: number;
+  /**
+   * The draft's persisted risk tier (Story 10.4 — `manifest.risk_tier`). When
+   * present this is the SINGLE SOURCE OF TRUTH for the Considered-lens bar: the
+   * panel uses it verbatim and does NOT recompute from `changedPaths`. Absent
+   * (legacy / BMad drafts with no persisted tier) → the panel falls back to
+   * classifying from `changedPaths`/`commitMessages`/`diffSize` as before.
+   *
+   * This closes the author-time fallback bug: before a build there is no diff,
+   * so recomputing from the (empty) author-time signal silently defaulted to the
+   * fallback tier. Scan now stamps `risk_tier` from the story's declared paths;
+   * the panel reads that persisted value.
+   */
+  riskTier?: "low" | "medium" | "high";
 }
 
 /**
@@ -328,18 +345,31 @@ export async function runJudgePanel(
   // Step 1 — lens diversity is structural; refuse a degenerate roster.
   validateLensRoleBinding(lensRoles);
 
-  // Step 2 — classify risk tier (selects the Considered bar). Reuses the
-  // existing classifier verbatim; its spec-lookup errors propagate uncaught.
-  const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
-  const classification = await classifyRiskTier({
-    targetRepoRoot,
-    pluginRoot,
-    storyId: draft.ref,
-    changedPaths: draft.changedPaths ?? [],
-    commitMessages: draft.commitMessages ?? [],
-    diffSize: draft.diffSize ?? 0,
-  });
-  const riskTier = classification.tier;
+  // Step 2 — select the risk tier that drives the Considered bar.
+  //
+  // Single source of truth (Story 10.4): when the draft carries a persisted
+  // `riskTier` (from the manifest's `risk_tier`, stamped at scan time from the
+  // story's declared paths), use it VERBATIM — do NOT recompute. Recomputing
+  // over the author-time signal is the fallback bug: before a build there is no
+  // diff, so a fresh empty-diff classify silently defaults to the fallback tier.
+  //
+  // Fall back to computing from `changedPaths`/`commitMessages`/`diffSize` only
+  // when no persisted tier is present (legacy / BMad drafts).
+  let riskTier: "low" | "medium" | "high";
+  if (draft.riskTier !== undefined) {
+    riskTier = draft.riskTier;
+  } else {
+    const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
+    const classification = await classifyRiskTier({
+      targetRepoRoot,
+      pluginRoot,
+      storyId: draft.ref,
+      changedPaths: draft.changedPaths ?? [],
+      commitMessages: draft.commitMessages ?? [],
+      diffSize: draft.diffSize ?? 0,
+    });
+    riskTier = classification.tier;
+  }
 
   // Steps 3 + 4 — spawn each lens judge, then read its verdict FILE. Serial so a
   // thrown error stops the panel at the first failing lens (no partial verdicts).
