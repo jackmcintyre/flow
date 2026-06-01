@@ -1,21 +1,7 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { PluginManifestSchema } from "../schemas/plugin-manifest.js";
-
-/**
- * Resolve the plugin root from this module's location.
- *
- * Layout (relative to compiled dist):
- *   plugins/crew/                  <-- PLUGIN_ROOT
- *     mcp-server/dist/lib/plugin-version.js       <-- this file at runtime
- *     mcp-server/src/lib/plugin-version.ts        <-- this file at test time (vitest)
- *
- * Both layouts are three directories up from this file.
- */
-const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-
-const MANIFEST_PATH = resolve(PLUGIN_ROOT, ".claude-plugin/plugin.json");
+import { getPluginRoot } from "./plugin-root.js";
 
 let cachedVersion: string | undefined;
 
@@ -31,7 +17,8 @@ export function getPluginVersion(): string {
   if (cachedVersion !== undefined) {
     return cachedVersion;
   }
-  const raw = readFileSync(MANIFEST_PATH, "utf8");
+  const manifestPath = resolve(getPluginRoot(), ".claude-plugin/plugin.json");
+  const raw = readFileSync(manifestPath, "utf8");
   const parsed = PluginManifestSchema.parse(JSON.parse(raw));
   cachedVersion = parsed.version;
   return cachedVersion;

@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { gitInitWithEmptyCommit } from "../lib/git.js";
+import { getPluginRoot } from "../lib/plugin-root.js";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -45,16 +45,11 @@ export async function createSmokeScratchRepo(
   const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
   const { label, parentDir } = parsed;
 
-  // Resolve the shipped standards template from this file's location.
-  // Layout: plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts
-  //   → up 4 dirs to plugins/crew/
-  //   → docs/standards-example.md
-  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  // Resolve the shipped standards template under the plugin root. Uses the
+  // marker-walk getPluginRoot() so this works whether the tool runs unbundled
+  // (dist/tools/...) or inlined into a bundled entrypoint (dist/cli.js).
   const standardsTemplatePath = path.resolve(
-    HERE,
-    "..", // src/
-    "..", // mcp-server/
-    "..", // plugins/crew/
+    getPluginRoot(),
     "docs",
     "standards-example.md",
   );

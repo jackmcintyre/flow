@@ -69,7 +69,7 @@ describe("dist shipping contract (Story 1.9)", () => {
     });
   });
 
-  describe("drift: a fresh tsc build matches the committed dist/", () => {
+  describe("drift: a fresh full build (tsc + normalise + bundle) matches the committed dist/", () => {
     it("byte-equal file set and contents", async () => {
       const tmpRoot = await mkdtemp(join(tmpdir(), "crew-dist-drift-"));
       try {
@@ -85,6 +85,15 @@ describe("dist shipping contract (Story 1.9)", () => {
           resolve(SERVER_ROOT, "scripts/normalise-dist.mjs")
         ) as { normaliseDistTree: (root: string) => Promise<string[]> };
         await normaliser.normaliseDistTree(tmpRoot);
+
+        // The committed dist's index.js + cli.js are esbuild bundles, not raw
+        // tsc output. Reproduce the same bundle step into the temp dir so the
+        // drift check compares against the FULL build (tsc + normalise + bundle)
+        // — exactly what `pnpm build` and the CI drift gate produce.
+        await execa("node", ["scripts/bundle.mjs"], {
+          cwd: SERVER_ROOT,
+          env: { ...process.env, CREW_BUNDLE_OUT_DIR: tmpRoot },
+        });
 
         const [committed, fresh] = await Promise.all([
           walkFiles(DIST_DIR),

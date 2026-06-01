@@ -242,6 +242,11 @@ describe("Story 5.28 — AC1: zero-new-deps static check", () => {
    * De-cruft 2026-05-30: `pino` removed — it was declared speculatively for a
    * future SonicBoom logger swap that never landed (the logger uses
    * `fs.appendFile`). Reference updated to match.
+   *
+   * Bundle-the-server change: `esbuild` (devDependency only) added — it bundles
+   * the MCP server + CLI into self-contained dist entrypoints so the plugin
+   * installs from a GitHub marketplace / clean machine without node_modules.
+   * Build-time only; ships no new runtime dependency. Reference updated to match.
    */
   const PRE_STORY_DEPENDENCIES: Record<string, string> = {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -255,6 +260,7 @@ describe("Story 5.28 — AC1: zero-new-deps static check", () => {
   const PRE_STORY_DEV_DEPENDENCIES: Record<string, string> = {
     "@types/node": "^22.10.0",
     "@types/picomatch": "^4.0.3",
+    "esbuild": "^0.28.0",
     "remark-parse": "11.0.0",
     "typescript": "^5.7.0",
     "unified": "11.0.5",
