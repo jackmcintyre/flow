@@ -23,6 +23,7 @@ import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { claimNextStory, QUEUE_DRAINED_LINE, WAITING_ON_IN_PROGRESS_LINE, } from "../claim-next-story.js";
 import { markStoryReady } from "../mark-story-ready.js";
+import { getBacklogDashboard, renderBacklogDashboard, } from "../render-backlog-dashboard.js";
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -264,5 +265,109 @@ describe("Story 9.1 — readiness brake gates the claim entry point", () => {
         if (after.next !== "spawn-dev")
             return;
         expect(after.ref).toBe(STORY_REF_A);
+    });
+});
+// ---------------------------------------------------------------------------
+// Story 10.6 AC1 — after cutover (config flipped to `adapter: native`), the
+// board renders from native state grouped by epic with the blessed story shown
+// claimable, AND the claim path claims that blessed native `ready` story and
+// never an un-blessed one. This is the live cockpit spine (board + drain claim)
+// operating on native state after the flip.
+//
+// This block builds its OWN config-bearing scratch repo (the file-level
+// beforeEach/tmpRoot helpers don't write `.crew/config.yaml`, and the board
+// getter — unlike the claim path — resolves the workspace config). Native refs
+// carry an epic via `<adapter>:<epic>.<story>` so the board groups by epic for
+// native exactly as for bmad; ULID-only refs sink to the "(no epic)" bucket.
+// ---------------------------------------------------------------------------
+describe("Story 10.6 AC1 — board + claim operate on native state after the flip", () => {
+    let cutoverRoot;
+    let cutoverTodoDir;
+    // Native refs that carry an epic key (`<adapter>:<epic>.<story>`) so the
+    // board's group-by-epic projection has something to group on. The ref format
+    // is immaterial to state reading; this just proves epic-grouping is alive on
+    // native refs too.
+    const NATIVE_EPIC_BLESSED = "native:10.1";
+    const NATIVE_EPIC_UNBLESSED = "native:10.2";
+    function makeNativeTodo(ref, opts = {}) {
+        return {
+            ref,
+            status: "to-do",
+            adapter: "native",
+            source_path: `.crew/native-stories/${ref}.yaml`,
+            source_hash: "a".repeat(64),
+            depends_on: [],
+            acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+            title: `Native story ${ref}`,
+            narrative: "As a dev, I want to test the cutover.",
+            withdrawn: false,
+            ready: opts.ready ?? false,
+        };
+    }
+    beforeEach(async () => {
+        cutoverRoot = await fs.mkdtemp(path.join(os.tmpdir(), "crew-cutover-native-"));
+        // The cutover IS this line: flip the active adapter to native.
+        await fs.mkdir(path.join(cutoverRoot, ".crew"), { recursive: true });
+        await atomicWriteFile(path.join(cutoverRoot, ".crew", "config.yaml"), "adapter: native\nadapter_config: {}\n");
+        cutoverTodoDir = path.join(cutoverRoot, ".crew", "state", "to-do");
+        for (const state of ["to-do", "in-progress", "blocked", "done"]) {
+            await fs.mkdir(path.join(cutoverRoot, ".crew", "state", state), { recursive: true });
+        }
+    });
+    afterEach(async () => {
+        await fs.rm(cutoverRoot, { recursive: true, force: true });
+    });
+    async function seedCutoverTodo(manifest) {
+        await atomicWriteFile(path.join(cutoverTodoDir, `${manifest.ref}.yaml`), yamlStringify(manifest, { lineWidth: 0 }));
+    }
+    it("(a) the board renders native state grouped by epic with the blessed story claimable", async () => {
+        await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_BLESSED, { ready: true }));
+        await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_UNBLESSED, { ready: false }));
+        const snapshot = await getBacklogDashboard({ targetRepoRoot: cutoverRoot });
+        const text = renderBacklogDashboard(snapshot);
+        // Grouped by epic from native state — Epic 10 heading present.
+        expect(text).toContain("Epic 10");
+        // The blessed native story is claimable; the un-blessed one is not.
+        const blessed = snapshot.entries.find((e) => e.ref === NATIVE_EPIC_BLESSED);
+        const unblessed = snapshot.entries.find((e) => e.ref === NATIVE_EPIC_UNBLESSED);
+        expect(blessed.ready).toBe(true);
+        expect(blessed.claimable).toBe(true);
+        expect(unblessed.ready).toBe(false);
+        expect(unblessed.claimable).toBe(false);
+        // Rendered rows distinguish them textually.
+        expect(text).toContain(`${NATIVE_EPIC_BLESSED} — Native story ${NATIVE_EPIC_BLESSED} [to-do] (ready, claimable)`);
+        expect(text).toContain(`${NATIVE_EPIC_UNBLESSED} — Native story ${NATIVE_EPIC_UNBLESSED} [to-do] (not ready, not claimable)`);
+    });
+    it("(b) claimNextStory claims the blessed native story and never the un-blessed one", async () => {
+        // Un-blessed sorts BEFORE the blessed ref alphabetically; without the
+        // readiness brake the claim path would pick the un-blessed one. The brake
+        // must skip it and claim the blessed native story.
+        await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_BLESSED, { ready: true }));
+        await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_UNBLESSED, { ready: false }));
+        const result = await claimNextStory({
+            targetRepoRoot: cutoverRoot,
+            sessionUlid: SESSION_ULID,
+        });
+        expect(result.next).toBe("spawn-dev");
+        if (result.next !== "spawn-dev")
+            return;
+        // The blessed native ready story is claimed — never the un-blessed one.
+        expect(result.ref).toBe(NATIVE_EPIC_BLESSED);
+        expect(result.manifestPath).toContain(path.join("in-progress", `${NATIVE_EPIC_BLESSED}.yaml`));
+        // The un-blessed native story is still sitting in to-do/ (never claimed).
+        const unblessedStillTodo = await fs
+            .stat(path.join(cutoverTodoDir, `${NATIVE_EPIC_UNBLESSED}.yaml`))
+            .then(() => true)
+            .catch(() => false);
+        expect(unblessedStillTodo).toBe(true);
+    });
+    it("(c) with only an un-blessed native story present, the claim path drains (fail-closed)", async () => {
+        await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_UNBLESSED, { ready: false }));
+        const result = await claimNextStory({
+            targetRepoRoot: cutoverRoot,
+            sessionUlid: SESSION_ULID,
+        });
+        expect(result.next).toBe("queue-drained");
+        expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
     });
 });

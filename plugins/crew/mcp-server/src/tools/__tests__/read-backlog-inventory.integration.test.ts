@@ -288,3 +288,65 @@ describe("readBacklogInventory (7) — shape contract: every entry has ref, titl
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// (8) Story 10.6 AC2 — after the cutover flip the inventory reads `native:<ULID>`
+// refs identically to `bmad:<ref>` refs (the ref format is immaterial to state
+// reading), and an explicit `adapter: native` config resolves WITHOUT detection
+// ambiguity even when a BMad backlog also sits in the tree. This pins the
+// pre-mortem: with both `.crew/native-stories/` and a BMad stories tree present,
+// `detect()` could match both — the cutover avoids that by binding via explicit
+// config (Branch A), never detection.
+// ---------------------------------------------------------------------------
+
+describe("readBacklogInventory (8) — Story 10.6 cutover: native reads ULID refs, no detection ambiguity", () => {
+  it("reads native:<ULID> manifests identically to how a BMad repo reads bmad:<ref> manifests", async () => {
+    const root = await copyFixture(NATIVE_FIXTURE);
+
+    const result = await readBacklogInventory({ targetRepoRoot: root });
+
+    // Every state-manifest entry on a native repo carries a `native:<ULID>` ref
+    // and is read by the same scan path as bmad refs — same { ref, title, state }
+    // shape, derived from the state directory the file lives in.
+    const stateEntries = result.backlog_inventory.filter(
+      (e) => e.state !== "native-source-only",
+    );
+    expect(stateEntries.length).toBeGreaterThanOrEqual(3);
+    for (const entry of stateEntries) {
+      expect(entry.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
+    }
+  });
+
+  it("an explicit `adapter: native` config binds native even when a BMad stories tree also exists (no AmbiguousAdapterError)", async () => {
+    // Build a repo that would be AMBIGUOUS under detection: it has BOTH a
+    // populated `.crew/native-stories/` AND a BMad stories tree. The explicit
+    // `adapter: native` config is what makes the cutover deterministic — the
+    // workspace resolver takes Branch B (config exists) and never calls detect().
+    const root = path.join(scratch, "ambiguous-but-config-pinned");
+    await fs.mkdir(path.join(root, ".crew", "native-stories"), { recursive: true });
+    await atomicWriteFile(
+      path.join(root, ".crew", "config.yaml"),
+      "adapter: native\nadapter_config: {}\n",
+    );
+    // A native source story (would make NativeAdapter.detect() true).
+    const ulid = "01HZABC0000000000000000077";
+    await atomicWriteFile(
+      path.join(root, ".crew", "native-stories", `${ulid}.md`),
+      "# Pinned native story\n\n## Narrative\n\nAs a user, I want it.\n",
+    );
+    // A BMad stories tree (would make BmadAdapter.detect() true).
+    const bmadStories = path.join(root, "_bmad-output", "planning-artifacts", "stories");
+    await fs.mkdir(bmadStories, { recursive: true });
+    await atomicWriteFile(
+      path.join(bmadStories, "1-1-some-story.md"),
+      "# Story 1.1: Some story\n\nStatus: ready-for-dev\n",
+    );
+
+    // Must resolve cleanly to native and surface the native source story — NOT
+    // throw AmbiguousAdapterError. The explicit config is the cutover's pin.
+    const result = await readBacklogInventory({ targetRepoRoot: root });
+    const entry = result.backlog_inventory.find((e) => e.ref === `native:${ulid}`);
+    expect(entry).toBeDefined();
+    expect(entry?.state).toBe("native-source-only");
+  });
+});
