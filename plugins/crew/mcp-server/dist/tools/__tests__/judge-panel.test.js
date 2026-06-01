@@ -333,6 +333,64 @@ describe("AC4: the Considered-lens bar scales with the draft's risk tier", () =>
     });
 });
 // ---------------------------------------------------------------------------
+// Story 10.4 AC3 — the panel prefers the persisted risk_tier (single source of
+// truth) and only computes from changedPaths when it is absent.
+// ---------------------------------------------------------------------------
+describe("Story 10.4 AC3: runJudgePanel prefers the persisted risk_tier", () => {
+    // A considered judge that simply echoes back the tier the panel handed it, so
+    // the test can assert WHICH tier reached the Considered lens.
+    const echoConsidered = (riskTier) => ({
+        pass: true,
+        missed: `considered graded at tier=${riskTier}`,
+    });
+    it("uses the persisted risk_tier verbatim — even when changedPaths would classify to a different tier (no double-classify)", async () => {
+        // changedPaths matches the seeded HIGH rule (migrations/**), but the draft
+        // carries a PERSISTED low tier (as scan would stamp from declared paths).
+        // The panel must honour the persisted value, NOT recompute to high.
+        const draft = {
+            ...DRAFT,
+            ref: "native:01PERSISTLOW0000000000000000",
+            changedPaths: ["migrations/0001_add_table.sql"], // would compute → high
+            diffSize: 0, // author time — no diff
+            riskTier: "low", // persisted (single source of truth)
+        };
+        const { riskTier, verdict } = await runJudgePanel({
+            targetRepoRoot,
+            sessionUlid,
+            draft,
+            lensRoles: DEFAULT_LENS_ROLES,
+            judgeRunner: makeRunner({ considered: echoConsidered }),
+            pluginRootOverride: pluginRoot,
+        });
+        // The panel reported the persisted tier, not the computed one.
+        expect(riskTier).toBe("low");
+        // The Considered lens received the persisted tier.
+        const considered = verdict.lenses.find((l) => l.lens === "considered");
+        expect(considered.missed).toBe("considered graded at tier=low");
+    });
+    it("falls back to computing from changedPaths when no persisted risk_tier is present (legacy / BMad)", async () => {
+        // No `riskTier` on the draft → the panel classifies from changedPaths.
+        const draft = {
+            ...DRAFT,
+            ref: "native:01NOPERSIST00000000000000000",
+            changedPaths: ["migrations/0001_add_table.sql"], // computes → high
+            diffSize: 50,
+            // riskTier intentionally omitted
+        };
+        const { riskTier, verdict } = await runJudgePanel({
+            targetRepoRoot,
+            sessionUlid,
+            draft,
+            lensRoles: DEFAULT_LENS_ROLES,
+            judgeRunner: makeRunner({ considered: echoConsidered }),
+            pluginRootOverride: pluginRoot,
+        });
+        expect(riskTier).toBe("high");
+        const considered = verdict.lenses.find((l) => l.lens === "considered");
+        expect(considered.missed).toBe("considered graded at tier=high");
+    });
+});
+// ---------------------------------------------------------------------------
 // AC5 — schema-shaped verdict, panel does not decide ready
 // ---------------------------------------------------------------------------
 describe("AC5: the panel emits a schema-shaped verdict and does not decide ready", () => {

@@ -57,12 +57,29 @@ export interface JudgeDraft {
      * POSIX-style relative paths the draft expects to touch, fed to the risk
      * classifier for the Considered-lens bar. Optional — an empty list is a
      * conservative "no signal" input.
+     *
+     * Only consulted when `riskTier` (below) is absent. When the manifest already
+     * carries a persisted `risk_tier` (Story 10.4), pass it as `riskTier` and the
+     * panel uses it directly — it does NOT recompute over these paths.
      */
     changedPaths?: string[];
     /** Commit-subject signals for the classifier (usually empty at draft time). */
     commitMessages?: string[];
     /** Authored-source diff size for the classifier. Defaults to 0 at draft time. */
     diffSize?: number;
+    /**
+     * The draft's persisted risk tier (Story 10.4 — `manifest.risk_tier`). When
+     * present this is the SINGLE SOURCE OF TRUTH for the Considered-lens bar: the
+     * panel uses it verbatim and does NOT recompute from `changedPaths`. Absent
+     * (legacy / BMad drafts with no persisted tier) → the panel falls back to
+     * classifying from `changedPaths`/`commitMessages`/`diffSize` as before.
+     *
+     * This closes the author-time fallback bug: before a build there is no diff,
+     * so recomputing from the (empty) author-time signal silently defaulted to the
+     * fallback tier. Scan now stamps `risk_tier` from the story's declared paths;
+     * the panel reads that persisted value.
+     */
+    riskTier?: "low" | "medium" | "high";
 }
 /**
  * The lens→role binding. Exactly one DISTINCT role per Tier-1 lens (rubric §3).

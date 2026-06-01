@@ -4,6 +4,8 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 import { extractDepRefsFromSpecBody } from "../lib/extract-dep-refs.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
+import { classifyRiskTier } from "./classify-risk-tier.js";
+import { getPluginRoot } from "../lib/plugin-root.js";
 import { ExecutionManifestSchema, parseExecutionManifest, } from "../schemas/execution-manifest.js";
 import { STATE_NAMES } from "../state/manifest-state-machine.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
@@ -186,11 +188,57 @@ async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath,
     });
 }
 /**
+ * Story 10.4 — compute the author-time `risk_tier` / `risk_tier_evidence` for a
+ * native draft from its DECLARED paths (`cited_sources`), before any build
+ * exists. Runs `classifyRiskTier` in author-time mode:
+ *   `{ changedPaths: story.cited_sources, commitMessages: [], diffSize: 0 }`.
+ * Path-pattern matching with no diff — the same separable classifier the
+ * post-build reviewer stamp uses, just fed the author-time path signal.
+ *
+ * Gated to native/enriched stories that DECLARE `cited_sources`. A BMad/legacy
+ * story with no `cited_sources` returns `{}` (NOT stamped) — no regression to
+ * BMad scanning; the judge panel keeps computing the tier from the diff for it.
+ *
+ * `cited_sources` (the blast radius the author read) is the best author-time
+ * signal for risk: the Considered lens only SELECTS a bar, and the reviewer's
+ * post-build stamp later refines the tier from the real diff. See the source
+ * story's Edge cases for why this is deliberate and bounded.
+ */
+async function computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot) {
+    // Gate: only native/enriched stories with declared paths get an author-time
+    // tier. No cited_sources (BMad/legacy) → leave risk_tier undefined.
+    if (story.cited_sources === undefined || story.cited_sources.length === 0) {
+        return {};
+    }
+    const classification = await classifyRiskTier({
+        targetRepoRoot,
+        pluginRoot,
+        storyId: story.ref,
+        changedPaths: story.cited_sources,
+        commitMessages: [],
+        diffSize: 0,
+    });
+    return {
+        risk_tier: classification.tier,
+        risk_tier_evidence: {
+            matched_rule: classification.matched_rule,
+            paths: classification.evidence.paths,
+            change_types: classification.evidence.change_types,
+            diff_size: classification.evidence.diff_size,
+        },
+    };
+}
+/**
  * Compose a new `ExecutionManifest` object from a `SourceStory`.
  * Validates through the schema defensively — catches coding mistakes in
  * the composer before writing to disk.
+ *
+ * `riskFields` (Story 10.4) carries the author-time `risk_tier` /
+ * `risk_tier_evidence` computed from the story's declared paths; `{}` for
+ * BMad/legacy stories with no author-time signal (those manifests stay
+ * unstamped — `risk_tier` remains absent).
  */
-function composeManifest(story, adapterName, targetRepoRoot) {
+function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
     const raw = stripUndefined({
         ref: story.ref,
         status: "to-do",
@@ -213,6 +261,9 @@ function composeManifest(story, adapterName, targetRepoRoot) {
         // Written explicitly (not left to the schema default) so the on-disk manifest
         // visibly carries the brake and round-trips stably.
         ready: false,
+        // Story 10.4 — author-time risk tier from declared paths (folds in `{}` for
+        // BMad/legacy stories, leaving both fields absent after stripUndefined).
+        ...riskFields,
     });
     // Defensive parse — throws if the composer produced an invalid shape.
     return ExecutionManifestSchema.parse(raw);
@@ -251,6 +302,8 @@ export async function scanSources(opts) {
     // Step 1: Resolve the workspace. Throws on misconfiguration.
     const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
     const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
+    // Story 10.4 — plugin root for the author-time risk classifier's spec lookup.
+    const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
     // Step 2: List source stories from the active adapter.
     const sourceStories = await activeAdapter.listSourceStories();
     const result = {
@@ -374,7 +427,8 @@ export async function scanSources(opts) {
                 // exist simultaneously. The startup guard above detects and recovers
                 // this state on the next scan (to-do/ wins, blocked/ is deleted).
                 const absToDoPathNew = path.join(stateRoot, "to-do", `${story.ref}.yaml`);
-                const manifest = composeManifest(story, activeAdapterName, targetRepoRoot);
+                const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
+                const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
                 const yamlText = yamlStringify(manifest, { lineWidth: 0 });
                 await writeManagedFile({
                     absPath: absToDoPathNew,
@@ -500,7 +554,8 @@ export async function scanSources(opts) {
         const absToDoPath = path.join(stateRoot, "to-do", `${story.ref}.yaml`);
         if (currentState === null) {
             // CREATE path (AC1): no manifest exists anywhere and discipline passed.
-            const manifest = composeManifest(story, activeAdapterName, targetRepoRoot);
+            const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
+            const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
             const yamlText = yamlStringify(manifest, { lineWidth: 0 });
             await writeManagedFile({
                 absPath: absToDoPath,

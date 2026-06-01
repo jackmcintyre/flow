@@ -80,4 +80,9 @@ export declare function renderScanResult(result: ScanResult): string;
  */
 export declare function scanSources(opts: {
     targetRepoRoot: string;
+    /**
+     * Plugin root override — test seam for the author-time risk classifier's
+     * spec lookup (Story 10.4). Defaults to the resolved plugin root.
+     */
+    pluginRootOverride?: string;
 }): Promise<ScanResult>;

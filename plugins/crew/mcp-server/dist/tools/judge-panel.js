@@ -188,18 +188,32 @@ export async function runJudgePanel(opts) {
     const { targetRepoRoot, sessionUlid, draft, lensRoles, judgeRunner, tier0 = "pass", } = opts;
     // Step 1 — lens diversity is structural; refuse a degenerate roster.
     validateLensRoleBinding(lensRoles);
-    // Step 2 — classify risk tier (selects the Considered bar). Reuses the
-    // existing classifier verbatim; its spec-lookup errors propagate uncaught.
-    const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
-    const classification = await classifyRiskTier({
-        targetRepoRoot,
-        pluginRoot,
-        storyId: draft.ref,
-        changedPaths: draft.changedPaths ?? [],
-        commitMessages: draft.commitMessages ?? [],
-        diffSize: draft.diffSize ?? 0,
-    });
-    const riskTier = classification.tier;
+    // Step 2 — select the risk tier that drives the Considered bar.
+    //
+    // Single source of truth (Story 10.4): when the draft carries a persisted
+    // `riskTier` (from the manifest's `risk_tier`, stamped at scan time from the
+    // story's declared paths), use it VERBATIM — do NOT recompute. Recomputing
+    // over the author-time signal is the fallback bug: before a build there is no
+    // diff, so a fresh empty-diff classify silently defaults to the fallback tier.
+    //
+    // Fall back to computing from `changedPaths`/`commitMessages`/`diffSize` only
+    // when no persisted tier is present (legacy / BMad drafts).
+    let riskTier;
+    if (draft.riskTier !== undefined) {
+        riskTier = draft.riskTier;
+    }
+    else {
+        const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
+        const classification = await classifyRiskTier({
+            targetRepoRoot,
+            pluginRoot,
+            storyId: draft.ref,
+            changedPaths: draft.changedPaths ?? [],
+            commitMessages: draft.commitMessages ?? [],
+            diffSize: draft.diffSize ?? 0,
+        });
+        riskTier = classification.tier;
+    }
     // Steps 3 + 4 — spawn each lens judge, then read its verdict FILE. Serial so a
     // thrown error stops the panel at the first failing lens (no partial verdicts).
     const lenses = [];
