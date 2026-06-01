@@ -1,0 +1,257 @@
+export const meta = {
+  name: 'crew-gate-1',
+  description:
+    'Gate-1 workflow: deterministically fans out all five lens judges in parallel and returns a structured pass/fail verdict with Quality Lead adjudication. ' +
+    'Mirrors drain.workflow.js conventions: seam() courier discipline, load-bearing decisions in tool results never in agent prose. ' +
+    'Always passes round=1 and k=1 to adjudicateQualityLead so a clean panel immediately yields decision=ready with blessing and any lens fail immediately yields decision=escalate (not rework). ' +
+    'Story native:01KT1MP7TR651TAGVJ6EZSR589.',
+  phases: [
+    { title: 'mint', detail: 'mint a session ULID and fetch the team roster + persona' },
+    { title: 'judge', detail: 'fan out five lens judges in parallel; each writes its verdict file via writeLensVerdict' },
+    { title: 'aggregate', detail: 'call aggregateJudgePanel to read all five files + validate; then adjudicateQualityLead with round=1 k=1' },
+  ],
+}
+
+// ---------------------------------------------------------------------------
+// Args. The Workflow runtime delivers `args` as a JSON STRING — parse defensively.
+//   targetRepoRoot : absolute path to the target repo
+//   cli            : absolute path to mcp-server/dist/cli.js
+//   ref            : the drafted story ref (e.g. native:01KT...)
+//   sessionUlid    : (optional) launcher-minted ULID; minted via CLI if absent
+// ---------------------------------------------------------------------------
+const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
+const REPO = A.targetRepoRoot || A.repo
+const CLI = A.cli
+const REF = A.ref
+
+phase('mint')
+if (!REPO || !CLI || !REF) return { error: 'missing-args', need: ['targetRepoRoot', 'cli', 'ref'], got: Object.keys(A) }
+
+// Clamp a seam-agent's output to a single stdout string.
+const RawSchema = { type: 'object', additionalProperties: false, properties: { stdout: { type: 'string' } }, required: ['stdout'] }
+const safeParse = (s) => { try { return JSON.parse(String(s).trim()) } catch (e) { return { _parseError: String(e), raw: String(s).slice(0, 400) } } }
+const J = (o) => JSON.stringify(o)
+
+// A SEAM: a cheap one-shot courier (sonnet) that runs ONE CLI command verbatim
+// and returns its single JSON line. Mirrors drain.workflow.js seam() conventions:
+// - retryable re-invokes the courier on a garbled (non-JSON) relay (safe ONLY for
+//   read-only / idempotent seams).
+// - MUTATING seams (adjudicate, writeLensVerdict) leave retryable=false so a garble
+//   safely pauses rather than risk double-applying a mutation.
+const seam = async (cmd, label, retryable = false) => {
+  const attempts = retryable ? 3 : 1
+  let parsed = { _parseError: 'agent-null' }
+  for (let a = 0; a < attempts; a++) {
+    const r = await agent(
+      `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
+        `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
+        `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
+      { schema: RawSchema, label, phase: 'gate-1', model: 'sonnet' },
+    )
+    parsed = r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
+    if (!parsed._parseError) return parsed
+    if (a < attempts - 1) log(`seam ${label} garbled relay (attempt ${a + 1}/${attempts}) — retrying`)
+  }
+  return parsed
+}
+
+// Session id: prefer the launcher-minted id; fall back to minting one via the CLI.
+const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
+if (!SU) return { error: 'no-session-ulid' }
+log(`gate-1 session=${SU} repo=${REPO} ref=${REF}`)
+
+// ---------------------------------------------------------------------------
+// Read the draft spec text and manifest so we can pass it to the judges.
+// ---------------------------------------------------------------------------
+phase('mint')
+
+// Fetch the team snapshot to resolve the lens→role binding from the hired roster.
+// We use DEFAULT_LENS_ROLES as the binding; if any role is missing from the roster
+// we surface it verbatim (aggregateJudgePanel will throw LensJudgeUnavailableError).
+// Default binding: structure→architect, verifiability→test-specialist,
+// discipline→generalist-reviewer, domain→generalist-dev, considered→retro-analyst.
+const lensRoles = {
+  structure: 'architect',
+  verifiability: 'test-specialist',
+  discipline: 'generalist-reviewer',
+  domain: 'generalist-dev',
+  considered: 'retro-analyst',
+}
+
+// Fetch the draft's spec text from the backlog inventory. We also extract the
+// persisted riskTier from the manifest if present (Story 10.4 single source of truth).
+const inventory = await seam(`node ${CLI} readBacklogInventory --json '${J({ targetRepoRoot: REPO })}'`, 'inventory', true)
+let specText = ''
+let riskTier = undefined
+if (inventory && !inventory._parseError && Array.isArray(inventory.items)) {
+  const item = inventory.items.find((i) => i.ref === REF)
+  if (item) {
+    specText = item.specText || item.spec_text || ''
+    riskTier = item.riskTier || item.risk_tier
+  }
+}
+
+// Build the draft object that aggregateJudgePanel and the judges need.
+// riskTier is the single source of truth (Story 10.4) when present; omitted
+// lets the panel fall back to classifying from changedPaths (legacy).
+const draft = {
+  ref: REF,
+  title: A.title || REF,
+  specText,
+  ...(riskTier !== undefined ? { riskTier } : {}),
+}
+
+// Build the judge persona prompt (shared across lenses — the per-lens rubric is
+// appended per-spawn below).
+const judgePersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:judge', true))?.systemPrompt || ''
+
+// ---------------------------------------------------------------------------
+// Phase 2: fan out five lens judges in PARALLEL via Promise.all.
+// Each judge is a short-lived read+write subagent. Unlike the drain's serial
+// per-story loop, judges are pure readers + one-write (writeLensVerdict) so
+// parallel dispatch is safe and correct. Each judge receives its lens name,
+// rubric checks, the draft spec text, the draft's risk tier, and an instruction
+// to call writeLensVerdict --json exactly once. The judge's transcript is not
+// load-bearing; only its file is.
+// ---------------------------------------------------------------------------
+phase('judge')
+log(`fanning out five lens judges in parallel for ref=${REF}`)
+
+// The rubric checks (abbreviated) per lens — enough for the judge to know what
+// to grade. The full rubric lives in the planning artifacts; these are the Tier-1
+// scoreable checks from rubric §3.
+const LENS_RUBRIC = {
+  structure: 'Grade against Structure lens (rubric §3.1): Given/When/Then ACs, task decomposition, no hidden coupling. Pass if the story is complete and self-contained; fail with the specific structural gap in `missed`.',
+  verifiability: 'Grade against Verifiability lens (rubric §3.2): every AC drives a behaviour, not just a string-presence check. Pass if ACs pin observable behaviour; fail with the specific unverifiable AC in `missed`.',
+  discipline: 'Grade against Discipline lens (rubric §3.3): one coherent concern per story, no scope creep, no premature abstraction. Pass if the story is disciplined; fail with the specific discipline breach in `missed`.',
+  domain: 'Grade against Domain lens (rubric §3.4): technically accurate, no ungrounded claims, implementation is plausible. Pass if the domain is sound; fail with the specific inaccuracy in `missed`.',
+  considered: 'Grade against Considered lens (rubric §3.5): failure modes addressed. For low-risk drafts: names what could break + pins top failure. For medium/high: cold-dev-sufficient (every open question has a defaulted answer). Pass if the bar is met; fail with the specific gap in `missed`.',
+}
+
+const LENSES = ['structure', 'verifiability', 'discipline', 'domain', 'considered']
+
+const judgeResults = await Promise.all(
+  LENSES.map(async (lens) => {
+    const role = lensRoles[lens]
+    // Build persona for this lens's role
+    const personaResult = await seam(
+      `node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role })}'`,
+      `persona:${lens}`,
+      true,
+    )
+    const lensPersona = personaResult?.systemPrompt || judgePersona
+
+    // Derive the verdict file path the judge MUST write to (mirrors lensVerdictFilePath
+    // in judge-panel.ts — the panel reader expects exactly this path).
+    // Path: <targetRepoRoot>/.crew/state/sessions/<sessionUlid>/<sanitised-ref>/judge-<lens>.json
+    // sanitiseRefForPathSegment replaces ':' with '-'; mirrors the TypeScript helper.
+    const sanitisedRef = REF.replace(/:/g, '-')
+    const verdictFilePath = `${REPO}/.crew/state/sessions/${SU}/${sanitisedRef}/judge-${lens}.json`
+
+    // Spawn the judge as a one-shot subagent. The judge's ONLY load-bearing act is
+    // calling node CLI writeLensVerdict --json exactly once. Its reasoning is free;
+    // only the verdict FILE is authoritative (deterministic-seam discipline).
+    const judgePrompt =
+      `${lensPersona}\n\n` +
+      `## Your task: grade a draft story against ONE lens\n\n` +
+      `You are the **${lens}** lens judge for the gate-1 panel. ` +
+      `Your ONLY job is to grade the draft below against the ${lens.toUpperCase()} lens, ` +
+      `then call the CLI tool to record your verdict. ` +
+      `You MUST call writeLensVerdict exactly once and then stop — do NOT edit any files, do NOT run any other commands.\n\n` +
+      `**Lens:** ${lens}\n` +
+      `**Your role:** ${role}\n` +
+      `**Rubric check:** ${LENS_RUBRIC[lens]}\n` +
+      `**Risk tier:** ${riskTier || 'medium (fallback)'}\n\n` +
+      `**Draft spec:**\n\`\`\`\n${specText || '(spec text not available)'}\n\`\`\`\n\n` +
+      `**Required action — call this command exactly once:**\n` +
+      `\`\`\`\n` +
+      `node ${CLI} writeLensVerdict --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref: REF, lens, role, pass: '<true|false>', missed: '<non-empty string: "nothing missed" on pass, specific gap on fail>' })}'\n` +
+      `\`\`\`\n\n` +
+      `Replace \`"<true|false>"\` with the boolean \`true\` or \`false\` (no quotes). ` +
+      `Replace \`"<non-empty string: ...>"\` with a plain string (never empty — even on a pass, write "nothing missed" or a brief summary of what you verified). ` +
+      `The verdict is written to: \`${verdictFilePath}\``
+
+    try {
+      await agent(judgePrompt, { label: `judge:${lens}`, phase: 'judge' })
+    } catch (e) {
+      log(`judge ${lens} agent threw: ${String(e)} — aggregation will fail loudly on the missing verdict file`)
+    }
+
+    return { lens, role, verdictFilePath }
+  }),
+)
+
+log(`all five lens judges settled for ref=${REF}`)
+
+// ---------------------------------------------------------------------------
+// Phase 3: aggregate and adjudicate.
+// aggregateJudgePanel reads the five per-lens verdict files, validates them
+// against the schema, and returns the PanelVerdict. Then adjudicateQualityLead
+// is called with round=1 and k=1: a clean panel yields decision=ready (blessed
+// through the Story 9.1 brake), any lens fail yields decision=escalate
+// immediately (not rework — the rework loop is the deferred follow-on).
+// ---------------------------------------------------------------------------
+phase('aggregate')
+
+// aggregateJudgePanel: read + validate the five per-lens files, assemble the
+// PanelVerdict, emit panel.graded telemetry. MUTATING reads (may fail on missing
+// file → LensVerdictFileMalformedError surfaced loudly). retryable=false: if the
+// relay garbles we surface the _parseError and stop.
+const aggregateResult = await seam(
+  `node ${CLI} aggregateJudgePanel --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, draft, lensRoles })}'`,
+  'aggregate',
+)
+if (!aggregateResult || aggregateResult._parseError || aggregateResult.error) {
+  return {
+    error: 'aggregate-failed',
+    detail: aggregateResult?._parseError || aggregateResult?.error || 'unknown',
+    sessionUlid: SU,
+    ref: REF,
+  }
+}
+log(`panel aggregated for ref=${REF}: riskTier=${aggregateResult.riskTier}`)
+
+// adjudicateQualityLead: apply rubric §5 synthesis with round=1 and k=1.
+// With these values synthesiseDecision behaves:
+//   - failed.length === 0 → decision=ready (clean sweep, blessed via brake)
+//   - failed.length > 0 AND round >= k (1 >= 1) → decision=escalate (any fail immediately escalates)
+// There is NO rework loop in this workflow. That is the deferred follow-on.
+// MUTATING (blesses through markStoryReady brake on ready). retryable=false.
+const adjudicateResult = await seam(
+  `node ${CLI} adjudicateQualityLead --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref: REF, panel: aggregateResult.verdict, round: 1, k: 1 })}'`,
+  'adjudicate',
+)
+if (!adjudicateResult || adjudicateResult._parseError || adjudicateResult.error) {
+  return {
+    error: 'adjudicate-failed',
+    detail: adjudicateResult?._parseError || adjudicateResult?.error || 'unknown',
+    sessionUlid: SU,
+    ref: REF,
+    panelVerdict: aggregateResult.verdict,
+  }
+}
+
+const decision = adjudicateResult.verdict?.decision
+log(`adjudication for ref=${REF}: decision=${decision}`)
+
+if (decision === 'ready') {
+  log(`ref=${REF} BLESSED as ready — the draft cleared all five lenses and the Quality Lead adjudicated ready.`)
+} else if (decision === 'escalate') {
+  const reason = adjudicateResult.verdict?.escalation_reason || adjudicateResult.verdict?.rationale || 'see verdict'
+  const failedLenses = aggregateResult.verdict?.lenses?.filter((l) => !l.pass).map((l) => `[${l.lens}] ${l.missed}`).join('; ')
+  log(`ref=${REF} ESCALATED — one or more lenses failed (k=1, round=1 → immediate escalate). Failed lenses: ${failedLenses}. Operator: revise the draft and re-run gate-1.`)
+  log(`Escalation reason: ${reason}`)
+} else {
+  log(`ref=${REF} unexpected decision=${decision} — this workflow always uses round=1 k=1, so rework should never occur.`)
+}
+
+return {
+  sessionUlid: SU,
+  ref: REF,
+  riskTier: aggregateResult.riskTier,
+  panelVerdict: aggregateResult.verdict,
+  adjudicationVerdict: adjudicateResult.verdict,
+  decision,
+  // Convenience summary.
+  lensResults: aggregateResult.verdict?.lenses?.map((l) => ({ lens: l.lens, pass: l.pass, missed: l.missed })),
+}

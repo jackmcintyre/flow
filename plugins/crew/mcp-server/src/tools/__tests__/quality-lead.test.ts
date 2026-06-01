@@ -336,6 +336,87 @@ describe("AC5: the emitted verdict validates against the schema and is persisted
 });
 
 // ---------------------------------------------------------------------------
+// Gate-1 AC4 — Story native:01KT1MP7TR651TAGVJ6EZSR589
+//
+// The gate-1 workflow ALWAYS calls adjudicateQualityLead with round=1 and k=1.
+// This forces immediate escalate on any lens fail (round >= k, so 1 >= 1 → escalate).
+// There is NO rework decision in gate-1: a clean panel → ready; any fail → escalate.
+// The adjudication-verdict.json persisted to the session dir MUST record round=1
+// so operators and the calibration loop can verify the gate-1 contract was honoured.
+// ---------------------------------------------------------------------------
+
+describe("Gate-1 AC4: synthesiseDecision with round=1 k=1 — any fail → escalate immediately (not rework)", () => {
+  it("synthesiseDecision({round: 1, k: 1}) with a failing lens returns decision=escalate, NOT rework", () => {
+    // This is the gate-1 contract: with k=1, a split that occurs at round=1
+    // satisfies round >= k (1 >= 1) → escalate immediately.
+    const failingPanel = makePanel({ verifiability: "AC does not pin behaviour" });
+
+    const result = synthesiseDecision({ panel: failingPanel, round: 1, k: 1 });
+
+    expect(result.decision).toBe("escalate");
+    expect(result.escalation_reason).toBeDefined();
+    expect(result.escalation_reason).toMatch(/verifiability/);
+    // Sanity: with k=2 (default), round=1 would have been rework.
+    expect(synthesiseDecision({ panel: failingPanel, round: 1, k: 2 }).decision).toBe("rework");
+  });
+
+  it("synthesiseDecision({round: 1, k: 1}) with all lenses passing → decision=ready", () => {
+    const cleanPanel = makePanel();
+    const result = synthesiseDecision({ panel: cleanPanel, round: 1, k: 1 });
+    expect(result.decision).toBe("ready");
+    expect(result.escalation_reason).toBeUndefined();
+  });
+
+  it("adjudicateQualityLead with round=1 k=1 and a failing lens → escalate with round=1 in persisted verdict", async () => {
+    const failMsg = "open question has no defaulted answer — cold dev would stop to ask";
+
+    const { verdict, verdictFilePath } = await adjudicateQualityLead({
+      targetRepoRoot,
+      sessionUlid: SESSION_ULID,
+      ref: REF,
+      panel: makePanel({ considered: failMsg }),
+      round: 1,
+      k: 1,
+    });
+
+    // Escalate immediately — no rework in gate-1.
+    expect(verdict.decision).toBe("escalate");
+    expect(verdict.round).toBe(1);
+    expect(verdict.escalation_reason).toBeDefined();
+
+    // The adjudication-verdict.json persisted to the session dir records round=1.
+    const onDisk = JSON.parse(await fs.readFile(verdictFilePath, "utf8"));
+    expect(onDisk.round).toBe(1);
+    expect(onDisk.decision).toBe("escalate");
+
+    // Verify the file is in the expected session dir.
+    const expectedPath = adjudicationVerdictFilePath(targetRepoRoot, SESSION_ULID, REF);
+    expect(verdictFilePath).toBe(expectedPath);
+  });
+
+  it("adjudicateQualityLead with round=1 k=1 and clean panel → ready with round=1 in persisted verdict", async () => {
+    await seedTodo({ ready: false });
+
+    const { verdict, verdictFilePath } = await adjudicateQualityLead({
+      targetRepoRoot,
+      sessionUlid: SESSION_ULID,
+      ref: REF,
+      panel: makePanel(),
+      round: 1,
+      k: 1,
+    });
+
+    expect(verdict.decision).toBe("ready");
+    expect(verdict.round).toBe(1);
+
+    // adjudication-verdict.json records round=1 even on a ready decision.
+    const onDisk = JSON.parse(await fs.readFile(verdictFilePath, "utf8"));
+    expect(onDisk.round).toBe(1);
+    expect(onDisk.decision).toBe("ready");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC1 — the role catalogue + permission files exist and parse against their schemas
 // ---------------------------------------------------------------------------
 

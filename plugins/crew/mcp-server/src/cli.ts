@@ -53,6 +53,8 @@ import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
 import { reapStaleWorktrees } from "./tools/reap-stale-worktrees.js";
 import { markStoryReady } from "./tools/mark-story-ready.js";
 import { guardCleanRoot } from "./tools/guard-clean-root.js";
+import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
+import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -97,6 +99,14 @@ const TOOLS: Record<string, ToolFn> = {
   // into the shared root checkout under bgIsolation:'none', so the next worktree
   // is cut from a clean base.
   guardCleanRoot,
+  // Story native:01KT1MP7TR651TAGVJ6EZSR589 — gate-1 judge panel tools (AC5).
+  // The three panel tools are registered here so they are callable via the CLI
+  // seam (node dist/cli.js toolName --json) from the gate-1.workflow.js and from
+  // the /crew:judge skill's seam-agents. Each accepts a plain options object so the
+  // existing CLI shim fn(args) pattern applies unchanged.
+  writeLensVerdict,
+  aggregateJudgePanel,
+  adjudicateQualityLead,
 };
 
 function emit(obj: unknown): void {
