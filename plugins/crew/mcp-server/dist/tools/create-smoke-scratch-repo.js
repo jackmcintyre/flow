@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { gitInitWithEmptyCommit } from "../lib/git.js";
+import { getPluginRoot } from "../lib/plugin-root.js";
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
@@ -31,15 +31,10 @@ export const CreateSmokeScratchRepoOptionsSchema = z.object({
 export async function createSmokeScratchRepo(opts) {
     const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
     const { label, parentDir } = parsed;
-    // Resolve the shipped standards template from this file's location.
-    // Layout: plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts
-    //   → up 4 dirs to plugins/crew/
-    //   → docs/standards-example.md
-    const HERE = path.dirname(fileURLToPath(import.meta.url));
-    const standardsTemplatePath = path.resolve(HERE, "..", // src/
-    "..", // mcp-server/
-    "..", // plugins/crew/
-    "docs", "standards-example.md");
+    // Resolve the shipped standards template under the plugin root. Uses the
+    // marker-walk getPluginRoot() so this works whether the tool runs unbundled
+    // (dist/tools/...) or inlined into a bundled entrypoint (dist/cli.js).
+    const standardsTemplatePath = path.resolve(getPluginRoot(), "docs", "standards-example.md");
     const scratchRoot = await fs.mkdtemp(path.join(parentDir ?? os.tmpdir(), `crew-smoke-${label}-`));
     // Step 1: git init + empty commit (canonical-fs-guard requires all git
     // spawns to live in lib/git.ts).
