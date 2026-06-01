@@ -1,5 +1,5 @@
 ---
-version: "1.3.0"
+version: "1.4.0"
 fallback_tier: medium
 tiers:
   low:
@@ -24,6 +24,14 @@ tiers:
         - "**/Dockerfile.*"
         - "**/.env*"
         - "**/*.sh"
+    - id: low.tests-only
+      path_patterns:
+        - "**/*.test.ts"
+        - "**/*.test.js"
+        - "**/*.test.d.ts"
+        - "**/__tests__/**"
+        - "tests/**"
+      all_paths_match: true
     - id: low.additive-only
       additive_only: true
       diff_size_thresholds:
@@ -63,12 +71,20 @@ and returns the first matching tier. If no rule matches, the `fallback_tier`
 
 ### Low
 
-A **low**-risk PR is safe to auto-merge without additional human review. Two
+A **low**-risk PR is safe to auto-merge without additional human review. Three
 rules classify `low`:
 
 - `low.docs-only` — every changed file falls under `docs/**` or matches
   `**/*.md`. Documentation and Markdown content cannot cause a runtime
   regression. Example: updating a README, adding a `.md` file.
+- `low.tests-only` — every changed file is a test file (matches
+  `**/*.test.ts`, `**/*.test.js`, `**/*.test.d.ts`, `**/__tests__/**`, or
+  `tests/**`). This includes committed compiled test output that travels with a
+  source test change (e.g. a `.test.ts` source alongside its built
+  `.test.js` counterpart). Test files cannot regress production behaviour —
+  the only code they can affect is other tests. There is **no size cap** for
+  this rule: a large batch of test-only edits is just as safe to auto-merge as
+  a small one.
 - `low.additive-only` — every changed file is a **brand-new file addition**
   (nothing existing modified, deleted, or renamed), the diff is ≤ 300 lines,
   **and** no changed file matches the `path_excludes` guard. *Import-wired*
@@ -79,7 +95,9 @@ rules classify `low`:
   files, shell scripts); those CAN change behavior on their own, so the
   `path_excludes` list keeps them out of `low` even when purely additive. The
   size cap bounds blast radius; high rules (migrations/schema) are evaluated
-  first. (Both low rules carry the same `path_excludes` guard.)
+  first. (Both low.docs-only and low.additive-only carry the same `path_excludes`
+  guard; low.tests-only does not need one because test files are already
+  scope-limited.)
 
 ### Medium
 
@@ -109,6 +127,20 @@ patterns. A PR is classified `low` only when ALL changed files match at least
 one of the patterns; a PR that touches both `docs/README.md` and `src/index.ts`
 does not match this rule (the `src/` file falls outside both patterns) and will
 instead receive the `fallback_tier` of `medium`.
+
+### `low.tests-only`
+
+Matches PRs whose changed files ALL fall under the test-file globs:
+`**/*.test.ts`, `**/*.test.js`, `**/*.test.d.ts`, `**/__tests__/**`, or
+`tests/**`. Like `low.docs-only` this rule uses `all_paths_match: true` — a
+single non-test file disqualifies it. Unlike the other `low` rules there is no
+`diff_size_thresholds` cap and no `path_excludes` guard: test files exist
+solely to verify behaviour and cannot alter production code paths on their own,
+so no size threshold is needed to bound blast radius. The globs are chosen to
+cover both TypeScript source test files and their compiled JavaScript and
+declaration-file counterparts that are committed to `dist/` alongside the
+source (CI fails on dist drift, so compiled test outputs travel with their
+source in the same PR).
 
 ### `high.schema-or-migration`
 
