@@ -127,6 +127,51 @@ export const ExecutionManifestSchema = z
     narrative: z.string().min(1),
 
     /**
+     * Structured narrative parts carried verbatim from
+     * `SourceStory.narrative_struct` (Story 10.2).
+     *
+     * **Optional and additive.** Native-scanned manifests carry it; a legacy
+     * manifest, and every BMad-scanned manifest (whose `narrative_struct` is
+     * undefined until the 10.5 ingest), still parses under `.strict()` because
+     * the key is simply absent. The raw `narrative` string above is always
+     * present; this is the structured view.
+     */
+    narrative_struct: z
+      .object({
+        role: z.string().min(1),
+        want: z.string().min(1),
+        so_that: z.string().min(1),
+      })
+      .optional(),
+
+    /**
+     * Structured implementation tasks, each mapped to ≥1 AC id, carried
+     * verbatim from `SourceStory.tasks` (Story 10.2).
+     *
+     * **Optional and additive** — native-scanned manifests carry it; legacy and
+     * BMad-scanned manifests omit it. Whole-story T0-1 enforcement (required
+     * sections present; every task mapped to an AC) is Story 10.3.
+     */
+    tasks: z
+      .array(
+        z.object({
+          text: z.string().min(1),
+          ac_refs: z.array(z.string().min(1)).min(1),
+        }),
+      )
+      .optional(),
+
+    /**
+     * Repo-relative source paths cited by the story, carried verbatim from
+     * `SourceStory.cited_sources` (Story 10.2).
+     *
+     * **Optional and additive** — native-scanned manifests carry it; legacy and
+     * BMad-scanned manifests omit it. On-disk resolvability of each path is
+     * T0-5 (Story 10.3), not enforced here.
+     */
+    cited_sources: z.array(z.string().min(1)).optional(),
+
+    /**
      * Optional free-text implementation notes from the source story.
      * Omitted from YAML when `undefined` (use `omitUndefined: true` or
      * strip undefined-keyed pairs before stringifying).

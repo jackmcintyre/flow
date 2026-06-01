@@ -90,7 +90,7 @@ function makeSpecWithVitestAc(vitestPath) {
 
 ## Narrative
 
-As a tester, I want to verify runVitestCheck uses the correct cwd.
+As a tester, I want to verify runVitestCheck uses the correct cwd, so that the vitest check runs in the right package.
 
 ## Acceptance Criteria
 
@@ -118,7 +118,7 @@ function makeManifestYaml(ulid, ref, sessionUlid) {
         `  - text: "Given the vitest marker points at a test file."`,
         `    kind: integration`,
         `title: "Fixture Story 5.27"`,
-        `narrative: "As a tester, I want to verify runVitestCheck uses the correct cwd."`,
+        `narrative: "As a tester, I want to verify runVitestCheck uses the correct cwd, so that the vitest check runs in the right package."`,
         `withdrawn: false`,
         `claimed_by: "${sessionUlid}"`,
     ].join("\n");

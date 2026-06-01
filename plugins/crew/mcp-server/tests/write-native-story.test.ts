@@ -71,10 +71,11 @@ it("AC5(a) — written story file parses via parseNativeStory", async () => {
   const result = await writeNativeStory({
     targetRepoRoot: scratch,
     title: "Enable dark mode",
-    narrative:
-      "As a **user with light sensitivity**,\n" +
-      "I want **to switch the UI to dark mode**,\n" +
-      "so that **I can use the app comfortably at night**.",
+    narrative: {
+      role: "user with light sensitivity",
+      want: "to switch the UI to dark mode",
+      so_that: "I can use the app comfortably at night",
+    },
     acceptance_criteria: [
       {
         text: "**Given** I am in Settings,\n**When** I toggle Dark Mode on,\n**Then** the UI switches to a dark colour scheme immediately.",
@@ -82,6 +83,8 @@ it("AC5(a) — written story file parses via parseNativeStory", async () => {
         verification: { type: "vitest", target: "src/settings/__tests__/dark-mode.test.ts" },
       },
     ],
+    tasks: [{ text: "Add the dark-mode toggle", ac_refs: ["AC1"] }],
+    cited_sources: ["src/settings/theme.ts"],
     depends_on: [],
   });
 
@@ -99,10 +102,11 @@ it("AC5(b) — parsed SourceStory has all required keys (key-set equality with B
   const result = await writeNativeStory({
     targetRepoRoot: scratch,
     title: "View order history",
-    narrative:
-      "As a **returning customer**,\n" +
-      "I want **to see all my past orders**,\n" +
-      "so that **I can track what I have bought**.",
+    narrative: {
+      role: "returning customer",
+      want: "to see all my past orders",
+      so_that: "I can track what I have bought",
+    },
     acceptance_criteria: [
       {
         text: "**Given** I am on My Account,\n**When** I click Order History,\n**Then** I see a list of my past orders with dates and totals.",
@@ -110,6 +114,8 @@ it("AC5(b) — parsed SourceStory has all required keys (key-set equality with B
         verification: { type: "vitest", target: "src/account/__tests__/order-history.test.ts" },
       },
     ],
+    tasks: [{ text: "Render the order-history list", ac_refs: ["AC1"] }],
+    cited_sources: ["src/account/order-history.ts"],
     depends_on: [],
   });
 
@@ -132,10 +138,11 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
   const storyA = await writeNativeStory({
     targetRepoRoot: scratch,
     title: "User sign-up",
-    narrative:
-      "As a **new visitor**,\n" +
-      "I want **to create an account with my email**,\n" +
-      "so that **I can save my progress**.",
+    narrative: {
+      role: "new visitor",
+      want: "to create an account with my email",
+      so_that: "I can save my progress",
+    },
     acceptance_criteria: [
       {
         text: "**Given** I fill in the sign-up form with a unique email,\n**When** I submit,\n**Then** my account is created and I receive a confirmation email.",
@@ -143,6 +150,8 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
         verification: { type: "vitest", target: "src/auth/__tests__/sign-up.test.ts" },
       },
     ],
+    tasks: [{ text: "Build the sign-up flow", ac_refs: ["AC1"] }],
+    cited_sources: ["src/auth/sign-up.ts"],
     depends_on: [],
   });
 
@@ -150,10 +159,11 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
   const storyB = await writeNativeStory({
     targetRepoRoot: scratch,
     title: "User profile",
-    narrative:
-      "As a **signed-in user**,\n" +
-      "I want **to see my profile page**,\n" +
-      "so that **I can verify my account details**.",
+    narrative: {
+      role: "signed-in user",
+      want: "to see my profile page",
+      so_that: "I can verify my account details",
+    },
     acceptance_criteria: [
       {
         text: "**Given** I am signed in,\n**When** I navigate to My Profile,\n**Then** I see my name and email address.",
@@ -161,6 +171,8 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
         verification: { type: "vitest", target: "src/profile/__tests__/profile.test.ts" },
       },
     ],
+    tasks: [{ text: "Render the profile page", ac_refs: ["AC1"] }],
+    cited_sources: ["src/profile/profile.ts"],
     depends_on: [storyA.ref],
   });
 
@@ -226,7 +238,7 @@ describe("writeNativeStory — adapter guard", () => {
         writeNativeStory({
           targetRepoRoot: bmadScratch,
           title: "Should fail",
-          narrative: "As a user I want something so that I can do things.",
+          narrative: { role: "user", want: "something", so_that: "I can do things" },
           acceptance_criteria: [
             {
               text: "**Given** x **When** y **Then** z.",
@@ -234,6 +246,8 @@ describe("writeNativeStory — adapter guard", () => {
               verification: { type: "vitest", target: "src/__tests__/x.test.ts" },
             },
           ],
+          tasks: [{ text: "Do the thing", ac_refs: ["AC1"] }],
+          cited_sources: ["src/x.ts"],
           depends_on: [],
         }),
       ).rejects.toThrow("requires adapter");
@@ -251,10 +265,11 @@ it("integration-tagged AC produces kind: 'integration' in the parsed SourceStory
   const result = await writeNativeStory({
     targetRepoRoot: scratch,
     title: "Process payment",
-    narrative:
-      "As a **customer at checkout**,\n" +
-      "I want **to pay by card**,\n" +
-      "so that **my order is confirmed immediately**.",
+    narrative: {
+      role: "customer at checkout",
+      want: "to pay by card",
+      so_that: "my order is confirmed immediately",
+    },
     acceptance_criteria: [
       {
         text: "**Given** I have items in my cart,\n**When** I submit a valid card number,\n**Then** my order is placed and I see a confirmation number.",
@@ -262,6 +277,8 @@ it("integration-tagged AC produces kind: 'integration' in the parsed SourceStory
         verification: { type: "vitest", target: "src/checkout/__tests__/payment.test.ts" },
       },
     ],
+    tasks: [{ text: "Wire the card-payment flow", ac_refs: ["AC1"] }],
+    cited_sources: ["src/checkout/payment.ts"],
     depends_on: [],
   });
 

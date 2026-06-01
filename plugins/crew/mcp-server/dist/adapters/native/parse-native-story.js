@@ -49,6 +49,10 @@ export function parseNativeStory(absPath, fileContents) {
         });
     }
     const narrative = narrativeSection.bodyLines.join("\n").trim();
+    // Story 10.2 — the structured narrative `{ role, want, so_that }` parsed from
+    // the canonical "As a {role}, I want {want}, so that {so_that}." sentence. The
+    // raw `narrative` string above is retained verbatim; this is the structured view.
+    const narrative_struct = parseNarrativeStruct(narrative, absPath);
     // Acceptance Criteria (required, ≥1 parseable AC).
     const acSection = sections.get("Acceptance Criteria");
     if (!acSection) {
@@ -66,11 +70,27 @@ export function parseNativeStory(absPath, fileContents) {
             reason: "no parseable AC blocks found under '## Acceptance Criteria'",
         });
     }
+    // The set of AC ids this story actually declares, used below to reject a task
+    // whose `ac_refs` dangles (names an AC that does not exist in the same story).
+    // ACs are parsed in document order, so id = AC<index+1> (mirrors the writer's render).
+    const acIds = new Set(acceptance_criteria.map((_, i) => `AC${i + 1}`));
     // Implementation Notes (optional).
     const implSection = sections.get("Implementation Notes");
     const implementation_notes = implSection
         ? implSection.bodyLines.join("\n").trim() || undefined
         : undefined;
+    // Tasks (Story 10.2). Parsed when present: each bullet `- <text> (AC: 1, 3)`
+    // becomes `{ text, ac_refs: ["AC1", "AC3"] }`. Fail-closed on a task with no
+    // AC ref or an `ac_ref` that does not resolve to a parsed AC id in this story.
+    // Required-presence (T0-1) is the scan-time validator's job (Story 10.3); the
+    // parse here only enforces shape + intra-story ref integrity when the section exists.
+    const tasksSection = sections.get("Tasks");
+    const tasks = tasksSection ? parseTasks(tasksSection.bodyLines, acIds, absPath) : undefined;
+    // Cited Sources (Story 10.2). Parsed when present: a bullet list of
+    // repo-relative paths into `cited_sources: string[]`. Throws when the section
+    // exists but is empty. On-disk resolvability of each path is T0-5 (Story 10.3).
+    const citedSection = sections.get("Cited Sources");
+    const cited_sources = citedSection ? parseCitedSources(citedSection.bodyLines, absPath) : undefined;
     // Dependencies (optional, bullet list of refs).
     const depSection = sections.get("Dependencies");
     const depends_on = depSection ? parseDependencies(depSection.bodyLines, absPath) : [];
@@ -81,9 +101,12 @@ export function parseNativeStory(absPath, fileContents) {
         ref,
         title,
         narrative,
+        narrative_struct,
         acceptance_criteria,
         depends_on,
         implementation_notes,
+        tasks,
+        cited_sources,
         raw_path: absPath,
         raw_frontmatter: { title, ref },
         source_hash,
@@ -242,6 +265,138 @@ function parseDependencies(bodyLines, absPath) {
             });
         }
         out.push(ref);
+    }
+    return out;
+}
+/**
+ * Parse the structured narrative `{ role, want, so_that }` from the canonical
+ * "As a {role}, I want {want}, so that {so_that}." sentence (Story 10.2).
+ *
+ * Grammar is strict and symmetric with `renderNativeStoryBody`'s emission:
+ *   `As a <role>, I want <want>, so that <so_that>.`
+ * The match is case-insensitive on the connective words and tolerant of an
+ * "As an" article and surrounding whitespace, but each of the three captured
+ * parts must be non-empty. Anything else throws `MalformedNativeStoryError`.
+ */
+function parseNarrativeStruct(narrative, absPath) {
+    // Collapse internal newlines/whitespace so a wrapped narrative still matches.
+    // The comma before "so that" is optional — both "…, I want X, so that Y." and
+    // "…, I want X so that Y." are accepted (the latter is the common BMad form).
+    const flat = narrative.replace(/\s+/g, " ").trim();
+    const m = /^As an? (.+?), I want (.+?),? so that (.+?)\.?$/i.exec(flat);
+    if (!m) {
+        throw new MalformedNativeStoryError({
+            path: absPath,
+            section: "## Narrative",
+            reason: "narrative must be in the form 'As a {role}, I want {want}, so that {so_that}.'",
+        });
+    }
+    const role = m[1].trim();
+    const want = m[2].trim();
+    const so_that = m[3].trim();
+    if (role.length === 0 || want.length === 0 || so_that.length === 0) {
+        throw new MalformedNativeStoryError({
+            path: absPath,
+            section: "## Narrative",
+            reason: "narrative role/want/so_that parts must each be non-empty in 'As a {role}, I want {want}, so that {so_that}.'",
+        });
+    }
+    return { role, want, so_that };
+}
+/** Trailing `(AC: 1, 3)` ref clause on a `## Tasks` bullet. */
+const TASK_AC_CLAUSE_RE = /\(AC:\s*([^)]*)\)\s*$/;
+/**
+ * Parse the `## Tasks` section bullets (Story 10.2). Each bullet has the shape
+ * `- <text> (AC: 1, 3)`, mapping to `{ text, ac_refs: ["AC1", "AC3"] }`.
+ *
+ * Fail-closed (`MalformedNativeStoryError`) when:
+ *   - a bullet carries no `(AC: …)` clause (a task with no AC ref);
+ *   - the clause is empty (`(AC: )`) or names a non-numeric ref;
+ *   - an `ac_ref` does not resolve to a parsed AC id in the same story (dangling
+ *     ref — the integrity the T0-1 validator later enforces across scan).
+ *
+ * @param acIds  the set of AC ids the story declares (e.g. `{"AC1","AC2"}`).
+ */
+function parseTasks(bodyLines, acIds, absPath) {
+    const out = [];
+    for (const line of bodyLines) {
+        const m = /^\s*[-*]\s+(.+?)\s*$/.exec(line);
+        if (!m)
+            continue;
+        const bullet = m[1].trim();
+        const clauseMatch = TASK_AC_CLAUSE_RE.exec(bullet);
+        if (!clauseMatch) {
+            throw new MalformedNativeStoryError({
+                path: absPath,
+                section: "## Tasks",
+                reason: `task '${bullet}' carries no AC ref — expected a trailing '(AC: <n>, …)' clause`,
+            });
+        }
+        const text = bullet.replace(TASK_AC_CLAUSE_RE, "").trim();
+        if (text.length === 0) {
+            throw new MalformedNativeStoryError({
+                path: absPath,
+                section: "## Tasks",
+                reason: `task bullet '${bullet}' has no task text before its '(AC: …)' clause`,
+            });
+        }
+        const rawRefs = clauseMatch[1]
+            .split(",")
+            .map((r) => r.trim())
+            .filter((r) => r.length > 0);
+        if (rawRefs.length === 0) {
+            throw new MalformedNativeStoryError({
+                path: absPath,
+                section: "## Tasks",
+                reason: `task '${text}' has an empty AC ref clause '(AC: )' — expected at least one AC number`,
+            });
+        }
+        const ac_refs = [];
+        for (const raw of rawRefs) {
+            if (!/^\d+$/.test(raw)) {
+                throw new MalformedNativeStoryError({
+                    path: absPath,
+                    section: "## Tasks",
+                    reason: `task '${text}' has a non-numeric AC ref '${raw}' — expected '(AC: 1, 3)'`,
+                });
+            }
+            const acId = `AC${parseInt(raw, 10)}`;
+            if (!acIds.has(acId)) {
+                throw new MalformedNativeStoryError({
+                    path: absPath,
+                    section: "## Tasks",
+                    reason: `task '${text}' references ${acId}, which does not resolve to any AC in this story`,
+                });
+            }
+            ac_refs.push(acId);
+        }
+        out.push({ text, ac_refs });
+    }
+    return out;
+}
+/**
+ * Parse the `## Cited Sources` section (Story 10.2): a bullet list of
+ * repo-relative paths into `string[]`. Throws when the section exists but
+ * contains no parseable bullet (an empty section). On-disk resolvability of
+ * each path is T0-5 (Story 10.3) — not checked here.
+ */
+function parseCitedSources(bodyLines, absPath) {
+    const out = [];
+    for (const line of bodyLines) {
+        const m = /^\s*[-*]\s+(.+?)\s*$/.exec(line);
+        if (!m)
+            continue;
+        const cited = m[1].trim();
+        if (cited.length === 0)
+            continue;
+        out.push(cited);
+    }
+    if (out.length === 0) {
+        throw new MalformedNativeStoryError({
+            path: absPath,
+            section: "## Cited Sources",
+            reason: "'## Cited Sources' section is present but empty — expected ≥1 repo-relative path bullet",
+        });
     }
     return out;
 }

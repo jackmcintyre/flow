@@ -6,7 +6,11 @@ import { z } from "zod";
 export declare const WriteNativeStoryInputSchema: z.ZodObject<{
     targetRepoRoot: z.ZodString;
     title: z.ZodString;
-    narrative: z.ZodString;
+    narrative: z.ZodObject<{
+        role: z.ZodString;
+        want: z.ZodString;
+        so_that: z.ZodString;
+    }, z.core.$strip>;
     acceptance_criteria: z.ZodArray<z.ZodObject<{
         text: z.ZodString;
         kind: z.ZodEnum<{
@@ -21,6 +25,11 @@ export declare const WriteNativeStoryInputSchema: z.ZodObject<{
             target: z.ZodString;
         }, z.core.$strip>;
     }, z.core.$strip>>;
+    tasks: z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        ac_refs: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>;
+    cited_sources: z.ZodArray<z.ZodString>;
     implementation_notes: z.ZodOptional<z.ZodString>;
     depends_on: z.ZodArray<z.ZodString>;
     sessionUlid: z.ZodOptional<z.ZodString>;
@@ -31,13 +40,22 @@ export interface WriteNativeStoryOutput {
     path: string;
 }
 /**
+ * Render the canonical narrative sentence from the structured parts (Story
+ * 10.2). `parseNativeStory` parses exactly this grammar back into
+ * `narrative_struct`, so the render here is the single source of the round-trip
+ * contract.
+ */
+export declare function renderNarrativeSentence(narrative: WriteNativeStoryInput["narrative"]): string;
+/**
  * Render a native-story file body from validated inputs.
  *
- * Produces the canonical four-section order:
+ * Produces the canonical section order:
  *   1. `## Narrative`
  *   2. `## Acceptance Criteria`
- *   3. `## Implementation Notes` (omitted if empty/absent)
- *   4. `## Dependencies`
+ *   3. `## Tasks`
+ *   4. `## Cited Sources`
+ *   5. `## Implementation Notes` (omitted if empty/absent)
+ *   6. `## Dependencies`
  */
 export declare function renderNativeStoryBody(input: WriteNativeStoryInput): string;
 /**

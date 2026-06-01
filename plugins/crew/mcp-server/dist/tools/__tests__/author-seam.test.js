@@ -40,7 +40,11 @@ function passingCandidate() {
     return {
         targetRepoRoot: root,
         title: "Persist the backlog ledger",
-        narrative: "As an operator, I want the plugin to write sprint-status.yaml so that the backlog ledger is durable.",
+        narrative: {
+            role: "operator",
+            want: "the plugin to write sprint-status.yaml",
+            so_that: "the backlog ledger is durable",
+        },
         acceptance_criteria: [
             {
                 text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated and read back unchanged.",
@@ -48,6 +52,8 @@ function passingCandidate() {
                 verification: { type: "vitest", target: "src/__tests__/ledger.integration.test.ts" },
             },
         ],
+        tasks: [{ text: "Write the ledger persistence path", ac_refs: ["AC1"] }],
+        cited_sources: ["src/state/ledger.ts"],
         depends_on: [],
         sessionUlid: SESSION_ULID,
     };
@@ -58,7 +64,11 @@ function failingCandidate() {
     return {
         targetRepoRoot: root,
         title: "Persist the backlog ledger",
-        narrative: "As an operator, I want the plugin to write sprint-status.yaml so that the backlog ledger is durable.",
+        narrative: {
+            role: "operator",
+            want: "the plugin to write sprint-status.yaml",
+            so_that: "the backlog ledger is durable",
+        },
         acceptance_criteria: [
             {
                 text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated.",
@@ -66,6 +76,8 @@ function failingCandidate() {
                 verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
             },
         ],
+        tasks: [{ text: "Write the ledger persistence path", ac_refs: ["AC1"] }],
+        cited_sources: ["src/state/ledger.ts"],
         depends_on: [],
         sessionUlid: SESSION_ULID,
     };

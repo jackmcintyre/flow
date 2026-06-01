@@ -271,7 +271,16 @@ export function registerAllTools(server) {
             properties: {
                 targetRepoRoot: { type: "string" },
                 title: { type: "string" },
-                narrative: { type: "string" },
+                // Story 10.2 — the narrative is a structured { role, want, so_that }.
+                narrative: {
+                    type: "object",
+                    properties: {
+                        role: { type: "string" },
+                        want: { type: "string" },
+                        so_that: { type: "string" },
+                    },
+                    required: ["role", "want", "so_that"],
+                },
                 acceptance_criteria: {
                     type: "array",
                     items: {
@@ -279,15 +288,46 @@ export function registerAllTools(server) {
                         properties: {
                             text: { type: "string" },
                             kind: { type: "string", enum: ["integration", "unit"] },
+                            // Story 10.1 — required per-AC verification directive.
+                            verification: {
+                                type: "object",
+                                properties: {
+                                    type: { type: "string", enum: ["vitest", "artifact"] },
+                                    target: { type: "string" },
+                                },
+                                required: ["type", "target"],
+                            },
                         },
-                        required: ["text", "kind"],
+                        required: ["text", "kind", "verification"],
                     },
                 },
+                // Story 10.2 — ≥1 task, each mapped to ≥1 AC id.
+                tasks: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            text: { type: "string" },
+                            ac_refs: { type: "array", items: { type: "string" } },
+                        },
+                        required: ["text", "ac_refs"],
+                    },
+                },
+                // Story 10.2 — ≥1 repo-relative cited source path.
+                cited_sources: { type: "array", items: { type: "string" } },
                 implementation_notes: { type: "string" },
                 depends_on: { type: "array", items: { type: "string" } },
                 sessionUlid: { type: "string" },
             },
-            required: ["targetRepoRoot", "title", "narrative", "acceptance_criteria", "depends_on"],
+            required: [
+                "targetRepoRoot",
+                "title",
+                "narrative",
+                "acceptance_criteria",
+                "tasks",
+                "cited_sources",
+                "depends_on",
+            ],
         },
         handler: async (args) => {
             try {
