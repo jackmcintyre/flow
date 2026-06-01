@@ -45480,6 +45480,18 @@ function isEnoent5(err) {
 var import_yaml16 = __toESM(require_dist2(), 1);
 import { promises as fs17 } from "node:fs";
 import * as path23 from "node:path";
+
+// src/lib/short-handle.ts
+function shortHandle(ref) {
+  const colon = ref.indexOf(":");
+  const localPart = colon === -1 ? ref : ref.slice(colon + 1);
+  if (ref.startsWith("native:")) {
+    return localPart.slice(0, 8);
+  }
+  return localPart;
+}
+
+// src/tools/list-claimable-todos.ts
 async function listClaimableTodos(opts) {
   const { targetRepoRoot } = opts;
   const stateRoot = path23.join(targetRepoRoot, ".crew", "state");
@@ -45529,6 +45541,7 @@ async function listClaimableTodos(opts) {
     }
     candidates.push({
       ref: manifest.ref,
+      shortHandle: shortHandle(manifest.ref),
       title: manifest.title,
       depends_on: manifest.depends_on,
       depsReady,
@@ -46799,7 +46812,8 @@ function renderRow(entry) {
   const readiness = entry.ready ? "ready" : "not ready";
   const claim = entry.claimable ? "claimable" : "not claimable";
   const withdrawn = entry.withdrawn ? " [withdrawn]" : "";
-  return `  - ${entry.ref} \u2014 ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
+  const handle = shortHandle(entry.ref);
+  return `  - [${handle}] ${entry.ref} \u2014 ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
 }
 function renderBacklogDashboard(snapshot) {
   const lines = ["Backlog dashboard"];

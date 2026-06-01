@@ -134,6 +134,49 @@ describe("listClaimableTodos", () => {
         expect(result.todos.length).toBe(1);
         expect(result.todos[0].depsReady).toBe(true);
     });
+    // AC3 (this story) — every candidate includes a non-empty shortHandle field.
+    it("(AC3) every candidate includes a non-empty shortHandle field", async () => {
+        const nativeRef = "native:01HZABC0000000000000000001";
+        await writeManifest(tmpRoot, "to-do", nativeRef, makeManifest(nativeRef));
+        const result = await listClaimableTodos({ targetRepoRoot: tmpRoot });
+        expect(result.todos.length).toBe(1);
+        const candidate = result.todos[0];
+        // shortHandle must be non-empty.
+        expect(candidate.shortHandle).toBeTruthy();
+        // For a native ref, shortHandle is the first 8 chars of the ULID.
+        expect(candidate.shortHandle).toBe("01HZABC0");
+        // The short handle is distinct from the full ref.
+        expect(candidate.shortHandle).not.toBe(candidate.ref);
+        // The short handle is shorter than the full ref (26-char ULID vs 8-char prefix).
+        expect(candidate.shortHandle.length).toBeLessThan(candidate.ref.length);
+    });
+    it("(AC3) bmad ref shortHandle equals the local part after the colon", async () => {
+        // Use a bmad-shaped ref to verify the bmad branch of shortHandle.
+        const bmadRef = "bmad:8.18";
+        // We need a manifest with bmad adapter; create a custom one.
+        const manifest = {
+            ref: bmadRef,
+            status: "to-do",
+            adapter: "bmad",
+            source_path: `_bmad-output/stories/${bmadRef}.md`,
+            source_hash: "a".repeat(64),
+            depends_on: [],
+            acceptance_criteria: [
+                { text: "Given something, when something, then something works.", kind: "integration" },
+            ],
+            title: `Story ${bmadRef}`,
+            narrative: "As a user, I want something so that I can use it.",
+            withdrawn: false,
+        };
+        const { stringify: yamlStringify2 } = await import("yaml");
+        await writeManifest(tmpRoot, "to-do", bmadRef, yamlStringify2(manifest, { lineWidth: 0 }));
+        const result = await listClaimableTodos({ targetRepoRoot: tmpRoot });
+        const bmadCandidate = result.todos.find((c) => c.ref === bmadRef);
+        expect(bmadCandidate).toBeDefined();
+        // bmad short handle is "8.18" (local part after colon)
+        expect(bmadCandidate.shortHandle).toBe("8.18");
+        expect(bmadCandidate.shortHandle).not.toBe(bmadRef);
+    });
     it("does not include in-progress manifests in todos", async () => {
         const ref = "native:01HZABC0000000000000000001";
         // in-progress manifest has status: "in-progress", which isClaimable filters

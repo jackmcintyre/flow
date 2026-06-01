@@ -23,10 +23,19 @@ import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { isClaimable } from "../state/manifest-state-machine.js";
+import { shortHandle } from "../lib/short-handle.js";
 
 export interface ClaimableCandidate {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
   ref: string;
+  /**
+   * Short human-friendly display handle derived from the ref.
+   * For a `native:<ULID>` ref this is the first 8 characters of the ULID.
+   * For any other ref (e.g. `bmad:8.18`) this is the local part after the
+   * first `:`. Always non-empty. Use this on operator-facing surfaces instead
+   * of the full ref.
+   */
+  shortHandle: string;
   /** Human-readable title from the manifest. */
   title: string;
   /** Dependency refs from the manifest. */
@@ -129,6 +138,7 @@ export async function listClaimableTodos(
 
     candidates.push({
       ref: manifest.ref,
+      shortHandle: shortHandle(manifest.ref),
       title: manifest.title,
       depends_on: manifest.depends_on,
       depsReady,

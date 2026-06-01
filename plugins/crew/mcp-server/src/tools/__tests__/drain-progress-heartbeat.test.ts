@@ -187,20 +187,23 @@ describe("drain progress heartbeat (Story 8.18, AC3)", () => {
     const { logs } = await runDrain({ withHeartbeat: true });
 
     // Each major phase emits a start line and a done-with-elapsed line.
-    expect(logs.some((l) => l.startsWith("bmad:8.18 dev-build: start"))).toBe(true);
-    expect(logs.some((l) => /^bmad:8\.18 dev-build: done in /.test(l))).toBe(true);
-    expect(logs.some((l) => l.startsWith("bmad:8.18 review: start"))).toBe(true);
-    expect(logs.some((l) => /^bmad:8\.18 review: done in /.test(l))).toBe(true);
-    expect(logs.some((l) => l.startsWith("bmad:8.18 gate: start"))).toBe(true);
-    expect(logs.some((l) => /^bmad:8\.18 gate: done in /.test(l))).toBe(true);
+    // Progress lines use the short handle (local part of the ref), so
+    // bmad:8.18 → "8.18" not "bmad:8.18".
+    expect(logs.some((l) => l.startsWith("8.18 dev-build: start"))).toBe(true);
+    expect(logs.some((l) => /^8\.18 dev-build: done in /.test(l))).toBe(true);
+    expect(logs.some((l) => l.startsWith("8.18 review: start"))).toBe(true);
+    expect(logs.some((l) => /^8\.18 review: done in /.test(l))).toBe(true);
+    expect(logs.some((l) => l.startsWith("8.18 gate: start"))).toBe(true);
+    expect(logs.some((l) => /^8\.18 gate: done in /.test(l))).toBe(true);
   });
 
   it("marks the dev-build start line as the long phase (and not the short phases)", async () => {
     const { logs } = await runDrain({ withHeartbeat: true });
 
-    const devStart = logs.find((l) => l.startsWith("bmad:8.18 dev-build: start"));
-    const reviewStart = logs.find((l) => l.startsWith("bmad:8.18 review: start"));
-    const gateStart = logs.find((l) => l.startsWith("bmad:8.18 gate: start"));
+    // Progress lines now use the short handle ("8.18" for bmad:8.18).
+    const devStart = logs.find((l) => l.startsWith("8.18 dev-build: start"));
+    const reviewStart = logs.find((l) => l.startsWith("8.18 review: start"));
+    const gateStart = logs.find((l) => l.startsWith("8.18 gate: start"));
 
     expect(devStart).toContain(LONG_PHASE_MARKER);
     expect(reviewStart).not.toContain(LONG_PHASE_MARKER);
@@ -211,8 +214,9 @@ describe("drain progress heartbeat (Story 8.18, AC3)", () => {
     const withHb = normaliseLogs((await runDrain({ withHeartbeat: true })).logs);
     const without = normaliseLogs((await runDrain({ withHeartbeat: false })).logs);
 
+    // Progress lines now use the short handle ("8.18" for bmad:8.18).
     const isProgress = (l: string) =>
-      /^bmad:8\.18 (dev-build|review|gate): (start|done)/.test(l);
+      /^8\.18 (dev-build|review|gate): (start|done)/.test(l);
 
     // The heartbeat run's non-progress lines match the baseline run exactly,
     // and the only extra lines are the six progress lines.

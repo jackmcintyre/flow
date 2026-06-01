@@ -44,7 +44,7 @@ A target repo with `.crew/config.yaml` resolved to a **`native`** adapter. (The 
 6. **Refuse-and-revise.** If the write tool refuses a draft, the subagent surfaces the specific violation codes back to you and proposes a revised framing. Nothing is written until a draft passes. Relay the codes and the revision offer; let the operator revise the feature framing and retry. The skill never tries to "fix" a violation by editing a manifest itself.
 
 7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report to the operator:
-   - the draft's **ref**,
+   - the draft's **short handle** (first 8 characters of the ULID for native refs) alongside the full **ref** — e.g. `[01KT1NR9] native:01KT1NR9F6133VHY601SF3BD5N`. Display the short handle as the primary identifier; include the full ref for completeness.
    - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and blessed),
    - the next step: run `/crew:scan` to materialise the draft into a backlog manifest (if not already), then `/crew:ready` to bless it once it has been judged.
 

@@ -196,7 +196,9 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
 /** The six per-story progress labels the heartbeat emits. */
 const PROGRESS_LABEL = /^seam progress-(start|done):/;
 function isProgressLogLine(l: string): boolean {
-  return /^bmad:8\.21 (dev-build|review|gate): (start|done)/.test(l);
+  // Progress lines use the short handle (local part of the ref).
+  // bmad:8.21 → short handle "8.21"
+  return /^8\.21 (dev-build|review|gate): (start|done)/.test(l);
 }
 
 describe("drain observability seams are non-fatal (Story 8.21)", () => {

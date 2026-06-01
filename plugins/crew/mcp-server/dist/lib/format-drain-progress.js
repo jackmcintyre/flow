@@ -22,6 +22,22 @@
  * Story 8.18
  */
 /**
+ * Inline short-handle helper — kept here rather than imported to preserve the
+ * zero-import contract of this module (see file header). Logic is identical to
+ * `shortHandle` in `./short-handle.ts`; the duplication is intentional.
+ *
+ * For `native:<ULID>` returns the first 8 characters of the ULID.
+ * For any other ref returns the local part after the first `:`.
+ */
+function _shortHandle(ref) {
+    const colon = ref.indexOf(":");
+    const localPart = colon === -1 ? ref : ref.slice(colon + 1);
+    if (ref.startsWith("native:")) {
+        return localPart.slice(0, 8);
+    }
+    return localPart;
+}
+/**
  * The set of phases the helper treats as the long-running one. Only
  * `dev-build` carries the "longest phase" marker on its start line — it is the
  * single long agent call (roughly ten minutes in the first real drain) where a
@@ -81,9 +97,10 @@ export function formatElapsed(elapsedMs) {
  * @returns A single-line, human-readable progress line.
  */
 export function formatDrainProgress(ref, phase, transition, elapsedMs = 0) {
+    const handle = _shortHandle(ref);
     if (transition === "start") {
-        const base = `${ref} ${phase}: start`;
+        const base = `${handle} ${phase}: start`;
         return LONG_PHASES.has(phase) ? `${base} ${LONG_PHASE_MARKER}` : base;
     }
-    return `${ref} ${phase}: done in ${formatElapsed(elapsedMs)}`;
+    return `${handle} ${phase}: done in ${formatElapsed(elapsedMs)}`;
 }

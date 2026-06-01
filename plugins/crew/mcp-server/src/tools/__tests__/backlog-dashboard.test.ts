@@ -35,6 +35,7 @@ import {
   renderBacklogDashboard,
   type BacklogDashboardSnapshot,
 } from "../render-backlog-dashboard.js";
+import { shortHandle } from "../../lib/short-handle.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 import type { StateName } from "../../state/manifest-state-machine.js";
 
@@ -131,10 +132,12 @@ describe("backlog dashboard AC1 — groups by epic from live state", () => {
     expect(e2.sort()).toEqual(["bmad:2.1", "bmad:2.2"]);
 
     // Each item's state is shown in the rendered output.
-    expect(text).toContain("bmad:1.1 — Story bmad:1.1 [done]");
-    expect(text).toContain("bmad:1.2 — Story bmad:1.2 [to-do]");
-    expect(text).toContain("bmad:2.1 — Story bmad:2.1 [in-progress]");
-    expect(text).toContain("bmad:2.2 — Story bmad:2.2 [blocked]");
+    // The row format is: [shortHandle] ref — title [state] (readiness, claimability)
+    // For bmad refs the short handle is the local part (e.g. "1.1").
+    expect(text).toContain("[1.1] bmad:1.1 — Story bmad:1.1 [done]");
+    expect(text).toContain("[1.2] bmad:1.2 — Story bmad:1.2 [to-do]");
+    expect(text).toContain("[2.1] bmad:2.1 — Story bmad:2.1 [in-progress]");
+    expect(text).toContain("[2.2] bmad:2.2 — Story bmad:2.2 [blocked]");
   });
 
   it("renders an empty backlog cleanly (no crash)", async () => {
@@ -168,8 +171,8 @@ describe("backlog dashboard AC2 — shows readiness and claimability distinctly"
     expect(notReadyEntry.claimable).toBe(false);
 
     // The rows are textually distinct on readiness/claimability.
-    expect(text).toContain("bmad:3.1 — Story bmad:3.1 [to-do] (ready, claimable)");
-    expect(text).toContain("bmad:3.2 — Story bmad:3.2 [to-do] (not ready, not claimable)");
+    expect(text).toContain("[3.1] bmad:3.1 — Story bmad:3.1 [to-do] (ready, claimable)");
+    expect(text).toContain("[3.2] bmad:3.2 — Story bmad:3.2 [to-do] (not ready, not claimable)");
   });
 
   it("ready but blocked on an unmet dependency reads ready yet NOT claimable", async () => {
@@ -182,7 +185,7 @@ describe("backlog dashboard AC2 — shows readiness and claimability distinctly"
     expect(entry.claimable).toBe(false);
 
     const text = renderBacklogDashboard(snapshot);
-    expect(text).toContain("bmad:4.2 — Story bmad:4.2 [to-do] (ready, not claimable)");
+    expect(text).toContain("[4.2] bmad:4.2 — Story bmad:4.2 [to-do] (ready, not claimable)");
   });
 });
 
@@ -243,6 +246,42 @@ describe("backlog dashboard AC3 — renderer is a pure function of the snapshot"
     expect(deriveEpic("bmad:12.3")).toBe("12");
     expect(deriveEpic("native:01HZABC0000000000000000001")).toBeNull();
   });
+
+  it("AC1 (this story) — a native ULID row shows only the first-8-char handle, not the full 26-char ULID", () => {
+    // Use a native ref whose ULID is 26 chars (standard ULID length).
+    const nativeRef = "native:01KT1NR9F6133VHY601SF3BD5N";
+    const nativeHandle = shortHandle(nativeRef); // "01KT1NR9"
+    expect(nativeHandle.length).toBe(8);
+    expect(nativeHandle).not.toBe("01KT1NR9F6133VHY601SF3BD5N"); // shorter than full ULID
+
+    const nativeSnapshot: BacklogDashboardSnapshot = {
+      entries: [
+        {
+          ref: nativeRef,
+          title: "A native story",
+          epic: null,
+          state: "to-do",
+          withdrawn: false,
+          ready: true,
+          claimable: true,
+        },
+      ],
+    };
+
+    const text = renderBacklogDashboard(nativeSnapshot);
+    // The short handle (first 8 chars) must appear in the row.
+    expect(text).toContain(`[${nativeHandle}]`);
+    // The full 26-character ULID must NOT appear as the display handle.
+    // (The full ref "native:01KT1NR9F6133VHY601SF3BD5N" will still appear as the ref label.)
+    const rowLine = text.split("\n").find((l) => l.includes(nativeRef))!;
+    expect(rowLine).toBeDefined();
+    // Row format: "  - [<handle>] <full-ref> — ..."
+    // The short handle bracket appears before the full ref in the row.
+    expect(rowLine).toContain(`[${nativeHandle}]`);
+    expect(rowLine.indexOf(`[${nativeHandle}]`)).toBeLessThan(rowLine.indexOf(nativeRef));
+    // The handle is visibly shorter than the full 26-char ULID.
+    expect(nativeHandle.length).toBeLessThan("01KT1NR9F6133VHY601SF3BD5N".length);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -288,8 +327,8 @@ describe("backlog dashboard AC4 — re-reads after a brake-tool toggle", () => {
     expect(after52.claimable).toBe(before52.claimable);
 
     // The rendered text changed for 5.1 and is otherwise the same shape.
-    expect(beforeText).toContain("bmad:5.1 — Story bmad:5.1 [to-do] (not ready, not claimable)");
-    expect(afterText).toContain("bmad:5.1 — Story bmad:5.1 [to-do] (ready, claimable)");
-    expect(afterText).toContain("bmad:5.2 — Story bmad:5.2 [to-do] (not ready, not claimable)");
+    expect(beforeText).toContain("[5.1] bmad:5.1 — Story bmad:5.1 [to-do] (not ready, not claimable)");
+    expect(afterText).toContain("[5.1] bmad:5.1 — Story bmad:5.1 [to-do] (ready, claimable)");
+    expect(afterText).toContain("[5.2] bmad:5.2 — Story bmad:5.2 [to-do] (not ready, not claimable)");
   });
 });

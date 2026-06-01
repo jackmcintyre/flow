@@ -19,15 +19,16 @@ import {
 
 describe("formatDrainProgress", () => {
   // ── AC1 — start line + done-with-elapsed line for a representative phase ──
-  it("produces a start line for a representative phase", () => {
+  it("produces a start line for a representative phase (bmad ref → local part as handle)", () => {
+    // For bmad:8.18 the short handle is "8.18" (local part after the colon).
     expect(formatDrainProgress("bmad:8.18", "review", "start")).toBe(
-      "bmad:8.18 review: start",
+      "8.18 review: start",
     );
   });
 
   it("produces a done line that includes the elapsed time", () => {
     const line = formatDrainProgress("bmad:8.18", "review", "done", 4200);
-    expect(line).toBe("bmad:8.18 review: done in 4.2s");
+    expect(line).toBe("8.18 review: done in 4.2s");
     expect(line).toContain("done");
     expect(line).toContain("4.2s");
   });
@@ -42,13 +43,33 @@ describe("formatDrainProgress", () => {
 
   it("ignores elapsedMs for a start transition (only the done line carries it)", () => {
     expect(formatDrainProgress("bmad:8.18", "review", "start", 99999)).toBe(
-      "bmad:8.18 review: start",
+      "8.18 review: start",
     );
   });
 
-  it("includes the ref in both the start and done lines", () => {
-    expect(formatDrainProgress("bmad:8.18", "review", "start")).toContain("bmad:8.18");
-    expect(formatDrainProgress("bmad:8.18", "review", "done", 1000)).toContain("bmad:8.18");
+  it("includes the short handle (not the full ref) in both the start and done lines", () => {
+    // bmad ref: handle is the local part "8.18"
+    expect(formatDrainProgress("bmad:8.18", "review", "start")).toContain("8.18");
+    expect(formatDrainProgress("bmad:8.18", "review", "done", 1000)).toContain("8.18");
+    // The full ref should NOT appear (short handle only)
+    expect(formatDrainProgress("bmad:8.18", "review", "start")).not.toContain("bmad:8.18");
+  });
+
+  it("uses first-8-char ULID handle for a native ref", () => {
+    const nativeRef = "native:01KT1NR9F6133VHY601SF3BD5N";
+    const line = formatDrainProgress(nativeRef, "review", "start");
+    // Short handle = first 8 chars of ULID = "01KT1NR9"
+    expect(line).toContain("01KT1NR9");
+    // The full 26-char ULID should NOT appear
+    expect(line).not.toContain("01KT1NR9F6133VHY601SF3BD5N");
+    // The full ref should NOT appear
+    expect(line).not.toContain(nativeRef);
+  });
+
+  it("native ref done line uses short handle", () => {
+    const nativeRef = "native:01KT1NR9F6133VHY601SF3BD5N";
+    const line = formatDrainProgress(nativeRef, "gate", "done", 5000);
+    expect(line).toBe("01KT1NR9 gate: done in 5.0s");
   });
 
   it("is a single line (contains no newline) for either transition", () => {
@@ -70,7 +91,7 @@ describe("formatDrainProgress", () => {
   it("marks the dev-build start line as the longest phase", () => {
     const line = formatDrainProgress("bmad:8.18", "dev-build", "start");
     expect(line).toContain(LONG_PHASE_MARKER);
-    expect(line).toBe(`bmad:8.18 dev-build: start ${LONG_PHASE_MARKER}`);
+    expect(line).toBe(`8.18 dev-build: start ${LONG_PHASE_MARKER}`);
   });
 
   it("does NOT mark the short phases (review, gate) as the longest phase", () => {
