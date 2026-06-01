@@ -38,6 +38,7 @@ function makeStoryBody(): string {
     ``,
     `**AC1 (integration):**`,
     `**Given** the system is running, **When** the user requests it, **Then** it works.`,
+    `vitest: src/__tests__/scan-sources.test.ts`,
     ``,
     `## Implementation Notes`,
     ``,

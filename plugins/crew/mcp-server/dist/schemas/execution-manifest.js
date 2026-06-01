@@ -82,7 +82,28 @@ export const ExecutionManifestSchema = z
      * and is refused at parse time. (FR13)
      */
     acceptance_criteria: z
-        .array(z.object({ text: z.string().min(1), kind: z.enum(["integration", "unit"]) }))
+        .array(z.object({
+        text: z.string().min(1),
+        kind: z.enum(["integration", "unit"]),
+        /**
+         * Structured verification directive carried verbatim from
+         * `SourceStory.acceptance_criteria` (Story 10.1).
+         *
+         * **Optional and additive.** Native-scanned manifests carry it; a
+         * legacy manifest written before this field existed — and every
+         * BMad-scanned manifest, whose ACs leave `verification` undefined —
+         * still parses under `.strict()` because the key is simply absent.
+         * Adding the key (rather than relying on passthrough) keeps strict
+         * mode intact while admitting the field. Resolvability of `target`
+         * is the 10.3 T0-6 check, not enforced here.
+         */
+        verification: z
+            .object({
+            type: z.enum(["vitest", "artifact"]),
+            target: z.string().min(1),
+        })
+            .optional(),
+    }))
         .min(1),
     /**
      * Human-readable story title. Required in v1 so operators can identify

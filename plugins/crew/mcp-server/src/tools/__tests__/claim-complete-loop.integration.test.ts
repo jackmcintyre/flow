@@ -81,6 +81,7 @@ function makeStoryContent(title: string, depRefs: string[]): string {
       "",
       "**AC1 (integration):**",
       `**Given** ${title} is live, **When** a user accesses it, **Then** it works correctly.`,
+      "vitest: src/__tests__/loop.test.ts",
       "",
       "## Implementation Notes",
       "",

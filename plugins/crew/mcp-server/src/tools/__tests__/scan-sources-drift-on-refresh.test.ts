@@ -71,6 +71,7 @@ function makeStoryBody(opts: {
     ``,
     `**AC1 (integration):**`,
     `**Given** the system is running, **When** the user requests it, **Then** it works.`,
+    `vitest: src/__tests__/drift.test.ts`,
     ``,
     `## Implementation Notes`,
     ``,

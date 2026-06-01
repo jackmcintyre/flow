@@ -52,6 +52,7 @@ function makeStoryBody(suffix: string): string {
     ``,
     `**AC1 (integration):**`,
     `**Given** the system is running, **When** the user requests it, **Then** it works.`,
+    `vitest: src/__tests__/resilience.test.ts`,
     ``,
     `## Implementation Notes`,
     ``,

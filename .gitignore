@@ -4,6 +4,11 @@ coverage/
 .DS_Store
 .sprint-orchestrator/
 .crew/
+# Exception: the native adapter's test fixtures contain a fake `.crew/` tree
+# (committed test data, not a local backlog). Without this negation, `git add`
+# of a modified fixture under `.crew/` errors on the ignore rule.
+!plugins/crew/mcp-server/src/adapters/native/fixtures/**/.crew/
+!plugins/crew/mcp-server/src/adapters/native/fixtures/**/.crew/**
 __pycache__/
 *.pyc
 

@@ -79,6 +79,7 @@ it("AC5(a) — written story file parses via parseNativeStory", async () => {
       {
         text: "**Given** I am in Settings,\n**When** I toggle Dark Mode on,\n**Then** the UI switches to a dark colour scheme immediately.",
         kind: "unit",
+        verification: { type: "vitest", target: "src/settings/__tests__/dark-mode.test.ts" },
       },
     ],
     depends_on: [],
@@ -106,6 +107,7 @@ it("AC5(b) — parsed SourceStory has all required keys (key-set equality with B
       {
         text: "**Given** I am on My Account,\n**When** I click Order History,\n**Then** I see a list of my past orders with dates and totals.",
         kind: "unit",
+        verification: { type: "vitest", target: "src/account/__tests__/order-history.test.ts" },
       },
     ],
     depends_on: [],
@@ -138,6 +140,7 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
       {
         text: "**Given** I fill in the sign-up form with a unique email,\n**When** I submit,\n**Then** my account is created and I receive a confirmation email.",
         kind: "unit",
+        verification: { type: "vitest", target: "src/auth/__tests__/sign-up.test.ts" },
       },
     ],
     depends_on: [],
@@ -155,6 +158,7 @@ it("AC5(c) — scanSources creates manifest under .crew/state/to-do/ with adapte
       {
         text: "**Given** I am signed in,\n**When** I navigate to My Profile,\n**Then** I see my name and email address.",
         kind: "unit",
+        verification: { type: "vitest", target: "src/profile/__tests__/profile.test.ts" },
       },
     ],
     depends_on: [storyA.ref],
@@ -227,6 +231,7 @@ describe("writeNativeStory — adapter guard", () => {
             {
               text: "**Given** x **When** y **Then** z.",
               kind: "unit",
+              verification: { type: "vitest", target: "src/__tests__/x.test.ts" },
             },
           ],
           depends_on: [],
@@ -254,6 +259,7 @@ it("integration-tagged AC produces kind: 'integration' in the parsed SourceStory
       {
         text: "**Given** I have items in my cart,\n**When** I submit a valid card number,\n**Then** my order is placed and I see a confirmation number.",
         kind: "integration",
+        verification: { type: "vitest", target: "src/checkout/__tests__/payment.test.ts" },
       },
     ],
     depends_on: [],

@@ -53,6 +53,7 @@ function makeNativeStoryContent(variant = ""): string {
     ``,
     `**AC1 (integration):**`,
     `**Given** the feature is running, **When** the user accesses it, **Then** the feature works correctly.`,
+    `vitest: src/__tests__/hand-edit.test.ts`,
     ``,
     `## Implementation Notes`,
     ``,

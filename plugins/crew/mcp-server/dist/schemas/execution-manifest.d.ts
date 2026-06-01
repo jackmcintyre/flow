@@ -48,6 +48,13 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
             integration: "integration";
             unit: "unit";
         }>;
+        verification: z.ZodOptional<z.ZodObject<{
+            type: z.ZodEnum<{
+                artifact: "artifact";
+                vitest: "vitest";
+            }>;
+            target: z.ZodString;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
     title: z.ZodString;
     narrative: z.ZodString;

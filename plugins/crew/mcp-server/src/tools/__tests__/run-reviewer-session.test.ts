@@ -71,6 +71,7 @@ vitest: fixture passing test
 
 **AC3:**
 **Given** this requires manual inspection, **When** the reviewer examines it, **Then** the operator must verify manually.
+artifact: hello-a.txt
 
 ## Implementation Notes
 
@@ -79,6 +80,29 @@ None.
 ## Dependencies
 
 `;
+
+/**
+ * Story 10.1: every native AC now carries a `vitest:`/`artifact:` verification
+ * marker, so `parseNativeStory` (reached via `readSourceStory`) rejects a
+ * markerless AC. The reviewer's *manual-check-required* classification is a
+ * property of `extractAcsFromSpec` + `classifyAc`, NOT of `parseNativeStory`.
+ * To exercise the manual-check path without writing an (now-invalid) markerless
+ * native story to disk, stub `extractAcsFromSpec` to return markerless AC
+ * bodies while the on-disk fixture stays a valid native story for the
+ * `readSourceStory` read. Returns the spy so callers can assert/restore.
+ */
+async function stubExtractAcsManual(
+  bodies: string[][],
+): Promise<{ mockRestore: () => void }> {
+  const extractAcsMod = await import("../../lib/extract-acs-from-spec.js");
+  const entries = bodies.map((body, i) => ({
+    index: i + 1,
+    tag: null,
+    firstLine: body[0] ?? "",
+    body,
+  }));
+  return vi.spyOn(extractAcsMod, "extractAcsFromSpec").mockResolvedValue(entries);
+}
 
 const FIXTURE_STANDARDS = `version: "0.1.0"
 updated: "2026-05-24"
@@ -482,13 +506,26 @@ describe("AC4(d): structured acResults for the three fixture ACs", () => {
   });
 
   it("AC3: manual-check-required, reason contains 'manual check required'", async () => {
-    const result = await callSession();
+    // Story 10.1: a markerless native AC is now invalid to parseNativeStory, so
+    // the manual-check path is exercised via an extractAcsFromSpec stub returning
+    // a markerless AC body (the reviewer logic under test is independent of the
+    // native parser). One artifact AC keeps the fixture realistic; AC2 is the
+    // markerless manual one.
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact file should exist, **When** the reviewer checks, **Then** present.", "artifact: hello-a.txt"],
+      ["**Given** this requires manual inspection, **When** examined, **Then** verify manually."],
+    ]);
+    try {
+      const result = await callSession();
 
-    const ac3 = result.acResults[3];
-    expect(ac3).toBeDefined();
-    expect(ac3!.applicability).toBe("manual-check-required");
-    if (ac3!.applicability !== "manual-check-required") return;
-    expect(ac3!.reason).toContain("manual check required");
+      const ac2 = result.acResults[2];
+      expect(ac2).toBeDefined();
+      expect(ac2!.applicability).toBe("manual-check-required");
+      if (ac2!.applicability !== "manual-check-required") return;
+      expect(ac2!.reason).toContain("manual check required");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -671,22 +708,31 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
     expect(parsed).toHaveProperty("standardsByCriterionId");
   });
 
-  it("happy path with all ACs passing: recommendedVerdict === 'READY FOR MERGE'", async () => {
-    // AC1: artifact present, AC2: vitest stub returns exit 0, AC3: manual-check-required
-    // Per spec §3f rule 2: AC3 is manual-check-required → BLOCKED
-    // Wait: AC3 is manual-check-required, so rule 2 fires first → BLOCKED.
-    // The fixture has AC3 as manual-check-required, so expect BLOCKED unless we strip it.
-    // Use a fixture with only artifact + passing vitest (no manual ACs).
-    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
-    const result = await callSession({ execaImpl: passingStub });
+  it("a passing artifact + passing vitest + manual AC: recommendedVerdict === 'BLOCKED'", async () => {
+    // Story 10.1: the manual AC can no longer be a markerless native AC on disk
+    // (parseNativeStory rejects it). Stub extractAcsFromSpec to return the three
+    // canonical ACs — artifact (pass), vitest (pass), manual — so the reviewer's
+    // "any manual-check-required → BLOCKED" rule is exercised. AC1 artifact and
+    // AC2 vitest both pass; AC3 is manual → BLOCKED per spec §3f rule 2.
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact, **When** checked, **Then** present.", "artifact: hello-a.txt"],
+      ["**Given** the vitest, **When** run, **Then** passes.", "vitest: fixture passing test"],
+      ["**Given** manual inspection, **When** examined, **Then** verify manually."],
+    ]);
+    try {
+      const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
+      const result = await callSession({ execaImpl: passingStub });
 
-    const raw = await fs.readFile(expectedFilePath(), "utf8");
-    const parsed = JSON.parse(raw) as ReviewerResultFileShape;
+      const raw = await fs.readFile(expectedFilePath(), "utf8");
+      const parsed = JSON.parse(raw) as ReviewerResultFileShape;
 
-    // AC3 is manual-check-required → BLOCKED per spec §3f rule 2
-    // (any manual-check-required → BLOCKED unless all are runnable-*)
-    expect(parsed.recommendedVerdict).toBe("BLOCKED");
-    expect(result.recommendedVerdict).toBe("BLOCKED");
+      // AC3 is manual-check-required → BLOCKED per spec §3f rule 2
+      // (any manual-check-required → BLOCKED unless all are runnable-*)
+      expect(parsed.recommendedVerdict).toBe("BLOCKED");
+      expect(result.recommendedVerdict).toBe("BLOCKED");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("missing artifact: reviewer-result.json has recommendedVerdict === 'NEEDS CHANGES'", async () => {
@@ -703,38 +749,26 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
   });
 
   it("all-manual-check fixture: recommendedVerdict === 'BLOCKED'", async () => {
-    // Overwrite the spec so all ACs are manual-check-required (no artifact/vitest markers)
-    const allManualSpec = `# Fixture Story All-Manual
+    // Story 10.1: a native story whose every AC is markerless is now invalid to
+    // parseNativeStory, so we exercise the all-manual case via an
+    // extractAcsFromSpec stub (the on-disk fixture stays a valid native story
+    // for readSourceStory). Both ACs are markerless → manual → BLOCKED.
+    const spy = await stubExtractAcsManual([
+      ["**Given** something, **When** reviewed, **Then** it is correct."],
+      ["**Given** something else, **When** reviewed, **Then** it is also correct."],
+    ]);
 
-## Narrative
+    try {
+      const result = await callSession();
 
-As a tester, I want manual checks.
+      const raw = await fs.readFile(expectedFilePath(), "utf8");
+      const parsed = JSON.parse(raw) as ReviewerResultFileShape;
 
-## Acceptance Criteria
-
-**AC1:**
-**Given** something, **When** reviewed, **Then** it is correct.
-
-**AC2:**
-**Given** something else, **When** reviewed, **Then** it is also correct.
-
-## Implementation Notes
-
-None.
-
-## Dependencies
-
-`;
-    const storiesDir = path.join(tmpRoot, ".crew", "native-stories");
-    await atomicWriteFile(path.join(storiesDir, `${ULID}.md`), allManualSpec);
-
-    const result = await callSession();
-
-    const raw = await fs.readFile(expectedFilePath(), "utf8");
-    const parsed = JSON.parse(raw) as ReviewerResultFileShape;
-
-    expect(parsed.recommendedVerdict).toBe("BLOCKED");
-    expect(result.recommendedVerdict).toBe("BLOCKED");
+      expect(parsed.recommendedVerdict).toBe("BLOCKED");
+      expect(result.recommendedVerdict).toBe("BLOCKED");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("empty acResults (extractAcsFromSpec returns []): recommendedVerdict === 'BLOCKED'", async () => {

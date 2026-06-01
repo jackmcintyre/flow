@@ -68,6 +68,7 @@ describe("AC4(a) — native add with existing backlog", () => {
                 {
                     text: "**Given** the new feature is deployed, **When** a user accesses it, **Then** it works.",
                     kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/new-feature.test.ts" },
                 },
             ],
             depends_on: [],
@@ -103,6 +104,7 @@ describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
                 {
                     text: "**Given** the edited feature is deployed, **When** a user accesses it, **Then** it works correctly.",
                     kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/edited-feature.test.ts" },
                 },
             ],
             depends_on: [oldRef],
@@ -138,6 +140,7 @@ describe("AC4(c) — native discard: revert/deprecate story appears, originals u
                 {
                     text: "**Given** the revert is complete, **When** a user accesses the system, **Then** the feature no longer exists.",
                     kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/revert.test.ts" },
                 },
             ],
             depends_on: [originalRef],
@@ -168,6 +171,7 @@ describe("AC4(d) — BMad add: writeNativeStory refuses on BMad workspace", () =
                 {
                     text: "**Given** the feature works, **When** accessed, **Then** success.",
                     kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/refused.test.ts" },
                 },
             ],
             depends_on: [],

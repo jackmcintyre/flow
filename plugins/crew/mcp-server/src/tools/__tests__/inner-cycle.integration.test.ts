@@ -668,6 +668,7 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
       "",
       "**AC1 (integration):**",
       `**Given** ${title} is live, **When** accessed, **Then** it works.`,
+      "vitest: src/__tests__/inner-cycle.test.ts",
       "",
       "## Implementation Notes",
       "",

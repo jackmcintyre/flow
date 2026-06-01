@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { DisciplineViolationError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
+import { parseNativeStory } from "../../adapters/native/parse-native-story.js";
 
 let root: string;
 let storiesDir: string;
@@ -66,6 +67,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         {
           text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated.",
           kind: "unit",
+          verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
         },
       ],
       depends_on: [],
@@ -85,6 +87,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
           {
             text: "Given a backlog, When the operator runs it, Then sprint-status.yaml is updated.",
             kind: "unit",
+            verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
           },
         ],
         depends_on: [],
@@ -110,6 +113,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         {
           text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated and read back unchanged.",
           kind: "integration",
+          verification: { type: "vitest", target: "src/__tests__/ledger.integration.test.ts" },
         },
       ],
       depends_on: [],
@@ -131,6 +135,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         {
           text: "**Given** the app is open, **When** the user lands, **Then** a greeting is shown.",
           kind: "unit",
+          verification: { type: "vitest", target: "src/__tests__/greeting.test.ts" },
         },
       ],
       depends_on: [],
@@ -138,5 +143,84 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
 
     expect(result.ref).toMatch(/^native:/);
     expect(await listStoryFiles()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 — the verification field survives write→parse and the write fails closed
+//        when it is absent (the observable spine of Story 10.1)
+// ---------------------------------------------------------------------------
+
+describe("writeNativeStory AC1 — verification round-trip + fail-closed on absence", () => {
+  it("(a) writes a story whose every AC has a verification block and round-trips it through parseNativeStory intact", async () => {
+    const result = await writeNativeStory({
+      targetRepoRoot: root,
+      title: "Multi-AC story with per-AC verification",
+      narrative: "As a user, I want a feature so that I get value.",
+      acceptance_criteria: [
+        {
+          text: "**Given** a state, **When** an action, **Then** an outcome.",
+          kind: "unit",
+          verification: { type: "vitest", target: "src/feature/__tests__/a.test.ts" },
+        },
+        {
+          text: "**Given** a system, **When** integrated, **Then** an artifact appears.",
+          kind: "integration",
+          verification: { type: "artifact", target: "build/out/report.json" },
+        },
+      ],
+      depends_on: [],
+    });
+
+    // Exactly one file landed; re-read and re-parse it.
+    expect(await listStoryFiles()).toHaveLength(1);
+    const written = await fs.readFile(result.path, "utf8");
+    const reparsed = parseNativeStory(result.path, written);
+
+    expect(reparsed.acceptance_criteria).toHaveLength(2);
+    expect(reparsed.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: "src/feature/__tests__/a.test.ts",
+    });
+    expect(reparsed.acceptance_criteria[1]!.verification).toEqual({
+      type: "artifact",
+      target: "build/out/report.json",
+    });
+  });
+
+  it("(b) refuses a write where any AC omits the verification block — before any file is written, naming the offending AC", async () => {
+    let caught: unknown;
+    try {
+      await writeNativeStory({
+        targetRepoRoot: root,
+        title: "Story whose second AC omits verification",
+        narrative: "As a user, I want a feature so that I get value.",
+        acceptance_criteria: [
+          {
+            text: "**Given** a state, **When** an action, **Then** an outcome.",
+            kind: "unit",
+            verification: { type: "vitest", target: "src/feature/__tests__/a.test.ts" },
+          },
+          // Second AC deliberately omits `verification`.
+          {
+            text: "**Given** a system, **When** integrated, **Then** an artifact appears.",
+            kind: "integration",
+          },
+        ],
+        depends_on: [],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeDefined();
+    // The validation error names the offending AC by its index in the array.
+    const message = String(caught);
+    expect(message).toMatch(/acceptance_criteria/);
+    expect(message).toMatch(/verification/);
+    expect(message).toMatch(/\b1\b/); // the second AC (index 1)
+
+    // Fail-closed: no native-story file appears on disk.
+    expect(await listStoryFiles()).toHaveLength(0);
   });
 });
