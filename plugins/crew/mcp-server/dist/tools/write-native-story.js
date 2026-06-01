@@ -174,6 +174,37 @@ export async function writeNativeStory(rawInput) {
             toolName: "writeNativeStory",
         });
     }
+    // Story 10.5 — the render → gate → round-trip → atomic-write internal is
+    // shared with the BMad→native ingest seam (`bmadToNativeIngest`). The ONLY
+    // difference between the two callers is this active-adapter guard above:
+    // `writeNativeStory` requires `native`; the ingest deliberately does NOT (it
+    // runs while BMad is still the active adapter — you ingest first, cut over
+    // second). Keeping the write body in one place means the two paths can never
+    // diverge on what "a Tier-0-clean native story on disk" means.
+    return renderGateWriteNativeStory(input, targetRepoRoot);
+}
+/**
+ * The shared native-write internal (Story 10.5): render → discipline-gate →
+ * round-trip-parse → atomic-write, mints a fresh ULID, emits the
+ * `draft.authored` telemetry event, returns `{ ref, path }`.
+ *
+ * Deliberately does NOT run the `WrongAdapterError` active-adapter guard — that
+ * is `writeNativeStory`'s responsibility, applied before calling here. The BMad
+ * → native ingest reuses this directly so it can write native stories while the
+ * active adapter is still `bmad` (it ingests first, cuts over second).
+ *
+ * The Tier-0 gate (`validateStoryAgainstDiscipline` + `resolveDisciplinePaths`)
+ * is the SOLE arbiter of whether the candidate is written: a violating candidate
+ * throws `DisciplineViolationError` and NOTHING is written (no file, no
+ * telemetry). For ingest this is load-bearing — the lossy LLM enrichment cannot
+ * smuggle a non-compliant story through; the deterministic gate decides.
+ *
+ * @param input          a validated `WriteNativeStoryInput`.
+ * @param targetRepoRoot the resolved repo root (already `path.resolve`d).
+ * @param agent          telemetry `agent` field — "author" for the native write
+ *                       path, "ingest" for the BMad→native seam.
+ */
+export async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
     // Generate a fresh ULID.
     const newUlid = generateUlid();
     const storiesDir = path.join(targetRepoRoot, ".crew", "native-stories");
@@ -233,7 +264,7 @@ export async function writeNativeStory(rawInput) {
         event: {
             type: "draft.authored",
             session_id: input.sessionUlid ?? "operator",
-            agent: "author",
+            agent,
             story_id: ref,
             data: { ref, title: input.title },
         },

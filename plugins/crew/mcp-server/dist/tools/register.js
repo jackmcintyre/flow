@@ -25,6 +25,7 @@ import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
 import { validatePlannerBacklog } from "./validate-planner-backlog.js";
 import { writeNativeStory } from "./write-native-story.js";
+import { bmadToNativeIngestTool } from "./bmad-to-native-ingest.js";
 import { claimNextStory } from "./claim-next-story.js";
 import { processDevTranscript } from "./process-dev-transcript.js";
 import { processReviewerTranscript } from "./process-reviewer-transcript.js";
@@ -332,6 +333,114 @@ export function registerAllTools(server) {
         handler: async (args) => {
             try {
                 const result = await writeNativeStory(args);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 10.5 — bmadToNativeIngest: the one-off, one-way BMad → native ingest
+    // seam. The enrich step is LLM-assisted, so it lives in the orchestrating
+    // /crew:ingest skill, which drafts a §3 enrichment per BMad story and passes
+    // the drafts here keyed by source `bmad:<ref>`. The tool runs the
+    // deterministic Tier-0 gate + native write over them: a passing draft is
+    // written to .crew/native-stories/<ULID>.md (reusing the shared native-write
+    // internal WITHOUT the WrongAdapterError guard, so it works while bmad is
+    // still the active adapter); a draft that fails Tier-0 — or a source with no
+    // supplied draft — is surfaced in the fix-up report, never silently dropped.
+    // Read-only over the BMad backlog; re-runs dedupe by the recorded provenance
+    // citation.
+    server.registerTool({
+        name: "bmadToNativeIngest",
+        description: "One-off, one-way BMad → native ingest (Story 10.5). Reads the live BMad backlog, " +
+            "gates each operator-supplied enriched draft (keyed by source bmad:<ref>) through the " +
+            "deterministic Tier-0 validator, and writes survivors to .crew/native-stories/<ULID>.md " +
+            "(works while adapter: bmad is still active — you ingest first, cut over second). " +
+            "Read-only and non-destructive over BMad; re-runs dedupe by a recorded provenance citation. " +
+            "Returns a report where written + needs_fix_up + skipped == input_count — nothing is ever " +
+            "silently dropped. A draft that fails Tier-0, or a source with no supplied draft, is surfaced " +
+            "for human fix-up with the failed check id(s).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                // Enriched §3 drafts keyed by the source `bmad:<epic>.<story>` ref. The
+                // model (the /crew:ingest skill) authors these; the tool only gates+writes.
+                drafts: {
+                    type: "object",
+                    additionalProperties: {
+                        type: "object",
+                        properties: {
+                            title: { type: "string" },
+                            narrative: {
+                                type: "object",
+                                properties: {
+                                    role: { type: "string" },
+                                    want: { type: "string" },
+                                    so_that: { type: "string" },
+                                },
+                                required: ["role", "want", "so_that"],
+                            },
+                            acceptance_criteria: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        text: { type: "string" },
+                                        kind: { type: "string", enum: ["integration", "unit"] },
+                                        verification: {
+                                            type: "object",
+                                            properties: {
+                                                type: { type: "string", enum: ["vitest", "artifact"] },
+                                                target: { type: "string" },
+                                            },
+                                            required: ["type", "target"],
+                                        },
+                                    },
+                                    required: ["text", "kind", "verification"],
+                                },
+                            },
+                            tasks: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        text: { type: "string" },
+                                        ac_refs: { type: "array", items: { type: "string" } },
+                                    },
+                                    required: ["text", "ac_refs"],
+                                },
+                            },
+                            cited_sources: { type: "array", items: { type: "string" } },
+                            implementation_notes: { type: "string" },
+                            depends_on: { type: "array", items: { type: "string" } },
+                        },
+                        required: [
+                            "title",
+                            "narrative",
+                            "acceptance_criteria",
+                            "tasks",
+                            "cited_sources",
+                            "depends_on",
+                        ],
+                    },
+                },
+            },
+            required: ["targetRepoRoot", "drafts"],
+        },
+        handler: async (args) => {
+            try {
+                const result = await bmadToNativeIngestTool(args);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };
