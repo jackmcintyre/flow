@@ -438,3 +438,92 @@ describe("Story 10.4 AC4: author-time path-pattern classification (no diff)", ()
     expect(result.matched_rule).toBe("fallback");
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC1: low.tests-only — test-only change set (incl. compiled dist output) > 300 lines
+// ---------------------------------------------------------------------------
+
+describe("AC1: low.tests-only — all test files (including compiled dist output), diff > 300 lines", () => {
+  it("grades a change set of only test files (source + dist compiled) as low with matched_rule=low.tests-only, regardless of diff size", async () => {
+    await seedSpec(
+      pluginRoot,
+      makeSpec(`  high:
+    - id: high.schema-or-migration
+      change_types:
+        - migration
+        - schema
+  low:
+    - id: low.tests-only
+      path_patterns:
+        - "**/*.test.ts"
+        - "**/*.test.js"
+        - "**/*.test.d.ts"
+        - "**/__tests__/**"
+        - "tests/**"
+      all_paths_match: true
+`),
+    );
+
+    const result = await classifyRiskTier({
+      targetRepoRoot,
+      pluginRoot,
+      storyId: "native:test-ac1-tests-only",
+      // source test file + its compiled dist counterpart
+      changedPaths: [
+        "src/tools/__tests__/x.test.ts",
+        "dist/tools/__tests__/x.test.js",
+      ],
+      commitMessages: ["test: add more coverage"],
+      diffSize: 500, // > 300 — would fail low.additive-only's size cap
+    });
+
+    expect(result.tier).toBe("low");
+    expect(result.matched_rule).toBe("low.tests-only");
+    expect(result.evidence.diff_size).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC2: low.tests-only — mixed test + production file falls back to medium
+// ---------------------------------------------------------------------------
+
+describe("AC2: low.tests-only — mixed test + production file is NOT low-risk", () => {
+  it("grades a change set mixing a test file with a production source file as medium (fallback), not low", async () => {
+    await seedSpec(
+      pluginRoot,
+      makeSpec(`  high:
+    - id: high.schema-or-migration
+      change_types:
+        - migration
+        - schema
+  low:
+    - id: low.tests-only
+      path_patterns:
+        - "**/*.test.ts"
+        - "**/*.test.js"
+        - "**/*.test.d.ts"
+        - "**/__tests__/**"
+        - "tests/**"
+      all_paths_match: true
+`),
+    );
+
+    const result = await classifyRiskTier({
+      targetRepoRoot,
+      pluginRoot,
+      storyId: "native:test-ac2-mixed",
+      // one test file + one production source file
+      changedPaths: [
+        "src/tools/__tests__/foo.test.ts",
+        "src/foo.ts",
+      ],
+      commitMessages: ["feat: add foo and its tests"],
+      diffSize: 150,
+    });
+
+    // Must NOT be low — the production source file disqualifies low.tests-only
+    expect(result.tier).not.toBe("low");
+    expect(result.tier).toBe("medium");
+    expect(result.matched_rule).toBe("fallback");
+  });
+});
