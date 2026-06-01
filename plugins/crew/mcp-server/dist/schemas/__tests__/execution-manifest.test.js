@@ -287,3 +287,66 @@ describe("acceptance_criteria.verification field (Story 10.1)", () => {
         expect(reparsed.acceptance_criteria[0].verification).toBeUndefined();
     });
 });
+// ---------------------------------------------------------------------------
+// tasks / cited_sources / narrative_struct fields (Story 10.2 — AC4: optional +
+// additive on the manifest; native carries them, legacy / BMad omit them)
+// ---------------------------------------------------------------------------
+describe("tasks / cited_sources / narrative_struct fields (Story 10.2)", () => {
+    // A native-scanned manifest carrying all three new fields through from the
+    // SourceStory.
+    const NATIVE_10_2_MANIFEST = {
+        ...BASE_MANIFEST,
+        narrative_struct: { role: "dev", want: "typed fields", so_that: "they cannot drift" },
+        tasks: [
+            { text: "Build the parser", ac_refs: ["AC1"] },
+            { text: "Wire the manifest", ac_refs: ["AC1"] },
+        ],
+        cited_sources: ["src/parser.ts", "docs/design.md"],
+    };
+    it("parses a legacy / BMad manifest that omits all three fields (additive — no regression)", () => {
+        const manifest = parseExecutionManifest(BASE_MANIFEST, { absPath: "/fake/path.yaml" });
+        expect(manifest.tasks).toBeUndefined();
+        expect(manifest.cited_sources).toBeUndefined();
+        expect(manifest.narrative_struct).toBeUndefined();
+    });
+    it("parses a native manifest carrying all three fields and preserves them", () => {
+        const manifest = parseExecutionManifest(NATIVE_10_2_MANIFEST, { absPath: "/fake/path.yaml" });
+        expect(manifest.narrative_struct).toEqual({
+            role: "dev",
+            want: "typed fields",
+            so_that: "they cannot drift",
+        });
+        expect(manifest.tasks).toEqual([
+            { text: "Build the parser", ac_refs: ["AC1"] },
+            { text: "Wire the manifest", ac_refs: ["AC1"] },
+        ]);
+        expect(manifest.cited_sources).toEqual(["src/parser.ts", "docs/design.md"]);
+    });
+    it("rejects a task with an empty ac_refs array (min(1))", () => {
+        expect(() => parseExecutionManifest({ ...BASE_MANIFEST, tasks: [{ text: "no refs", ac_refs: [] }] }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+    it("rejects a narrative_struct missing a part (so_that)", () => {
+        expect(() => parseExecutionManifest({ ...BASE_MANIFEST, narrative_struct: { role: "x", want: "y" } }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+    it("preserves the strict posture — an unknown key alongside the new fields is still rejected", () => {
+        expect(() => parseExecutionManifest({ ...NATIVE_10_2_MANIFEST, not_a_real_field: 1 }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+    it("round-trips all three fields through yaml.stringify intact", () => {
+        const parsed = parseExecutionManifest(NATIVE_10_2_MANIFEST, { absPath: "/fake/path.yaml" });
+        const reparsed = parseExecutionManifest(yamlParse(yamlStringify(parsed)), {
+            absPath: "/fake/path.yaml",
+        });
+        expect(reparsed.narrative_struct).toEqual(NATIVE_10_2_MANIFEST.narrative_struct);
+        expect(reparsed.tasks).toEqual(NATIVE_10_2_MANIFEST.tasks);
+        expect(reparsed.cited_sources).toEqual(NATIVE_10_2_MANIFEST.cited_sources);
+    });
+    it("round-trips through yaml.stringify with all three fields absent (legacy)", () => {
+        const parsed = parseExecutionManifest(BASE_MANIFEST, { absPath: "/fake/path.yaml" });
+        const reparsed = parseExecutionManifest(yamlParse(yamlStringify(parsed)), {
+            absPath: "/fake/path.yaml",
+        });
+        expect(reparsed.tasks).toBeUndefined();
+        expect(reparsed.cited_sources).toBeUndefined();
+        expect(reparsed.narrative_struct).toBeUndefined();
+    });
+});

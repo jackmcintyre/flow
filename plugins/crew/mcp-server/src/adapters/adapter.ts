@@ -90,6 +90,27 @@ export type DisciplineViolation = {
   violations: DisciplineViolationReason[];
 };
 
+/**
+ * A single implementation task, each mapped to ≥1 acceptance criterion (Story
+ * 10.2 — native `## Tasks` section).
+ *
+ * `ac_refs` is a non-empty list of AC ids (e.g. `["AC1", "AC3"]`) that the task
+ * advances. **Optional at the type level on purpose**: only the native
+ * write/parse path requires it. BMad-scanned stories and any already-persisted
+ * manifest leave it `undefined`. (Whole-story T0-1 enforcement — required
+ * sections present; every task mapped to an AC — is Story 10.3; the
+ * intra-story ref-integrity check is enforced at native parse time here.)
+ */
+export type Task = { text: string; ac_refs: string[] };
+
+/**
+ * Structured narrative (Story 10.2 — native `## Narrative` "As a {role}, I want
+ * {want}, so that {so_that}." prose parsed into its three parts). **Optional at
+ * the type level on purpose**: only the native write/parse path requires it.
+ * The raw `narrative` string is always retained alongside it.
+ */
+export type NarrativeStruct = { role: string; want: string; so_that: string };
+
 export type SourceStory = {
   ref: string;
   title: string;
@@ -97,6 +118,23 @@ export type SourceStory = {
   acceptance_criteria: AC[];
   depends_on: string[];
   implementation_notes?: string;
+  /**
+   * Structured implementation tasks (Story 10.2). Optional and additive —
+   * native-scanned stories carry it; BMad-scanned stories leave it `undefined`
+   * (BMad enrichment is the 10.5 ingest's job).
+   */
+  tasks?: Task[];
+  /**
+   * Repo-relative source paths cited by the story (Story 10.2). Optional and
+   * additive. Presence + shape are checked at native parse time; that each
+   * path *resolves on disk* is T0-5, Story 10.3 — not checked here.
+   */
+  cited_sources?: string[];
+  /**
+   * Structured narrative parts (Story 10.2). Optional and additive; the raw
+   * `narrative` string is always retained.
+   */
+  narrative_struct?: NarrativeStruct;
   raw_path: string;
   raw_frontmatter: Record<string, unknown>;
   source_hash: string;

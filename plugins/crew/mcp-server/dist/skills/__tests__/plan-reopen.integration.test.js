@@ -63,7 +63,7 @@ describe("AC4(a) — native add with existing backlog", () => {
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "New story added in re-open mode",
-            narrative: "As a user, I want a new feature so that I can use it.",
+            narrative: { role: "user", want: "a new feature", so_that: "I can use it" },
             acceptance_criteria: [
                 {
                     text: "**Given** the new feature is deployed, **When** a user accesses it, **Then** it works.",
@@ -71,6 +71,8 @@ describe("AC4(a) — native add with existing backlog", () => {
                     verification: { type: "vitest", target: "src/__tests__/new-feature.test.ts" },
                 },
             ],
+            tasks: [{ text: "Build the new feature", ac_refs: ["AC1"] }],
+            cited_sources: ["src/new-feature.ts"],
             depends_on: [],
         });
         expect(result.ref).toMatch(/^native:[0-9A-Z]{26}$/);
@@ -99,7 +101,7 @@ describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "Edited to-do story one",
-            narrative: "As a user, I want the edited feature so that I can use it better.",
+            narrative: { role: "user", want: "the edited feature", so_that: "I can use it better" },
             acceptance_criteria: [
                 {
                     text: "**Given** the edited feature is deployed, **When** a user accesses it, **Then** it works correctly.",
@@ -107,6 +109,8 @@ describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
                     verification: { type: "vitest", target: "src/__tests__/edited-feature.test.ts" },
                 },
             ],
+            tasks: [{ text: "Build the edited feature", ac_refs: ["AC1"] }],
+            cited_sources: ["src/edited-feature.ts"],
             depends_on: [oldRef],
         });
         // A NEW file is created (new ULID).
@@ -135,7 +139,11 @@ describe("AC4(c) — native discard: revert/deprecate story appears, originals u
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "revert/deprecate: Done story three",
-            narrative: `This story reverses the feature shipped by ${originalRef} (Done story three). The operator chose to withdraw it on 2026-05-21.`,
+            narrative: {
+                role: "operator",
+                want: `to reverse the feature shipped by ${originalRef} (Done story three)`,
+                so_that: "the withdrawn feature no longer ships",
+            },
             acceptance_criteria: [
                 {
                     text: "**Given** the revert is complete, **When** a user accesses the system, **Then** the feature no longer exists.",
@@ -143,6 +151,8 @@ describe("AC4(c) — native discard: revert/deprecate story appears, originals u
                     verification: { type: "vitest", target: "src/__tests__/revert.test.ts" },
                 },
             ],
+            tasks: [{ text: "Remove the feature and its tests", ac_refs: ["AC1"] }],
+            cited_sources: ["src/done-feature.ts"],
             depends_on: [originalRef],
         });
         // New revert story file has the revert/deprecate: title prefix.
@@ -166,7 +176,7 @@ describe("AC4(d) — BMad add: writeNativeStory refuses on BMad workspace", () =
         await expect(writeNativeStory({
             targetRepoRoot: root,
             title: "Should be refused",
-            narrative: "As a user, I want this so that it works.",
+            narrative: { role: "user", want: "this", so_that: "it works" },
             acceptance_criteria: [
                 {
                     text: "**Given** the feature works, **When** accessed, **Then** success.",
@@ -174,6 +184,8 @@ describe("AC4(d) — BMad add: writeNativeStory refuses on BMad workspace", () =
                     verification: { type: "vitest", target: "src/__tests__/refused.test.ts" },
                 },
             ],
+            tasks: [{ text: "Build it", ac_refs: ["AC1"] }],
+            cited_sources: ["src/refused.ts"],
             depends_on: [],
         })).rejects.toBeInstanceOf(WrongAdapterError);
     });

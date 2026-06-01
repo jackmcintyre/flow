@@ -58,6 +58,16 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strip>>;
     title: z.ZodString;
     narrative: z.ZodString;
+    narrative_struct: z.ZodOptional<z.ZodObject<{
+        role: z.ZodString;
+        want: z.ZodString;
+        so_that: z.ZodString;
+    }, z.core.$strip>>;
+    tasks: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        ac_refs: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>>;
+    cited_sources: z.ZodOptional<z.ZodArray<z.ZodString>>;
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
     ready: z.ZodDefault<z.ZodBoolean>;

@@ -79,7 +79,7 @@ function makeSourceStorySpec(opts) {
         "",
         "## Narrative",
         "",
-        "As a maintainer, I want per-story isolation so verdicts survive.",
+        "As a maintainer, I want per-story isolation, so that verdicts survive.",
         "",
         "## Acceptance Criteria",
         "",

@@ -15,7 +15,18 @@ import { validateStoryAgainstDiscipline } from "../validators/planning-disciplin
 export const WriteNativeStoryInputSchema = z.object({
     targetRepoRoot: z.string().min(1),
     title: z.string().min(1),
-    narrative: z.string().min(1),
+    /**
+     * Story 10.2 — the narrative is now a structured `{ role, want, so_that }`
+     * object. REQUIRED on the native write path (mirrors the `verification`
+     * precedent from 10.1). `renderNativeStoryBody` emits the canonical
+     * "As a {role}, I want {want}, so that {so_that}." sentence and
+     * `parseNativeStory` parses exactly that grammar back, closing the round-trip.
+     */
+    narrative: z.object({
+        role: z.string().min(1),
+        want: z.string().min(1),
+        so_that: z.string().min(1),
+    }),
     acceptance_criteria: z
         .array(z.object({
         text: z.string().min(1),
@@ -33,6 +44,25 @@ export const WriteNativeStoryInputSchema = z.object({
         }),
     }))
         .min(1),
+    /**
+     * Story 10.2 — implementation tasks. REQUIRED on the native write path: ≥1
+     * task, each carrying ≥1 `ac_refs` (e.g. `["AC1", "AC3"]`). The pre-write
+     * round-trip through `parseNativeStory` additionally rejects a task whose
+     * `ac_ref` dangles (names an AC the story does not declare). Whole-story
+     * T0-1 enforcement at scan time is Story 10.3.
+     */
+    tasks: z
+        .array(z.object({
+        text: z.string().min(1),
+        ac_refs: z.array(z.string().min(1)).min(1),
+    }))
+        .min(1),
+    /**
+     * Story 10.2 — repo-relative source paths cited by the story. REQUIRED on the
+     * native write path: ≥1 path. That each path *resolves on disk* is T0-5
+     * (Story 10.3) — not enforced here.
+     */
+    cited_sources: z.array(z.string().min(1)).min(1),
     implementation_notes: z.string().optional(),
     depends_on: z.array(z.string()),
     /**
@@ -44,19 +74,30 @@ export const WriteNativeStoryInputSchema = z.object({
     sessionUlid: z.string().min(1).optional(),
 });
 /**
+ * Render the canonical narrative sentence from the structured parts (Story
+ * 10.2). `parseNativeStory` parses exactly this grammar back into
+ * `narrative_struct`, so the render here is the single source of the round-trip
+ * contract.
+ */
+export function renderNarrativeSentence(narrative) {
+    return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+}
+/**
  * Render a native-story file body from validated inputs.
  *
- * Produces the canonical four-section order:
+ * Produces the canonical section order:
  *   1. `## Narrative`
  *   2. `## Acceptance Criteria`
- *   3. `## Implementation Notes` (omitted if empty/absent)
- *   4. `## Dependencies`
+ *   3. `## Tasks`
+ *   4. `## Cited Sources`
+ *   5. `## Implementation Notes` (omitted if empty/absent)
+ *   6. `## Dependencies`
  */
 export function renderNativeStoryBody(input) {
     const lines = [`# ${input.title}`, ""];
-    // ## Narrative
+    // ## Narrative — the canonical "As a … I want … so that …" sentence (10.2).
     lines.push("## Narrative", "");
-    lines.push(input.narrative);
+    lines.push(renderNarrativeSentence(input.narrative));
     lines.push("");
     // ## Acceptance Criteria
     lines.push("## Acceptance Criteria", "");
@@ -71,6 +112,21 @@ export function renderNativeStoryBody(input) {
         lines.push(`${ac.verification.type}: ${ac.verification.target}`);
         lines.push("");
     }
+    // ## Tasks — Story 10.2. Each task renders as `- <text> (AC: 1, 3)`;
+    // `parseNativeStory` consumes exactly this shape into `{ text, ac_refs }`.
+    // The numeric ref is recovered from the `AC<n>` id.
+    lines.push("## Tasks", "");
+    for (const task of input.tasks) {
+        const nums = task.ac_refs.map((r) => r.replace(/^AC/i, "")).join(", ");
+        lines.push(`- ${task.text} (AC: ${nums})`);
+    }
+    lines.push("");
+    // ## Cited Sources — Story 10.2. Bullet list of repo-relative paths.
+    lines.push("## Cited Sources", "");
+    for (const src of input.cited_sources) {
+        lines.push(`- ${src}`);
+    }
+    lines.push("");
     // ## Implementation Notes (optional)
     if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
         lines.push("## Implementation Notes", "");
@@ -181,10 +237,15 @@ function inputToSourceStory(input, ref, absPath) {
     return {
         ref,
         title: input.title,
-        narrative: input.narrative,
+        // The discipline validator scans the raw narrative string for implicit
+        // depends-on refs, so pass the canonical rendered sentence (10.2).
+        narrative: renderNarrativeSentence(input.narrative),
+        narrative_struct: input.narrative,
         acceptance_criteria: input.acceptance_criteria,
         depends_on: input.depends_on,
         implementation_notes: input.implementation_notes,
+        tasks: input.tasks,
+        cited_sources: input.cited_sources,
         raw_path: absPath,
         raw_frontmatter: { title: input.title, ref },
         source_hash: createHash("sha256").update(renderNativeStoryBody(input)).digest("hex"),

@@ -55,7 +55,7 @@ const FIXTURE_SPEC = `# Story 5.26 PR-Branch Check Fixture
 
 ## Narrative
 
-As a tester, I want the reviewer to check the PR branch filesystem.
+As a tester, I want the reviewer to check the PR branch filesystem, so that the artifact check runs against the right tree.
 
 ## Acceptance Criteria
 

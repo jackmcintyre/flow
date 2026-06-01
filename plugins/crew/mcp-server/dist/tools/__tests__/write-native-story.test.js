@@ -17,7 +17,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { DisciplineViolationError } from "../../errors.js";
+import { DisciplineViolationError, MalformedNativeStoryError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { parseNativeStory } from "../../adapters/native/parse-native-story.js";
 let root;
@@ -52,7 +52,11 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         const promise = writeNativeStory({
             targetRepoRoot: root,
             title: "Persist the backlog ledger",
-            narrative: "As an operator, I want the plugin to write sprint-status.yaml so that the backlog ledger is durable.",
+            narrative: {
+                role: "operator",
+                want: "the plugin to write sprint-status.yaml",
+                so_that: "the backlog ledger is durable",
+            },
             acceptance_criteria: [
                 {
                     text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated.",
@@ -60,6 +64,8 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
                     verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
                 },
             ],
+            tasks: [{ text: "Write the ledger path", ac_refs: ["AC1"] }],
+            cited_sources: ["src/state/ledger.ts"],
             depends_on: [],
         });
         await expect(promise).rejects.toBeInstanceOf(DisciplineViolationError);
@@ -69,7 +75,11 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
             await writeNativeStory({
                 targetRepoRoot: root,
                 title: "Persist the backlog ledger",
-                narrative: "As an operator, I want the plugin to write sprint-status.yaml so that the backlog ledger is durable.",
+                narrative: {
+                    role: "operator",
+                    want: "the plugin to write sprint-status.yaml",
+                    so_that: "the backlog ledger is durable",
+                },
                 acceptance_criteria: [
                     {
                         text: "Given a backlog, When the operator runs it, Then sprint-status.yaml is updated.",
@@ -77,6 +87,8 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
                         verification: { type: "vitest", target: "src/__tests__/ledger.test.ts" },
                     },
                 ],
+                tasks: [{ text: "Write the ledger path", ac_refs: ["AC1"] }],
+                cited_sources: ["src/state/ledger.ts"],
                 depends_on: [],
             });
         }
@@ -93,7 +105,11 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "Persist the backlog ledger",
-            narrative: "As an operator, I want the plugin to write sprint-status.yaml so that the backlog ledger is durable.",
+            narrative: {
+                role: "operator",
+                want: "the plugin to write sprint-status.yaml",
+                so_that: "the backlog ledger is durable",
+            },
             acceptance_criteria: [
                 {
                     text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated and read back unchanged.",
@@ -101,6 +117,8 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
                     verification: { type: "vitest", target: "src/__tests__/ledger.integration.test.ts" },
                 },
             ],
+            tasks: [{ text: "Write the ledger path", ac_refs: ["AC1"] }],
+            cited_sources: ["src/state/ledger.ts"],
             depends_on: [],
         });
         expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
@@ -112,7 +130,11 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "Render a friendly greeting",
-            narrative: "As a user, I want a friendly greeting so that the app feels welcoming.",
+            narrative: {
+                role: "user",
+                want: "a friendly greeting",
+                so_that: "the app feels welcoming",
+            },
             acceptance_criteria: [
                 {
                     text: "**Given** the app is open, **When** the user lands, **Then** a greeting is shown.",
@@ -120,6 +142,8 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
                     verification: { type: "vitest", target: "src/__tests__/greeting.test.ts" },
                 },
             ],
+            tasks: [{ text: "Render the greeting component", ac_refs: ["AC1"] }],
+            cited_sources: ["src/ui/greeting.ts"],
             depends_on: [],
         });
         expect(result.ref).toMatch(/^native:/);
@@ -135,7 +159,7 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
         const result = await writeNativeStory({
             targetRepoRoot: root,
             title: "Multi-AC story with per-AC verification",
-            narrative: "As a user, I want a feature so that I get value.",
+            narrative: { role: "user", want: "a feature", so_that: "I get value" },
             acceptance_criteria: [
                 {
                     text: "**Given** a state, **When** an action, **Then** an outcome.",
@@ -148,6 +172,8 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
                     verification: { type: "artifact", target: "build/out/report.json" },
                 },
             ],
+            tasks: [{ text: "Build the feature", ac_refs: ["AC1", "AC2"] }],
+            cited_sources: ["src/feature/index.ts"],
             depends_on: [],
         });
         // Exactly one file landed; re-read and re-parse it.
@@ -170,7 +196,7 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
             await writeNativeStory({
                 targetRepoRoot: root,
                 title: "Story whose second AC omits verification",
-                narrative: "As a user, I want a feature so that I get value.",
+                narrative: { role: "user", want: "a feature", so_that: "I get value" },
                 acceptance_criteria: [
                     {
                         text: "**Given** a state, **When** an action, **Then** an outcome.",
@@ -183,6 +209,8 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
                         kind: "integration",
                     },
                 ],
+                tasks: [{ text: "Build the feature", ac_refs: ["AC1", "AC2"] }],
+                cited_sources: ["src/feature/index.ts"],
                 depends_on: [],
             });
         }
@@ -199,3 +227,91 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
         expect(await listStoryFiles()).toHaveLength(0);
     });
 });
+// ---------------------------------------------------------------------------
+// AC1 (Story 10.2) — tasks[] / cited_sources[] / structured narrative survive
+//   write→parse, and the write fails closed on each violation.
+// ---------------------------------------------------------------------------
+/** A valid candidate carrying the three new 10.2 fields, with overrides. */
+function candidate10_2(overrides = {}) {
+    return {
+        targetRepoRoot: root,
+        title: "A story exercising the 10.2 fields",
+        narrative: { role: "developer", want: "a typed parser", so_that: "fields cannot drift" },
+        acceptance_criteria: [
+            {
+                text: "**Given** a state, **When** an action, **Then** an outcome.",
+                kind: "unit",
+                verification: { type: "vitest", target: "src/__tests__/a.test.ts" },
+            },
+            {
+                text: "**Given** a system, **When** integrated, **Then** an artifact appears.",
+                kind: "integration",
+                verification: { type: "artifact", target: "build/out.json" },
+            },
+        ],
+        tasks: [
+            { text: "Build the parser", ac_refs: ["AC1"] },
+            { text: "Wire the integration", ac_refs: ["AC1", "AC2"] },
+        ],
+        cited_sources: ["src/parser.ts", "docs/design.md"],
+        depends_on: [],
+        ...overrides,
+    };
+}
+describe("writeNativeStory AC1 (Story 10.2) — tasks / cited_sources / narrative round-trip + fail-closed", () => {
+    it("(a) writes a story with structured narrative, tasks→ac_refs, and cited sources, and round-trips all three through parseNativeStory", async () => {
+        const result = await writeNativeStory(candidate10_2());
+        expect(await listStoryFiles()).toHaveLength(1);
+        const reparsed = parseNativeStory(result.path, await fs.readFile(result.path, "utf8"));
+        expect(reparsed.narrative_struct).toEqual({
+            role: "developer",
+            want: "a typed parser",
+            so_that: "fields cannot drift",
+        });
+        expect(reparsed.tasks).toEqual([
+            { text: "Build the parser", ac_refs: ["AC1"] },
+            { text: "Wire the integration", ac_refs: ["AC1", "AC2"] },
+        ]);
+        expect(reparsed.cited_sources).toEqual(["src/parser.ts", "docs/design.md"]);
+    });
+    it("(b) refuses a write that omits tasks — before any file is written", async () => {
+        const message = String(await rejectionOf(candidate10_2({ tasks: undefined })));
+        expect(message).toMatch(/tasks/);
+        expect(await listStoryFiles()).toHaveLength(0);
+    });
+    it("(b) refuses a write whose task ac_refs names a non-existent AC — naming the violation, nothing written", async () => {
+        // AC9 dangles: the story declares only AC1 and AC2. The pre-write round-trip
+        // through parseNativeStory rejects it with the dangling-ref reason.
+        let caught;
+        try {
+            await writeNativeStory(candidate10_2({ tasks: [{ text: "Dangling", ac_refs: ["AC9"] }] }));
+        }
+        catch (err) {
+            caught = err;
+        }
+        expect(caught).toBeInstanceOf(MalformedNativeStoryError);
+        expect(caught.reason).toMatch(/AC9.*does not resolve/);
+        expect(await listStoryFiles()).toHaveLength(0);
+    });
+    it("(b) refuses a write that omits cited sources — before any file is written", async () => {
+        const message = String(await rejectionOf(candidate10_2({ cited_sources: undefined })));
+        expect(message).toMatch(/cited_sources/);
+        expect(await listStoryFiles()).toHaveLength(0);
+    });
+    it("(b) refuses a write whose narrative is not in role/want/so_that shape", async () => {
+        // A narrative object missing `so_that` fails the input schema before any write.
+        const message = String(await rejectionOf(candidate10_2({ narrative: { role: "x", want: "y" } })));
+        expect(message).toMatch(/narrative|so_that/);
+        expect(await listStoryFiles()).toHaveLength(0);
+    });
+});
+/** Run writeNativeStory and return the thrown value (fails the test if it resolves). */
+async function rejectionOf(input) {
+    try {
+        await writeNativeStory(input);
+    }
+    catch (err) {
+        return err;
+    }
+    throw new Error("expected writeNativeStory to reject, but it resolved");
+}
