@@ -70,6 +70,18 @@ function makeStoryContent(title, depRefs) {
             `**Given** ${title} is live, **When** a user accesses it, **Then** it works correctly.`,
             "vitest: src/__tests__/loop.test.ts",
             "",
+            // Story 10.3 — native stories must carry the §3 enriched sections to pass
+            // the Tier-0 scan gate: a Tasks section (each task → a real AC) and a Cited
+            // Sources section whose paths resolve on disk (seeded in the workspace
+            // builder). The vitest: target above is shape-only (not existence-checked).
+            "## Tasks",
+            "",
+            `- Implement ${title} (AC: 1)`,
+            "",
+            "## Cited Sources",
+            "",
+            "- src/loop.ts",
+            "",
             "## Implementation Notes",
             "",
             `Implement ${title}.`,
@@ -96,6 +108,9 @@ async function buildIntegrationWorkspace(scratch) {
     // Native stories directory
     const storiesDir = path.join(root, ".crew", "native-stories");
     await fs.mkdir(storiesDir, { recursive: true });
+    // Story 10.3 — seed the cited source so the Tier-0 T0-5 resolvability check
+    // passes at scan (cited paths must resolve on disk).
+    await atomicWriteFile(path.join(root, "src", "loop.ts"), "// seeded for resolvability\n");
     // Story A — no deps
     const contentA = makeStoryContent("Story A", []);
     await atomicWriteFile(path.join(storiesDir, `${ULID_A}.md`), contentA);

@@ -37,6 +37,15 @@ function makeStoryBody() {
         `**Given** the system is running, **When** the user requests it, **Then** it works.`,
         `vitest: src/__tests__/scan-sources.test.ts`,
         ``,
+        // Story 10.3 — §3 enriched sections required to pass the Tier-0 scan gate.
+        `## Tasks`,
+        ``,
+        `- Wire up the handler (AC: 1)`,
+        ``,
+        `## Cited Sources`,
+        ``,
+        `- src/handler.ts`,
+        ``,
         `## Implementation Notes`,
         ``,
         `Wire up the handler.`,
@@ -64,6 +73,9 @@ describe("scan-sources Story 9.1 (AC5) — fresh manifests default ready: false"
         await fs.mkdir(path.join(root, ".crew", "state", "done"), { recursive: true });
         // Native-adapter config.
         await atomicWriteFile(path.join(root, ".crew", "config.yaml"), `adapter: native\nadapter_config: {}\n`);
+        // Story 10.3 — seed the cited source so the Tier-0 T0-5 resolvability check
+        // passes at scan (cited paths must resolve on disk).
+        await atomicWriteFile(path.join(root, "src", "handler.ts"), "// seeded\n");
         // Seed a single source story. No pre-existing manifest → scan composes fresh.
         await atomicWriteFile(path.join(storiesDir, `${STORY_ULID}.md`), makeStoryBody());
         const result = await scanSources({ targetRepoRoot: root });

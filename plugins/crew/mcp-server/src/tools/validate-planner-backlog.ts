@@ -77,7 +77,14 @@ export type ValidatePlannerBacklogOutput =
 
 function pendingToSourceStory(pending: PendingStoryInput, index: number): SourceStory {
   return {
-    ref: `native:pending-${index}`,
+    // A `pending:<n>` pseudo-ref — deliberately NOT `native:` so the Story 10.3
+    // Tier-0 §3 checks (T0-1/T0-2, gated to native/enriched stories via
+    // `isEnrichedStory`) do NOT fire here. This pre-write planning batch carries
+    // only the legacy discipline-rule fields (the PendingStoryInput schema has
+    // no `verification`/`tasks`/`cited_sources`); the §3 fields are present and
+    // enforced at `writeNativeStory` (which builds a real `native:` ref from the
+    // enriched input). Running §3 here would falsely block every pre-write batch.
+    ref: `pending:${index}`,
     title: pending.title,
     narrative: pending.narrative,
     acceptance_criteria: pending.acceptance_criteria,

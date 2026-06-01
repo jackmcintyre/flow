@@ -116,7 +116,23 @@ export const NativeAdapter: PlanningAdapter = {
     const results: SourceStory[] = [];
     for (const file of files) {
       const contents = await fs.readFile(file, "utf8");
-      results.push(parseNativeStory(file, contents));
+      // Per-file parse resilience (Story 10.3): a single malformed native file
+      // must NOT abort the whole scan — that would be a live-backlog outage (one
+      // bad file taking down the entire backlog projection). The native parser
+      // already fail-closes on the structural Tier-0 shapes (an AC with no
+      // verification directive, a task with no/dangling AC ref, an empty Cited
+      // Sources section); a story carrying one of those is structurally
+      // un-parseable and therefore correctly absent from to-do/ (fail-closed).
+      // We log a loud warning (NOT a silent skip — see the project's "native
+      // scan silently skips" anti-pattern) and continue with the good files.
+      try {
+        results.push(parseNativeStory(file, contents));
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[NativeAdapter] Skipping malformed native story '${file}' — it failed to parse and is fail-closed (NOT projected to to-do/). Fix the source and re-run /crew:scan. Reason: ${reason}`,
+        );
+      }
     }
     // Sort by ULID (lexicographic = chronological for ULIDs).
     results.sort((a, b) => a.ref.localeCompare(b.ref));

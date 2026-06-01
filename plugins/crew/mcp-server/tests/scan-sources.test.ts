@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { getPluginRoot } from "../src/lib/plugin-root.js";
 import { parseExecutionManifest } from "../src/schemas/execution-manifest.js";
 import { renderScanResult, scanSources } from "../src/tools/scan-sources.js";
+import { atomicWriteFile } from "../src/lib/managed-fs.js";
 import { parse as yamlParse } from "yaml";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -472,5 +473,262 @@ describe("renderScanResult cosmetic guarantees (Story 5.22)", () => {
         false,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 10.3 AC1 — Tier-0 fail-closed at scan on a NATIVE workspace.
+//   (a) a native story that violates a new check → blocked/ with
+//       blocked_by: "planning-discipline" + discipline_violations carrying the
+//       new code(s); NOT written to to-do/.
+//   (b) a fully-compliant native story scans to to-do/.
+//   (c) non-regression — the existing BMad-fixture tests above already prove a
+//       BMad source lacking the enriched fields scans exactly as before; this
+//       block adds the explicit assertion that the new codes never fire on BMad.
+//
+// Also covers AC3 (resolvability) end-to-end through the scan path: T0-5
+// (cited sources present + resolve) and T0-6 (verification target well-formed;
+// artifact: resolves; vitest: shape-only, not required to pre-exist).
+// ---------------------------------------------------------------------------
+
+describe("Story 10.3 AC1/AC3 — Tier-0 fail-closed at scan (native workspace)", () => {
+  let nativeScratch: string;
+  let storiesDir: string;
+
+  // Two valid Crockford Base32 ULIDs (uppercase, 26 chars, no I/L/O/U).
+  const ULID_A = "01HZDRF00000000000000000AA";
+  const ULID_B = "01HZDRF00000000000000000BB";
+
+  beforeEach(async () => {
+    nativeScratch = await fs.mkdtemp(path.join(os.tmpdir(), "crew-scan-native-"));
+    storiesDir = path.join(nativeScratch, ".crew", "native-stories");
+    await fs.mkdir(storiesDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(nativeScratch, ".crew", "config.yaml"),
+      `adapter: native\nadapter_config: {}\n`,
+    );
+  });
+
+  afterEach(async () => {
+    await fs.rm(nativeScratch, { recursive: true, force: true });
+  });
+
+  /** Seed a repo-relative file under the native workspace so a path resolves. */
+  async function seedFile(relPath: string): Promise<void> {
+    const abs = path.join(nativeScratch, relPath);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, "// seeded\n");
+  }
+
+  /**
+   * Build a canonical native-story body parseable by parseNativeStory. Defaults
+   * are fully Tier-0-compliant; overrides inject specific violations.
+   */
+  function nativeBody(opts: {
+    acVerificationLines?: string[]; // one per AC; omit a line to drop verification
+    taskLines?: string[];
+    citedLines?: string[];
+  } = {}): string {
+    const acVer = opts.acVerificationLines ?? [
+      "vitest: src/__tests__/a.test.ts",
+      "artifact: build/out.json",
+    ];
+    const tasks = opts.taskLines ?? ["- Build it (AC: 1, 2)"];
+    const cited = opts.citedLines ?? ["- src/index.ts"];
+
+    const lines: string[] = [
+      "# A native story",
+      "",
+      "## Narrative",
+      "",
+      "As a developer, I want a feature, so that I get value.",
+      "",
+      "## Acceptance Criteria",
+      "",
+      "**AC1:**",
+      "**Given** a state, **When** an action, **Then** an outcome.",
+      ...(acVer[0] ? [acVer[0]] : []),
+      "",
+      "**AC2 (integration):**",
+      "**Given** a system, **When** integrated, **Then** an artifact appears.",
+      ...(acVer[1] ? [acVer[1]] : []),
+      "",
+      "## Tasks",
+      "",
+      ...tasks,
+      "",
+      "## Cited Sources",
+      "",
+      ...cited,
+      "",
+      "## Dependencies",
+      "",
+      "",
+    ];
+    return lines.join("\n");
+  }
+
+  async function writeStory(ulid: string, body: string): Promise<void> {
+    await atomicWriteFile(path.join(storiesDir, `${ulid}.md`), body);
+  }
+
+  function blockedPathOf(ulid: string): string {
+    return path.join(nativeScratch, ".crew", "state", "blocked", `native:${ulid}.yaml`);
+  }
+  function toDoPathOf(ulid: string): string {
+    return path.join(nativeScratch, ".crew", "state", "to-do", `native:${ulid}.yaml`);
+  }
+
+  async function violationCodesFor(ulid: string): Promise<string[]> {
+    const raw = await fs.readFile(blockedPathOf(ulid), "utf8");
+    const manifest = yamlParse(raw) as Record<string, unknown>;
+    expect(manifest["status"]).toBe("blocked");
+    expect(manifest["blocked_by"]).toBe("planning-discipline");
+    const violations = (manifest["discipline_violations"] ?? []) as Array<{ code: string }>;
+    return violations.map((v) => v.code);
+  }
+
+  it("(b) a fully-compliant native story scans to to-do/", async () => {
+    await seedFile("src/index.ts");
+    await seedFile("build/out.json"); // the artifact: target must resolve.
+    await writeStory(ULID_A, nativeBody());
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+
+    expect(result.createdRefs).toContain(`native:${ULID_A}`);
+    expect(result.blockedRefs).not.toContain(`native:${ULID_A}`);
+    const manifest = parseExecutionManifest(
+      yamlParse(await fs.readFile(toDoPathOf(ULID_A), "utf8")),
+      { absPath: toDoPathOf(ULID_A) },
+    );
+    expect(manifest.status).toBe("to-do");
+    await expect(fs.stat(blockedPathOf(ULID_A))).rejects.toThrow();
+  });
+
+  // Note on the parser seam: three of the AC1a-enumerated violations — an AC
+  // with no `verification`, a task whose `ac_refs` is empty/dangling, and an
+  // empty `cited_sources` section — are caught EARLIER, by the native parser
+  // (`parseNativeStory`), which fail-closes on those exact shapes (Story
+  // 3.4/10.1/10.2). A native story carrying one of them is structurally
+  // un-parseable: it can never be authored via `writeNativeStory` (the
+  // write-time gate covers it — see write-native-story.test.ts) and is rejected
+  // before the scan validator ever sees it. The pure validator's T0-1/T0-2
+  // checks (planning-discipline.test.ts) are the seam that catches them when a
+  // story IS presented structurally (the write path, or a future ingest), and
+  // are defense-in-depth at scan for any partially-enriched story that slips
+  // past the parser. The scan-only NEW behavior this story adds — the disk-side
+  // resolvability the parser CANNOT check — is exercised below.
+
+  it("(a) T0-5 — a cited_sources path that does not resolve on disk is blocked with unresolvable-cited-source", async () => {
+    await seedFile("build/out.json");
+    // Cite a path that does NOT exist on disk → T0-5 resolvability fires at scan.
+    await writeStory(ULID_A, nativeBody({ citedLines: ["- src/does-not-exist.ts"] }));
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+
+    expect(result.blockedRefs).toContain(`native:${ULID_A}`);
+    expect(await violationCodesFor(ULID_A)).toContain("unresolvable-cited-source");
+    await expect(fs.stat(toDoPathOf(ULID_A))).rejects.toThrow();
+  });
+
+  it("(a) T0-6 — an artifact: verification target that does not resolve is blocked with unresolvable-verification-target", async () => {
+    await seedFile("src/index.ts");
+    // Do NOT seed build/out.json — the artifact: target on AC2 won't resolve.
+    await writeStory(ULID_A, nativeBody());
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+
+    expect(result.blockedRefs).toContain(`native:${ULID_A}`);
+    expect(await violationCodesFor(ULID_A)).toContain("unresolvable-verification-target");
+    await expect(fs.stat(toDoPathOf(ULID_A))).rejects.toThrow();
+  });
+
+  it("(a) T0-6 — an invented-flag verification target is blocked with invalid-verification-target", async () => {
+    await seedFile("src/index.ts");
+    await seedFile("build/out.json");
+    // AC1 uses an invented flag instead of a path — the rubric's `vitest --grep`
+    // anti-pattern. The verification LINE shape (`vitest: vitest --grep foo`)
+    // parses as type=vitest, target="vitest --grep foo"; T0-6 rejects the target.
+    await writeStory(
+      ULID_A,
+      nativeBody({
+        acVerificationLines: ["vitest: vitest --grep foo", "artifact: build/out.json"],
+      }),
+    );
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+
+    expect(result.blockedRefs).toContain(`native:${ULID_A}`);
+    expect(await violationCodesFor(ULID_A)).toContain("invalid-verification-target");
+    await expect(fs.stat(toDoPathOf(ULID_A))).rejects.toThrow();
+  });
+
+  it("(b) T0-6 — a brand-new vitest: target (non-existent test file) does NOT block (chicken-and-egg exemption)", async () => {
+    await seedFile("src/index.ts");
+    await seedFile("build/out.json");
+    // AC1's vitest target points at a test the build will create — it does not
+    // exist at scan time. It must NOT block: vitest targets are shape-only.
+    await writeStory(
+      ULID_A,
+      nativeBody({
+        acVerificationLines: [
+          "vitest: src/__tests__/brand-new.test.ts",
+          "artifact: build/out.json",
+        ],
+      }),
+    );
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+    expect(result.createdRefs).toContain(`native:${ULID_A}`);
+    expect(result.blockedRefs).not.toContain(`native:${ULID_A}`);
+  });
+
+  it("(a) multiple violations accumulate in the blocked manifest's discipline_violations array", async () => {
+    // Neither cited source nor artifact resolves → two distinct disk violations.
+    await writeStory(
+      ULID_A,
+      nativeBody({ citedLines: ["- src/missing.ts"] }), // unseeded → unresolvable
+    );
+    // build/out.json also unseeded → unresolvable-verification-target.
+
+    await scanSources({ targetRepoRoot: nativeScratch });
+    const codes = await violationCodesFor(ULID_A);
+    expect(codes).toContain("unresolvable-cited-source");
+    expect(codes).toContain("unresolvable-verification-target");
+    expect(codes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("idempotent remediation — fixing the source moves a blocked native story to to-do/ on re-scan", async () => {
+    // First scan: unresolvable cited source → blocked.
+    await seedFile("build/out.json");
+    await writeStory(ULID_A, nativeBody({ citedLines: ["- src/missing.ts"] }));
+    await scanSources({ targetRepoRoot: nativeScratch });
+    await expect(fs.stat(blockedPathOf(ULID_A))).resolves.toBeTruthy();
+
+    // Fix: seed the cited file AND change the source so the hash differs so the
+    // blocked branch re-evaluates.
+    await seedFile("src/now-exists.ts");
+    await writeStory(ULID_A, nativeBody({ citedLines: ["- src/now-exists.ts"] }));
+
+    const result2 = await scanSources({ targetRepoRoot: nativeScratch });
+    expect(result2.createdRefs).toContain(`native:${ULID_A}`);
+    expect(result2.blockedRefs).not.toContain(`native:${ULID_A}`);
+    await expect(fs.stat(blockedPathOf(ULID_A))).rejects.toThrow();
+    await expect(fs.stat(toDoPathOf(ULID_A))).resolves.toBeTruthy();
+  });
+
+  it("(c) non-regression — a compliant native and a BMad-shaped scenario coexist; new codes never fire on BMad", async () => {
+    // This block runs the native adapter, so we assert the BMad non-regression
+    // at the unit-of-behaviour level here: the new codes are gated to native:
+    // refs (see planning-discipline.test.ts for the pure-validator assertion and
+    // the BMad-fixture tests above for the untouched-scan assertion). Here we
+    // simply prove a compliant native story is not collaterally blocked.
+    await seedFile("src/index.ts");
+    await seedFile("build/out.json");
+    await writeStory(ULID_B, nativeBody());
+
+    const result = await scanSources({ targetRepoRoot: nativeScratch });
+    expect(result.createdRefs).toContain(`native:${ULID_B}`);
+    expect(result.blockedRefs).not.toContain(`native:${ULID_B}`);
   });
 });

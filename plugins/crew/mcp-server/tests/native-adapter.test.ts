@@ -142,6 +142,40 @@ describe("NativeAdapter.listSourceStories()", () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it("Story 10.3 — a malformed ULID-named file is contained (warned + skipped), NOT a whole-scan abort", async () => {
+    // A single malformed native story (a ULID-named file that fails the parser)
+    // must NOT take down the entire backlog projection — that would be a
+    // live-backlog outage. listSourceStories logs a loud warning and continues
+    // with the good files; the malformed story is fail-closed (absent from the
+    // returned set, hence never projected to to-do/).
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "native-list-malformed-"));
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      await fs.cp(FIXTURE_REPO, tmp, { recursive: true });
+      // A valid ULID filename whose body has no H1 → parser throws.
+      const badUlid = "01JX900000000000000000BADX";
+      await fs.writeFile(
+        path.join(tmp, ".crew", "native-stories", `${badUlid}.md`),
+        "no heading here, just prose\n",
+      );
+      configureNativeAdapter({ targetRepo: tmp });
+
+      // Must NOT throw — the malformed file is contained.
+      const stories = await NativeAdapter.listSourceStories();
+      // Still exactly the 2 good fixture stories.
+      expect(stories).toHaveLength(2);
+      // A warning naming the malformed file was emitted (not a silent skip).
+      expect(warnings.some((w) => w.includes(badUlid) && /malformed/i.test(w))).toBe(true);
+    } finally {
+      console.warn = origWarn;
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -283,7 +317,34 @@ describe("NativeAdapter static config", () => {
     ).toThrow();
   });
 
-  it("validateAgainstDiscipline is a pass-through (Story 3.5 stub)", () => {
+  it("validateAgainstDiscipline returns the story unchanged for a Tier-0-compliant native story", () => {
+    // Story 10.3 — the native adapter's validateAgainstDiscipline now enforces
+    // the pure Tier-0 checks (T0-1/T0-2). A FULLY-compliant native story (every
+    // AC carries a verification block; every task maps to a real AC) passes
+    // through unchanged — the same object reference is returned.
+    configureNativeAdapter({ targetRepo: FIXTURE_REPO });
+    const story = {
+      ref: "native:01JX9000000000000000000001",
+      title: "Test",
+      narrative: "As a user, I want a thing, so that I am happy.",
+      acceptance_criteria: [
+        {
+          text: "**Given** x **When** y **Then** z.",
+          kind: "unit" as const,
+          verification: { type: "vitest" as const, target: "src/__tests__/x.test.ts" },
+        },
+      ],
+      tasks: [{ text: "Do the thing", ac_refs: ["AC1"] }],
+      cited_sources: ["src/x.ts"],
+      depends_on: [],
+      raw_path: "/tmp/01JX9000000000000000000001.md",
+      raw_frontmatter: {},
+      source_hash: "a".repeat(64),
+    };
+    expect(NativeAdapter.validateAgainstDiscipline(story)).toBe(story);
+  });
+
+  it("validateAgainstDiscipline returns a discipline-violation for a native story missing verification/tasks (Story 10.3)", () => {
     configureNativeAdapter({ targetRepo: FIXTURE_REPO });
     const story = {
       ref: "native:01JX9000000000000000000001",
@@ -295,6 +356,7 @@ describe("NativeAdapter static config", () => {
       raw_frontmatter: {},
       source_hash: "a".repeat(64),
     };
-    expect(NativeAdapter.validateAgainstDiscipline(story)).toBe(story);
+    const result = NativeAdapter.validateAgainstDiscipline(story);
+    expect(result).toMatchObject({ kind: "discipline-violation" });
   });
 });

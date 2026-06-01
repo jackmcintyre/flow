@@ -9,6 +9,7 @@ import { atomicWriteFile } from "../lib/managed-fs.js";
 import { logTelemetryEvent } from "../lib/logger.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { validateStoryAgainstDiscipline } from "../validators/planning-discipline.js";
+import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
@@ -219,12 +220,27 @@ export async function writeNativeStory(
   // implicit-depends-on check correctly excludes self-references. The
   // state-mutating heuristic (`isStateMutatingByHeuristic`) is conservative —
   // false positives are acceptable; false negatives are not.
+  // Story 10.3 — the write-time gate now runs the FULL Tier-0 set:
+  //   - the PURE checks (T0-1 task→AC refs, T0-2 every AC has verification, plus
+  //     the legacy state-mutating / implicit-depends-on rules) via
+  //     `validateStoryAgainstDiscipline`; and
+  //   - the writable-time resolvability (T0-5 cited sources present and
+  //     resolving — they are files the author read, so they exist at write — and
+  //     the pure part of T0-6, rejecting invented flags / non-path targets) via
+  //     `resolveDisciplinePaths`.
+  // New-test-file `vitest:` targets are NOT existence-checked at write: the build
+  // creates that test file, so requiring it would make every new-test story
+  // un-writable (the chicken-and-egg the story's pre-mortem pins). All violations
+  // accumulate into one `DisciplineViolationError` so the author fixes in one pass.
   const candidate = inputToSourceStory(input, ref, absPath);
-  const disciplineResult = validateStoryAgainstDiscipline(candidate);
-  if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
-    throw new DisciplineViolationError({
-      violations: disciplineResult.violations,
-    });
+  const pureResult = validateStoryAgainstDiscipline(candidate);
+  const violations =
+    "kind" in pureResult && pureResult.kind === "discipline-violation"
+      ? [...pureResult.violations]
+      : [];
+  violations.push(...(await resolveDisciplinePaths(candidate, targetRepoRoot)));
+  if (violations.length > 0) {
+    throw new DisciplineViolationError({ violations });
   }
 
   // Render the body.

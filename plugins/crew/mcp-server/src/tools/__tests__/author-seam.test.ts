@@ -125,6 +125,10 @@ beforeEach(async () => {
     path.join(root, ".crew", "config.yaml"),
     `adapter: native\nadapter_config: {}\n`,
   );
+  // Story 10.3 — writeNativeStory + scanSources now resolve cited_sources on
+  // disk. Seed the cited path both candidates reference so the Tier-0 T0-5 check
+  // passes. (Their verification targets are vitest:, which is not existence-checked.)
+  await atomicWriteFile(path.join(root, "src", "state", "ledger.ts"), "// seeded\n");
 });
 
 afterEach(async () => {
