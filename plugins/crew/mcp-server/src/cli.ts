@@ -52,6 +52,7 @@ import { reattachOrphan } from "./tools/reattach-orphan.js";
 import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
 import { reapStaleWorktrees } from "./tools/reap-stale-worktrees.js";
 import { markStoryReady } from "./tools/mark-story-ready.js";
+import { guardCleanRoot } from "./tools/guard-clean-root.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -91,6 +92,11 @@ const TOOLS: Record<string, ToolFn> = {
   // first-class CLI seam (Epic 10 drain fix-plan, Fix 1). Now `/crew:ready` and the
   // cutover scan→bless step round-trip through the same one-shot transport.
   markStoryReady,
+  // Epic 10 drain fix-plan, Fix 2b — clean-root guard. The drain calls this after
+  // each story to detect (and non-destructively stash) any dev edits that leaked
+  // into the shared root checkout under bgIsolation:'none', so the next worktree
+  // is cut from a clean base.
+  guardCleanRoot,
 };
 
 function emit(obj: unknown): void {
