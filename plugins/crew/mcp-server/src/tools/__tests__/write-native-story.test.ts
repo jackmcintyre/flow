@@ -380,6 +380,105 @@ async function rejectionOf(input: unknown): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Story 10.8 — AC1 + AC2: build-ready first-pass blocks
+//
+// AC1: a sparse draft authored through the write seam renders all three
+//   build-ready sub-sections (Files-touched, Definition-of-Done, Risk) as
+//   non-empty content inside ## Implementation Notes.
+//
+// AC2: a sparse draft authored through the write seam, then re-parsed from
+//   the file the seam produced, retains all three sub-sections in the parsed
+//   implementation_notes — including the build-time defaults.
+// ---------------------------------------------------------------------------
+
+/** A minimal sparse candidate — none of the three build-ready fields supplied. */
+function sparseCandidate() {
+  return {
+    targetRepoRoot: root,
+    title: "A sparse story with no build-ready blocks supplied",
+    narrative: {
+      role: "developer",
+      want: "the write seam to fill in build-ready blocks",
+      so_that: "I have something to work from even on a lean draft",
+    },
+    acceptance_criteria: [
+      {
+        text: "**Given** a sparse draft, **When** authored through the write seam, **Then** all three build-ready sub-sections render non-empty.",
+        kind: "integration" as const,
+        verification: {
+          type: "vitest" as const,
+          target: "src/tools/__tests__/write-native-story.test.ts",
+        },
+      },
+    ],
+    tasks: [{ text: "Author a sparse story and assert the build-ready blocks are present", ac_refs: ["AC1"] }],
+    cited_sources: ["src/parser.ts"],
+    depends_on: [] as string[],
+    // Intentionally omit: implementation_notes, files_touched, definition_of_done, risk_reasoning
+  };
+}
+
+describe("writeNativeStory Story 10.8 — build-ready first-pass blocks", () => {
+  it("AC1: a sparse draft authored through the write seam renders all three build-ready sub-sections as non-empty in the produced body", async () => {
+    const result = await writeNativeStory(sparseCandidate());
+
+    expect(await listStoryFiles()).toHaveLength(1);
+
+    // Read the file the seam produced and assert the three sub-sections are present and non-empty.
+    const body = await fs.readFile(result.path, "utf8");
+
+    // All three sub-section headings must be present.
+    expect(body).toMatch(/^### Files touched/m);
+    expect(body).toMatch(/^### Definition of Done/m);
+    expect(body).toMatch(/^### Risk/m);
+
+    // Each sub-section must be non-empty: extract the content between the heading
+    // and the next heading or end-of-string.
+    const filesTouchedMatch = /### Files touched\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(filesTouchedMatch).not.toBeNull();
+    expect(filesTouchedMatch![1]!.trim().length).toBeGreaterThan(0);
+
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    expect(dodMatch![1]!.trim().length).toBeGreaterThan(0);
+
+    const riskMatch = /### Risk\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(riskMatch).not.toBeNull();
+    expect(riskMatch![1]!.trim().length).toBeGreaterThan(0);
+  });
+
+  it("AC2: a sparse draft authored through the write seam, then re-parsed from the produced file, retains all three build-ready sub-sections in the parsed implementation_notes", async () => {
+    const result = await writeNativeStory(sparseCandidate());
+
+    // Re-parse the file the seam produced — this is the AC2 end-to-end round-trip.
+    const body = await fs.readFile(result.path, "utf8");
+    const reparsed = parseNativeStory(result.path, body);
+
+    // The parser preserves ## Implementation Notes verbatim into implementation_notes.
+    expect(reparsed.implementation_notes).toBeDefined();
+    const notes = reparsed.implementation_notes!;
+
+    // All three sub-section headings survive the round-trip.
+    expect(notes).toMatch(/^### Files touched/m);
+    expect(notes).toMatch(/^### Definition of Done/m);
+    expect(notes).toMatch(/^### Risk/m);
+
+    // Each sub-section in the parsed notes is non-empty (the defaults persisted).
+    const filesTouchedMatch = /### Files touched\n+([\s\S]+?)(?=\n###|$)/.exec(notes);
+    expect(filesTouchedMatch).not.toBeNull();
+    expect(filesTouchedMatch![1]!.trim().length).toBeGreaterThan(0);
+
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|$)/.exec(notes);
+    expect(dodMatch).not.toBeNull();
+    expect(dodMatch![1]!.trim().length).toBeGreaterThan(0);
+
+    const riskMatch = /### Risk\n+([\s\S]+?)(?=\n###|$)/.exec(notes);
+    expect(riskMatch).not.toBeNull();
+    expect(riskMatch![1]!.trim().length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Story 10.3 AC4 — writeNativeStory rejects native stories failing the
 //   writable-time Tier-0 checks (T0-5 cited sources resolve, the pure part of
 //   T0-6 reject invented flags), throwing DisciplineViolationError, nothing
