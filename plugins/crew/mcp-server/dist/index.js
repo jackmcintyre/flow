@@ -48649,6 +48649,14 @@ var WriteNativeStoryInputSchema = external_exports.object({
    */
   cited_sources: external_exports.array(external_exports.string().min(1)).min(1),
   implementation_notes: external_exports.string().optional(),
+  /**
+   * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
+   * a non-empty build-time default is substituted so the rendered
+   * `## Implementation Notes` always carries all three `###` sub-sections.
+   */
+  files_touched: external_exports.string().optional(),
+  definition_of_done: external_exports.string().optional(),
+  risk_reasoning: external_exports.string().optional(),
   depends_on: external_exports.array(external_exports.string()),
   /**
    * Session id for the `draft.authored` telemetry envelope. Optional — the
@@ -48658,6 +48666,15 @@ var WriteNativeStoryInputSchema = external_exports.object({
    */
   sessionUlid: external_exports.string().min(1).optional()
 });
+var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
+var DEFAULT_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] `pnpm build` green from `plugins/crew/mcp-server` before the PR.",
+  "- [ ] `pnpm test` green (all tests passing).",
+  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
+  "- [ ] PR opened against `main` with CI green."
+].join("\n");
+var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
 function renderNarrativeSentence(narrative) {
   return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
 }
@@ -48686,11 +48703,9 @@ function renderNativeStoryBody(input) {
     lines.push(`- ${src}`);
   }
   lines.push("");
-  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
-    lines.push("## Implementation Notes", "");
-    lines.push(input.implementation_notes.trim());
-    lines.push("");
-  }
+  lines.push("## Implementation Notes", "");
+  lines.push(renderImplementationNotesBody(input));
+  lines.push("");
   lines.push("## Dependencies", "");
   if (input.depends_on.length > 0) {
     lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
@@ -48742,6 +48757,20 @@ async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author
   });
   return { ref, path: absPath };
 }
+function renderImplementationNotesBody(input) {
+  const parts = [];
+  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
+    parts.push(input.implementation_notes.trim());
+    parts.push("");
+  }
+  const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
+  parts.push("### Files touched", "", filesTouched, "");
+  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+  parts.push("### Definition of Done", "", dod, "");
+  const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
+  parts.push("### Risk", "", risk, "");
+  return parts.join("\n").trim();
+}
 function inputToSourceStory(input, ref, absPath) {
   return {
     ref,
@@ -48752,7 +48781,10 @@ function inputToSourceStory(input, ref, absPath) {
     narrative_struct: input.narrative,
     acceptance_criteria: input.acceptance_criteria,
     depends_on: input.depends_on,
-    implementation_notes: input.implementation_notes,
+    // Story 10.8: pass the full rendered implementation notes (including the
+    // three build-ready sub-sections with their defaults) so the discipline
+    // gate sees the same text the file will contain.
+    implementation_notes: renderImplementationNotesBody(input),
     tasks: input.tasks,
     cited_sources: input.cited_sources,
     raw_path: absPath,

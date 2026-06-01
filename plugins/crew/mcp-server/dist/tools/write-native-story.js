@@ -65,6 +65,14 @@ export const WriteNativeStoryInputSchema = z.object({
      */
     cited_sources: z.array(z.string().min(1)).min(1),
     implementation_notes: z.string().optional(),
+    /**
+     * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
+     * a non-empty build-time default is substituted so the rendered
+     * `## Implementation Notes` always carries all three `###` sub-sections.
+     */
+    files_touched: z.string().optional(),
+    definition_of_done: z.string().optional(),
+    risk_reasoning: z.string().optional(),
     depends_on: z.array(z.string()),
     /**
      * Session id for the `draft.authored` telemetry envelope. Optional — the
@@ -74,6 +82,22 @@ export const WriteNativeStoryInputSchema = z.object({
      */
     sessionUlid: z.string().min(1).optional(),
 });
+// ---------------------------------------------------------------------------
+// Story 10.8 — build-ready block defaults
+// ---------------------------------------------------------------------------
+/** Default text for the Files-touched sub-section when the author omits it. */
+const DEFAULT_FILES_TOUCHED = "To be completed by dev — list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
+/** Default text for the Definition-of-Done sub-section when the author omits it. */
+const DEFAULT_DEFINITION_OF_DONE = [
+    "- [ ] All ACs met.",
+    "- [ ] `pnpm build` green from `plugins/crew/mcp-server` before the PR.",
+    "- [ ] `pnpm test` green (all tests passing).",
+    "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
+    "- [ ] PR opened against `main` with CI green.",
+].join("\n");
+/** Default text for the risk-reasoning sub-section when the author omits it. */
+const DEFAULT_RISK_REASONING = "No elevated risk identified — confirm at dev time. Highest-risk failure mode: TBD by dev.";
+// ---------------------------------------------------------------------------
 /**
  * Render the canonical narrative sentence from the structured parts (Story
  * 10.2). `parseNativeStory` parses exactly this grammar back into
@@ -128,12 +152,17 @@ export function renderNativeStoryBody(input) {
         lines.push(`- ${src}`);
     }
     lines.push("");
-    // ## Implementation Notes (optional)
-    if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
-        lines.push("## Implementation Notes", "");
-        lines.push(input.implementation_notes.trim());
-        lines.push("");
-    }
+    // ## Implementation Notes — Story 10.8: always emitted, carrying three
+    // build-ready `###` sub-sections. Each sub-section uses the author-supplied
+    // value when present, or a non-empty build-time default when absent. Any
+    // free-form `implementation_notes` prose provided by the author is prepended
+    // before the sub-sections. The section is always non-empty because the
+    // defaults guarantee it.
+    // NOTE: renderImplementationNotesBody is defined AFTER this function (below),
+    // but TypeScript hoists function declarations; this call is safe.
+    lines.push("## Implementation Notes", "");
+    lines.push(renderImplementationNotesBody(input));
+    lines.push("");
     // ## Dependencies
     // Story 5.13: also emit a `Depends on: <refs>` prose line above the section
     // so that the deps-drift gate in scanSources finds prose and manifest in agreement.
@@ -272,12 +301,37 @@ export async function renderGateWriteNativeStory(input, targetRepoRoot, agent = 
     return { ref, path: absPath };
 }
 /**
+ * Render the full `## Implementation Notes` body (without the section header)
+ * as it will appear in the written file (Story 10.8). This includes the author's
+ * free-form notes (if any) followed by the three build-ready `###` sub-sections,
+ * each filled with its default when the author omitted the field.
+ *
+ * Used both in `renderNativeStoryBody` and in `inputToSourceStory` so the
+ * discipline-gate candidate sees the same rendered text the file will contain.
+ */
+export function renderImplementationNotesBody(input) {
+    const parts = [];
+    if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
+        parts.push(input.implementation_notes.trim());
+        parts.push("");
+    }
+    const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
+    parts.push("### Files touched", "", filesTouched, "");
+    const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+    parts.push("### Definition of Done", "", dod, "");
+    const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
+    parts.push("### Risk", "", risk, "");
+    return parts.join("\n").trim();
+}
+/**
  * Build a `SourceStory` from `WriteNativeStoryInput` for the fail-closed
  * discipline gate. The `source_hash` is computed over the rendered body so it
  * is stable and non-empty; `raw_frontmatter` carries the ref/title so the
  * validator's self-reference exclusion works against the real minted ref.
  *
- * Story 9.2.
+ * Story 9.2. Story 10.8: `implementation_notes` now reflects the full rendered
+ * body (author notes + three build-ready sub-sections with defaults) so the
+ * discipline gate and round-trip see the same text the written file will contain.
  */
 function inputToSourceStory(input, ref, absPath) {
     return {
@@ -289,7 +343,10 @@ function inputToSourceStory(input, ref, absPath) {
         narrative_struct: input.narrative,
         acceptance_criteria: input.acceptance_criteria,
         depends_on: input.depends_on,
-        implementation_notes: input.implementation_notes,
+        // Story 10.8: pass the full rendered implementation notes (including the
+        // three build-ready sub-sections with their defaults) so the discipline
+        // gate sees the same text the file will contain.
+        implementation_notes: renderImplementationNotesBody(input),
         tasks: input.tasks,
         cited_sources: input.cited_sources,
         raw_path: absPath,

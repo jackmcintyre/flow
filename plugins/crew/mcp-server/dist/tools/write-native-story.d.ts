@@ -31,6 +31,9 @@ export declare const WriteNativeStoryInputSchema: z.ZodObject<{
     }, z.core.$strip>>;
     cited_sources: z.ZodArray<z.ZodString>;
     implementation_notes: z.ZodOptional<z.ZodString>;
+    files_touched: z.ZodOptional<z.ZodString>;
+    definition_of_done: z.ZodOptional<z.ZodString>;
+    risk_reasoning: z.ZodOptional<z.ZodString>;
     depends_on: z.ZodArray<z.ZodString>;
     sessionUlid: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -94,3 +97,13 @@ export declare function writeNativeStory(rawInput: unknown): Promise<WriteNative
  *                       path, "ingest" for the BMad→native seam.
  */
 export declare function renderGateWriteNativeStory(input: WriteNativeStoryInput, targetRepoRoot: string, agent?: "author" | "ingest"): Promise<WriteNativeStoryOutput>;
+/**
+ * Render the full `## Implementation Notes` body (without the section header)
+ * as it will appear in the written file (Story 10.8). This includes the author's
+ * free-form notes (if any) followed by the three build-ready `###` sub-sections,
+ * each filled with its default when the author omitted the field.
+ *
+ * Used both in `renderNativeStoryBody` and in `inputToSourceStory` so the
+ * discipline-gate candidate sees the same rendered text the file will contain.
+ */
+export declare function renderImplementationNotesBody(input: WriteNativeStoryInput): string;
