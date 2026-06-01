@@ -416,9 +416,11 @@ export async function runJudgePanel(
 }
 
 /**
- * The default lens→role binding from the rubric §3 brackets. Exported so the
- * `/crew:judge` skill and callers can start from it and override per the hired
- * roster. Each lens is bound to a DISTINCT role.
+ * The default lens→role binding from the rubric §3 brackets.
+ *
+ * Exported for documentation of the rubric §3 intent. The OPERATIVE path for
+ * auto-staffing is `resolveLensRoleBinding`, which derives the binding from the
+ * live hired roster. Each lens is bound to a DISTINCT role.
  */
 export const DEFAULT_LENS_ROLES: LensRoleBinding = {
   structure: "architect",
@@ -427,6 +429,111 @@ export const DEFAULT_LENS_ROLES: LensRoleBinding = {
   domain: "generalist-dev",
   considered: "retro-analyst",
 };
+
+// ---------------------------------------------------------------------------
+// Deterministic lens→role resolver (maximum bipartite matching)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-lens ordered candidate preference lists.
+ *
+ * The first candidate in each list is the preferred specialist; subsequent
+ * entries are fallbacks in priority order. The resolver intersects this list
+ * with the ACTUALLY HIRED roles at match time — roles absent from the team are
+ * silently skipped. `architect` is kept at the head of `structure` for
+ * forward-compat with the rubric §3 intent; it never matches today (no
+ * `architect` in the default catalogue) but costs nothing.
+ */
+const LENS_CANDIDATES: Record<LensName, readonly string[]> = {
+  structure: ["architect", "planner", "generalist-dev", "orchestrator"],
+  verifiability: ["test-specialist", "generalist-reviewer", "orchestrator", "generalist-dev"],
+  discipline: ["generalist-reviewer", "security-specialist", "planner", "orchestrator"],
+  domain: ["generalist-dev", "planner", "orchestrator"],
+  considered: ["retro-analyst", "quality-lead", "orchestrator", "planner"],
+};
+
+/**
+ * Resolve the lens→role binding from a live hired roster using maximum bipartite
+ * matching (augmenting paths / Kuhn's algorithm).
+ *
+ * Algorithm:
+ *  1. For each lens, compute its candidate list = preference list ∩ hiredRoles
+ *     (filtered in preference order so the preferred specialist is tried first).
+ *  2. Run Kuhn's augmenting-path matching: iterate lenses in LENS_NAMES order;
+ *     for each lens, DFS through candidates (in preference order) looking for a
+ *     free role or an augmenting path through an already-matched lens.
+ *  3. If all five lenses are covered → return the binding (passes
+ *     validateLensRoleBinding by construction).
+ *  4. If any lens is uncovered → throw `LensJudgeUnavailableError` naming the
+ *     FIRST uncovered lens in LENS_NAMES order.
+ *
+ * This is the only correct approach for the default roster: greedy first-match
+ * fails because structure and discipline share planner/generalist-reviewer as
+ * fallbacks and collide. The augmenting-path search resolves conflicts by
+ * reassigning an already-matched lens to a different candidate when doing so
+ * frees a slot for the current lens.
+ *
+ * Exported for unit testing.
+ */
+export function resolveLensRoleBinding(hiredRoles: string[]): LensRoleBinding {
+  const hiredSet = new Set(hiredRoles);
+
+  // Build adjacency: per-lens candidate list filtered to hired roles.
+  const adjacency: Record<LensName, string[]> = {} as Record<LensName, string[]>;
+  for (const lens of LENS_NAMES) {
+    adjacency[lens] = LENS_CANDIDATES[lens].filter((r) => hiredSet.has(r));
+  }
+
+  // matchRole: role → the lens currently assigned to it (or null).
+  const matchRole = new Map<string, LensName>();
+  // matchLens: lens → the role currently assigned to it (or null).
+  const matchLens = new Map<LensName, string>();
+
+  /**
+   * Kuhn's DFS: attempt to find an augmenting path starting from `lens`.
+   * `visited` tracks which roles have already been considered in this outer
+   * iteration so we don't cycle.
+   */
+  function tryAugment(lens: LensName, visited: Set<string>): boolean {
+    for (const role of adjacency[lens]) {
+      if (visited.has(role)) continue;
+      visited.add(role);
+
+      const currentLens = matchRole.get(role);
+      if (currentLens === undefined || tryAugment(currentLens, visited)) {
+        // Free slot or successfully re-routed the existing occupant.
+        matchRole.set(role, lens);
+        matchLens.set(lens, role);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Run matching for each lens in LENS_NAMES order.
+  for (const lens of LENS_NAMES) {
+    const visited = new Set<string>();
+    tryAugment(lens, visited);
+  }
+
+  // Check coverage: all five lenses must be matched.
+  for (const lens of LENS_NAMES) {
+    if (!matchLens.has(lens)) {
+      throw new LensJudgeUnavailableError({ lens });
+    }
+  }
+
+  // Build the LensRoleBinding.
+  const binding = {} as LensRoleBinding;
+  for (const lens of LENS_NAMES) {
+    binding[lens] = matchLens.get(lens)!;
+  }
+
+  // Paranoia check: the result must pass full validation (total + injective).
+  validateLensRoleBinding(binding);
+
+  return binding;
+}
 
 // ---------------------------------------------------------------------------
 // MCP-registered halves

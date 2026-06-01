@@ -46,6 +46,7 @@ import { blockOrphanNoTranscript } from "./block-orphan-no-transcript.js";
 import { writeLensVerdict, aggregateJudgePanel, DEFAULT_LENS_ROLES } from "./judge-panel.js";
 import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
+import { resolveLensRoles } from "./resolve-lens-roles.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -2205,6 +2206,54 @@ export function registerAllTools(server) {
                     round: parsed.round ?? 1,
                     k: parsed.k ?? DEFAULT_ADJUDICATION_K,
                 });
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — resolveLensRoles: read-only auto-staffing
+    // seam. Enumerates the live hired roster (same source as getTeamSnapshot) and returns
+    // the deterministic lens→role binding via resolveLensRoleBinding (bipartite matching).
+    // Registered here (MCP) AND in the CLI TOOLS map so it is callable on the no-MCP
+    // drain/gate path: node dist/cli.js resolveLensRoles --json '{"targetRepoRoot":"..."}'.
+    // Throws LensJudgeUnavailableError when the roster cannot staff all five distinct judges.
+    server.registerTool({
+        name: "resolveLensRoles",
+        description: "Resolve the deterministic lens→role binding from the live hired roster (Story FU2). " +
+            "Reads <targetRepoRoot>/team/ to enumerate hired roles (same source as getTeamSnapshot), " +
+            "then runs maximum bipartite matching (Kuhn's algorithm) with per-lens ordered candidate " +
+            "preference lists to assign all five lenses to five DISTINCT hired roles — preferring a " +
+            "specialist for a lens when one is on the team. Returns { lensRoles, hiredRoles }. " +
+            "Throws LensJudgeUnavailableError (naming the first uncovered lens) when the roster is " +
+            "too small or too narrow to staff all five distinct judges. " +
+            "Read-only: does NOT mutate state. Used by both the interactive /crew:judge skill and " +
+            "the unattended gate-1.workflow.js (via the CLI seam) so no operator ever hand-picks " +
+            "judge assignments.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

@@ -65,18 +65,26 @@ log(`gate-1 session=${SU} repo=${REPO} ref=${REF}`)
 // ---------------------------------------------------------------------------
 phase('mint')
 
-// Fetch the team snapshot to resolve the lens→role binding from the hired roster.
-// We use DEFAULT_LENS_ROLES as the binding; if any role is missing from the roster
-// we surface it verbatim (aggregateJudgePanel will throw LensJudgeUnavailableError).
-// Default binding: structure→architect, verifiability→test-specialist,
-// discipline→generalist-reviewer, domain→generalist-dev, considered→retro-analyst.
-const lensRoles = {
-  structure: 'architect',
-  verifiability: 'test-specialist',
-  discipline: 'generalist-reviewer',
-  domain: 'generalist-dev',
-  considered: 'retro-analyst',
+// Resolve the lens→role binding from the live hired roster via the deterministic
+// resolveLensRoles seam (Story FU2). Uses maximum bipartite matching so the binding
+// is always injective (five distinct roles), preferring a specialist per lens when one
+// is hired. Throws LensJudgeUnavailableError (surfaced as resolve-lens-roles-failed)
+// when the roster is too small to staff all five judges. retryable=true: read-only.
+const lensRolesResult = await seam(
+  `node ${CLI} resolveLensRoles --json '${J({ targetRepoRoot: REPO })}'`,
+  'resolve-lens-roles',
+  true,
+)
+if (!lensRolesResult || lensRolesResult._parseError || lensRolesResult.error) {
+  return {
+    error: 'resolve-lens-roles-failed',
+    detail: lensRolesResult?._parseError || lensRolesResult?.error || 'unknown',
+    sessionUlid: SU,
+    ref: REF,
+  }
 }
+const lensRoles = lensRolesResult.lensRoles
+log(`lens→role binding resolved: ${JSON.stringify(lensRoles)}`)
 
 // Fetch the draft's spec text from the backlog inventory. We also extract the
 // persisted riskTier from the manifest if present (Story 10.4 single source of truth).
