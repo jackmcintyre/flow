@@ -452,3 +452,51 @@ export async function listDirtyPaths(opts) {
     }
     return out.filter((p) => !p.startsWith(".crew/state/") && p !== ".crew/state");
 }
+// ---------------------------------------------------------------------------
+// stashWorkingTree (Epic 10 drain fix-plan — Fix 2b, clean-root guard)
+// ---------------------------------------------------------------------------
+/**
+ * Stash the working-tree changes at `cwd` onto the stash stack, non-destructively.
+ *
+ * Used by the drain's clean-root guard (`guardCleanRoot`): when the orchestrating
+ * root checkout is unexpectedly dirty after a story — the `bgIsolation: "none"`
+ * leak, where the dev's edits land in the shared root instead of its own worktree
+ * (Epic 10 drain retro, Issue B) — the guard stashes the leaked edits so the NEXT
+ * story's worktree is still cut from a clean base. A stash is fully recoverable
+ * (`git stash list` / `git stash pop`), so this turns a silent leak into a
+ * visible, safe one rather than discarding work.
+ *
+ * When `paths` is given, ONLY those pathspecs are stashed (`git stash push -- <p>`),
+ * leaving everything else untouched. `-u` includes untracked files so a leaked new
+ * file is captured too. (`.crew/**` is gitignored in this repo, so operational
+ * state — ledger, telemetry, sessions — is never seen by `git status` and never
+ * stashed; the caller's `listDirtyPaths` additionally drops `.crew/state/**`.)
+ *
+ * A `git stash` in the root operates on the root's own index/working-tree only —
+ * sibling git worktrees keep their separate state — so a guard call is safe to run
+ * between concurrent stories.
+ *
+ * Returns `{ stashed }` — false when git reports nothing to stash (a benign race
+ * where the dirty set cleared between detection and the stash, or a transient
+ * index-lock collision). Best-effort: a non-zero exit returns `stashed: false` so
+ * a guard call can never break the drain.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ */
+export async function stashWorkingTree(opts) {
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const args = ["-C", opts.cwd, "stash", "push", "-u"];
+    if (opts.message)
+        args.push("-m", opts.message);
+    if (opts.paths && opts.paths.length > 0)
+        args.push("--", ...opts.paths);
+    const result = await execaImpl("git", args, { reject: false });
+    const exitCode = result.exitCode ?? 1;
+    const stdout = typeof result.stdout === "string" ? result.stdout : "";
+    const stderr = typeof result.stderr === "string" ? result.stderr : "";
+    // `git stash push` exits 0 and prints "No local changes to save" when there is
+    // nothing to stash; a real stash prints "Saved working directory ...".
+    const stashed = exitCode === 0 && !/No local changes to save/i.test(stdout);
+    return { stashed, stdout, stderr };
+}

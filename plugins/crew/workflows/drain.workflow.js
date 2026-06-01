@@ -155,6 +155,31 @@ const notifyHumanNeeded = (ref, question) => {
   }
 }
 
+// CLEAN-ROOT GUARD (Epic 10 drain fix-plan, Fix 2b): the dev edits inside its OWN
+// per-story worktree (Story 8.20), so the orchestrating root checkout should stay
+// clean. But in a BACKGROUND job the repo's `worktree.bgIsolation: "none"` setting
+// can suppress that isolation, pinning the dev's edits to the shared root instead
+// (Epic 10 drain retro, Issue B — observed mid-10.2, recurred 0/5 across the
+// batch). After each story settles we ask the guard tool whether the root carries
+// any leaked tracked changes (operational `.crew/**` is gitignored, so only a real
+// source leak shows); if so it stashes exactly those paths non-destructively
+// (recoverable via `git stash`) so the NEXT story's worktree is still cut from a
+// clean base, and we log a LOUD warning here. This converts a silent leak into a
+// visible, safe one — it does not pretend to make concurrent drains under a broken
+// isolation flag correct. Read-mostly + idempotent (a second call after a stash
+// finds the root clean), so retryable; a garbled relay never breaks the run.
+const guardRoot = async (ref) => {
+  const g = await seam(`node ${CLI} guardCleanRoot --json '${J({ targetRepoRoot: REPO, ref })}'`, `clean-root-guard:${ref}`, true)
+  if (g && !g._parseError && g.dirty) {
+    const paths = Array.isArray(g.paths) ? g.paths : []
+    const shown = paths.slice(0, 8).join(', ')
+    const more = paths.length > 8 ? `, +${paths.length - 8} more` : ''
+    log(`⚠ CLEAN-ROOT GUARD: root checkout was dirty after ${ref} — ${paths.length} leaked path(s): ${shown}${more}. ` +
+      `${g.stashed ? 'Auto-stashed (recover via `git stash list` / `git stash pop`).' : 'STASH DID NOT LAND — root still dirty; inspect manually.'} ` +
+      `Likely a worktree-isolation leak (bgIsolation:'none').`)
+  }
+}
+
 phase('drain')
 if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli'], got: Object.keys(A) }
 
@@ -354,6 +379,7 @@ for (const o of orphans) {
   resumed.push({ ref, mode, attempt: re.resumeAttempts })
   log(`resuming orphan ${ref} (${mode}, attempt ${re.resumeAttempts})`)
   await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume' })
+  await guardRoot(ref)
 }
 
 // ── MAIN DRAIN (concurrent — Story 8.22) ────────────────────────────────────
@@ -424,6 +450,9 @@ async function drainWorker(workerId) {
       blocked.push({ ref, blocked_by: 'worker-threw', tail: msg, stackTail })
       log(`worker ${workerId} story ${ref} threw — bucketed blocked (${msg.slice(0, 120)}), run continues`)
     }
+    // CLEAN-ROOT GUARD (Fix 2b): runs whether the story settled or threw, so a
+    // leaked-then-crashed story still can't leave the root dirty for the next claim.
+    await guardRoot(ref)
   }
 }
 

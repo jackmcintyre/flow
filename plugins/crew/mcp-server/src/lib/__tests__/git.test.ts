@@ -9,6 +9,7 @@ import {
   gitCreateBranch,
   gitPush,
   gitCommit,
+  stashWorkingTree,
   CONVENTIONAL_COMMIT_TYPES,
 } from "../git.js";
 import {
@@ -313,5 +314,65 @@ describe("gitCommit — conventional shape (Task 2.3)", () => {
       "build", "ci", "perf", "style", "revert",
     ];
     expect([...CONVENTIONAL_COMMIT_TYPES].sort()).toEqual(expected.sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stashWorkingTree (Epic 10 drain fix-plan — Fix 2b, clean-root guard)
+// ---------------------------------------------------------------------------
+
+describe("stashWorkingTree", () => {
+  it("scopes the stash to the given pathspecs, includes untracked (-u), and labels it", async () => {
+    const spy = vi.fn(async () => ({
+      stdout: "Saved working directory and index state WIP on main: abc123",
+      stderr: "",
+      exitCode: 0,
+    }));
+    const result = await stashWorkingTree({
+      cwd: "/tmp/repo",
+      paths: ["src/a.ts", "src/b.ts"],
+      message: "crew-drain clean-root guard: native:01ABC",
+      execaImpl: spy as unknown as Parameters<typeof stashWorkingTree>[0]["execaImpl"],
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]).toEqual([
+      "git",
+      [
+        "-C", "/tmp/repo", "stash", "push", "-u",
+        "-m", "crew-drain clean-root guard: native:01ABC",
+        "--", "src/a.ts", "src/b.ts",
+      ],
+      { reject: false },
+    ]);
+    expect(result.stashed).toBe(true);
+  });
+
+  it("reports stashed:false when git says there is nothing to stash", async () => {
+    const spy = vi.fn(async () => ({
+      stdout: "No local changes to save",
+      stderr: "",
+      exitCode: 0,
+    }));
+    const result = await stashWorkingTree({
+      cwd: "/tmp/repo",
+      paths: ["src/a.ts"],
+      execaImpl: spy as unknown as Parameters<typeof stashWorkingTree>[0]["execaImpl"],
+    });
+    expect(result.stashed).toBe(false);
+  });
+
+  it("reports stashed:false on a non-zero exit (best-effort, never throws)", async () => {
+    const spy = vi.fn(async () => ({
+      stdout: "",
+      stderr: "fatal: Unable to create '.git/index.lock': File exists.",
+      exitCode: 128,
+    }));
+    const result = await stashWorkingTree({
+      cwd: "/tmp/repo",
+      paths: ["src/a.ts"],
+      execaImpl: spy as unknown as Parameters<typeof stashWorkingTree>[0]["execaImpl"],
+    });
+    expect(result.stashed).toBe(false);
+    expect(result.stderr).toContain("index.lock");
   });
 });

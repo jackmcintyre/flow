@@ -5,11 +5,14 @@
 > invocation from the workflow source each time.
 
 This runbook walks the end-to-end operator flow for the `crew-drain` workflow
-(`plugins/crew/workflows/drain.workflow.js`). The drain is a serial,
-single-story-at-a-time loop: for each story it claims the next ready story,
-runs the generalist-dev to implement it and open a PR, runs the reviewer,
-derives a verdict, and runs the auto-merge gate. It does this entirely through
-one-shot CLI seams, so no persistent MCP server sits on the drain path.
+(`plugins/crew/workflows/drain.workflow.js`). For each story the drain claims the
+next ready story, runs the generalist-dev to implement it and open a PR, runs the
+reviewer, derives a verdict, and runs the auto-merge gate. It does this entirely
+through one-shot CLI seams, so no persistent MCP server sits on the drain path.
+The main loop runs up to `maxConcurrency` stories at once (Story 8.22, default 2);
+each dev works inside its **own per-story git worktree** (Story 8.20), so
+concurrent devs never cross-contaminate edits. It also recovers crash-orphaned
+stories left by a prior run before claiming new work.
 
 ## 1. Queue the stories
 
@@ -25,10 +28,16 @@ stories. Before you launch it, get the stories you want drained into that queue:
    writes one execution manifest per story into `.crew/state/to-do/`. Only
    stories that land in `to-do/` are claimable by the drain. `/crew:scan` is
    idempotent — re-running it is safe and only picks up new or changed stories.
+3. **Bless the stories with `/crew:ready`.** Scanned stories land in `to-do/` as
+   **not ready**. The readiness brake (Story 9.1) is fail-closed: the drain claims
+   **nothing** until you bless it. Mark each story you want drained as `ready` via
+   `/crew:ready` (the underlying `markStoryReady` is also a one-shot CLI seam, so
+   the same bless works mid-drain when the MCP server is down). A scan→launch with
+   no bless drains zero stories — that is the brake working, not a bug.
 
-After the scan, confirm the manifests are present (`.crew/state/to-do/`) before
-launching. A story whose dependencies are not yet in `.crew/state/done/` will
-not be claimed until those deps complete.
+After blessing, confirm the manifests are present (`.crew/state/to-do/`) and
+`ready` before launching. A story whose dependencies are not yet in
+`.crew/state/done/` will not be claimed until those deps complete.
 
 ## 2. Launch the drain
 
@@ -39,6 +48,7 @@ Run the `crew-drain` workflow via the Workflow tool. It takes three inputs:
 | `targetRepoRoot` | yes | Absolute path to the repo being built (the repo whose stories you are draining). |
 | `cli` | yes | Absolute path to the plugin's compiled CLI entrypoint, `mcp-server/dist/cli.js`. This is the stateless seam transport and lives in the **plugin**, not the target repo. |
 | `maxStories` | no | A positive-integer safety cap on stories claimed this run. Omit it to drain until the queue is empty. See [§3](#3-unattended-walk-away-mode-vs-the-safety-cap). |
+| `maxConcurrency` | no | How many stories the main loop runs at once (Story 8.22). Default 2; set `1` for the historical strictly-serial loop. Per-dev worktree isolation (8.20) makes >1 safe. |
 
 The workflow `args` are delivered as a JSON string. A typical launch passes:
 
@@ -97,27 +107,46 @@ lands in exactly one bucket of the return object:
 - `blocked` — the dev or reviewer could not finish cleanly; the ref carries a
   `blocked_by` reason.
 
+### Who merges a `needs-human` PR
+
+**The drain never merges a paused PR.** The auto-merge gate merges a PR **only**
+when it is low-risk **and** the agreement threshold is met **and** CI is green;
+every other outcome applies the `needs-human` label and routes the ref to
+`pausedForHuman` — the drain does not run `gh pr merge` on it. In a truly
+unattended ("walk-away") run, **you merge the `pausedForHuman` PRs yourself** when
+you return; the loop will not, and an agent acting on your behalf should not merge
+a `needs-human`-labelled PR either. (The `needs-human` label is the permanent,
+correct record that a human review was required — leave it in place; do not strip
+it on merge.) This is the safe default for unattended runs: the drain ships only
+what it is allowed to ship hands-off and parks the rest for you.
+
 ## 4. After the run
 
-The drain runs the generalist-dev **directly in `targetRepoRoot`** — it does
-**not** use an isolated worktree. (In v1 the loop is single-story serial, so the
-dev's `runDevTerminalAction` infers the repo from the current working directory;
-a worktree would mismatch and the changes would land where `git -C
-targetRepoRoot` can't see them.) The practical consequence: when the drain
-finishes, **your local checkout is left on the last story's branch**, not on
-`dev`.
+Each dev works inside its **own per-story git worktree** (Story 8.20), so the
+orchestrating checkout at `targetRepoRoot` is **not** moved onto a story branch —
+it stays where you left it (normally `main`), and the worktrees are reaped at the
+end of the run. So unlike the old serial loop, you are **not** left stranded on
+the last story's leftover branch.
+
+> **One caveat for background runs.** If this repo's
+> `worktree.bgIsolation: "none"` setting suppresses the per-agent worktree in a
+> background job, a dev's edits can leak into the shared `targetRepoRoot` checkout.
+> The drain's **clean-root guard** detects that after each story and
+> **non-destructively stashes** the leaked paths (recoverable via `git stash list`
+> / `git stash pop`), logging a loud `CLEAN-ROOT GUARD` warning. If you see that
+> warning in the run log, check `git stash list` before reconciling.
 
 To reconcile after a run:
 
 1. **Return to the trunk and pull:**
 
    ```sh
-   git checkout dev && git pull
+   git checkout main && git pull
    ```
 
-   This moves you off the last story's leftover branch and pulls down the PRs
-   that merged during the drain (and any human merges you completed for the
-   `pausedForHuman` set).
+   This pulls down the PRs that merged during the drain (and any human merges you
+   completed for the `pausedForHuman` set). If a `CLEAN-ROOT GUARD` warning fired,
+   inspect `git stash list` first.
 
 2. **Mark the drained stories `done` in the sprint-status tracker.** Edit
    `_bmad-output/implementation-artifacts/sprint-status.yaml` and set each
