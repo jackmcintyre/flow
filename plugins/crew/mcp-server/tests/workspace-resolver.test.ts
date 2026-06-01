@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { parse as yamlParse } from "yaml";
 import { resolveWorkspace } from "../src/state/workspace-resolver.js";
+import { adapters as registryAdapters } from "../src/adapters/registry.js";
 import type { PlanningAdapter, SourceStory } from "../src/adapters/adapter.js";
 import {
   AmbiguousAdapterError,
@@ -255,6 +256,113 @@ describe("resolveWorkspace", () => {
       const matches = resolverSrc.match(/"_bmad-output\/planning-artifacts\/stories"/g);
       expect(matches).not.toBeNull();
       expect(matches!.length).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Story 10.6 AC3 — the cutover is reversible up to the flip. Both adapters
+  // remain registered and coexist; native is additive. Flipping
+  // `.crew/config.yaml` back to `adapter: bmad` restores BMad as the active
+  // adapter, and the BMad parser remains available as an ingest on-ramp after
+  // cutover (it is demoted, not removed). Uses the LIVE registry (not stubs) so
+  // the test pins the real coexistence.
+  // -------------------------------------------------------------------------
+  describe("Story 10.6 AC3 — reversible cutover; both adapters coexist in the live registry", () => {
+    beforeEach(() => {
+      resetBmadAdapter();
+    });
+    afterEach(() => {
+      resetBmadAdapter();
+    });
+
+    it("both bmad and native are registered and coexist (native is additive, not a replacement)", () => {
+      const names = registryAdapters.map((a) => a.name);
+      expect(names).toContain("bmad");
+      expect(names).toContain("native");
+    });
+
+    async function writeRepoWithAdapter(adapter: "native" | "bmad"): Promise<string> {
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), `wsres-cutover-${adapter}-`));
+      tmpDirs.push(tmp);
+      const crewDir = path.join(tmp, ".crew");
+      await fs.mkdir(crewDir, { recursive: true });
+      if (adapter === "native") {
+        await fs.writeFile(
+          path.join(crewDir, "config.yaml"),
+          "adapter: native\nadapter_config: {}\nplugin: {}\n",
+          "utf8",
+        );
+      } else {
+        await fs.writeFile(
+          path.join(crewDir, "config.yaml"),
+          "adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\nplugin: {}\n",
+          "utf8",
+        );
+      }
+      return tmp;
+    }
+
+    it("flipping config to native binds the native adapter; flipping back to bmad restores bmad as live", async () => {
+      // After cutover: adapter: native → native is the live adapter.
+      const tmp = await writeRepoWithAdapter("native");
+      const ws1 = await resolveWorkspace({ targetRepoRoot: tmp });
+      expect(ws1.activeAdapterName).toBe("native");
+      expect(ws1.activeAdapter.name).toBe("native");
+
+      // Reversibility: flip the SAME repo's config back to bmad.
+      await fs.writeFile(
+        path.join(tmp, ".crew", "config.yaml"),
+        "adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\nplugin: {}\n",
+        "utf8",
+      );
+      const ws2 = await resolveWorkspace({ targetRepoRoot: tmp });
+      expect(ws2.activeAdapterName).toBe("bmad");
+      expect(ws2.activeAdapter.name).toBe("bmad");
+    });
+
+    it("after cutover the BMad parser is still an available ingest on-ramp (demoted, not removed)", async () => {
+      // The repo is native-primary (post-cutover), but the BMad adapter is still
+      // in the registry and its parser still works — it is the ingest on-ramp.
+      const bmadAdapter = registryAdapters.find((a) => a.name === "bmad")!;
+      expect(bmadAdapter).toBeDefined();
+
+      // Build a BMad-shaped repo and parse a story through the still-registered
+      // adapter to prove the parser is reachable, not stripped, after cutover.
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "wsres-cutover-ingest-"));
+      tmpDirs.push(tmp);
+      const storiesDir = path.join(tmp, "_bmad-output", "planning-artifacts", "stories");
+      await fs.mkdir(storiesDir, { recursive: true });
+      await fs.writeFile(
+        path.join(storiesDir, "9-9-ingest-story.md"),
+        [
+          "# Story 9.9: Ingest on-ramp story",
+          "",
+          "Status: ready-for-dev",
+          "",
+          "## Story",
+          "",
+          "As a **BMad story**,",
+          "I want **to remain parseable after cutover**,",
+          "so that **the ingest on-ramp still works**.",
+          "",
+          "## Acceptance Criteria",
+          "",
+          "**AC1 (integration):**",
+          "**Given** this fixture,",
+          "**When** the BMad parser runs,",
+          "**Then** a SourceStory is returned.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      // Bind the BMad adapter's context (as resolveWorkspace would) and parse.
+      const { configureBmadAdapter } = await import("../src/adapters/bmad/index.js");
+      configureBmadAdapter({
+        targetRepo: tmp,
+        storiesRoot: "_bmad-output/planning-artifacts/stories",
+      });
+      const stories = await bmadAdapter.listSourceStories();
+      expect(stories.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
