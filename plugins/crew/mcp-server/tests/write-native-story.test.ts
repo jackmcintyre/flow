@@ -44,6 +44,16 @@ const SOURCE_STORY_REQUIRED_KEYS = [
 
 let scratch: string;
 
+/**
+ * Seed a repo-relative file under `scratch` so a Story 10.3 T0-5 cited-source
+ * resolvability check passes (cited sources must resolve at write time).
+ */
+async function seedCited(relPath: string): Promise<void> {
+  const abs = path.join(scratch, relPath);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.writeFile(abs, "// seeded for resolvability\n");
+}
+
 beforeEach(async () => {
   scratch = await fs.mkdtemp(path.join(os.tmpdir(), "crew-native-integ-"));
 
@@ -55,6 +65,19 @@ beforeEach(async () => {
   );
   // Create the native-stories directory so detect() returns true.
   await fs.mkdir(path.join(scratch, ".crew", "native-stories"), { recursive: true });
+  // Story 10.3 — writeNativeStory now resolves cited_sources on disk. Seed every
+  // cited path the tests below reference so those writes are not (correctly)
+  // rejected. All verification targets in this file are `vitest:` (not
+  // existence-checked), so only cited sources need seeding.
+  for (const rel of [
+    "src/settings/theme.ts",
+    "src/account/order-history.ts",
+    "src/auth/sign-up.ts",
+    "src/profile/profile.ts",
+    "src/checkout/payment.ts",
+  ]) {
+    await seedCited(rel);
+  }
 });
 
 afterEach(async () => {

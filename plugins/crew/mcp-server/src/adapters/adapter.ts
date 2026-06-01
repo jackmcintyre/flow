@@ -64,13 +64,43 @@ export type AC = {
 
 /**
  * A single planning-discipline rule violation found by
- * `validateAgainstDiscipline`. Story 3.5 will widen `code` to cover its
- * full enforcement enumeration; the union is intentionally narrow here so
- * Story 3.5 can add new string-literal members without breaking existing
+ * `validateAgainstDiscipline`. The union grows additively as new Tier-0 checks
+ * land — new string-literal members can be added without breaking existing
  * callers.
+ *
+ * Story 3.5 codes: `missing-integration-ac`, `implicit-depends-on`,
+ * `missing-ship-gate`.
+ *
+ * Story 5.13 code: `deps-drift-prose-vs-manifest` (scan-only — prose deps and
+ * the manifest's `depends_on` set disagree).
+ *
+ * Story 10.3 — the four remaining Tier-0 checks, gated to native/enriched
+ * stories (a BMad story is never failed by them, see
+ * `validateStoryAgainstDiscipline`):
+ *   - `missing-verification` (T0-2): an AC has no `verification` block.
+ *   - `task-ac-ref-unresolved` (T0-1): a task has no `ac_ref`, or one names an
+ *     AC the story does not declare.
+ *   - `missing-cited-sources` (T0-5): `cited_sources` is empty/absent.
+ *   - `unresolvable-cited-source` (T0-5): a cited-source path does not resolve
+ *     on disk (a disk check — scan/write paths only).
+ *   - `invalid-verification-target` (T0-6): a `verification.target` is not a
+ *     well-formed path (e.g. an invented flag like `vitest --grep …`).
+ *   - `unresolvable-verification-target` (T0-6): an `artifact:` target does not
+ *     resolve on disk (a disk check; `vitest:` targets are shape-checked only —
+ *     the build creates that test file, so it need not pre-exist).
  */
 export type DisciplineViolationReason = {
-  code: "missing-integration-ac" | "implicit-depends-on" | "missing-ship-gate";
+  code:
+    | "missing-integration-ac"
+    | "implicit-depends-on"
+    | "missing-ship-gate"
+    | "deps-drift-prose-vs-manifest"
+    | "missing-verification"
+    | "task-ac-ref-unresolved"
+    | "missing-cited-sources"
+    | "unresolvable-cited-source"
+    | "invalid-verification-target"
+    | "unresolvable-verification-target";
   field: string;
   detail: string;
 };

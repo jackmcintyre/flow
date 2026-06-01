@@ -5,16 +5,35 @@
  * are constructed inline.
  */
 import { describe, it, expect } from "vitest";
-import { validateStoryAgainstDiscipline, validateBacklogAgainstDiscipline, STATE_MUTATING_GLOBS, STATE_MUTATING_TOKEN_RE, } from "../planning-discipline.js";
+import { validateStoryAgainstDiscipline, validateBacklogAgainstDiscipline, isEnrichedStory, STATE_MUTATING_GLOBS, STATE_MUTATING_TOKEN_RE, } from "../planning-discipline.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+/**
+ * Build a Tier-0-COMPLIANT native story by default. Story 10.3 added the pure
+ * T0-2 (every AC has a `verification` block) and T0-1 (every task maps to a real
+ * AC) checks, gated to native/enriched stories (`native:` ref). The default
+ * therefore carries a verification block and one task so a story with no
+ * intended violation still passes — individual tests override `acceptance_criteria`
+ * / `tasks` to exercise a specific failure.
+ *
+ * The legacy state-mutating / implicit-depends-on tests pass `ref: "bmad:…"`
+ * (or rely on the absent-fields gate) where they want the new checks NOT to
+ * fire; tests that exercise the new checks keep the `native:` ref.
+ */
 function makeStory(overrides = {}) {
     return {
         ref: "native:TESTULIDPLACEHOLDERX01",
         title: "Test story",
         narrative: "As a user, I want something, so that I am happy.",
-        acceptance_criteria: [{ text: "Given ... When ... Then ...", kind: "unit" }],
+        acceptance_criteria: [
+            {
+                text: "Given ... When ... Then ...",
+                kind: "unit",
+                verification: { type: "vitest", target: "src/__tests__/x.test.ts" },
+            },
+        ],
+        tasks: [{ text: "Do the thing", ac_refs: ["AC1"] }],
         depends_on: [],
         implementation_notes: undefined,
         raw_path: "/fake/path/story.md",
@@ -100,7 +119,15 @@ describe("validateStoryAgainstDiscipline — state-mutating heuristic negative c
         const story = makeStory({
             narrative: "As a reader, I want clear documentation.",
             implementation_notes: "Update the README introduction paragraph.",
-            acceptance_criteria: [{ text: "The docs are readable.", kind: "unit" }],
+            // Carry a verification block so the Story 10.3 T0-2 check (native stories)
+            // does not fire — this test isolates the legacy state-mutating heuristic.
+            acceptance_criteria: [
+                {
+                    text: "The docs are readable.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/docs.test.ts" },
+                },
+            ],
         });
         const result = validateStoryAgainstDiscipline(story);
         expect(result).toBe(story); // pass = original object returned
@@ -143,8 +170,16 @@ describe("validateStoryAgainstDiscipline — missing-integration-AC detection", 
         const story = makeStory({
             implementation_notes: "Edit scan-sources.ts to extend the discipline path.",
             acceptance_criteria: [
-                { text: "Unit test coverage.", kind: "unit" },
-                { text: "Integration path exercised end-to-end.", kind: "integration" },
+                {
+                    text: "Unit test coverage.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/a.test.ts" },
+                },
+                {
+                    text: "Integration path exercised end-to-end.",
+                    kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/b.integration.test.ts" },
+                },
             ],
         });
         const result = validateStoryAgainstDiscipline(story);
@@ -158,7 +193,13 @@ describe("validateStoryAgainstDiscipline — missing-integration-AC detection", 
     it("non-state-mutating story without integration AC passes", () => {
         const story = makeStory({
             narrative: "As a reader, I want documentation.",
-            acceptance_criteria: [{ text: "Docs are present.", kind: "unit" }],
+            acceptance_criteria: [
+                {
+                    text: "Docs are present.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/docs.test.ts" },
+                },
+            ],
         });
         const result = validateStoryAgainstDiscipline(story);
         expect(result).toBe(story);
@@ -171,7 +212,13 @@ describe("validateStoryAgainstDiscipline — stateMutating override", () => {
     it("override false suppresses integration-AC check even on a heuristic-positive story", () => {
         const story = makeStory({
             implementation_notes: "Edit scan-sources.ts",
-            acceptance_criteria: [{ text: "Unit tests only.", kind: "unit" }],
+            acceptance_criteria: [
+                {
+                    text: "Unit tests only.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/a.test.ts" },
+                },
+            ],
         });
         const result = validateStoryAgainstDiscipline(story, { stateMutating: false });
         expect(result).toBe(story);
@@ -311,6 +358,146 @@ describe("validateBacklogAgainstDiscipline — ship-gate detection", () => {
         if ("violations" in result) {
             expect(result.violations.every((v) => v.code !== "missing-ship-gate")).toBe(true);
         }
+    });
+});
+// ---------------------------------------------------------------------------
+// Story 10.3 AC2 — pure T0-2 (every AC has verification) and T0-1 (every task
+//   maps to a real AC), gated to native/enriched stories. A BMad story (or any
+//   story whose enriched fields are absent + bmad: ref) is NOT failed by them.
+// ---------------------------------------------------------------------------
+describe("validateStoryAgainstDiscipline — Story 10.3 T0-2 (every AC has verification)", () => {
+    it("native story with an AC missing its verification block fails with missing-verification naming the AC", () => {
+        const story = makeStory({
+            acceptance_criteria: [
+                {
+                    text: "AC1 has verification.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/a.test.ts" },
+                },
+                // Second AC omits verification → T0-2 fires, naming AC2.
+                { text: "AC2 omits verification.", kind: "integration" },
+            ],
+        });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toMatchObject({
+            kind: "discipline-violation",
+            violations: expect.arrayContaining([
+                expect.objectContaining({
+                    code: "missing-verification",
+                    detail: expect.stringContaining("AC2"),
+                }),
+            ]),
+        });
+    });
+    it("native story whose every AC has a verification block does not raise missing-verification", () => {
+        const story = makeStory(); // default carries a verification block on AC1
+        const result = validateStoryAgainstDiscipline(story);
+        if ("violations" in result) {
+            expect(result.violations.some((v) => v.code === "missing-verification")).toBe(false);
+        }
+    });
+    it("accumulates one missing-verification per offending AC (does not short-circuit)", () => {
+        const story = makeStory({
+            acceptance_criteria: [
+                { text: "AC1 no verification.", kind: "unit" },
+                { text: "AC2 no verification.", kind: "unit" },
+            ],
+        });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toMatchObject({ kind: "discipline-violation" });
+        if ("violations" in result) {
+            expect(result.violations.filter((v) => v.code === "missing-verification")).toHaveLength(2);
+        }
+    });
+});
+describe("validateStoryAgainstDiscipline — Story 10.3 T0-1 (every task maps to a real AC)", () => {
+    it("native story with a task whose ac_refs is empty fails with task-ac-ref-unresolved", () => {
+        const story = makeStory({
+            tasks: [{ text: "Orphan task", ac_refs: [] }],
+        });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toMatchObject({
+            kind: "discipline-violation",
+            violations: expect.arrayContaining([
+                expect.objectContaining({ code: "task-ac-ref-unresolved" }),
+            ]),
+        });
+    });
+    it("native story with a task referencing a non-existent AC fails, naming the dangling ref", () => {
+        const story = makeStory({
+            // Story declares AC1 only; task names AC5 which does not resolve.
+            tasks: [{ text: "Dangling", ac_refs: ["AC5"] }],
+        });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toMatchObject({
+            kind: "discipline-violation",
+            violations: expect.arrayContaining([
+                expect.objectContaining({
+                    code: "task-ac-ref-unresolved",
+                    detail: expect.stringContaining("AC5"),
+                }),
+            ]),
+        });
+    });
+    it("native story with no tasks at all fails with task-ac-ref-unresolved", () => {
+        const story = makeStory({ tasks: undefined });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toMatchObject({
+            kind: "discipline-violation",
+            violations: expect.arrayContaining([
+                expect.objectContaining({ code: "task-ac-ref-unresolved", field: "tasks" }),
+            ]),
+        });
+    });
+    it("native story whose tasks all resolve to declared ACs does not raise task-ac-ref-unresolved", () => {
+        const story = makeStory({
+            acceptance_criteria: [
+                {
+                    text: "AC1.",
+                    kind: "unit",
+                    verification: { type: "vitest", target: "src/__tests__/a.test.ts" },
+                },
+                {
+                    text: "AC2.",
+                    kind: "integration",
+                    verification: { type: "vitest", target: "src/__tests__/b.test.ts" },
+                },
+            ],
+            tasks: [
+                { text: "Task one", ac_refs: ["AC1"] },
+                { text: "Task two", ac_refs: ["AC1", "AC2"] },
+            ],
+        });
+        const result = validateStoryAgainstDiscipline(story);
+        expect(result).toBe(story);
+    });
+});
+describe("validateStoryAgainstDiscipline — Story 10.3 AC2 non-regression: BMad stories are NOT failed by the new checks", () => {
+    it("a bmad: story with verification-less ACs and no tasks is NOT failed by T0-1/T0-2", () => {
+        // A BMad-shaped SourceStory: bmad: ref, ACs without verification, no tasks,
+        // no cited_sources — exactly what the BMad parser produces pre-ingest. The
+        // new checks must NOT fire (the live-backlog-outage guard).
+        const bmadStory = makeStory({
+            ref: "bmad:3.4",
+            acceptance_criteria: [
+                { text: "**Given** … **When** … **Then** …", kind: "unit" },
+                { text: "**Given** … **When** … **Then** …", kind: "integration" },
+            ],
+            tasks: undefined,
+            cited_sources: undefined,
+        });
+        const result = validateStoryAgainstDiscipline(bmadStory);
+        // No 10.3 codes present. (The story may still pass outright — it has an
+        // integration AC and no implicit refs — but assert the codes specifically.)
+        if ("violations" in result) {
+            const codes = result.violations.map((v) => v.code);
+            expect(codes).not.toContain("missing-verification");
+            expect(codes).not.toContain("task-ac-ref-unresolved");
+        }
+    });
+    it("isEnrichedStory is true only for native: refs", () => {
+        expect(isEnrichedStory(makeStory({ ref: "native:01HZDRF000000000000000009A" }))).toBe(true);
+        expect(isEnrichedStory(makeStory({ ref: "bmad:1.1" }))).toBe(false);
     });
 });
 // ---------------------------------------------------------------------------

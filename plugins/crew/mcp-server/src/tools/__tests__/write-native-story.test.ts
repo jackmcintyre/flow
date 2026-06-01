@@ -18,7 +18,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { DisciplineViolationError, MalformedNativeStoryError } from "../../errors.js";
+import { DisciplineViolationError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { parseNativeStory } from "../../adapters/native/parse-native-story.js";
 
@@ -33,6 +33,18 @@ async function listStoryFiles(): Promise<string[]> {
   }
 }
 
+/**
+ * Seed a repo-relative file under `root` so a Story 10.3 T0-5/T0-6 resolvability
+ * check (cited sources / `artifact:` targets must resolve at write time) passes.
+ */
+async function seedFile(relPath: string): Promise<void> {
+  // Route the write through the sanctioned atomicWriteFile seam so the static
+  // fs-write guard (canonical-fs-guard.test.ts) does not flag this test file
+  // for a raw write binding. The path is non-canonical (outside .crew/state/**)
+  // so no MCP tool context is required.
+  await atomicWriteFile(path.join(root, relPath), "// seeded for resolvability\n");
+}
+
 beforeEach(async () => {
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "crew-write-native-story-"));
   root = path.join(scratch, "workspace");
@@ -43,6 +55,22 @@ beforeEach(async () => {
     path.join(root, ".crew", "config.yaml"),
     `adapter: native\nadapter_config: {}\n`,
   );
+  // Story 10.3 — the write-time gate now resolves cited sources and `artifact:`
+  // verification targets on disk. Seed every path the passing-candidate fixtures
+  // below cite or reference as an artifact so those writes are not (correctly)
+  // rejected as unresolvable. `vitest:` targets are NOT seeded — they are
+  // shape-checked only (the build creates the test file).
+  for (const rel of [
+    "src/state/ledger.ts",
+    "src/ui/greeting.ts",
+    "src/feature/index.ts",
+    "src/parser.ts",
+    "docs/design.md",
+    "build/out/report.json",
+    "build/out.json",
+  ]) {
+    await seedFile(rel);
+  }
 });
 
 afterEach(async () => {
@@ -309,16 +337,21 @@ describe("writeNativeStory AC1 (Story 10.2) — tasks / cited_sources / narrativ
   });
 
   it("(b) refuses a write whose task ac_refs names a non-existent AC — naming the violation, nothing written", async () => {
-    // AC9 dangles: the story declares only AC1 and AC2. The pre-write round-trip
-    // through parseNativeStory rejects it with the dangling-ref reason.
+    // AC9 dangles: the story declares only AC1 and AC2. Story 10.3 moves this
+    // rejection earlier — the pure T0-1 check (`task-ac-ref-unresolved`) in the
+    // write-time discipline gate now catches the dangling ref BEFORE the
+    // parse round-trip, throwing a DisciplineViolationError that names AC9. Both
+    // paths reject and write nothing; the discipline gate is the Tier-0 seam.
     let caught: unknown;
     try {
       await writeNativeStory(candidate10_2({ tasks: [{ text: "Dangling", ac_refs: ["AC9"] }] }));
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(MalformedNativeStoryError);
-    expect((caught as MalformedNativeStoryError).reason).toMatch(/AC9.*does not resolve/);
+    expect(caught).toBeInstanceOf(DisciplineViolationError);
+    const violations = (caught as DisciplineViolationError).violations;
+    expect(violations.some((v) => v.code === "task-ac-ref-unresolved")).toBe(true);
+    expect(violations.some((v) => /AC9/.test(v.detail))).toBe(true);
     expect(await listStoryFiles()).toHaveLength(0);
   });
 
@@ -345,3 +378,109 @@ async function rejectionOf(input: unknown): Promise<unknown> {
   }
   throw new Error("expected writeNativeStory to reject, but it resolved");
 }
+
+// ---------------------------------------------------------------------------
+// Story 10.3 AC4 — writeNativeStory rejects native stories failing the
+//   writable-time Tier-0 checks (T0-5 cited sources resolve, the pure part of
+//   T0-6 reject invented flags), throwing DisciplineViolationError, nothing
+//   written. New-test-file `vitest:` targets are NOT existence-checked at write.
+// ---------------------------------------------------------------------------
+
+describe("writeNativeStory AC4 (Story 10.3) — writable-time Tier-0 gate", () => {
+  it("rejects a cited source that does not resolve on disk (T0-5), nothing written", async () => {
+    let caught: unknown;
+    try {
+      await writeNativeStory(
+        candidate10_2({ cited_sources: ["src/parser.ts", "src/does-not-exist.ts"] }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DisciplineViolationError);
+    const codes = (caught as DisciplineViolationError).violations.map((v) => v.code);
+    expect(codes).toContain("unresolvable-cited-source");
+    expect(await listStoryFiles()).toHaveLength(0);
+  });
+
+  it("rejects an invented-flag verification target (pure part of T0-6), nothing written", async () => {
+    let caught: unknown;
+    try {
+      await writeNativeStory(
+        candidate10_2({
+          acceptance_criteria: [
+            {
+              text: "**Given** a state, **When** an action, **Then** an outcome.",
+              kind: "unit" as const,
+              // An invented flag — not a path. T0-6 rejects this shape.
+              verification: { type: "vitest" as const, target: "vitest --grep foo" },
+            },
+            {
+              text: "**Given** a system, **When** integrated, **Then** an artifact appears.",
+              kind: "integration" as const,
+              verification: { type: "artifact" as const, target: "build/out.json" },
+            },
+          ],
+        }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DisciplineViolationError);
+    const codes = (caught as DisciplineViolationError).violations.map((v) => v.code);
+    expect(codes).toContain("invalid-verification-target");
+    expect(await listStoryFiles()).toHaveLength(0);
+  });
+
+  it("rejects an `artifact:` target that does not resolve on disk (T0-6 disk), nothing written", async () => {
+    let caught: unknown;
+    try {
+      await writeNativeStory(
+        candidate10_2({
+          acceptance_criteria: [
+            {
+              text: "**Given** a state, **When** an action, **Then** an outcome.",
+              kind: "unit" as const,
+              verification: { type: "vitest" as const, target: "src/__tests__/a.test.ts" },
+            },
+            {
+              text: "**Given** a system, **When** integrated, **Then** an artifact appears.",
+              kind: "integration" as const,
+              // An artifact that does not exist — must resolve at write.
+              verification: { type: "artifact" as const, target: "build/missing.json" },
+            },
+          ],
+        }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DisciplineViolationError);
+    const codes = (caught as DisciplineViolationError).violations.map((v) => v.code);
+    expect(codes).toContain("unresolvable-verification-target");
+    expect(await listStoryFiles()).toHaveLength(0);
+  });
+
+  it("WRITES a story whose every `vitest:` target is a brand-new (non-existent) test file (chicken-and-egg exemption)", async () => {
+    // Both vitest targets point at test files the BUILD will create — they do
+    // NOT exist at write time. The write must succeed: vitest targets are
+    // shape-checked, not existence-checked.
+    const result = await writeNativeStory(
+      candidate10_2({
+        acceptance_criteria: [
+          {
+            text: "**Given** a state, **When** an action, **Then** an outcome.",
+            kind: "unit" as const,
+            verification: { type: "vitest" as const, target: "src/__tests__/brand-new-a.test.ts" },
+          },
+          {
+            text: "**Given** a system, **When** integrated, **Then** an outcome.",
+            kind: "integration" as const,
+            verification: { type: "vitest" as const, target: "src/__tests__/brand-new-b.test.ts" },
+          },
+        ],
+      }),
+    );
+    expect(result.ref).toMatch(/^native:/);
+    expect(await listStoryFiles()).toHaveLength(1);
+  });
+});

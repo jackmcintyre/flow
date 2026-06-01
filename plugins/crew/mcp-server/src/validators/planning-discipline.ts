@@ -124,11 +124,40 @@ function isStateMutatingByHeuristic(story: SourceStory): boolean {
 }
 
 /**
+ * Whether a story is a native / enriched story — the only stories the Tier-0
+ * §3 checks (T0-1, T0-2, T0-5, T0-6, Story 10.3) apply to.
+ *
+ * The gate is the `native:` ref prefix. A BMad-scanned `SourceStory` always
+ * carries a `bmad:` ref and never populates the enriched fields
+ * (`tasks`/`cited_sources`/per-AC `verification`) — BMad enrichment is the 10.5
+ * ingest's job. Gating here is the load-bearing protection against a
+ * live-backlog outage: until ingest (10.5) + cutover (10.6), a BMad story must
+ * NEVER be failed by the new checks (Story 10.3 AC1c + AC2; see the pre-mortem
+ * in the story's Implementation Notes). There is no path in this codebase where
+ * a BMad story is presented to the validator with a `native:` ref — the ref is
+ * minted by the parser/`writeNativeStory` from the adapter, not the operator.
+ */
+export function isEnrichedStory(story: SourceStory): boolean {
+  return story.ref.startsWith("native:");
+}
+
+/**
  * Validate a single `SourceStory` against per-story discipline rules.
  *
  * Rules checked:
  *   - Missing integration AC (when story is state-mutating).
  *   - Implicit `depends_on` refs in narrative / AC text.
+ *
+ * Native/enriched stories (`isEnrichedStory`) additionally get the pure Tier-0
+ * §3 checks (Story 10.3):
+ *   - **T0-2** (`missing-verification`): every AC carries a `verification`
+ *     block.
+ *   - **T0-1** (`task-ac-ref-unresolved`): every task has ≥1 `ac_ref`, and each
+ *     resolves to a real AC id (`AC<n>`) declared in the story.
+ *
+ * Both are PURE (no I/O). The disk-side Tier-0 checks (T0-5 cited-source
+ * resolvability, T0-6 verification-target resolvability) live in
+ * `resolveDisciplinePaths` (run at the scan/write I/O boundary), not here.
  *
  * Ship-gate is a backlog-level concept — NOT checked here.
  *
@@ -189,6 +218,63 @@ export function validateStoryAgainstDiscipline(
         detail: `Story body references ref '${implicitRef}' but it is missing from depends_on. Add it or rephrase to remove the cross-story reference.`,
       });
     }
+  }
+
+  // Tier-0 §3 checks (Story 10.3) — native/enriched stories only. A BMad story
+  // (no `verification`/`tasks` yet) is NEVER failed by these; gating here is the
+  // protection against a live-backlog outage pre-cutover (AC1c + AC2).
+  if (isEnrichedStory(story)) {
+    // T0-2 — every AC carries a `verification` block. The native parser already
+    // requires this on the write/parse path, but a scan re-validates from the
+    // structured field so a hand-edited or partially-enriched native story is
+    // also caught. Multiple offenders accumulate — name each by its 1-based id.
+    story.acceptance_criteria.forEach((ac, i) => {
+      if (!ac.verification) {
+        reasons.push({
+          code: "missing-verification",
+          field: `acceptance_criteria[${i}].verification`,
+          detail: `AC${i + 1} has no verification block. Every native AC must carry a 'vitest: <path>' or 'artifact: <path>' directive declaring how it is checked.`,
+        });
+      }
+    });
+
+    // T0-1 — every task maps to ≥1 real AC. A task with no `ac_refs`, or one
+    // naming an AC id the story does not declare, fails. AC ids are 1-based
+    // (`AC1`, `AC2`, …) in document order — the same id space the writer renders
+    // and the parser resolves. The check tolerates a `cited_sources`-style
+    // absent `tasks` array only if the story is not enriched; an enriched story
+    // with no tasks at all is left to the presence checks (parse/write require
+    // ≥1 task; an absent `tasks` array on a scanned native story is itself a
+    // T0-1 signal).
+    const acIds = new Set(story.acceptance_criteria.map((_, i) => `AC${i + 1}`));
+    const tasks = story.tasks ?? [];
+    if (tasks.length === 0) {
+      reasons.push({
+        code: "task-ac-ref-unresolved",
+        field: "tasks",
+        detail:
+          "Native story declares no tasks. Every native story must have ≥1 task in '## Tasks', each mapping to at least one AC via a trailing '(AC: <n>, …)' clause.",
+      });
+    }
+    tasks.forEach((task, i) => {
+      if (task.ac_refs.length === 0) {
+        reasons.push({
+          code: "task-ac-ref-unresolved",
+          field: `tasks[${i}].ac_refs`,
+          detail: `Task ${i + 1} ('${task.text}') maps to no AC. Add at least one '(AC: <n>)' ref so every task advances a declared acceptance criterion.`,
+        });
+        return;
+      }
+      for (const acRef of task.ac_refs) {
+        if (!acIds.has(acRef)) {
+          reasons.push({
+            code: "task-ac-ref-unresolved",
+            field: `tasks[${i}].ac_refs`,
+            detail: `Task ${i + 1} ('${task.text}') references ${acRef}, which does not resolve to any AC declared in this story (declared: ${[...acIds].join(", ") || "none"}).`,
+          });
+        }
+      }
+    });
   }
 
   if (reasons.length === 0) {

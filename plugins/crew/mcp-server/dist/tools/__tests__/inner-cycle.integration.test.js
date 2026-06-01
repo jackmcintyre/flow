@@ -527,6 +527,9 @@ async function buildTwoStoryWorkspace(scratch) {
     // Native stories directory
     const storiesDir = path.join(root, ".crew", "native-stories");
     await fs.mkdir(storiesDir, { recursive: true });
+    // Story 10.3 — seed the cited source so the Tier-0 T0-5 resolvability check
+    // passes at scan (cited paths must resolve on disk).
+    await atomicWriteFile(path.join(root, "src", "inner-cycle.ts"), "// seeded\n");
     // State directories
     await fs.mkdir(path.join(root, ".crew", "state", "to-do"), { recursive: true });
     await fs.mkdir(path.join(root, ".crew", "state", "in-progress"), { recursive: true });
@@ -549,6 +552,15 @@ async function buildTwoStoryWorkspace(scratch) {
             "**AC1 (integration):**",
             `**Given** ${title} is live, **When** accessed, **Then** it works.`,
             "vitest: src/__tests__/inner-cycle.test.ts",
+            "",
+            // Story 10.3 — §3 enriched sections required to pass the Tier-0 scan gate.
+            "## Tasks",
+            "",
+            `- Implement ${title} (AC: 1)`,
+            "",
+            "## Cited Sources",
+            "",
+            "- src/inner-cycle.ts",
             "",
             "## Implementation Notes",
             "",

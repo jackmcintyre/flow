@@ -23,11 +23,37 @@ export declare const STATE_MUTATING_GLOBS: readonly string[];
  */
 export declare const STATE_MUTATING_TOKEN_RE: RegExp;
 /**
+ * Whether a story is a native / enriched story — the only stories the Tier-0
+ * §3 checks (T0-1, T0-2, T0-5, T0-6, Story 10.3) apply to.
+ *
+ * The gate is the `native:` ref prefix. A BMad-scanned `SourceStory` always
+ * carries a `bmad:` ref and never populates the enriched fields
+ * (`tasks`/`cited_sources`/per-AC `verification`) — BMad enrichment is the 10.5
+ * ingest's job. Gating here is the load-bearing protection against a
+ * live-backlog outage: until ingest (10.5) + cutover (10.6), a BMad story must
+ * NEVER be failed by the new checks (Story 10.3 AC1c + AC2; see the pre-mortem
+ * in the story's Implementation Notes). There is no path in this codebase where
+ * a BMad story is presented to the validator with a `native:` ref — the ref is
+ * minted by the parser/`writeNativeStory` from the adapter, not the operator.
+ */
+export declare function isEnrichedStory(story: SourceStory): boolean;
+/**
  * Validate a single `SourceStory` against per-story discipline rules.
  *
  * Rules checked:
  *   - Missing integration AC (when story is state-mutating).
  *   - Implicit `depends_on` refs in narrative / AC text.
+ *
+ * Native/enriched stories (`isEnrichedStory`) additionally get the pure Tier-0
+ * §3 checks (Story 10.3):
+ *   - **T0-2** (`missing-verification`): every AC carries a `verification`
+ *     block.
+ *   - **T0-1** (`task-ac-ref-unresolved`): every task has ≥1 `ac_ref`, and each
+ *     resolves to a real AC id (`AC<n>`) declared in the story.
+ *
+ * Both are PURE (no I/O). The disk-side Tier-0 checks (T0-5 cited-source
+ * resolvability, T0-6 verification-target resolvability) live in
+ * `resolveDisciplinePaths` (run at the scan/write I/O boundary), not here.
  *
  * Ship-gate is a backlog-level concept — NOT checked here.
  *

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 import { extractDepRefsFromSpecBody } from "../lib/extract-dep-refs.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { ExecutionManifestSchema, parseExecutionManifest, } from "../schemas/execution-manifest.js";
@@ -78,6 +79,29 @@ function repoRelativePath(rawPath, targetRepoRoot) {
         return rawPath;
     }
     return rel;
+}
+/**
+ * Run the FULL discipline gate for a story at scan time: the adapter's pure
+ * validator (`validateAgainstDiscipline`) PLUS the disk-side Tier-0 checks
+ * (`resolveDisciplinePaths` — T0-5 cited-source resolvability, T0-6
+ * verification-target resolvability). Story 10.3 wires the disk pass in here so
+ * both pure and disk violations land in the SAME `discipline_violations` array
+ * on the blocked manifest — the operator sees the full list to fix in one pass.
+ *
+ * Returns `null` when the story passes both passes, or a `DisciplineViolation`
+ * carrying every accumulated reason. The disk pass is a no-op for BMad stories
+ * (gated to native/enriched in `resolveDisciplinePaths`), so BMad scanning is
+ * untouched (AC1c).
+ */
+async function runFullDisciplineGate(story, activeAdapter, targetRepoRoot) {
+    const pure = activeAdapter.validateAgainstDiscipline(story);
+    const reasons = "kind" in pure && pure.kind === "discipline-violation" ? [...pure.violations] : [];
+    // Disk-side T0-5 / T0-6 (native/enriched only). Merge into the same array.
+    const diskReasons = await resolveDisciplinePaths(story, targetRepoRoot);
+    reasons.push(...diskReasons);
+    if (reasons.length === 0)
+        return null;
+    return { kind: "discipline-violation", ref: story.ref, violations: reasons };
 }
 /**
  * Strip keys with `undefined` values from a plain object before YAML
@@ -340,9 +364,9 @@ export async function scanSources(opts) {
                 });
                 continue;
             }
-            // No deps-drift — re-run discipline.
-            const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
-            if (!("kind" in disciplineResult) || disciplineResult.kind !== "discipline-violation") {
+            // No deps-drift — re-run the FULL discipline gate (pure + disk T0-5/T0-6).
+            const disciplineResult = await runFullDisciplineGate(story, activeAdapter, targetRepoRoot);
+            if (disciplineResult === null) {
                 // Story now passes both deps-drift and discipline — promote from blocked/ to to-do/.
                 // NOTE: This sequence is non-atomic: the to-do/ manifest is written
                 // first, then the blocked/ manifest is deleted. If the unlink fails
@@ -428,8 +452,8 @@ export async function scanSources(opts) {
                 });
                 continue;
             }
-            const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
-            if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
+            const disciplineResult = await runFullDisciplineGate(story, activeAdapter, targetRepoRoot);
+            if (disciplineResult !== null) {
                 const firstViolation = disciplineResult.violations[0];
                 result.skippedRefs.push({
                     ref: story.ref,

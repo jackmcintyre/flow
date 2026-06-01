@@ -34,6 +34,7 @@ import { parse as yamlParse } from "yaml";
 import { WrongAdapterError } from "../../errors.js";
 import { markWithdrawn } from "../../tools/mark-withdrawn.js";
 import { writeNativeStory } from "../../tools/write-native-story.js";
+import { atomicWriteFile } from "../../lib/managed-fs.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLANNER_MD = path.resolve(HERE, "..", "..", "..", "..", "catalogue", "planner.md");
 const BMAD_FIXTURE = path.resolve(HERE, "..", "..", "adapters", "bmad", "fixtures", "sample-target-repo");
@@ -50,12 +51,22 @@ async function copyFixture(fixturePath) {
     await fs.cp(fixturePath, dest, { recursive: true });
     return dest;
 }
+/**
+ * Seed a repo-relative file under `root` so a Story 10.3 T0-5 cited-source
+ * resolvability check passes (cited sources must resolve at write time).
+ */
+async function seedInRepo(root, relPath) {
+    // Route through the sanctioned atomicWriteFile seam (it creates parent dirs)
+    // so the static fs-write guard does not flag this test file for a raw write.
+    await atomicWriteFile(path.join(root, relPath), "// seeded for resolvability\n");
+}
 // ---------------------------------------------------------------------------
 // (a) native add — new story written, existing files untouched
 // ---------------------------------------------------------------------------
 describe("AC4(a) — native add with existing backlog", () => {
     it("writes a new native story file without touching the existing backlog files", async () => {
         const root = await copyFixture(NATIVE_FIXTURE);
+        await seedInRepo(root, "src/new-feature.ts"); // Story 10.3 T0-5 cited source.
         // Record existing native story refs before the add.
         const storiesDir = path.join(root, ".crew", "native-stories");
         const beforeFiles = await fs.readdir(storiesDir);
@@ -93,6 +104,7 @@ describe("AC4(a) — native add with existing backlog", () => {
 describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
     it("writeNativeStory produces a new ULID file; scan-sources updates on re-scan", async () => {
         const root = await copyFixture(NATIVE_FIXTURE);
+        await seedInRepo(root, "src/edited-feature.ts"); // Story 10.3 T0-5 cited source.
         const oldRef = "native:01HZABC0000000000000000001";
         const oldStoryPath = path.join(root, ".crew", "native-stories", "01HZABC0000000000000000001.md");
         // Record the original file content.
@@ -129,6 +141,7 @@ describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
 describe("AC4(c) — native discard: revert/deprecate story appears, originals untouched", () => {
     it("writes a revert/deprecate story citing the original ref in depends_on", async () => {
         const root = await copyFixture(NATIVE_FIXTURE);
+        await seedInRepo(root, "src/done-feature.ts"); // Story 10.3 T0-5 cited source.
         const originalRef = "native:01HZABC0000000000000000003";
         const originalStoryPath = path.join(root, ".crew", "native-stories", "01HZABC0000000000000000003.md");
         const originalManifestPath = path.join(root, ".crew", "state", "done", `${originalRef}.yaml`);
