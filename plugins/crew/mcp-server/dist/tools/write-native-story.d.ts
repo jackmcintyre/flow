@@ -72,3 +72,25 @@ export declare function renderNativeStoryBody(input: WriteNativeStoryInput): str
  * @see _bmad-output/implementation-artifacts/3-4-native-adapter-planner-subagent-and-plan-skill.md § Task 4
  */
 export declare function writeNativeStory(rawInput: unknown): Promise<WriteNativeStoryOutput>;
+/**
+ * The shared native-write internal (Story 10.5): render → discipline-gate →
+ * round-trip-parse → atomic-write, mints a fresh ULID, emits the
+ * `draft.authored` telemetry event, returns `{ ref, path }`.
+ *
+ * Deliberately does NOT run the `WrongAdapterError` active-adapter guard — that
+ * is `writeNativeStory`'s responsibility, applied before calling here. The BMad
+ * → native ingest reuses this directly so it can write native stories while the
+ * active adapter is still `bmad` (it ingests first, cuts over second).
+ *
+ * The Tier-0 gate (`validateStoryAgainstDiscipline` + `resolveDisciplinePaths`)
+ * is the SOLE arbiter of whether the candidate is written: a violating candidate
+ * throws `DisciplineViolationError` and NOTHING is written (no file, no
+ * telemetry). For ingest this is load-bearing — the lossy LLM enrichment cannot
+ * smuggle a non-compliant story through; the deterministic gate decides.
+ *
+ * @param input          a validated `WriteNativeStoryInput`.
+ * @param targetRepoRoot the resolved repo root (already `path.resolve`d).
+ * @param agent          telemetry `agent` field — "author" for the native write
+ *                       path, "ingest" for the BMad→native seam.
+ */
+export declare function renderGateWriteNativeStory(input: WriteNativeStoryInput, targetRepoRoot: string, agent?: "author" | "ingest"): Promise<WriteNativeStoryOutput>;

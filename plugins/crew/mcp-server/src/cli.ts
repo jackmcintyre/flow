@@ -32,6 +32,7 @@ import { scanSources } from "./tools/scan-sources.js";
 import { createSmokeScratchRepo } from "./tools/create-smoke-scratch-repo.js";
 import { instantiatePersona } from "./tools/instantiate-persona.js";
 import { writeNativeStory } from "./tools/write-native-story.js";
+import { bmadToNativeIngestTool } from "./tools/bmad-to-native-ingest.js";
 import { buildPersonaSpawnPrompt } from "./tools/build-persona-spawn-prompt.js";
 import { listClaimableTodos } from "./tools/list-claimable-todos.js";
 import { readBacklogInventory } from "./tools/read-backlog-inventory.js";
@@ -65,6 +66,7 @@ const TOOLS: Record<string, ToolFn> = {
   createSmokeScratchRepo,
   instantiatePersona,
   writeNativeStory,
+  bmadToNativeIngestTool,
   buildPersonaSpawnPrompt,
   listClaimableTodos,
   readBacklogInventory,

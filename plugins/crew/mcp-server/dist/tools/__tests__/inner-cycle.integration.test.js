@@ -503,7 +503,9 @@ describe("AC4(g): tool count and required tools present", () => {
             // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
             expect(toolNames).toContain("recordSkillInvoke");
             expect(toolNames).toContain("computeSkillEffectiveness");
-            expect(toolNames.length).toBe(44);
+            // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
+            expect(toolNames).toContain("bmadToNativeIngest");
+            expect(toolNames.length).toBe(45);
         }
         finally {
             await client.close();
