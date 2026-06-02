@@ -9208,12 +9208,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve19, reject) {
+        return new Promise(function(resolve18, reject) {
           isexe(path57, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve19(is);
+              resolve18(is);
             }
           });
         });
@@ -9279,27 +9279,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve19, reject) => {
+      const step = (i2) => new Promise((resolve18, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve19(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve18(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path57.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve19(subStep(p, i2, 0));
+        resolve18(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve19, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve18, reject) => {
         if (ii === pathExt.length)
-          return resolve19(step(i2 + 1));
+          return resolve18(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve19(p + ext);
+              return resolve18(p + ext);
           }
-          return resolve19(subStep(p, i2, ii + 1));
+          return resolve18(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -29445,8 +29445,8 @@ var disconnect = (anyProcess) => {
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve19, reject) => {
-    Object.assign(methods, { resolve: resolve19, reject });
+  const promise2 = new Promise((resolve18, reject) => {
+    Object.assign(methods, { resolve: resolve18, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -34088,11 +34088,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve19 = promise2.resolve.bind(promise2);
-  return { resolve: resolve19, promises };
+  const resolve18 = promise2.resolve.bind(promise2);
+  return { resolve: resolve18, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve19, promises }, subprocess) => {
-  resolve19();
+var waitForConcurrentStreams = async ({ resolve: resolve18, promises }, subprocess) => {
+  resolve18();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -34723,7 +34723,7 @@ function gitLockBackoffMs(attempt, random = Math.random) {
   return Math.floor(random() * window2);
 }
 function defaultGitLockSleep(ms) {
-  return new Promise((resolve19) => setTimeout(resolve19, ms));
+  return new Promise((resolve18) => setTimeout(resolve18, ms));
 }
 function isGitLockContention(value) {
   const stderr = typeof value === "string" ? value : String(
@@ -36361,7 +36361,7 @@ async function claimNextStory(opts) {
 }
 
 // src/tools/process-dev-transcript.ts
-import * as path33 from "node:path";
+import * as path34 from "node:path";
 
 // src/skills/handoff-parser.ts
 var HANDOFF_PHRASE_TEMPLATE = "Handoff to reviewer \u2014 story <story-id> ready for review.";
@@ -36398,20 +36398,92 @@ async function writeManifest(absPath, manifest) {
 }
 
 // src/lib/read-dev-outcome-file.ts
+import { promises as fs22 } from "node:fs";
+import * as path33 from "node:path";
+
+// src/lib/read-reviewer-result-file.ts
 import { promises as fs21 } from "node:fs";
 import * as path32 from "node:path";
-async function readDevOutcomeFile(targetRepoRoot, sessionUlid) {
-  const filePath = path32.join(
+function sanitiseRefForPathSegment(ref) {
+  const replaced = ref.replace(/[^A-Za-z0-9._-]/g, "_");
+  if (replaced === "" || replaced === "." || replaced === "..") {
+    return "_";
+  }
+  return replaced;
+}
+function reviewerResultFilePath(targetRepoRoot, sessionUlid, ref) {
+  return path32.join(
     targetRepoRoot,
     ".crew",
     "state",
     "sessions",
     sessionUlid,
-    "dev-outcome.json"
+    sanitiseRefForPathSegment(ref),
+    "reviewer-result.json"
   );
+}
+async function readReviewerResultFile(targetRepoRoot, sessionUlid, ref) {
+  const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
   let raw;
   try {
     raw = await fs21.readFile(filePath, "utf8");
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new ReviewerResultFileMalformedError({ path: filePath, cause });
+  }
+  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
+    parsed.recommendedVerdict
+  )) {
+    throw new ReviewerResultFileMalformedError({
+      path: filePath,
+      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED"
+    });
+  }
+  const asRecord = parsed;
+  if (typeof asRecord["standardsVersion"] !== "string") {
+    asRecord["standardsVersion"] = "";
+  }
+  if (asRecord["riskTier"] !== void 0) {
+    const riskTierResult = RiskTierBlockSchema.safeParse(asRecord["riskTier"]);
+    if (!riskTierResult.success) {
+      const firstIssue = riskTierResult.error.issues[0];
+      const detail = firstIssue ? `${firstIssue.path.join(".")}: ${firstIssue.message}` : "(no details)";
+      throw new ReviewerResultFileMalformedError({
+        path: filePath,
+        cause: `riskTier block failed schema validation: ${detail}`
+      });
+    }
+    asRecord["riskTier"] = riskTierResult.data;
+  }
+  return asRecord;
+}
+
+// src/lib/read-dev-outcome-file.ts
+function devOutcomeFilePath(targetRepoRoot, sessionUlid, ref) {
+  return path33.join(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+    sanitiseRefForPathSegment(ref),
+    "dev-outcome.json"
+  );
+}
+async function readDevOutcomeFile(targetRepoRoot, sessionUlid, ref) {
+  const filePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
+  let raw;
+  try {
+    raw = await fs22.readFile(filePath, "utf8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") {
@@ -36472,7 +36544,7 @@ var PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/g;
 async function processDevTranscript(opts) {
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
   const chatLog = [];
-  const manifestPath = path33.resolve(
+  const manifestPath = path34.resolve(
     targetRepoRoot,
     ".crew",
     "state",
@@ -36519,7 +36591,7 @@ async function processDevTranscript(opts) {
     );
     return { next: "done-blocked-handoff-grammar", chatLog };
   }
-  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);
+  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid, ref);
   let prNumber;
   if (devOutcome !== null) {
     prNumber = devOutcome.prNumber;
@@ -36557,12 +36629,12 @@ function buildActionHint(errorClass) {
 }
 
 // src/tools/run-dev-terminal-action.ts
-import * as path37 from "node:path";
+import * as path38 from "node:path";
 
 // src/lib/extract-acs-from-spec.ts
-import { promises as fs22 } from "node:fs";
+import { promises as fs23 } from "node:fs";
 async function extractAcsFromSpec(specPath) {
-  const raw = await fs22.readFile(specPath, "utf8");
+  const raw = await fs23.readFile(specPath, "utf8");
   const lines = raw.split("\n");
   const AC_HEADING_RE = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
   const results = [];
@@ -36591,8 +36663,8 @@ async function extractAcsFromSpec(specPath) {
 
 // src/lib/gh-error-map.ts
 var import_yaml12 = __toESM(require_dist(), 1);
-import { promises as fs23 } from "node:fs";
-import * as path34 from "node:path";
+import { promises as fs24 } from "node:fs";
+import * as path35 from "node:path";
 
 // src/schemas/gh-error-map.ts
 var GhErrorMapEntrySchema = external_exports.object({
@@ -36607,7 +36679,7 @@ var GhErrorMapSchema = external_exports.object({
 // src/lib/gh-error-map.ts
 var cache = /* @__PURE__ */ new Map();
 async function parseGhErrorMap(filePath) {
-  const raw = await fs23.readFile(filePath, "utf8");
+  const raw = await fs24.readFile(filePath, "utf8");
   const parsed = (0, import_yaml12.parse)(raw);
   const result = GhErrorMapSchema.safeParse(parsed);
   if (!result.success) {
@@ -36651,7 +36723,7 @@ async function parseGhErrorMap(filePath) {
   return { entries };
 }
 async function loadGhErrorMap(pluginRoot) {
-  const absPath = path34.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
+  const absPath = path35.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
   const cached2 = cache.get(absPath);
   if (cached2 !== void 0) {
     return cached2;
@@ -36772,8 +36844,8 @@ ${opts.summary}`;
 
 // src/state/load-role-permissions.ts
 var import_yaml13 = __toESM(require_dist(), 1);
-import { promises as fs24 } from "node:fs";
-import * as path35 from "node:path";
+import { promises as fs25 } from "node:fs";
+import * as path36 from "node:path";
 
 // src/schemas/role-permissions.ts
 var RolePermissionsSchema = external_exports.object({
@@ -36791,10 +36863,10 @@ function formatZodIssues5(issues) {
   return `${dottedPath}: ${first.message}`;
 }
 async function loadRolePermissions(opts) {
-  const specPath = path35.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
+  const specPath = path36.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
   let raw;
   try {
-    raw = await fs24.readFile(specPath, "utf8");
+    raw = await fs25.readFile(specPath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") {
       throw new RolePermissionsMissingError({ role: opts.role, specPath });
@@ -36821,11 +36893,11 @@ async function loadRolePermissions(opts) {
 }
 
 // src/lib/run-project-build.ts
-import * as path36 from "node:path";
+import * as path37 from "node:path";
 var PROJECT_BUILD_COMMAND = "pnpm";
 var PROJECT_BUILD_ARGS = ["build"];
 function deriveProjectBuildCwd(devWorkingDir) {
-  return path36.join(devWorkingDir, "plugins", "crew");
+  return path37.join(devWorkingDir, "plugins", "crew");
 }
 async function runProjectBuild(opts) {
   const execaImpl = opts.execaImpl ?? execa;
@@ -36884,7 +36956,7 @@ async function runDevTerminalAction(opts) {
   }
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
-  const specPath = path37.isAbsolute(manifest.source_path) ? manifest.source_path : path37.join(targetRepoRoot, manifest.source_path);
+  const specPath = path38.isAbsolute(manifest.source_path) ? manifest.source_path : path38.join(targetRepoRoot, manifest.source_path);
   const acs = await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
@@ -36944,7 +37016,7 @@ async function runDevTerminalAction(opts) {
       role: ROLE,
       ...execaImpl ? { execaImpl } : {}
     });
-    const specPathForPr = path37.isAbsolute(manifest.source_path) ? path37.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
+    const specPathForPr = path38.isAbsolute(manifest.source_path) ? path38.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
     const prBody = composePrBody({
       ref,
       specPath: specPathForPr,
@@ -36986,14 +37058,7 @@ async function runDevTerminalAction(opts) {
       cwd: gitRoot,
       ...execaImpl ? { execaImpl } : {}
     }) : targetRepoRoot;
-    const devOutcomePath = path37.resolve(
-      ledgerRoot,
-      ".crew",
-      "state",
-      "sessions",
-      sessionUlid,
-      "dev-outcome.json"
-    );
+    const devOutcomePath = devOutcomeFilePath(ledgerRoot, sessionUlid, ref);
     await atomicWriteFile(
       devOutcomePath,
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2)
@@ -37015,72 +37080,6 @@ import { accessSync } from "node:fs";
 // src/lib/slugify-standards-criterion.ts
 function slugifyStandardsCriterion(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-// src/lib/read-reviewer-result-file.ts
-import { promises as fs25 } from "node:fs";
-import * as path38 from "node:path";
-function sanitiseRefForPathSegment(ref) {
-  const replaced = ref.replace(/[^A-Za-z0-9._-]/g, "_");
-  if (replaced === "" || replaced === "." || replaced === "..") {
-    return "_";
-  }
-  return replaced;
-}
-function reviewerResultFilePath(targetRepoRoot, sessionUlid, ref) {
-  return path38.join(
-    targetRepoRoot,
-    ".crew",
-    "state",
-    "sessions",
-    sessionUlid,
-    sanitiseRefForPathSegment(ref),
-    "reviewer-result.json"
-  );
-}
-async function readReviewerResultFile(targetRepoRoot, sessionUlid, ref) {
-  const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
-  let raw;
-  try {
-    raw = await fs25.readFile(filePath, "utf8");
-  } catch (err) {
-    const code = err.code;
-    if (code === "ENOENT") {
-      return null;
-    }
-    throw err;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (cause) {
-    throw new ReviewerResultFileMalformedError({ path: filePath, cause });
-  }
-  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
-    parsed.recommendedVerdict
-  )) {
-    throw new ReviewerResultFileMalformedError({
-      path: filePath,
-      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED"
-    });
-  }
-  const asRecord = parsed;
-  if (typeof asRecord["standardsVersion"] !== "string") {
-    asRecord["standardsVersion"] = "";
-  }
-  if (asRecord["riskTier"] !== void 0) {
-    const riskTierResult = RiskTierBlockSchema.safeParse(asRecord["riskTier"]);
-    if (!riskTierResult.success) {
-      const firstIssue = riskTierResult.error.issues[0];
-      const detail = firstIssue ? `${firstIssue.path.join(".")}: ${firstIssue.message}` : "(no details)";
-      throw new ReviewerResultFileMalformedError({
-        path: filePath,
-        cause: `riskTier block failed schema validation: ${detail}`
-      });
-    }
-    asRecord["riskTier"] = riskTierResult.data;
-  }
-  return asRecord;
 }
 
 // src/lib/materialise-pr-branch-worktree.ts
@@ -38337,7 +38336,7 @@ async function waitForCiGreen(opts) {
     if (state === "green") return "green";
     if (state === "failed") return "failed";
     if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-    await new Promise((resolve19) => setTimeout(resolve19, CI_GATE_POLL_INTERVAL_MS));
+    await new Promise((resolve18) => setTimeout(resolve18, CI_GATE_POLL_INTERVAL_MS));
   }
 }
 async function runAutoMergeGate(opts) {
@@ -38906,7 +38905,11 @@ async function scanOrphanedInProgress(opts) {
     }
     let prNumber = null;
     try {
-      const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid);
+      const outcome = await readDevOutcomeFile(
+        targetRepoRoot,
+        staleUlid,
+        manifest.ref
+      );
       prNumber = outcome?.prNumber ?? null;
     } catch {
       prNumber = null;

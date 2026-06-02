@@ -143,7 +143,7 @@ export async function processDevTranscript(opts) {
     // On ENOENT (file absent): fall through to the PR_URL_RE fallback below.
     // On malformed file: DevOutcomeFileMalformedError propagates uncaught (Task 4.6).
     // ---------------------------------------------------------------------------
-    const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);
+    const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid, ref);
     let prNumber;
     if (devOutcome !== null) {
         // Primary path (AC2): use the machine-written prNumber directly.

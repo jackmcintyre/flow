@@ -2988,7 +2988,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve20.call(this, root, ref);
+      let _sch = resolve19.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3015,7 +3015,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve20(root, ref) {
+    function resolve19(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3646,7 +3646,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve20(baseURI, relativeURI, options) {
+    function resolve19(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3904,7 +3904,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve20,
+      resolve: resolve19,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -14314,12 +14314,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve20, reject) {
+        return new Promise(function(resolve19, reject) {
           isexe(path68, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve20(is);
+              resolve19(is);
             }
           });
         });
@@ -14385,27 +14385,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve20, reject) => {
+      const step = (i2) => new Promise((resolve19, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve20(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve19(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path68.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve20(subStep(p, i2, 0));
+        resolve19(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve20, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve19, reject) => {
         if (ii === pathExt.length)
-          return resolve20(step(i2 + 1));
+          return resolve19(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve20(p + ext);
+              return resolve19(p + ext);
           }
-          return resolve20(subStep(p, i2, ii + 1));
+          return resolve19(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -32581,12 +32581,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve20) => {
+    return new Promise((resolve19) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve20();
+        resolve19();
       } else {
-        this._stdout.once("drain", resolve20);
+        this._stdout.once("drain", resolve19);
       }
     });
   }
@@ -33184,7 +33184,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve20) => setTimeout(resolve20, pollInterval));
+        await new Promise((resolve19) => setTimeout(resolve19, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error51) {
@@ -33201,7 +33201,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve20, reject) => {
+    return new Promise((resolve19, reject) => {
       const earlyReject = (error51) => {
         reject(error51);
       };
@@ -33279,7 +33279,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve20(parseResult.data);
+            resolve19(parseResult.data);
           }
         } catch (error51) {
           reject(error51);
@@ -33540,12 +33540,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve20, reject) => {
+    return new Promise((resolve19, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve20, interval);
+      const timeoutId = setTimeout(resolve19, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -38509,8 +38509,8 @@ var disconnect = (anyProcess) => {
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve20, reject) => {
-    Object.assign(methods, { resolve: resolve20, reject });
+  const promise2 = new Promise((resolve19, reject) => {
+    Object.assign(methods, { resolve: resolve19, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -43152,11 +43152,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve20 = promise2.resolve.bind(promise2);
-  return { resolve: resolve20, promises };
+  const resolve19 = promise2.resolve.bind(promise2);
+  return { resolve: resolve19, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve20, promises }, subprocess) => {
-  resolve20();
+var waitForConcurrentStreams = async ({ resolve: resolve19, promises }, subprocess) => {
+  resolve19();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -43787,7 +43787,7 @@ function gitLockBackoffMs(attempt, random = Math.random) {
   return Math.floor(random() * window2);
 }
 function defaultGitLockSleep(ms) {
-  return new Promise((resolve20) => setTimeout(resolve20, ms));
+  return new Promise((resolve19) => setTimeout(resolve19, ms));
 }
 function isGitLockContention(value) {
   const stderr = typeof value === "string" ? value : String(
@@ -49081,7 +49081,7 @@ async function claimNextStory(opts) {
 }
 
 // src/tools/process-dev-transcript.ts
-import * as path48 from "node:path";
+import * as path49 from "node:path";
 
 // src/skills/handoff-parser.ts
 var HANDOFF_PHRASE_TEMPLATE = "Handoff to reviewer \u2014 story <story-id> ready for review.";
@@ -49105,20 +49105,92 @@ function parseHandoff(transcript, expectedRef) {
 }
 
 // src/lib/read-dev-outcome-file.ts
+import { promises as fs36 } from "node:fs";
+import * as path48 from "node:path";
+
+// src/lib/read-reviewer-result-file.ts
 import { promises as fs35 } from "node:fs";
 import * as path47 from "node:path";
-async function readDevOutcomeFile(targetRepoRoot, sessionUlid) {
-  const filePath = path47.join(
+function sanitiseRefForPathSegment(ref) {
+  const replaced = ref.replace(/[^A-Za-z0-9._-]/g, "_");
+  if (replaced === "" || replaced === "." || replaced === "..") {
+    return "_";
+  }
+  return replaced;
+}
+function reviewerResultFilePath(targetRepoRoot, sessionUlid, ref) {
+  return path47.join(
     targetRepoRoot,
     ".crew",
     "state",
     "sessions",
     sessionUlid,
-    "dev-outcome.json"
+    sanitiseRefForPathSegment(ref),
+    "reviewer-result.json"
   );
+}
+async function readReviewerResultFile(targetRepoRoot, sessionUlid, ref) {
+  const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
   let raw;
   try {
     raw = await fs35.readFile(filePath, "utf8");
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new ReviewerResultFileMalformedError({ path: filePath, cause });
+  }
+  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
+    parsed.recommendedVerdict
+  )) {
+    throw new ReviewerResultFileMalformedError({
+      path: filePath,
+      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED"
+    });
+  }
+  const asRecord = parsed;
+  if (typeof asRecord["standardsVersion"] !== "string") {
+    asRecord["standardsVersion"] = "";
+  }
+  if (asRecord["riskTier"] !== void 0) {
+    const riskTierResult = RiskTierBlockSchema.safeParse(asRecord["riskTier"]);
+    if (!riskTierResult.success) {
+      const firstIssue = riskTierResult.error.issues[0];
+      const detail = firstIssue ? `${firstIssue.path.join(".")}: ${firstIssue.message}` : "(no details)";
+      throw new ReviewerResultFileMalformedError({
+        path: filePath,
+        cause: `riskTier block failed schema validation: ${detail}`
+      });
+    }
+    asRecord["riskTier"] = riskTierResult.data;
+  }
+  return asRecord;
+}
+
+// src/lib/read-dev-outcome-file.ts
+function devOutcomeFilePath(targetRepoRoot, sessionUlid, ref) {
+  return path48.join(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+    sanitiseRefForPathSegment(ref),
+    "dev-outcome.json"
+  );
+}
+async function readDevOutcomeFile(targetRepoRoot, sessionUlid, ref) {
+  const filePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
+  let raw;
+  try {
+    raw = await fs36.readFile(filePath, "utf8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") {
@@ -49179,7 +49251,7 @@ var PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/g;
 async function processDevTranscript(opts) {
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
   const chatLog = [];
-  const manifestPath = path48.resolve(
+  const manifestPath = path49.resolve(
     targetRepoRoot,
     ".crew",
     "state",
@@ -49226,7 +49298,7 @@ async function processDevTranscript(opts) {
     );
     return { next: "done-blocked-handoff-grammar", chatLog };
   }
-  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);
+  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid, ref);
   let prNumber;
   if (devOutcome !== null) {
     prNumber = devOutcome.prNumber;
@@ -49261,72 +49333,6 @@ function buildActionHint(errorClass) {
     case "needs-human":
       return "run `gh auth login` then re-run /crew:start";
   }
-}
-
-// src/lib/read-reviewer-result-file.ts
-import { promises as fs36 } from "node:fs";
-import * as path49 from "node:path";
-function sanitiseRefForPathSegment(ref) {
-  const replaced = ref.replace(/[^A-Za-z0-9._-]/g, "_");
-  if (replaced === "" || replaced === "." || replaced === "..") {
-    return "_";
-  }
-  return replaced;
-}
-function reviewerResultFilePath(targetRepoRoot, sessionUlid, ref) {
-  return path49.join(
-    targetRepoRoot,
-    ".crew",
-    "state",
-    "sessions",
-    sessionUlid,
-    sanitiseRefForPathSegment(ref),
-    "reviewer-result.json"
-  );
-}
-async function readReviewerResultFile(targetRepoRoot, sessionUlid, ref) {
-  const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
-  let raw;
-  try {
-    raw = await fs36.readFile(filePath, "utf8");
-  } catch (err) {
-    const code = err.code;
-    if (code === "ENOENT") {
-      return null;
-    }
-    throw err;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (cause) {
-    throw new ReviewerResultFileMalformedError({ path: filePath, cause });
-  }
-  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
-    parsed.recommendedVerdict
-  )) {
-    throw new ReviewerResultFileMalformedError({
-      path: filePath,
-      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED"
-    });
-  }
-  const asRecord = parsed;
-  if (typeof asRecord["standardsVersion"] !== "string") {
-    asRecord["standardsVersion"] = "";
-  }
-  if (asRecord["riskTier"] !== void 0) {
-    const riskTierResult = RiskTierBlockSchema.safeParse(asRecord["riskTier"]);
-    if (!riskTierResult.success) {
-      const firstIssue = riskTierResult.error.issues[0];
-      const detail = firstIssue ? `${firstIssue.path.join(".")}: ${firstIssue.message}` : "(no details)";
-      throw new ReviewerResultFileMalformedError({
-        path: filePath,
-        cause: `riskTier block failed schema validation: ${detail}`
-      });
-    }
-    asRecord["riskTier"] = riskTierResult.data;
-  }
-  return asRecord;
 }
 
 // src/tools/process-reviewer-transcript.ts
@@ -49800,14 +49806,7 @@ async function runDevTerminalAction(opts) {
       cwd: gitRoot,
       ...execaImpl ? { execaImpl } : {}
     }) : targetRepoRoot;
-    const devOutcomePath = path53.resolve(
-      ledgerRoot,
-      ".crew",
-      "state",
-      "sessions",
-      sessionUlid,
-      "dev-outcome.json"
-    );
+    const devOutcomePath = devOutcomeFilePath(ledgerRoot, sessionUlid, ref);
     await atomicWriteFile(
       devOutcomePath,
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2)
@@ -51225,7 +51224,7 @@ async function waitForCiGreen(opts) {
     if (state === "green") return "green";
     if (state === "failed") return "failed";
     if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-    await new Promise((resolve20) => setTimeout(resolve20, CI_GATE_POLL_INTERVAL_MS));
+    await new Promise((resolve19) => setTimeout(resolve19, CI_GATE_POLL_INTERVAL_MS));
   }
 }
 async function runAutoMergeGate(opts) {
@@ -51518,7 +51517,11 @@ async function scanOrphanedInProgress(opts) {
     }
     let prNumber = null;
     try {
-      const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid);
+      const outcome = await readDevOutcomeFile(
+        targetRepoRoot,
+        staleUlid,
+        manifest.ref
+      );
       prNumber = outcome?.prNumber ?? null;
     } catch {
       prNumber = null;

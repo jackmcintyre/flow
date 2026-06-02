@@ -216,7 +216,7 @@ export async function processDevTranscript(
   // On malformed file: DevOutcomeFileMalformedError propagates uncaught (Task 4.6).
   // ---------------------------------------------------------------------------
 
-  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);
+  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid, ref);
 
   let prNumber: number;
 

@@ -76,6 +76,7 @@ import {
   wrapCommitBody,
 } from "../lib/pr-body.js";
 import { readManifest } from "../lib/manifest-io.js";
+import { devOutcomeFilePath } from "../lib/read-dev-outcome-file.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { runProjectBuild, runProjectTests } from "../lib/run-project-build.js";
@@ -322,9 +323,9 @@ export async function runDevTerminalAction(opts: {
     }
     const prNumber = parseInt(prNumberMatch[1]!, 10);
 
-    // (xiii) Atomically write dev-outcome.json to the session directory under the
-    // ORCHESTRATING CHECKOUT — not the worktree. processDevTranscript reads
-    // `<orchestrating-checkout>/.crew/state/sessions/<sessionUlid>/dev-outcome.json`,
+    // (xiii) Atomically write dev-outcome.json to the per-ref session directory
+    // under the ORCHESTRATING CHECKOUT — not the worktree. processDevTranscript
+    // reads `<orchestrating-checkout>/.crew/state/sessions/<sessionUlid>/<ref>/dev-outcome.json`,
     // but in worktree mode the dev's cwd (`gitRoot`/`targetRepoRoot`) is the
     // worktree, whose separate (gitignored) `.crew/state` the orchestrating
     // session cannot see. resolveSessionLedgerRoot maps a worktree cwd back to
@@ -338,14 +339,13 @@ export async function runDevTerminalAction(opts: {
           ...(execaImpl ? { execaImpl } : {}),
         })
       : targetRepoRoot;
-    const devOutcomePath = path.resolve(
-      ledgerRoot,
-      ".crew",
-      "state",
-      "sessions",
-      sessionUlid,
-      "dev-outcome.json",
-    );
+    // Story native:01KT3YDHM10FPQ77N22BTJP9AF: namespace the PR-pointer record
+    // per story ref. A drain run shares one sessionUlid across every story, so a
+    // run-shared dev-outcome.json let a later/concurrent story clobber an
+    // earlier one's PR record — crash-recovery then resumed an unbuilt story
+    // against a sibling's PR. devOutcomeFilePath derives the same per-ref path
+    // the readers use.
+    const devOutcomePath = devOutcomeFilePath(ledgerRoot, sessionUlid, ref);
     await atomicWriteFile(
       devOutcomePath,
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2),

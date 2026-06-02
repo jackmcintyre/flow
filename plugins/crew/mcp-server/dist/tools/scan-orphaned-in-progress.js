@@ -129,7 +129,7 @@ export async function scanOrphanedInProgress(opts) {
         // malformed/absent outcome file must NOT abort the whole scan — treat as null.
         let prNumber = null;
         try {
-            const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid);
+            const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid, manifest.ref);
             prNumber = outcome?.prNumber ?? null;
         }
         catch {
