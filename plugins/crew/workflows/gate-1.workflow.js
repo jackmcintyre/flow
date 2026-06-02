@@ -1,10 +1,10 @@
 export const meta = {
   name: 'crew-gate-1',
-  description:
-    'Gate-1 workflow: deterministically fans out all five lens judges in parallel and returns a structured pass/fail verdict with Quality Lead adjudication. ' +
-    'Mirrors drain.workflow.js conventions: seam() courier discipline, load-bearing decisions in tool results never in agent prose. ' +
-    'Always passes round=1 and k=1 to adjudicateQualityLead so a clean panel immediately yields decision=ready with blessing and any lens fail immediately yields decision=escalate (not rework). ' +
-    'Story native:01KT1MP7TR651TAGVJ6EZSR589.',
+  // NB: this MUST be a single string literal (not a `+` concatenation). The
+  // Workflow runtime requires `meta` to be a pure literal and rejects a
+  // BinaryExpression here — a concatenated description makes the whole workflow
+  // unlaunchable via the Workflow tool (the only path that runs gate-1).
+  description: 'Gate-1 workflow: deterministically fans out all five lens judges in parallel (per-lens model tiering: Structure+Discipline on Sonnet, the rest on Opus) and returns a structured pass/fail verdict with Quality Lead adjudication. round=1 k=1: a clean sweep blesses ready, any lens fail escalates. Mirrors drain.workflow.js seam() courier discipline (load-bearing decisions live in tool results, never agent prose). Story native:01KT1MP7TR651TAGVJ6EZSR589.',
   phases: [
     { title: 'mint', detail: 'mint a session ULID and fetch the team roster + persona' },
     { title: 'judge', detail: 'fan out five lens judges in parallel; each writes its verdict file via writeLensVerdict' },
