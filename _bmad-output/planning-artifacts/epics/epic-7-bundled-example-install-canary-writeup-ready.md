@@ -18,7 +18,7 @@ So that I can run the canonical scenario before trusting the plugin with my own 
 
 **Acceptance Criteria:**
 
-**Given** the plugin tree, **When** I look at `plugins/crew/example/`, **Then** it contains a BMad-shaped source story tree under `_bmad-output/.../stories/`, a populated `docs/standards.md` (≤10 criteria), a `docs/risk-tiering.md`, and `.crew/config.yaml` with `adapter: bmad`. _(FR72)_
+**Given** the plugin tree, **When** I look at `plugins/flow/example/`, **Then** it contains a BMad-shaped source story tree under `_bmad-output/.../stories/`, a populated `docs/standards.md` (≤10 criteria), a `docs/risk-tiering.md`, and `.flow/config.yaml` with `adapter: bmad`. _(FR72)_
 
 **Given** the example,
 **When** I run `/<plugin>:scan` against it,

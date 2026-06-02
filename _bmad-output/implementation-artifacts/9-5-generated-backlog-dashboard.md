@@ -22,33 +22,33 @@ This is the cockpit's **read surface**, and it closes the loop on the original "
 **AC1 — the dashboard renders the backlog grouped by epic from live state (integration):**
 
 Given a set of backlog manifests across the state buckets, the dashboard groups entries by epic and lists each item with its state, derived from the live inventory read — not a hand-maintained list. A vitest seeds manifests spanning multiple epics and states, renders the dashboard, and asserts the output groups the items by epic with each item's state shown.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
 
 **AC2 — readiness and claimability are shown per item (integration):**
 
 Each item shows whether it is blessed (the readiness flag) and whether it is claimable (dependencies satisfied and blessed); a not-ready item is visibly distinct from a ready one. A vitest seeds a ready item and a not-ready item with satisfied dependencies and asserts the rendered rows distinguish them on readiness and claimability.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
 
 **AC3 — the render is a pure function of state (integration):**
 
 The dashboard renderer takes a typed inventory snapshot and returns text with no file IO and no clock dependency, mirroring the existing pure renderers; the state read is a separate getter. A vitest calls the renderer twice with the same snapshot and asserts byte-identical output, and asserts the renderer performs no IO (pure-function contract).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
 
 **AC4 — blessing an item changes the rendered view with no hand-edit (integration):**
 
 Because the table is a function of state, marking an item ready (through the brake tool) and re-reading the inventory yields a dashboard whose row for that item now reads ready/claimable — no manual table edit. A vitest renders the dashboard, flips an item via the brake tool, re-reads + re-renders, and asserts only that item's readiness/claimability changed.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts
 
 **AC5 — a read-only skill prints the dashboard (artifact):**
 
 A skill renders and prints the dashboard for the operator. Its frontmatter lists only read-tools in `allowed_tools`; its body mutates nothing. The file exists at the skill path and is shaped like the other crew skills.
-artifact: plugins/crew/skills/board/SKILL.md
+artifact: plugins/flow/skills/board/SKILL.md
 
 ## Definition of Done
 
 - [ ] All five ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new test file covers every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new test file covers every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC4 runnable vitest, AC5 file-presence.
 - [ ] The renderer is pure (no IO, no clock); the state read is a separate getter — mirrors the existing render pattern.
@@ -58,7 +58,7 @@ artifact: plugins/crew/skills/board/SKILL.md
 
 ### Scope discipline — what this story does and does NOT build
 
-**Builds:** a pure `renderBacklogDashboard` over the inventory snapshot (group-by-epic + status + readiness/claimability), and a read-only `/crew:board` skill.
+**Builds:** a pure `renderBacklogDashboard` over the inventory snapshot (group-by-epic + status + readiness/claimability), and a read-only `/flow:board` skill.
 
 **Does NOT build:** operator-set priority/sequencing (deferred — the dashboard orders by natural ref order for now; an explicit operator order field is a later concern, not this slice's spine); any state mutation (read-only); the readiness flag itself (Story 9.1).
 
@@ -71,19 +71,19 @@ artifact: plugins/crew/skills/board/SKILL.md
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/tools/render-backlog-dashboard.ts` — the pure renderer (+ a thin getter wrapper if needed).
-- `plugins/crew/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts` — AC1–AC4.
-- `plugins/crew/skills/board/SKILL.md` — the read-only skill (AC5).
+- `plugins/flow/mcp-server/src/tools/render-backlog-dashboard.ts` — the pure renderer (+ a thin getter wrapper if needed).
+- `plugins/flow/mcp-server/src/tools/__tests__/backlog-dashboard.test.ts` — AC1–AC4.
+- `plugins/flow/skills/board/SKILL.md` — the read-only skill (AC5).
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/read-backlog-inventory.ts` — if needed, project `ready` + claimability onto the inventory entry (additive).
-- `plugins/crew/mcp-server/src/tools/register.ts` — register the dashboard getter if it is exposed as a tool.
+- `plugins/flow/mcp-server/src/tools/read-backlog-inventory.ts` — if needed, project `ready` + claimability onto the inventory entry (additive).
+- `plugins/flow/mcp-server/src/tools/register.ts` — register the dashboard getter if it is exposed as a tool.
 
 ### Existing seams to wire into (do not reinvent)
 
-- **Inventory:** `readBacklogInventory` in `plugins/crew/mcp-server/src/tools/read-backlog-inventory.ts` (state-dir enumeration + entry shape).
-- **Render pattern:** the pure `renderStatus` in `plugins/crew/mcp-server/src/tools/get-status.ts` (getter/renderer separation, no IO in render).
-- **State names:** `STATE_NAMES` in `plugins/crew/mcp-server/src/state/manifest-state-machine.ts`.
+- **Inventory:** `readBacklogInventory` in `plugins/flow/mcp-server/src/tools/read-backlog-inventory.ts` (state-dir enumeration + entry shape).
+- **Render pattern:** the pure `renderStatus` in `plugins/flow/mcp-server/src/tools/get-status.ts` (getter/renderer separation, no IO in render).
+- **State names:** `STATE_NAMES` in `plugins/flow/mcp-server/src/state/manifest-state-machine.ts`.
 - **Readiness/claimability:** the `ready` field (Story 9.1) and the claim eligibility (deps + ready) — show both.
 
 ### Edge cases worth surfacing in dev/review

@@ -39,12 +39,12 @@ The "handoff parser" part of the story name addresses the coupling inside `proce
 - (e) Persist the dev transcript to disk. Only the structured `dev-outcome.json` is written. The transcript remains in-memory / discarded per Story 4.3b (k).
 - (f) Remove `PR_URL_RE` from `process-dev-transcript.ts`. The regex is kept as a fallback for backward compatibility — a session started before this story is deployed will have no `dev-outcome.json`; the fallback prevents a hard crash on upgrade. On the fallback path, all current error behaviour is preserved (`PrUrlNotFoundInDevTranscriptError` if no URL found).
 - (g) Change how `prNumber` flows to the reviewer. SKILL.md prose already stores `prNumber` from the `processDevTranscript` result and passes it to `runReviewerSession`. The type and call site are unchanged.
-- (h) Write any file outside `.crew/state/sessions/<sessionUlid>/`. `dev-outcome.json` is written to the session directory, which is already managed state.
+- (h) Write any file outside `.flow/state/sessions/<sessionUlid>/`. `dev-outcome.json` is written to the session directory, which is already managed state.
 - (i) Emit telemetry. Story 4.12 owns telemetry.
 - (j) Pre-create the session directory before writing. `atomicWriteFile` (`lib/managed-fs.ts:115–120`) already calls `fs.mkdir(path.dirname(absPath), { recursive: true })` internally — no caller-side `fs.mkdir` is required. Only genuine filesystem errors (disk full, EROFS, permission denied) propagate uncaught from the write.
 - (k) Change the `runReviewerSession` caller in SKILL.md or its inputs. Only `processDevTranscript`'s internal PR-number resolution changes; the output shape `{ next: "spawn-reviewer", prNumber, reviewerPrompt, chatLog }` is unchanged.
 - (l) Add a strict "handoff implies dev-outcome file exists" assertion. `processDevTranscript` checks for the file opportunistically (use if present, fall back otherwise). A strict assertion — refusing to proceed if `parseHandoff` succeeds but no `dev-outcome.json` exists — is deferred work (see § Deferred work).
-- (m) Handle the partial-failure case where `gh pr create` succeeds but the subsequent `atomicWriteFile` throws. In that case, the PR exists on GitHub (irreversible) but `runDevTerminalAction` raises the filesystem error; the dev subagent never receives the `prUrl`, the handoff phrase is never emitted, the story stays in `in-progress/`, and a retry will hit `gh pr create`'s "PR already exists for branch" error. v1 accepts this as a regression on Story 4.4's failure surface (4.4 § (k) acknowledged a similar shape) — operator inspects, deletes the stuck branch's PR via `gh pr close`, and re-runs `/crew:start`. A typed `DevOutcomeWriteFailedError` with structured recovery hints is deferred work.
+- (m) Handle the partial-failure case where `gh pr create` succeeds but the subsequent `atomicWriteFile` throws. In that case, the PR exists on GitHub (irreversible) but `runDevTerminalAction` raises the filesystem error; the dev subagent never receives the `prUrl`, the handoff phrase is never emitted, the story stays in `in-progress/`, and a retry will hit `gh pr create`'s "PR already exists for branch" error. v1 accepts this as a regression on Story 4.4's failure surface (4.4 § (k) acknowledged a similar shape) — operator inspects, deletes the stuck branch's PR via `gh pr close`, and re-runs `/flow:start`. A typed `DevOutcomeWriteFailedError` with structured recovery hints is deferred work.
 - (n) Define rework-cycle semantics for `dev-outcome.json`. On a Story 4.3 rework iteration the dev subagent re-runs against the same story; current Story 4.4 behaviour is that `runDevTerminalAction` would call `gh pr create` again and that call would fail with "PR already exists" — so `atomicWriteFile` never runs and the original `dev-outcome.json` is preserved untouched. This story does NOT add idempotency-on-rework logic; if Story 4.4 is later amended to skip `gh pr create` on rework, the same amendment owner must decide whether to (i) skip the `dev-outcome.json` write too, or (ii) overwrite it with the same content (the PR number and branch don't change across rework iterations).
 
 ### Deferred work
@@ -56,18 +56,18 @@ The "handoff parser" part of the story name addresses the coupling inside `proce
 
 ## Acceptance Criteria
 
-> AC1–AC4 describe structural and behavioural changes to internal MCP tools. AC5 is the integration test. Per `plugins/crew/docs/user-surface-acs.md`, this story is `substrate`; no `(user-surface)` tags apply.
+> AC1–AC4 describe structural and behavioural changes to internal MCP tools. AC5 is the integration test. Per `plugins/flow/docs/user-surface-acs.md`, this story is `substrate`; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** the `runDevTerminalAction` MCP tool completes a successful `gh pr create` (i.e., `prUrl` is validated as starting with `https://github.com/`),
 **When** the tool runs,
-**Then** it atomically writes `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` with the shape `{ "prUrl": "<url>", "prNumber": <positive int>, "branch": "<branch>", "commitSha": "<sha>" }` using `atomicWriteFile` from `lib/managed-fs.ts`. `prNumber` is extracted via: `const m = prUrl.match(/\/pull\/(\d+)/); if (!m) throw new GhPrCreateFailedError({ stderr: ghResult.stderr, diagnostic: "PR URL stdout contained no /pull/<n> segment" }); const prNumber = parseInt(m[1]!, 10);` — the regex captures `\d+`, so `parseInt` always returns a positive integer (NaN is unreachable). The write happens before the `return { ok: true, ... }` statement. `atomicWriteFile` internally creates parents via `fs.mkdir(..., { recursive: true })`, so a missing session directory is NOT an error case; only genuine filesystem errors (disk full, EROFS, permission denied) propagate uncaught. _(seam reliability; replaces the fragile LLM-text extraction path)_
+**Then** it atomically writes `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/dev-outcome.json` with the shape `{ "prUrl": "<url>", "prNumber": <positive int>, "branch": "<branch>", "commitSha": "<sha>" }` using `atomicWriteFile` from `lib/managed-fs.ts`. `prNumber` is extracted via: `const m = prUrl.match(/\/pull\/(\d+)/); if (!m) throw new GhPrCreateFailedError({ stderr: ghResult.stderr, diagnostic: "PR URL stdout contained no /pull/<n> segment" }); const prNumber = parseInt(m[1]!, 10);` — the regex captures `\d+`, so `parseInt` always returns a positive integer (NaN is unreachable). The write happens before the `return { ok: true, ... }` statement. `atomicWriteFile` internally creates parents via `fs.mkdir(..., { recursive: true })`, so a missing session directory is NOT an error case; only genuine filesystem errors (disk full, EROFS, permission denied) propagate uncaught. _(seam reliability; replaces the fragile LLM-text extraction path)_
 
 <!-- Not user-surface: AC1 describes a tool's internal file-write side-effect. No operator-visible change. -->
 
 **AC2:**
 **Given** `processDevTranscript` is called after a successful `parseHandoff` (i.e., `parseHandoff` returns `{ ok: true }`),
-**When** `dev-outcome.json` is present at `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` and contains valid JSON with all required fields,
+**When** `dev-outcome.json` is present at `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/dev-outcome.json` and contains valid JSON with all required fields,
 **Then** `processDevTranscript` reads `prNumber` from the file (without scanning `devTranscript` with `PR_URL_RE`), and returns `{ next: "spawn-reviewer", prNumber: <file-sourced int>, reviewerPrompt, chatLog }`. The `PR_URL_RE` regex loop is not reached on this path.
 
 <!-- Not user-surface: AC2 describes the primary file-read path. Operator-observable behaviour (reviewer spawns with correct PR number) is unchanged. -->
@@ -107,8 +107,8 @@ vitest covers:
 Implementation order is load-bearing.
 
 - [x] **Task 1: Write `dev-outcome.json` in `runDevTerminalAction`** (AC: #1, #5a, #5h)
-  - [x] 1.0 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, locate the existing destructure of the `opts` parameter at lines 83–91. `sessionUlid` is declared on `RunDevTerminalActionOptions` but is NOT currently pulled into local scope there — add `sessionUlid` to the destructure so it is available as a plain identifier in the write block added by Task 1.3. Alternatively, reference it as `opts.sessionUlid` in the write call if that reads more cleanly with the surrounding code — pick whichever form is already dominant for other option fields in this file. (This is the same pattern Task 4.2 applies to `process-dev-transcript.ts`.)
-  - [x] 1.1 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, add an import for `atomicWriteFile` from `"../lib/managed-fs.js"`.
+  - [x] 1.0 In `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`, locate the existing destructure of the `opts` parameter at lines 83–91. `sessionUlid` is declared on `RunDevTerminalActionOptions` but is NOT currently pulled into local scope there — add `sessionUlid` to the destructure so it is available as a plain identifier in the write block added by Task 1.3. Alternatively, reference it as `opts.sessionUlid` in the write call if that reads more cleanly with the surrounding code — pick whichever form is already dominant for other option fields in this file. (This is the same pattern Task 4.2 applies to `process-dev-transcript.ts`.)
+  - [x] 1.1 In `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`, add an import for `atomicWriteFile` from `"../lib/managed-fs.js"`.
   - [x] 1.2 After the `prUrl` validation block (currently lines 177–183, which throw `GhPrCreateFailedError` if `prUrl` is falsy or doesn't start with `https://github.com/`), extract `prNumber` via regex match — NOT `split("/pull/")` (which would silently produce NaN on a malformed URL):
     ```ts
     const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
@@ -121,13 +121,13 @@ Implementation order is load-bearing.
     const prNumber = parseInt(prNumberMatch[1]!, 10);
     ```
     The regex guarantees `\d+` matched, so `parseInt` returns a positive integer (NaN is unreachable). This is the SINGLE source-of-truth for `prNumber` parsing across this story — AC1 quotes the same expression.
-  - [x] 1.3 Compute `devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`.
+  - [x] 1.3 Compute `devOutcomePath = path.resolve(targetRepoRoot, ".flow", "state", "sessions", sessionUlid, "dev-outcome.json")`.
   - [x] 1.4 Call `await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha }, null, 2))`. This happens BEFORE the `return { ok: true, branch, commitSha, prUrl }` statement. `atomicWriteFile` creates the session directory internally; no caller-side `fs.mkdir` is required.
   - [x] 1.5 Do NOT add `sessionUlid` to the return type — it is already a tool input; the caller already has it.
-  - [x] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a). Existing tests do not provide a session directory — that's fine; `atomicWriteFile` will create it. If any existing test asserts "no files are written under `.crew/state/`", update that assertion to allow `dev-outcome.json` under the session directory.
+  - [x] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a). Existing tests do not provide a session directory — that's fine; `atomicWriteFile` will create it. If any existing test asserts "no files are written under `.flow/state/`", update that assertion to allow `dev-outcome.json` under the session directory.
 
 - [x] **Task 2: Add `DevOutcomeFileMalformedError` to `errors.ts`** (AC: #4, #5d, #5e)
-  - [x] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, add (matching the sibling `ReviewerResultFileMalformedError` ctor shape — `{ path, cause }`, no `sessionUlid`, since `path` already encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`):
+  - [x] 2.1 In `plugins/flow/mcp-server/src/errors.ts`, add (matching the sibling `ReviewerResultFileMalformedError` ctor shape — `{ path, cause }`, no `sessionUlid`, since `path` already encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`):
     ```ts
     export class DevOutcomeFileMalformedError extends DomainError {
       readonly path: string;
@@ -138,7 +138,7 @@ Implementation order is load-bearing.
   - [x] 2.2 The `cause` field carries the underlying parse error or a descriptive string for missing/wrong-typed-field cases. Follow the pattern of `ReviewerResultFileMalformedError` at `errors.ts:1091`.
 
 - [x] **Task 3: Add `readDevOutcomeFile` shared helper** (AC: #2, #3, #4)
-  - [x] 3.1 Create `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(targetRepoRoot: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`. **Signature deliberately matches `readReviewerResultFile(targetRepoRoot, sessionUlid)` (`lib/read-reviewer-result-file.ts:31`)** — the helper computes the file path internally (`path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`).
+  - [x] 3.1 Create `plugins/flow/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(targetRepoRoot: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`. **Signature deliberately matches `readReviewerResultFile(targetRepoRoot, sessionUlid)` (`lib/read-reviewer-result-file.ts:31`)** — the helper computes the file path internally (`path.join(targetRepoRoot, ".flow", "state", "sessions", sessionUlid, "dev-outcome.json")`).
   - [x] 3.2 On ENOENT: return `null`.
   - [x] 3.3 On read success: `JSON.parse(contents)`. Validate (a) presence and string type of `prUrl`, `branch`, `commitSha`; (b) `prNumber` is a number AND `Number.isInteger(prNumber)` AND `prNumber > 0` (reject NaN, floats, zero, negatives). On parse failure or any validation miss: throw `DevOutcomeFileMalformedError({ path, cause })` where `cause` is the underlying error or a descriptive string naming the offending field.
   - [x] 3.4 No Zod dependency required — manual field checks mirror the pattern in `read-reviewer-result-file.ts`.
@@ -152,7 +152,7 @@ Implementation order is load-bearing.
   - [x] 4.6 `DevOutcomeFileMalformedError` thrown by `readDevOutcomeFile` propagates uncaught — same pattern as `ReviewerResultFileMalformedError` in `processReviewerTranscript`.
 
 - [x] **Task 5: Update tests** (AC: #5)
-  - [x] 5.1 In `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`, add test cases for (5b) file-present path, (5c) fallback path, (5d) malformed JSON, (5e) missing field. Use `tmpdir` per `beforeEach`; write `dev-outcome.json` where needed. The `processDevTranscript` call takes `targetRepoRoot` and `sessionUlid` from which the tool resolves the path.
+  - [x] 5.1 In `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`, add test cases for (5b) file-present path, (5c) fallback path, (5d) malformed JSON, (5e) missing field. Use `tmpdir` per `beforeEach`; write `dev-outcome.json` where needed. The `processDevTranscript` call takes `targetRepoRoot` and `sessionUlid` from which the tool resolves the path.
   - [x] 5.2 In the `runDevTerminalAction` test file, add test case (5a): stub `gh pr create` to return a known PR URL; assert `dev-outcome.json` is written to the session tmpdir with the expected content.
   - [x] 5.3 Run full vitest suite (`pnpm vitest --run` from `mcp-server/`) — confirm all existing tests still pass.
 
@@ -175,7 +175,7 @@ Implementation order is load-bearing.
 
 ### Why keep the `PR_URL_RE` fallback
 
-Session continuity: a `/crew:start` session that started before this story is deployed will have no `dev-outcome.json`. When `processDevTranscript` runs for such a session (ENOENT on the file), the fallback prevents a hard `DevOutcomeFileMalformedError` where previously there was only a potential `PrUrlNotFoundInDevTranscriptError`. The fallback is the conservative choice during the stabilisation period.
+Session continuity: a `/flow:start` session that started before this story is deployed will have no `dev-outcome.json`. When `processDevTranscript` runs for such a session (ENOENT on the file), the fallback prevents a hard `DevOutcomeFileMalformedError` where previously there was only a potential `PrUrlNotFoundInDevTranscriptError`. The fallback is the conservative choice during the stabilisation period.
 
 ### Why `DevOutcomeFileMalformedError` does not fall back to transcript scanning
 
@@ -183,7 +183,7 @@ A malformed file is a machine-write failure, not an absent file. If `atomicWrite
 
 ### Why session-state rather than the manifest
 
-Story 4.4 §(j) anticipated that "a future story may add `pr_url` to the manifest for faster reviewer-side lookup." Story 4.8b deliberately picks the session directory (`<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json`) instead. Rationale: PR URLs are session-scoped artefacts — they belong to the dev→reviewer cycle that produced them and have no meaning outside it. The manifest is long-lived per-story state and should not accumulate transient run-cycle metadata. Persisting to the session directory keeps the manifest schema stable and mirrors how `reviewer-result.json` is scoped (Story 4.6 revision 2). If a future story needs a manifest-level `pr_url` for cross-session lookup (e.g., for blocked-story recovery), it can read the most-recent session's `dev-outcome.json` and write a derived field — that work is out of scope here.
+Story 4.4 §(j) anticipated that "a future story may add `pr_url` to the manifest for faster reviewer-side lookup." Story 4.8b deliberately picks the session directory (`<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/dev-outcome.json`) instead. Rationale: PR URLs are session-scoped artefacts — they belong to the dev→reviewer cycle that produced them and have no meaning outside it. The manifest is long-lived per-story state and should not accumulate transient run-cycle metadata. Persisting to the session directory keeps the manifest schema stable and mirrors how `reviewer-result.json` is scoped (Story 4.6 revision 2). If a future story needs a manifest-level `pr_url` for cross-session lookup (e.g., for blocked-story recovery), it can read the most-recent session's `dev-outcome.json` and write a derived field — that work is out of scope here.
 
 ### Acknowledging the partial-failure regression
 
@@ -193,17 +193,17 @@ The write happens AFTER `gh pr create` succeeds. If `atomicWriteFile` throws, th
 
 ## Locked files
 
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — NOT touched
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Stories 4.6b / 4.7) — NOT touched
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — NOT touched
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — NOT touched
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7 / 4.8) — NOT touched
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — NOT touched
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Stories 4.6b / 4.7) — NOT touched
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — NOT touched
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — NOT touched
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7 / 4.8) — NOT touched
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`** (Story 4.4) — Task 1 adds a `dev-outcome.json` write after a successful `gh pr create`. The change is additive (new side-effect only; return type unchanged) and is load-bearing for AC1's machine-authoritative seam.
-- **`plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`** (Stories 4.3b / 4.5 / 4.6) — Task 4 inserts a `readDevOutcomeFile` call in the `parseHandoff`-success branch (before the `PR_URL_RE` scan). Existing recoverable-error check (Step 1) and handoff-phrase check (Step 2) are UNTOUCHED. The `PR_URL_RE` scan block is preserved as-is for the fallback path.
-- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories including 4.1 / 4.2 / 4.3 / 4.3b / 4.4 / 4.5 / 4.6 / 4.6b / 4.7 / 4.8) — Task 2 appends `DevOutcomeFileMalformedError`. No existing error classes are modified; routine additive growth follows the established `extends DomainError` pattern.
+- **`plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`** (Story 4.4) — Task 1 adds a `dev-outcome.json` write after a successful `gh pr create`. The change is additive (new side-effect only; return type unchanged) and is load-bearing for AC1's machine-authoritative seam.
+- **`plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`** (Stories 4.3b / 4.5 / 4.6) — Task 4 inserts a `readDevOutcomeFile` call in the `parseHandoff`-success branch (before the `PR_URL_RE` scan). Existing recoverable-error check (Step 1) and handoff-phrase check (Step 2) are UNTOUCHED. The `PR_URL_RE` scan block is preserved as-is for the fallback path.
+- **`plugins/flow/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories including 4.1 / 4.2 / 4.3 / 4.3b / 4.4 / 4.5 / 4.6 / 4.6b / 4.7 / 4.8) — Task 2 appends `DevOutcomeFileMalformedError`. No existing error classes are modified; routine additive growth follows the established `extends DomainError` pattern.
 
 ---
 
@@ -211,16 +211,16 @@ The write happens AFTER `gh pr create` succeeds. If `atomicWriteFile` throws, th
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts` (Task 3)
+- `plugins/flow/mcp-server/src/lib/read-dev-outcome-file.ts` (Task 3)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` (Task 1)
-- `plugins/crew/mcp-server/src/errors.ts` (Task 2)
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Task 4)
-- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (Task 5.1)
-- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-terminal-action.test.ts` (Task 5.2)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts` (Task 1)
+- `plugins/flow/mcp-server/src/errors.ts` (Task 2)
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Task 4)
+- `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (Task 5.1)
+- `plugins/flow/mcp-server/src/tools/__tests__/run-dev-terminal-action.test.ts` (Task 5.2)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 ### Current-state notes on files being modified
 
@@ -232,18 +232,18 @@ The write happens AFTER `gh pr create` succeeds. If `atomicWriteFile` throws, th
 
 - vitest with `pnpm vitest --run` from `mcp-server/`.
 - Use `tmp` directory fixtures per `beforeEach`; clean up per `afterEach` using `fs.rm`.
-- For the `runDevTerminalAction` write-path test (5a): provide a `sessionUlid` and a `targetRepoRoot` pointing to a tmpdir with a valid `.crew/state/sessions/<sessionUlid>/` directory. Stub `gh pr create` via `execaImpl` to return the test PR URL.
+- For the `runDevTerminalAction` write-path test (5a): provide a `sessionUlid` and a `targetRepoRoot` pointing to a tmpdir with a valid `.flow/state/sessions/<sessionUlid>/` directory. Stub `gh pr create` via `execaImpl` to return the test PR URL.
 - For `processDevTranscript` file-read tests (5b–5e): write (or omit) `dev-outcome.json` in the session tmpdir; pass matching `targetRepoRoot` and `sessionUlid` to the tool.
 
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md`]
 - [Source: `_bmad-output/implementation-artifacts/4-8-reviewer-labels-and-negative-capability-enforcement.md`] (adjacent story, grounding voice)
-- [Source: `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`] (modified by Task 4; PR_URL_RE block at lines 163–175)
-- [Source: `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`] (modified by Task 1; write site at lines 183–190)
-- [Source: `plugins/crew/mcp-server/src/lib/managed-fs.ts`] (atomicWriteFile export — used in Task 1)
-- [Source: `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`] (pattern for Task 3's helper)
-- [Source: `plugins/crew/mcp-server/src/errors.ts`] (DevOutcomeFileMalformedError added in Task 2)
+- [Source: `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`] (modified by Task 4; PR_URL_RE block at lines 163–175)
+- [Source: `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`] (modified by Task 1; write site at lines 183–190)
+- [Source: `plugins/flow/mcp-server/src/lib/managed-fs.ts`] (atomicWriteFile export — used in Task 1)
+- [Source: `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`] (pattern for Task 3's helper)
+- [Source: `plugins/flow/mcp-server/src/errors.ts`] (DevOutcomeFileMalformedError added in Task 2)
 
 ---
 
@@ -284,10 +284,10 @@ claude-sonnet-4-6
 
 ### File List
 
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` (modified)
-- `plugins/crew/mcp-server/src/errors.ts` (modified)
-- `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts` (created)
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (modified)
-- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (modified)
-- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts` (modified)
-- `plugins/crew/mcp-server/dist/` (rebuilt)
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts` (modified)
+- `plugins/flow/mcp-server/src/errors.ts` (modified)
+- `plugins/flow/mcp-server/src/lib/read-dev-outcome-file.ts` (created)
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (modified)
+- `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (modified)
+- `plugins/flow/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts` (modified)
+- `plugins/flow/mcp-server/dist/` (rebuilt)

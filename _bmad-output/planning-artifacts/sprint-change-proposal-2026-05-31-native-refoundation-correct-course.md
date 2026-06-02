@@ -58,7 +58,7 @@ Re-anchor the install-canary to the native world **before** any of its stories a
 | Story | Stale assumption (today) | Rescope (post-native) |
 |---|---|---|
 | 7.1 | Bundled **BMad-shaped** example repo (`adapter: bmad`) | Native-shaped example (native is the primary adapter; BMad demoted to ingest-only per plan §5/§6). Open call in §5 on whether to *also* seed a BMad fixture to canary the ingest seam. |
-| 7.2 | README step 8 = run `/start` and `/watch` | Both retired (#210; `/watch` cancelled). Re-point the install path at the **drain** workflow (`/crew:crew-drain`) + the intake cockpit (`/ready`, `/board`). |
+| 7.2 | README step 8 = run `/start` and `/watch` | Both retired (#210; `/watch` cancelled). Re-point the install path at the **drain** workflow (`/flow:crew-drain`) + the intake cockpit (`/ready`, `/board`). |
 | 7.3 | E2e canary drives `/start` | Drive the **drain** end-to-end (author → judge → QL → ready → drain → merge), matching plan §7's "prove the pipeline" scenario. |
 | 7.4b | Plain-language pass over Story **5.5** surface tags | 5.5 is cancelled (assumed the retired watch loop). Re-anchor to the live drain/result-bucket surfaces. |
 | 7.5 | Troubleshooting guide inventories failure paths from Stories **5.4 / 5.5 / 5.8** | All three cancelled. Re-anchor to the drain's exit-reason/result-bucket failure taxonomy (Epic 8 surfaces). |

@@ -25,7 +25,7 @@ Append Story 5.13 block to `_bmad-output/planning-artifacts/epics/epic-5-orchest
 ACs (full text in the epic file):
 - **AC1** — `scanSources` extracts dep references from spec body; drift between extracted set and manifest `depends_on` refuses the scan-write with a `[deps-drift]` stderr line. Spec author owns exact extraction patterns.
 - **AC2** — `blocked_by` migrates from free string to Zod-typed enum with 10 initial members (including `orphan-no-transcript` from 5.11 and `deps-drift` from AC1).
-- **AC3** — `/crew:start`'s blocked-recovery surface uses the typed reason to render a per-case operator hint (memory `project_blocked_recovery_prose_lies`).
+- **AC3** — `/flow:start`'s blocked-recovery surface uses the typed reason to render a per-case operator hint (memory `project_blocked_recovery_prose_lies`).
 - **AC4 (integration)** — vitest covers drift-refusal, Zod boundary rejection, and per-enum operator hints.
 - **AC5 (integration)** — existing `blocked/` test fixtures migrated to typed values.
 

@@ -12,23 +12,23 @@
 
 ## Story 8.1: Commit-scope regex accepts real story refs
 
-Scope: `plugins/crew/mcp-server/src/lib/git.ts` — the conventional-commit subject scope `[a-z0-9-]+` rejects every real ref (`bmad:1.1`, `native:<ULID>`); widen to `[A-Za-z0-9._:-]+`. Fix already staged in worktree `wf-drain-fix`. Pivot-independent; unblocks every dev commit. (Proposal M0.)
+Scope: `plugins/flow/mcp-server/src/lib/git.ts` — the conventional-commit subject scope `[a-z0-9-]+` rejects every real ref (`bmad:1.1`, `native:<ULID>`); widen to `[A-Za-z0-9._:-]+`. Fix already staged in worktree `wf-drain-fix`. Pivot-independent; unblocks every dev commit. (Proposal M0.)
 
 ## Story 8.2: Reviewer AC-heading regex alignment
 
-Scope: `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts` — the reviewer's AC-heading regex rejects em-dash descriptive headings (`**AC3 — title:**`) that the BMad parser accepts, so the reviewer matches **zero** ACs and "verifies" nothing (41 headings affected in crew's own backlog). Align to the BMad em-dash-aware pattern; add a **parity test** vs the BMad parser. The critical correctness fix. (Proposal M1.)
+Scope: `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts` — the reviewer's AC-heading regex rejects em-dash descriptive headings (`**AC3 — title:**`) that the BMad parser accepts, so the reviewer matches **zero** ACs and "verifies" nothing (41 headings affected in crew's own backlog). Align to the BMad em-dash-aware pattern; add a **parity test** vs the BMad parser. The critical correctness fix. (Proposal M1.)
 
 ## Story 8.3: Agent-discipline — evidence-only dev/reviewer
 
-Scope: `plugins/crew/catalogue/generalist-dev.md` + `generalist-reviewer.md` (and their `team/` copies) — forbid agents from writing the execution manifest/state (evidence-only: code, PR, transcript), while **preserving full reasoning latitude**. Closes the manifest-corruption the spike hit (`parseExecutionManifest` `.strict()` throw). (Proposal M2.)
+Scope: `plugins/flow/catalogue/generalist-dev.md` + `generalist-reviewer.md` (and their `team/` copies) — forbid agents from writing the execution manifest/state (evidence-only: code, PR, transcript), while **preserving full reasoning latitude**. Closes the manifest-corruption the spike hit (`parseExecutionManifest` `.strict()` throw). (Proposal M2.)
 
 ## Story 8.4: Productionise the CLI shim
 
-Scope: `plugins/crew/mcp-server/src/cli.ts` (currently untracked) — commit it; wire the two missing seam tools (`processReviewerYield`, `scanOrphanedInProgress`); rebuild `dist`; add a smoke test. This is the one-shot CLI the drain's seam-agents call (no daemon on the drain path). (Proposal M3.)
+Scope: `plugins/flow/mcp-server/src/cli.ts` (currently untracked) — commit it; wire the two missing seam tools (`processReviewerYield`, `scanOrphanedInProgress`); rebuild `dist`; add a smoke test. This is the one-shot CLI the drain's seam-agents call (no daemon on the drain path). (Proposal M3.)
 
 ## Story 8.5: Stateless drain workflow
 
-Scope: `plugins/crew/workflows/drain.workflow.js` (net-new) — the serial stateless drain per build brief §4.4, scoped to one story for v1; `haiku` seam-agents over the CLI shim; dev agent in its own worktree (cwd = repo root for `gh`); verdict from the reviewer-result file; tunables parameterised (not hardcoded). Skips orphan-recovery + yield for v1. (Proposal M4.)
+Scope: `plugins/flow/workflows/drain.workflow.js` (net-new) — the serial stateless drain per build brief §4.4, scoped to one story for v1; `haiku` seam-agents over the CLI shim; dev agent in its own worktree (cwd = repo root for `gh`); verdict from the reviewer-result file; tunables parameterised (not hardcoded). Skips orphan-recovery + yield for v1. (Proposal M4.)
 
 ## Story 8.6: Bootstrap story + dogfood run
 
@@ -36,16 +36,16 @@ Scope: author a real low-risk bootstrap story (via `bmad-create-story`), prime i
 
 ## Story 8.8: Native scan arms loudly on unmatched story files
 
-Scope: `plugins/crew/mcp-server/src/adapters/native/index.ts` — `listNativeStoryFiles` silently drops every `.md` whose name doesn't match the ULID pattern, so a misnamed story vanishes and a directory of only-misnamed files scans to zero with no signal (the `nothingMatched` gap). Surface the unmatched basenames so the scan can report them loudly instead of returning a silent all-zero. Pure, additive, unit-testable. Second Stage-1 dogfood story — re-validates the autonomous loop + CI after the base-branch fix (#191).
+Scope: `plugins/flow/mcp-server/src/adapters/native/index.ts` — `listNativeStoryFiles` silently drops every `.md` whose name doesn't match the ULID pattern, so a misnamed story vanishes and a directory of only-misnamed files scans to zero with no signal (the `nothingMatched` gap). Surface the unmatched basenames so the scan can report them loudly instead of returning a silent all-zero. Pure, additive, unit-testable. Second Stage-1 dogfood story — re-validates the autonomous loop + CI after the base-branch fix (#191).
 
 ## Story 8.11: One-line summary of an auto-merge gate outcome
 
-Scope: a new self-contained pure helper `plugins/crew/mcp-server/src/lib/summarise-gate-outcome.ts` — `summariseGateOutcome(outcome)` renders a plain `{ ref, prNumber, decision, reason, merged }` into a single operator-readable line. New module + unit test only; nothing existing modified. The **Stage-2-for-code proof** re-run after the source-only diff-size fix (#200): a purely-additive code helper that should now classify `low.additive-only`, CI-gate green, and auto-merge with zero humans. Vitest-verified.
+Scope: a new self-contained pure helper `plugins/flow/mcp-server/src/lib/summarise-gate-outcome.ts` — `summariseGateOutcome(outcome)` renders a plain `{ ref, prNumber, decision, reason, merged }` into a single operator-readable line. New module + unit test only; nothing existing modified. The **Stage-2-for-code proof** re-run after the source-only diff-size fix (#200): a purely-additive code helper that should now classify `low.additive-only`, CI-gate green, and auto-merge with zero humans. Vitest-verified.
 
 ## Story 8.10: Plain-language explanation of auto-merge gate reasons
 
-Scope: a new self-contained pure helper `plugins/crew/mcp-server/src/lib/explain-gate-reason.ts` — `explainGateReason(reason: string): string` maps each auto-merge gate reason literal to a one-line operator explanation, with a safe fallback for unknown reasons. New module + unit test only; nothing existing modified. The **Stage-2-for-CODE guinea pig**: the first real code the loop builds, verifies, CI-gates, and auto-merges with zero humans — purely-additive → `low.additive-only`. Vitest-verified.
+Scope: a new self-contained pure helper `plugins/flow/mcp-server/src/lib/explain-gate-reason.ts` — `explainGateReason(reason: string): string` maps each auto-merge gate reason literal to a one-line operator explanation, with a safe fallback for unknown reasons. New module + unit test only; nothing existing modified. The **Stage-2-for-CODE guinea pig**: the first real code the loop builds, verifies, CI-gates, and auto-merges with zero humans — purely-additive → `low.additive-only`. Vitest-verified.
 
 ## Story 8.9: Document the provisional-trust auto-merge flag
 
-Scope: a new docs-only file `plugins/crew/docs/provisional-trust.md` documenting the Stage-2 `plugin.provisional_trust` flag (what it does, the default, the low-risk-only constraint, how to enable/disable). Docs-only → classifies `low`; ACs verified by `artifact:` presence. The **Stage-2 guinea pig**: the first story the autonomous loop merges with zero human intervention (provisional-trust auto-merge on the safest possible change). Purely additive, no code, no tests.
+Scope: a new docs-only file `plugins/flow/docs/provisional-trust.md` documenting the Stage-2 `plugin.provisional_trust` flag (what it does, the default, the low-risk-only constraint, how to enable/disable). Docs-only → classifies `low`; ACs verified by `artifact:` presence. The **Stage-2 guinea pig**: the first story the autonomous loop merges with zero human intervention (provisional-trust auto-merge on the safest possible change). Purely additive, no code, no tests.

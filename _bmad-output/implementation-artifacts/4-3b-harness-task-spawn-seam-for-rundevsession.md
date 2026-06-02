@@ -8,17 +8,17 @@ Status: review
 
 ## Story
 
-As a **plugin maintainer driving `/crew:start` in production**,
-I want **the `/crew:start` SKILL.md prose layer to own the `Task`-tool spawn of dev and reviewer subagents (using prompts and verdicts computed by pure MCP tools), rather than `runDevSession` attempting to spawn subagents itself across the MCP wire**,
+As a **plugin maintainer driving `/flow:start` in production**,
+I want **the `/flow:start` SKILL.md prose layer to own the `Task`-tool spawn of dev and reviewer subagents (using prompts and verdicts computed by pure MCP tools), rather than `runDevSession` attempting to spawn subagents itself across the MCP wire**,
 so that **the inner dev↔reviewer cycle actually runs in a real Claude Code session — today's `runDevSession` ships with a stub `taskSpawnWithTranscript` (closures cannot cross MCP), so every claimed story silently fails handoff parsing and gets stamped `blocked_by: handoff-grammar`, making the user-surface ACs Stories 4.2 and 4.3 verified through dependency injection inert in any live operator session.**
 
 ### What this story is, in one sentence
 
-Move the `Task`-tool spawn responsibility out of the MCP server and into the `/crew:start` SKILL.md prose: the prose calls a pure MCP tool to get the next dev prompt, invokes Claude Code's built-in `Task` tool itself with that prompt, captures the dev's final transcript verbatim, hands it to a new pure MCP tool `processDevTranscript` (which parses, mutates the manifest, and returns either a reviewer prompt or a terminal verdict), then — if a reviewer is to spawn — repeats the pattern with `Task` again and a second pure MCP tool `processReviewerTranscript`. The do-everything `runDevSession` tool is unregistered. Tool count moves 19 → 21 (drop `runDevSession`; add `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`).
+Move the `Task`-tool spawn responsibility out of the MCP server and into the `/flow:start` SKILL.md prose: the prose calls a pure MCP tool to get the next dev prompt, invokes Claude Code's built-in `Task` tool itself with that prompt, captures the dev's final transcript verbatim, hands it to a new pure MCP tool `processDevTranscript` (which parses, mutates the manifest, and returns either a reviewer prompt or a terminal verdict), then — if a reviewer is to spawn — repeats the pattern with `Task` again and a second pure MCP tool `processReviewerTranscript`. The do-everything `runDevSession` tool is unregistered. Tool count moves 19 → 21 (drop `runDevSession`; add `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`).
 
 ### What this story fixes (and why it needs its own story)
 
-Story 4.3 (PR #103) shipped `runDevSession` as a single MCP-tool entry point that bundled the outer claim-loop and the inner dev↔reviewer cycle. The seam for the `Task` spawn was an injectable parameter `taskSpawnWithTranscript` on the in-process function signature. That works for vitest (the test passes a closure that returns a scripted transcript) but breaks across the MCP wire: MCP tool inputs are JSON-only — no closures, no callables. The production wiring at `plugins/crew/mcp-server/src/tools/run-dev-session.ts:73-80` falls through to a stub that returns `{ transcript: "" }`, which causes every dev subagent's "transcript" to be empty, which causes `parseHandoff` to return `{ ok: false, reason: "empty" }`, which stamps `blocked_by: handoff-grammar` on every claimed story. The PR #103 reviewer flagged this as Info-2 and the Epic 4 carry-forward retro confirmed it as a follow-up.
+Story 4.3 (PR #103) shipped `runDevSession` as a single MCP-tool entry point that bundled the outer claim-loop and the inner dev↔reviewer cycle. The seam for the `Task` spawn was an injectable parameter `taskSpawnWithTranscript` on the in-process function signature. That works for vitest (the test passes a closure that returns a scripted transcript) but breaks across the MCP wire: MCP tool inputs are JSON-only — no closures, no callables. The production wiring at `plugins/flow/mcp-server/src/tools/run-dev-session.ts:73-80` falls through to a stub that returns `{ transcript: "" }`, which causes every dev subagent's "transcript" to be empty, which causes `parseHandoff` to return `{ ok: false, reason: "empty" }`, which stamps `blocked_by: handoff-grammar` on every claimed story. The PR #103 reviewer flagged this as Info-2 and the Epic 4 carry-forward retro confirmed it as a follow-up.
 
 Three concrete gaps:
 
@@ -31,45 +31,45 @@ This story restructures the seam so the SKILL.md prose IS the loop driver — in
 ### This story does NOT
 
 - (a) Touch `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other file under `_bmad-output/implementation-artifacts/`. The orchestrator owns status transitions. The dev agent MUST NOT edit any status / state file when implementing this story.
-- (b) Change the locked handoff phrase grammar, the verdict sentinel grammar, the rework-count semantics, or the `blocked_by` taxonomy. Story 4.3 owns those contracts; Story 4.3b keeps them byte-identical. The `parseHandoff` / `parseVerdict` modules in `plugins/crew/mcp-server/src/skills/` are imported by the new tools verbatim — no edits to their behaviour.
+- (b) Change the locked handoff phrase grammar, the verdict sentinel grammar, the rework-count semantics, or the `blocked_by` taxonomy. Story 4.3 owns those contracts; Story 4.3b keeps them byte-identical. The `parseHandoff` / `parseVerdict` modules in `plugins/flow/mcp-server/src/skills/` are imported by the new tools verbatim — no edits to their behaviour.
 - (c) Change the chat-surface lines (AC1/AC2/AC3 from Story 4.3, plus the `BLOCKED` passthrough and grammar-drift lines). The verbatim strings move from `dev-reviewer-cycle.ts` into the new transcript-processor tools, but their text is unchanged. Operator-observable behaviour is identical.
 - (d) Implement `git push`, `gh pr create`, risk-tier classification, auto-merge, the yield protocol, telemetry events, or any of the downstream Epic 4 stories. Those land in 4.4 / 4.9 / 4.10b / 4.11 / 4.12.
 - (e) Re-implement `claimStory`, `listClaimableTodos`, `buildPersonaSpawnPrompt`, the workspace resolver, `parseExecutionManifest`, `parseHandoff`, `parseVerdict`, or `writeManagedFile`. All shipped; this story re-wires them.
 - (f) Modify the catalogue persona bodies (`generalist-dev.md`, `generalist-reviewer.md`) or the team-instantiated copies under `<targetRepoRoot>/team/<role>/PERSONA.md`. The locked-phrase contract Story 4.3 pinned on persona files is the contract this story consumes.
 - (g) Move the outer claim-loop (the alphabetical scan of `to-do/`, the `claimStory` call, the queue-drained line). That stays as plain TypeScript inside the MCP layer — see § Implementation strategy for where exactly. The story focuses on the inner cycle's spawn-and-process responsibility split.
-- (h) Add a recovery-from-blocked path for grammar-drift events. The current v1 recovery (operator hand-edits the manifest to clear `blocked_by`, re-runs `/crew:start`) is unchanged. Story 5.1 will retrofit the proper `blocked/` directory path.
+- (h) Add a recovery-from-blocked path for grammar-drift events. The current v1 recovery (operator hand-edits the manifest to clear `blocked_by`, re-runs `/flow:start`) is unchanged. Story 5.1 will retrofit the proper `blocked/` directory path.
 - (i) Add a `max_rework_count` cap or any rework-loop guardrail. The unbounded rework loop semantics from Story 4.3 carry forward unchanged.
 - (j) Add a separate prompt-builder MCP tool. The existing `buildPersonaSpawnPrompt` is sufficient — the SKILL.md prose calls it directly to compute dev / reviewer prompts. (We considered a new `buildDevPrompt` / `buildReviewerPrompt` pair to encapsulate role selection in the tool name; rejected because `buildPersonaSpawnPrompt` already takes `role` as an argument, and adding wrappers would inflate the allowlist without adding value.)
 - (k) Persist the dev / reviewer transcript anywhere on disk. Transcripts flow from `Task` (return value) → SKILL.md prose (in-memory string) → `processDevTranscript` / `processReviewerTranscript` (MCP input argument) → discarded. There is no transcript log file in v1; Story 4.12's telemetry may add `agent.invoke` events that include transcript-length metadata, but the transcript body is not stored.
 - (l) Add a `rework_iteration` history list to the manifest. Only the integer counter `rework_count` is mutated. Iteration-by-iteration audit lives in operator chat scrollback only (Story 4.12 telemetry will give us a JSONL trail later).
 - (m) Persist `chatLog` anywhere. The MCP tools return chat lines for each call; the SKILL.md prose surfaces them to the operator as it goes. There is no aggregated session-level chat log file.
-- (n) Touch the dev-subagent or reviewer-subagent permission specs (`plugins/crew/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml`). Those specs allow the subagent to invoke MCP tools it needs to do its work (e.g. `claimStory`, `completeStory`, `readSourceStory`); they do NOT need to include the new `processDevTranscript` / `processReviewerTranscript` tools — those are `/crew:start`-prose-only.
+- (n) Touch the dev-subagent or reviewer-subagent permission specs (`plugins/flow/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml`). Those specs allow the subagent to invoke MCP tools it needs to do its work (e.g. `claimStory`, `completeStory`, `readSourceStory`); they do NOT need to include the new `processDevTranscript` / `processReviewerTranscript` tools — those are `/flow:start`-prose-only.
 - (o) Re-architect the SKILL.md prose's relationship with the outer claim-loop. The outer loop (claim → spawn dev → process → maybe spawn reviewer → process → loop) is the inner cycle's responsibility; the OUTER claim-loop (next claimable ref, queue-drained termination) stays in TypeScript. The SKILL.md prose drives the inner cycle and calls a thin MCP tool (`claimNextStory`, see § Implementation strategy) that wraps the outer loop's single-iteration logic.
 
 ---
 
 ## Acceptance Criteria
 
-> AC1, AC2, AC5 are user-surface per `plugins/crew/docs/user-surface-acs.md` rubric. AC3 is the MCP API refactor — no user-surface tag (only MCP-tool names and TypeScript signatures). AC4 is the integration test — no user-surface tag. AC6 is the deterministic content-structure check for SKILL.md anchors; it inspects on-disk source files only.
+> AC1, AC2, AC5 are user-surface per `plugins/flow/docs/user-surface-acs.md` rubric. AC3 is the MCP API refactor — no user-surface tag (only MCP-tool names and TypeScript signatures). AC4 is the integration test — no user-surface tag. AC6 is the deterministic content-structure check for SKILL.md anchors; it inspects on-disk source files only.
 
 **AC1 (user-surface):**
-**Given** a target repo with at least one ready story in `.crew/state/to-do/` and the operator running `/crew:start` in a real Claude Code session (NOT a vitest fixture),
+**Given** a target repo with at least one ready story in `.flow/state/to-do/` and the operator running `/flow:start` in a real Claude Code session (NOT a vitest fixture),
 **When** the inner cycle reaches the spawn-dev step,
-**Then** (a) the SKILL.md prose calls `buildPersonaSpawnPrompt({ targetRepoRoot, role: "generalist-dev" })` to obtain the dev system prompt, (b) the SKILL.md prose invokes Claude Code's built-in `Task` tool with that prompt verbatim — no paraphrase, no truncation, no LLM-side rewording — and an `initial_context` block carrying `ref`, `title`, `sessionUlid`, `targetRepoRoot`, `manifestPath`, and (if rework) `rework_iteration`; (c) the dev subagent appears in the Claude Code Task-tool UI as a new clean-context subagent isolated from the calling `/crew:start` session; (d) when the dev subagent terminates, the SKILL.md prose captures its final transcript (the subagent's last message, returned by the `Task` tool) and passes it verbatim — full string, no summarisation, no editing — into `processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript })`; (e) the chat surface emits the verbatim Story 4.3 AC1 line `handoff received — story <story-id> — spawning generalist-reviewer subagent (clean context)` IF and only if `processDevTranscript` returns `{ next: "spawn-reviewer", reviewerPrompt, chatLog: [...] }`. _(FR26, FR27; closes Story 4.3 user-surface AC1 in production)_
+**Then** (a) the SKILL.md prose calls `buildPersonaSpawnPrompt({ targetRepoRoot, role: "generalist-dev" })` to obtain the dev system prompt, (b) the SKILL.md prose invokes Claude Code's built-in `Task` tool with that prompt verbatim — no paraphrase, no truncation, no LLM-side rewording — and an `initial_context` block carrying `ref`, `title`, `sessionUlid`, `targetRepoRoot`, `manifestPath`, and (if rework) `rework_iteration`; (c) the dev subagent appears in the Claude Code Task-tool UI as a new clean-context subagent isolated from the calling `/flow:start` session; (d) when the dev subagent terminates, the SKILL.md prose captures its final transcript (the subagent's last message, returned by the `Task` tool) and passes it verbatim — full string, no summarisation, no editing — into `processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript })`; (e) the chat surface emits the verbatim Story 4.3 AC1 line `handoff received — story <story-id> — spawning generalist-reviewer subagent (clean context)` IF and only if `processDevTranscript` returns `{ next: "spawn-reviewer", reviewerPrompt, chatLog: [...] }`. _(FR26, FR27; closes Story 4.3 user-surface AC1 in production)_
 
-<!-- User-surface: AC1 names `/crew:start` (rubric i) and references the Task-tool UI surface (rubric iv) plus the verbatim chat line the operator reads. The dependencies (Task tool, processDevTranscript, buildPersonaSpawnPrompt) are all callable from day-one of merge — no deferred caller. This AC is the live version of Story 4.3's AC1 which only verified via injected closures. -->
+<!-- User-surface: AC1 names `/flow:start` (rubric i) and references the Task-tool UI surface (rubric iv) plus the verbatim chat line the operator reads. The dependencies (Task tool, processDevTranscript, buildPersonaSpawnPrompt) are all callable from day-one of merge — no deferred caller. This AC is the live version of Story 4.3's AC1 which only verified via injected closures. -->
 
 **AC2 (user-surface):**
 **Given** the dev subagent has terminated and emitted the verbatim locked handoff phrase, and `processDevTranscript` has returned `{ next: "spawn-reviewer", reviewerPrompt }`,
 **When** the SKILL.md prose continues the inner cycle,
-**Then** (a) the prose invokes Claude Code's `Task` tool with the `reviewerPrompt` returned by `processDevTranscript` — verbatim, no paraphrase, no edits — and an `initial_context` block carrying `ref`, `title`, `sessionUlid`, `targetRepoRoot`; (b) the reviewer subagent appears in the Claude Code Task-tool UI as a new clean-context subagent isolated from both the calling `/crew:start` session AND the dev subagent's context; (c) when the reviewer terminates, the SKILL.md prose captures its final transcript and passes it verbatim into `processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript })`; (d) on a `NEEDS CHANGES` verdict the tool returns `{ next: "rework-dev", devPrompt, reworkIteration, chatLog: [...] }` and the chat surface emits the verbatim Story 4.3 AC2 line `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration <n>)`; the SKILL.md prose then re-invokes `Task` with the new `devPrompt` (which already carries `rework_iteration` in its initial-context block) and loops back to step (d) of AC1; (e) on a `READY FOR MERGE` verdict the tool returns `{ next: "done-ready-for-merge", chatLog: [...] }` and the chat surface emits `reviewer verdict: READY FOR MERGE — story <story-id> ready for merge gate`; (f) on a `BLOCKED` verdict the tool returns `{ next: "done-blocked-reviewer-verdict", chatLog: [...] }` and the chat surface emits `reviewer verdict: BLOCKED — story <story-id> awaiting human`. _(FR26, FR27, FR28; closes Story 4.3 user-surface AC2 in production)_
+**Then** (a) the prose invokes Claude Code's `Task` tool with the `reviewerPrompt` returned by `processDevTranscript` — verbatim, no paraphrase, no edits — and an `initial_context` block carrying `ref`, `title`, `sessionUlid`, `targetRepoRoot`; (b) the reviewer subagent appears in the Claude Code Task-tool UI as a new clean-context subagent isolated from both the calling `/flow:start` session AND the dev subagent's context; (c) when the reviewer terminates, the SKILL.md prose captures its final transcript and passes it verbatim into `processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript })`; (d) on a `NEEDS CHANGES` verdict the tool returns `{ next: "rework-dev", devPrompt, reworkIteration, chatLog: [...] }` and the chat surface emits the verbatim Story 4.3 AC2 line `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration <n>)`; the SKILL.md prose then re-invokes `Task` with the new `devPrompt` (which already carries `rework_iteration` in its initial-context block) and loops back to step (d) of AC1; (e) on a `READY FOR MERGE` verdict the tool returns `{ next: "done-ready-for-merge", chatLog: [...] }` and the chat surface emits `reviewer verdict: READY FOR MERGE — story <story-id> ready for merge gate`; (f) on a `BLOCKED` verdict the tool returns `{ next: "done-blocked-reviewer-verdict", chatLog: [...] }` and the chat surface emits `reviewer verdict: BLOCKED — story <story-id> awaiting human`. _(FR26, FR27, FR28; closes Story 4.3 user-surface AC2 in production)_
 
-<!-- User-surface: AC2 names `/crew:start` (rubric i), the Task-tool UI surface (rubric iv), AND the verbatim chat lines (rubric iv) for all three reviewer-verdict branches. All sub-clauses are reachable in a live session without a deferred caller. -->
+<!-- User-surface: AC2 names `/flow:start` (rubric i), the Task-tool UI surface (rubric iv), AND the verbatim chat lines (rubric iv) for all three reviewer-verdict branches. All sub-clauses are reachable in a live session without a deferred caller. -->
 
 **AC3:**
 **Given** the refactored MCP surface,
 **When** the server registers its tools at startup,
-**Then** (a) `runDevSession` is NOT registered (the tool is unregistered from `plugins/crew/mcp-server/src/tools/register.ts`); (b) three new MCP tools are registered: `claimNextStory`, `processDevTranscript`, and `processReviewerTranscript`; (c) total tool count is exactly **21** (Story 4.3 baseline 19, minus `runDevSession`, plus `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`); (d) `processDevTranscript` takes `{ targetRepoRoot, sessionUlid, ref, devTranscript }` and returns one of: `{ next: "spawn-reviewer", reviewerPrompt: string, chatLog: string[] }`, `{ next: "done-blocked-handoff-grammar", chatLog: string[] }`, or — if and only if the dev transcript captured does not contain the handoff phrase as its last non-empty line but DOES carry a recognisable "done, no review yet" signal (see § Behavioural contract for the fallback case) — `{ next: "done-handoff-but-no-review-yet", chatLog: string[] }` (this last branch is reserved for forward compatibility and is NOT returnable from v1 — the v1 tool returns only the first two shapes; the type is declared for ABI stability so Story 5.x can extend without bumping the schema); (e) `processReviewerTranscript` takes `{ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript }` and returns one of: `{ next: "rework-dev", devPrompt: string, reworkIteration: number, chatLog: string[] }`, `{ next: "done-ready-for-merge", chatLog: string[] }`, `{ next: "done-blocked-reviewer-verdict", chatLog: string[] }`, or `{ next: "done-blocked-reviewer-grammar", chatLog: string[] }`; (f) neither tool spawns subagents, performs git operations, calls `gh`, or writes to any path outside the in-progress manifest for `ref` — pure transcript-in / verdict-out functions with one bounded I/O surface (the manifest read/write for `rework_count` and `blocked_by`). _(Architecture cleanup; FR-new)_
+**Then** (a) `runDevSession` is NOT registered (the tool is unregistered from `plugins/flow/mcp-server/src/tools/register.ts`); (b) three new MCP tools are registered: `claimNextStory`, `processDevTranscript`, and `processReviewerTranscript`; (c) total tool count is exactly **21** (Story 4.3 baseline 19, minus `runDevSession`, plus `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`); (d) `processDevTranscript` takes `{ targetRepoRoot, sessionUlid, ref, devTranscript }` and returns one of: `{ next: "spawn-reviewer", reviewerPrompt: string, chatLog: string[] }`, `{ next: "done-blocked-handoff-grammar", chatLog: string[] }`, or — if and only if the dev transcript captured does not contain the handoff phrase as its last non-empty line but DOES carry a recognisable "done, no review yet" signal (see § Behavioural contract for the fallback case) — `{ next: "done-handoff-but-no-review-yet", chatLog: string[] }` (this last branch is reserved for forward compatibility and is NOT returnable from v1 — the v1 tool returns only the first two shapes; the type is declared for ABI stability so Story 5.x can extend without bumping the schema); (e) `processReviewerTranscript` takes `{ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript }` and returns one of: `{ next: "rework-dev", devPrompt: string, reworkIteration: number, chatLog: string[] }`, `{ next: "done-ready-for-merge", chatLog: string[] }`, `{ next: "done-blocked-reviewer-verdict", chatLog: string[] }`, or `{ next: "done-blocked-reviewer-grammar", chatLog: string[] }`; (f) neither tool spawns subagents, performs git operations, calls `gh`, or writes to any path outside the in-progress manifest for `ref` — pure transcript-in / verdict-out functions with one bounded I/O surface (the manifest read/write for `rework_count` and `blocked_by`). _(Architecture cleanup; FR-new)_
 
 <!-- Not user-surface: AC3 names MCP tool names and TypeScript signatures. The operator never types `processDevTranscript`. -->
 
@@ -91,23 +91,23 @@ vitest covers the existing Story 4.3 AC4 branches (happy / rework / grammar-drif
 - (g) **Tool count:** assert the registered MCP tool list contains exactly **21** entries and contains `claimNextStory`, `processDevTranscript`, and `processReviewerTranscript` but does NOT contain `runDevSession`.
 
 **AC5 (user-surface):**
-**Given** an operator running `/crew:start` against a scratch repo with at least one ready story, the hired `generalist-dev` and `generalist-reviewer` personas, and a real Claude Code session,
+**Given** an operator running `/flow:start` against a scratch repo with at least one ready story, the hired `generalist-dev` and `generalist-reviewer` personas, and a real Claude Code session,
 **When** the operator observes the live session,
-**Then** they see (a) the Story 4.2 outer-loop lines (claim, spawning generalist-dev, etc.) verbatim, (b) the dev subagent appears in the Task-tool UI panel and runs to completion, (c) on a happy handoff, the verbatim `handoff received — story <story-id> — spawning generalist-reviewer subagent (clean context)` line appears in chat, (d) the reviewer subagent then appears in the Task-tool UI panel as a new clean-context subagent, (e) the reviewer's verdict line appears verbatim in chat (`READY FOR MERGE`, `NEEDS CHANGES` with rework iteration, or `BLOCKED` passthrough — whichever the live reviewer emits), (f) the manifest at `<targetRepoRoot>/.crew/state/in-progress/<story-id>.yaml` reflects the live verdict — `rework_count` incremented on rework, `blocked_by` stamped on grammar drift, unchanged on `READY FOR MERGE`. The operator MUST NOT see the empty-transcript bug (every story stamped `blocked_by: handoff-grammar`) that ships with Story 4.3 pre-refactor. _(closes the carry-forward from Epic 3 retro / PR #103 Info-2)_
+**Then** they see (a) the Story 4.2 outer-loop lines (claim, spawning generalist-dev, etc.) verbatim, (b) the dev subagent appears in the Task-tool UI panel and runs to completion, (c) on a happy handoff, the verbatim `handoff received — story <story-id> — spawning generalist-reviewer subagent (clean context)` line appears in chat, (d) the reviewer subagent then appears in the Task-tool UI panel as a new clean-context subagent, (e) the reviewer's verdict line appears verbatim in chat (`READY FOR MERGE`, `NEEDS CHANGES` with rework iteration, or `BLOCKED` passthrough — whichever the live reviewer emits), (f) the manifest at `<targetRepoRoot>/.flow/state/in-progress/<story-id>.yaml` reflects the live verdict — `rework_count` incremented on rework, `blocked_by` stamped on grammar drift, unchanged on `READY FOR MERGE`. The operator MUST NOT see the empty-transcript bug (every story stamped `blocked_by: handoff-grammar`) that ships with Story 4.3 pre-refactor. _(closes the carry-forward from Epic 3 retro / PR #103 Info-2)_
 
 <!-- User-surface: AC5 is the live-session smoke test. The operator OBSERVES the Task-tool UI (rubric iv), the chat-surface lines (rubric iv), and the resulting manifest on disk (rubric iii — a path the docs may instruct the operator to inspect during the smoke). This is the AC that catches the Story 4.3 production-vs-test gap; it is the reason this story exists. -->
 
 **AC6:**
 **Given** the new files added by this story —
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`
 
-— and the rewritten skill file `plugins/crew/skills/start/SKILL.md` and the updated `plugins/crew/mcp-server/src/tools/register.ts`,
+— and the rewritten skill file `plugins/flow/skills/start/SKILL.md` and the updated `plugins/flow/mcp-server/src/tools/register.ts`,
 **When** each file is inspected by content-structure assertions,
 **Then** the following anchors MUST be present:
 
-- (i) `plugins/crew/skills/start/SKILL.md` front-matter `allowed_tools` array, parsed as an unordered set, equals exactly `{getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}` — set-equality, order-agnostic. `Task` is Claude Code's built-in subagent-spawn tool; it MUST be listed for the prose to invoke it. The assertion catches both a missing entry and any unexpected additional entry.
-- (ii) `plugins/crew/skills/start/SKILL.md` contains a `# Inner cycle: dev → reviewer → rework` section (H1 `#` or H2 `##` both accepted via regex).
+- (i) `plugins/flow/skills/start/SKILL.md` front-matter `allowed_tools` array, parsed as an unordered set, equals exactly `{getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}` — set-equality, order-agnostic. `Task` is Claude Code's built-in subagent-spawn tool; it MUST be listed for the prose to invoke it. The assertion catches both a missing entry and any unexpected additional entry.
+- (ii) `plugins/flow/skills/start/SKILL.md` contains a `# Inner cycle: dev → reviewer → rework` section (H1 `#` or H2 `##` both accepted via regex).
 - (iii) The same section contains the verbatim substring `invoke the Task tool with the devPrompt returned by buildPersonaSpawnPrompt` (the dev-spawn invocation site anchor — prose may surround it with other words but this substring MUST appear).
 - (iv) The same section contains the verbatim substring `invoke the Task tool with the reviewerPrompt returned by processDevTranscript` (the reviewer-spawn invocation site anchor).
 - (v) The same section contains the verbatim substring `pass the captured devTranscript to processDevTranscript` (the dev-transcript handoff anchor).
@@ -116,7 +116,7 @@ vitest covers the existing Story 4.3 AC4 branches (happy / rework / grammar-drif
 - (viii) The `# Failure modes` section names `HandoffGrammarDriftError` AND `blocked_by: handoff-grammar` (preserved from Story 4.3) AND adds a new bullet for `ReviewerGrammarDriftError` / `blocked_by: reviewer-grammar` (preserved from Story 4.3 — anchor MUST remain).
 - (ix) `process-dev-transcript.ts` contains the verbatim string `re-spawning generalist-dev subagent (rework iteration` is NOT in this file (the rework chat line is emitted by `process-reviewer-transcript.ts` — see § Behavioural contract for the line-emission ownership table) and `process-dev-transcript.ts` DOES contain the verbatim string `handoff received — story` AND the verbatim string `handoff grammar drift — story`.
 - (x) `process-reviewer-transcript.ts` contains the verbatim string `re-spawning generalist-dev subagent (rework iteration` AND the verbatim string `reviewer verdict: READY FOR MERGE` AND the verbatim string `reviewer verdict: BLOCKED` AND the verbatim string `reviewer grammar drift — story`.
-- (xi) `plugins/crew/mcp-server/src/tools/register.ts` contains zero occurrences of the literal `"runDevSession"` (set-equality assertion that the tool name does not appear anywhere in the registration file — the tool is gone, not just commented out).
+- (xi) `plugins/flow/mcp-server/src/tools/register.ts` contains zero occurrences of the literal `"runDevSession"` (set-equality assertion that the tool name does not appear anywhere in the registration file — the tool is gone, not just commented out).
 
 <!-- AC6 inspects internal source files and skill front-matter. Not user-surface (no slash command, no CLI command, no Claude Code UI element). The anchors make the user-surface ACs (AC1, AC2, AC5) mechanically checkable without an operator smoke pass; the smoke pass is still required by the ship gate per AC5, but AC6 ensures the file contents that drive AC1 / AC2 are deterministically present. -->
 
@@ -124,7 +124,7 @@ vitest covers the existing Story 4.3 AC4 branches (happy / rework / grammar-drif
 
 ## Behavioural contract
 
-The `/crew:start` skill's inner cycle (dev → reviewer → rework) is now divided across three layers: (i) the SKILL.md prose, which owns `Task`-tool spawn responsibility; (ii) the two pure MCP tools `processDevTranscript` and `processReviewerTranscript`, which own parsing, verdict computation, and manifest mutation; (iii) the helper `buildPersonaSpawnPrompt`, which owns prompt assembly. The dev/reviewer persona files themselves (and their locked-phrase grammar) are untouched — Story 4.3's pinning carries forward.
+The `/flow:start` skill's inner cycle (dev → reviewer → rework) is now divided across three layers: (i) the SKILL.md prose, which owns `Task`-tool spawn responsibility; (ii) the two pure MCP tools `processDevTranscript` and `processReviewerTranscript`, which own parsing, verdict computation, and manifest mutation; (iii) the helper `buildPersonaSpawnPrompt`, which owns prompt assembly. The dev/reviewer persona files themselves (and their locked-phrase grammar) are untouched — Story 4.3's pinning carries forward.
 
 Both new tool source files MUST cite this section by full path (`_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract`) in TSDoc at the top of the file. The SKILL.md prose MUST cite this section as an HTML comment in the file header so a future SKILL.md editor can find the source of the invariants.
 
@@ -142,25 +142,25 @@ The SKILL.md prose's `# Inner cycle: dev → reviewer → rework` section is a u
 - **MUST NOT** skip the `processDevTranscript` / `processReviewerTranscript` step under any circumstance. The prose MUST NOT "shortcut" to a manifest write directly, MUST NOT parse the transcript inline (no LLM regex eyeballing), MUST NOT call `claimStory` / `completeStory` from inside the inner cycle. All manifest mutations go through the transcript-processor tools. (The OUTER claim-loop — `claimNextStory` and queue-drained termination — is separate and remains the operator's signal that a new story is being attempted.)
 - **MUST NOT** call `Task` for the reviewer spawn until `processDevTranscript` has returned `next: "spawn-reviewer"`. The handoff phrase parse is the gate that authorises the reviewer; an empty or grammar-drift transcript MUST block the reviewer spawn (AC3 from Story 4.3 carries forward as the v1 grammar-drift surface).
 - **NEVER** mutate the manifest from the SKILL.md prose layer directly. The prose has no `writeManagedFile` access — `allowed_tools` does NOT include any direct file-write tool. All state changes go through the transcript-processor tools, which own the manifest mutation contract.
-- **NEVER** modify `sprint-status.yaml`, source story files, `.git/` content, or any file outside `<targetRepoRoot>/.crew/state/in-progress/`. (Same write-surface constraint Story 4.3 pinned; carries forward.)
+- **NEVER** modify `sprint-status.yaml`, source story files, `.git/` content, or any file outside `<targetRepoRoot>/.flow/state/in-progress/`. (Same write-surface constraint Story 4.3 pinned; carries forward.)
 
 ### `processDevTranscript` invariants
 
 Pure function of `(targetRepoRoot, sessionUlid, ref, devTranscript)`. The signature is JSON-only — the tool runs across the MCP wire.
 
-- **MUST** call `parseHandoff(devTranscript, ref)` exactly once. The parser is Story 4.3's existing module (`plugins/crew/mcp-server/src/skills/handoff-parser.ts`) and is imported verbatim — no re-implementation, no regex tweaks.
-- **MUST** on `parseHandoff` returning `{ ok: false, reason: "drift" | "empty" }`: (i) read the in-progress manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml`, (ii) stamp `blocked_by: "handoff-grammar"`, (iii) write the manifest atomically via `atomicWriteFile`, (iv) return `{ next: "done-blocked-handoff-grammar", chatLog: [<Story 4.3 AC3 verbatim line>] }`. The chat-line text is identical to Story 4.3's `dev-reviewer-cycle.ts` emission (`handoff grammar drift — story <ref> blocked. expected verbatim phrase: "Handoff to reviewer — story <ref> ready for review." Edit the manifest to clear blocked_by and re-run /crew:start.`).
+- **MUST** call `parseHandoff(devTranscript, ref)` exactly once. The parser is Story 4.3's existing module (`plugins/flow/mcp-server/src/skills/handoff-parser.ts`) and is imported verbatim — no re-implementation, no regex tweaks.
+- **MUST** on `parseHandoff` returning `{ ok: false, reason: "drift" | "empty" }`: (i) read the in-progress manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml`, (ii) stamp `blocked_by: "handoff-grammar"`, (iii) write the manifest atomically via `atomicWriteFile`, (iv) return `{ next: "done-blocked-handoff-grammar", chatLog: [<Story 4.3 AC3 verbatim line>] }`. The chat-line text is identical to Story 4.3's `dev-reviewer-cycle.ts` emission (`handoff grammar drift — story <ref> blocked. expected verbatim phrase: "Handoff to reviewer — story <ref> ready for review." Edit the manifest to clear blocked_by and re-run /flow:start.`).
 - **MUST** on `parseHandoff` returning `{ ok: true }`: (i) call `buildPersonaSpawnPrompt({ targetRepoRoot, role: "generalist-reviewer" })` to compute the reviewer prompt, (ii) return `{ next: "spawn-reviewer", reviewerPrompt: <buildPersonaSpawnPrompt's systemPrompt>, chatLog: [<Story 4.3 AC1 verbatim line>] }`. The chat-line text: `handoff received — story <ref> — spawning generalist-reviewer subagent (clean context)`.
 - **MUST NOT** spawn anything. **MUST NOT** call `Task` (the MCP server has no access to `Task` in v1; this is a structural guarantee — the tool runs over JSON-RPC stdio).
 - **MUST NOT** mutate the manifest on the happy-path (handoff parsed OK). The only manifest write performed by this tool is the `blocked_by: "handoff-grammar"` stamp on the grammar-drift path.
-- **MUST NOT** read or write any file outside `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` and `<targetRepoRoot>/team/<role>/PERSONA.md` (indirectly, via `buildPersonaSpawnPrompt`). The static-fs-guard test enforces this.
-- **MUST** be unit-tested against every branch enumerated above: happy-path (handoff parsed), drift, empty transcript. Use the precedent from `plugins/crew/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts` as a structural template, but the new test fixture targets `processDevTranscript` directly.
+- **MUST NOT** read or write any file outside `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` and `<targetRepoRoot>/team/<role>/PERSONA.md` (indirectly, via `buildPersonaSpawnPrompt`). The static-fs-guard test enforces this.
+- **MUST** be unit-tested against every branch enumerated above: happy-path (handoff parsed), drift, empty transcript. Use the precedent from `plugins/flow/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts` as a structural template, but the new test fixture targets `processDevTranscript` directly.
 
 ### `processReviewerTranscript` invariants
 
 Pure function of `(targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript)`. Note `manifestPath` is an explicit argument (rather than computed from `ref`) so the MCP layer can sanity-check the caller has the right manifest in mind; the parser does NOT compute the manifest path itself, which keeps the tool's file-read surface explicit and inspectable.
 
-- **MUST** call `parseVerdict(reviewerTranscript)` exactly once. The parser is Story 4.3's existing module (`plugins/crew/mcp-server/src/skills/verdict-parser.ts`) and is imported verbatim.
+- **MUST** call `parseVerdict(reviewerTranscript)` exactly once. The parser is Story 4.3's existing module (`plugins/flow/mcp-server/src/skills/verdict-parser.ts`) and is imported verbatim.
 - **MUST** on `parseVerdict` returning `{ ok: false, reason: "drift" | "empty" | "unknown-sentinel" }`: (i) read the in-progress manifest, (ii) stamp `blocked_by: "reviewer-grammar"`, (iii) write the manifest atomically, (iv) return `{ next: "done-blocked-reviewer-grammar", chatLog: [<Story 4.3 verbatim reviewer-grammar-drift line>] }`. Chat-line text: `reviewer grammar drift — story <ref> blocked. expected verbatim final line: "**Verdict: <SENTINEL>**" where SENTINEL is one of READY FOR MERGE | NEEDS CHANGES | BLOCKED.`
 - **MUST** on `{ ok: true, sentinel: "READY FOR MERGE" }`: return `{ next: "done-ready-for-merge", chatLog: [<verbatim ready-for-merge passthrough>] }`. No manifest mutation. Chat-line text: `reviewer verdict: READY FOR MERGE — story <ref> ready for merge gate`.
 - **MUST** on `{ ok: true, sentinel: "BLOCKED" }`: return `{ next: "done-blocked-reviewer-verdict", chatLog: [<verbatim BLOCKED passthrough>] }`. No manifest mutation. Chat-line text: `reviewer verdict: BLOCKED — story <ref> awaiting human`.
@@ -188,7 +188,7 @@ The `spawning generalist-dev subagent (clean context)` line being prose-emitted 
 
 ### Manifest re-entry semantics (carries forward from Story 4.3)
 
-When `blocked_by: handoff-grammar` or `blocked_by: reviewer-grammar` is stamped, the manifest stays in `in-progress/`. No `blocked/` directory in v1 — Story 5.1's deliverable. Operator recovery: hand-edit the manifest to remove `blocked_by:`, re-run `/crew:start`. `claimStory` does NOT re-claim (the story is already claimed by the dev session ULID). v1's full recovery for a blocked-in-progress story remains "delete the in-progress manifest, re-add the source story to `to-do/`, re-scan, re-claim" — clumsy but viable.
+When `blocked_by: handoff-grammar` or `blocked_by: reviewer-grammar` is stamped, the manifest stays in `in-progress/`. No `blocked/` directory in v1 — Story 5.1's deliverable. Operator recovery: hand-edit the manifest to remove `blocked_by:`, re-run `/flow:start`. `claimStory` does NOT re-claim (the story is already claimed by the dev session ULID). v1's full recovery for a blocked-in-progress story remains "delete the in-progress manifest, re-add the source story to `to-do/`, re-scan, re-claim" — clumsy but viable.
 
 ### "Done, no review yet" forward-compatibility branch (declared, not exercised)
 
@@ -199,36 +199,36 @@ The `processDevTranscript` return type declares a third branch `{ next: "done-ha
 ## Tasks / Subtasks
 
 - [x] **Task 1 — Add `claimNextStory` MCP tool to own outer claim-loop iteration (AC: 3, 4)**
-  - [x] 1.1 Create `plugins/crew/mcp-server/src/tools/claim-next-story.ts`. Top of file: TSDoc citing § Behavioural contract by full path.
+  - [x] 1.1 Create `plugins/flow/mcp-server/src/tools/claim-next-story.ts`. Top of file: TSDoc citing § Behavioural contract by full path.
   - [x] 1.2 The tool wraps a single iteration of `runStartLoop`'s outer pass: call `listClaimableTodos`, pick the first `depsReady: true` candidate, call `claimStory`, return `{ next: "spawn-dev", ref, title, manifestPath, chatLog: [<claiming line>] }` OR `{ next: "queue-drained", chatLog: [<queue drained line>] }` OR `{ next: "waiting-on-in-progress", chatLog: [<waiting line>] }`.
   - [x] 1.3 The tool MUST NOT spawn anything. **MUST NOT** mutate state beyond the `claimStory` call (which is the only sanctioned state mutation).
-  - [x] 1.4 Export from `plugins/crew/mcp-server/src/tools/claim-next-story.ts` as `claimNextStory(opts)`.
-  - [x] 1.5 Register in `plugins/crew/mcp-server/src/tools/register.ts` with `inputSchema { targetRepoRoot, sessionUlid }` required.
+  - [x] 1.4 Export from `plugins/flow/mcp-server/src/tools/claim-next-story.ts` as `claimNextStory(opts)`.
+  - [x] 1.5 Register in `plugins/flow/mcp-server/src/tools/register.ts` with `inputSchema { targetRepoRoot, sessionUlid }` required.
   - [x] 1.6 No `console.*`. Chat lines flow through the returned `chatLog`. Errors propagate as typed `DomainError`s — `register.ts` already wraps `DomainError` into `isError: true` content responses (existing convention).
 
 - [x] **Task 2 — Create `processDevTranscript` MCP tool (AC: 1, 3, 4, 6)**
-  - [x] 2.1 Create `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`. Top of file: TSDoc citing § Behavioural contract.
+  - [x] 2.1 Create `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`. Top of file: TSDoc citing § Behavioural contract.
   - [x] 2.2 Import `parseHandoff` from `../skills/handoff-parser.js` (verbatim — no re-implementation). Import `buildPersonaSpawnPrompt` from `./build-persona-spawn-prompt.js`. Import `parseExecutionManifest` from `../schemas/execution-manifest.js`. Import `atomicWriteFile` from `../lib/managed-fs.js`. Import `node:fs/promises` and `yaml` for the manifest read/write.
   - [x] 2.3 Define and export the discriminated-union return type per § Behavioural contract.
   - [x] 2.4 Implement `processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript })` per the invariants table above.
   - [x] 2.5 Register the tool in `register.ts` with `inputSchema { targetRepoRoot, sessionUlid, ref, devTranscript }` all required (all strings).
 
 - [x] **Task 3 — Create `processReviewerTranscript` MCP tool (AC: 2, 3, 4, 6)**
-  - [x] 3.1 Create `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`. Top of file: TSDoc citing § Behavioural contract.
+  - [x] 3.1 Create `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`. Top of file: TSDoc citing § Behavioural contract.
   - [x] 3.2 Import `parseVerdict` from `../skills/verdict-parser.js`. Import `buildPersonaSpawnPrompt`, `parseExecutionManifest`, `atomicWriteFile` per Task 2.
   - [x] 3.3 Define and export the discriminated-union return type.
   - [x] 3.4 Implement `processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript })` per the invariants table above.
   - [x] 3.5 Register the tool in `register.ts` with all five inputs required.
 
 - [x] **Task 4 — Delete or refactor `runDevSession`, `runStartLoop`, `runDevReviewerCycle` (AC: 3, 4)**
-  - [x] 4.1 Delete `plugins/crew/mcp-server/src/tools/run-dev-session.ts`. Move helpers into `lib/manifest-io.ts`.
+  - [x] 4.1 Delete `plugins/flow/mcp-server/src/tools/run-dev-session.ts`. Move helpers into `lib/manifest-io.ts`.
   - [x] 4.2 Unregister `runDevSession` from `register.ts` — delete the registration block entirely.
-  - [x] 4.3 Delete `plugins/crew/mcp-server/src/skills/dev-reviewer-cycle.ts`.
-  - [x] 4.4 Delete `plugins/crew/mcp-server/src/skills/start-loop.ts`.
+  - [x] 4.3 Delete `plugins/flow/mcp-server/src/skills/dev-reviewer-cycle.ts`.
+  - [x] 4.4 Delete `plugins/flow/mcp-server/src/skills/start-loop.ts`.
   - [x] 4.5 Delete associated test files: `dev-reviewer-cycle.test.ts`, `start-skill.integration.test.ts`, `run-dev-session.test.ts`.
   - [x] 4.6 Parsers (`handoff-parser.ts`, `verdict-parser.ts`) are NOT deleted — kept verbatim.
 
-- [x] **Task 5 — Rewrite `plugins/crew/skills/start/SKILL.md` to drive the inner cycle (AC: 1, 2, 5, 6)**
+- [x] **Task 5 — Rewrite `plugins/flow/skills/start/SKILL.md` to drive the inner cycle (AC: 1, 2, 5, 6)**
   - [x] 5.1 Update front-matter `allowed_tools` to the exact set `[getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]`.
   - [x] 5.2 Rewrite the `# Steps` section to reflect the new control flow.
   - [x] 5.3 Write the new `# Inner cycle: dev → reviewer → rework` section with all required anchor strings.
@@ -241,22 +241,22 @@ The `processDevTranscript` return type declares a third branch `{ next: "done-ha
   - [x] 6.3 New assertion in `inner-cycle.integration.test.ts` AC4(g): tool list contains new tools and NOT `runDevSession`.
 
 - [x] **Task 7 — Manifest-IO shared utility (AC: 3)**
-  - [x] 7.1 Create `plugins/crew/mcp-server/src/lib/manifest-io.ts`.
+  - [x] 7.1 Create `plugins/flow/mcp-server/src/lib/manifest-io.ts`.
   - [x] 7.2 Export `readManifest(absPath)`.
   - [x] 7.3 Export `writeManifest(absPath, manifest)`.
   - [x] 7.4 Moved `readManifestFromDisk` / `writeManifestToDisk` helpers verbatim (renamed).
 
 - [x] **Task 8 — Unit tests for `processDevTranscript` (AC: 1, 4, 6)**
-  - [x] 8.1 Create `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`.
+  - [x] 8.1 Create `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`.
   - [x] 8.2 Cover all four branches (happy handoff, drift, empty, whitespace-only).
   - [x] 8.3 Regression assertion: no Task-spawn seam needed (test compiles and passes without one).
 
 - [x] **Task 9 — Unit tests for `processReviewerTranscript` (AC: 2, 4, 6)**
-  - [x] 9.1 Create `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`.
+  - [x] 9.1 Create `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`.
   - [x] 9.2 Cover all branches: READY FOR MERGE (w/ and w/o bracket), NEEDS CHANGES (first and second rework), BLOCKED (w/ and w/o bracket), drift/empty/unknown-sentinel.
 
 - [x] **Task 10 — Integration tests: end-to-end inner cycle through tool composition (AC: 1, 2, 4, 5)**
-  - [x] 10.1 Create `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`.
+  - [x] 10.1 Create `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`.
   - [x] 10.2 Cover all AC4 branches (a)–(g) with fixture tmpdir target repo.
   - [x] 10.3 Assert cumulative `chatLog` matches verbatim lines.
   - [x] 10.4 Assert final manifest state on disk matches AC4 expectations.
@@ -266,7 +266,7 @@ The `processDevTranscript` return type declares a third branch `{ next: "done-ha
   - [x] 11.2 Create `processors-content.test.ts` checking anchor strings in tool source files and register.ts.
 
 - [ ] **Task 12 — User-surface smoke evidence for AC5 (AC: 5)**
-  - [ ] 12.1 AC5 requires `user_surface_verified` evidence from a real `/crew:start` session (vitest cannot exercise the live Task-tool flow).
+  - [ ] 12.1 AC5 requires `user_surface_verified` evidence from a real `/flow:start` session (vitest cannot exercise the live Task-tool flow).
   - [ ] 12.2 Operator-smoke procedure documented in the story spec.
   - [ ] 12.3 Separate smoke session needed for grammar-drift branch.
 
@@ -332,14 +332,14 @@ Claude Code skills declare their tool surface in `allowed_tools` regardless of w
 
 ### How the operator-smoke evidence path works
 
-Per `plugins/crew/docs/user-surface-acs.md` §How the gate uses this, AC5 (user-surface) requires a `user_surface_verified` event in the ship-story run log carrying `ac_refs` covering AC5 and a `pasted_output` block with the verbatim chat-surface output of a real `/crew:start` session. The operator follows Task 12.2's smoke procedure, pastes the output, and the pre-PR gate accepts. AC1 and AC2 (also user-surface) are covered by the same paste IF the live session exercises both — i.e. the dev subagent emits the handoff phrase (AC1), the reviewer emits a verdict (AC2). A single smoke session covers all three if the story drives the happy path. The grammar-drift branch needs a second smoke session (operator deliberately paraphrases the dev's handoff phrase, observes the AC3 drift line).
+Per `plugins/flow/docs/user-surface-acs.md` §How the gate uses this, AC5 (user-surface) requires a `user_surface_verified` event in the ship-story run log carrying `ac_refs` covering AC5 and a `pasted_output` block with the verbatim chat-surface output of a real `/flow:start` session. The operator follows Task 12.2's smoke procedure, pastes the output, and the pre-PR gate accepts. AC1 and AC2 (also user-surface) are covered by the same paste IF the live session exercises both — i.e. the dev subagent emits the handoff phrase (AC1), the reviewer emits a verdict (AC2). A single smoke session covers all three if the story drives the happy path. The grammar-drift branch needs a second smoke session (operator deliberately paraphrases the dev's handoff phrase, observes the AC3 drift line).
 
 ### Risks and mitigations
 
 - **Risk: SKILL.md prose drifts the verbatim chat lines.** Mitigation: AC6 anchors iii–vii are content-structure checks that catch any prose edit that loses an anchor string. The CI test runs on every PR.
 - **Risk: A future story adds a fourth transcript-processor tool and breaks the SKILL.md prose's switch exhaustiveness.** Mitigation: the discriminated-union return types use a `next: "..."` literal field; TypeScript enforces exhaustive switches at compile time. A new branch forces a SKILL.md prose update.
 - **Risk: The Claude Code `Task` tool's return shape changes between versions.** Mitigation: the SKILL.md prose treats the `Task` return value as "the subagent's final message string" — a contract that has been stable since `Task` shipped. If the contract changes, the prose's transcript-capture step is the one location that needs an update; the parsers and tools are unaffected.
-- **Risk: An operator runs `/crew:start` on a repo whose hired personas have drifted from the catalogue.** Mitigation: `buildPersonaSpawnPrompt` reads `<targetRepoRoot>/team/<role>/PERSONA.md` (the hired copy) on every call. If a knowledge edit lands between dev and reviewer turns, the next reviewer spawn picks it up.
+- **Risk: An operator runs `/flow:start` on a repo whose hired personas have drifted from the catalogue.** Mitigation: `buildPersonaSpawnPrompt` reads `<targetRepoRoot>/team/<role>/PERSONA.md` (the hired copy) on every call. If a knowledge edit lands between dev and reviewer turns, the next reviewer spawn picks it up.
 
 ---
 
@@ -348,61 +348,61 @@ Per `plugins/crew/docs/user-surface-acs.md` §How the gate uses this, AC5 (user-
 ### File map (likely — refine during implementation)
 
 **New files:**
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts`
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`
-- `plugins/crew/mcp-server/src/lib/manifest-io.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/claim-next-story.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/processors-content.test.ts`
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts`
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`
+- `plugins/flow/mcp-server/src/lib/manifest-io.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/claim-next-story.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/processors-content.test.ts`
 
 **Modified files:**
-- `plugins/crew/skills/start/SKILL.md` (substantial rewrite — front-matter + steps + new inner-cycle section + failure-modes update)
-- `plugins/crew/mcp-server/src/tools/register.ts` (unregister `runDevSession`; register `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`)
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts` (AC6 anchor updates)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/skills/start/SKILL.md` (substantial rewrite — front-matter + steps + new inner-cycle section + failure-modes update)
+- `plugins/flow/mcp-server/src/tools/register.ts` (unregister `runDevSession`; register `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`)
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill-content.test.ts` (AC6 anchor updates)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 **Deleted files:**
-- `plugins/crew/mcp-server/src/tools/run-dev-session.ts`
-- `plugins/crew/mcp-server/src/skills/dev-reviewer-cycle.ts`
-- `plugins/crew/mcp-server/src/skills/start-loop.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-session.test.ts`
-- `plugins/crew/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts`
-- `plugins/crew/mcp-server/src/skills/__tests__/start-loop.test.ts` (if it exists)
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill.integration.test.ts` (Story 4.2 integration test — replaced by `inner-cycle.integration.test.ts`)
+- `plugins/flow/mcp-server/src/tools/run-dev-session.ts`
+- `plugins/flow/mcp-server/src/skills/dev-reviewer-cycle.ts`
+- `plugins/flow/mcp-server/src/skills/start-loop.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/run-dev-session.test.ts`
+- `plugins/flow/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts`
+- `plugins/flow/mcp-server/src/skills/__tests__/start-loop.test.ts` (if it exists)
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill.integration.test.ts` (Story 4.2 integration test — replaced by `inner-cycle.integration.test.ts`)
 
 **Untouched (consumed verbatim):**
-- `plugins/crew/mcp-server/src/skills/handoff-parser.ts` and its test
-- `plugins/crew/mcp-server/src/skills/verdict-parser.ts` and its test
-- `plugins/crew/mcp-server/src/tools/build-persona-spawn-prompt.ts` and its test
-- `plugins/crew/mcp-server/src/tools/claim-story.ts`, `complete-story.ts`, `list-claimable-todos.ts`, `mint-session-ulid.ts`
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (`rework_count`, `blocked_by` already declared per Story 4.3 Task 7)
-- `plugins/crew/catalogue/generalist-dev.md`, `generalist-reviewer.md` (locked-phrase declarations unchanged)
-- `plugins/crew/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml` (subagent permission specs — neither subagent needs the new tools)
+- `plugins/flow/mcp-server/src/skills/handoff-parser.ts` and its test
+- `plugins/flow/mcp-server/src/skills/verdict-parser.ts` and its test
+- `plugins/flow/mcp-server/src/tools/build-persona-spawn-prompt.ts` and its test
+- `plugins/flow/mcp-server/src/tools/claim-story.ts`, `complete-story.ts`, `list-claimable-todos.ts`, `mint-session-ulid.ts`
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (`rework_count`, `blocked_by` already declared per Story 4.3 Task 7)
+- `plugins/flow/catalogue/generalist-dev.md`, `generalist-reviewer.md` (locked-phrase declarations unchanged)
+- `plugins/flow/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml` (subagent permission specs — neither subagent needs the new tools)
 
 ### State of files being modified (read these before editing)
 
-- **`plugins/crew/skills/start/SKILL.md`**: Currently a 79-line skill file. Front-matter `allowed_tools: [getStatus, mintSessionUlid, runDevSession]`. `# Steps` section is five steps ending in `call runDevSession`. `# Inner cycle` section (3 sub-bullets) and `# Failure modes` section are already present from Story 4.3 but reference `runDevSession`. The rewrite preserves the Story 4.2 outer-loop description and the queue-drained line; replaces the `runDevSession` call with the new `claimNextStory` loop; expands `# Inner cycle` with explicit `Task` invocation sites.
+- **`plugins/flow/skills/start/SKILL.md`**: Currently a 79-line skill file. Front-matter `allowed_tools: [getStatus, mintSessionUlid, runDevSession]`. `# Steps` section is five steps ending in `call runDevSession`. `# Inner cycle` section (3 sub-bullets) and `# Failure modes` section are already present from Story 4.3 but reference `runDevSession`. The rewrite preserves the Story 4.2 outer-loop description and the queue-drained line; replaces the `runDevSession` call with the new `claimNextStory` loop; expands `# Inner cycle` with explicit `Task` invocation sites.
 
-- **`plugins/crew/mcp-server/src/tools/register.ts`**: 723 lines, 19 `registerTool` calls (Story 4.3 baseline). The `runDevSession` registration is at lines 682–722. Delete this block. Add three new blocks following the same DomainError-handling pattern (see `claimStory`'s handler at lines 455–484 for the canonical try/catch shape).
+- **`plugins/flow/mcp-server/src/tools/register.ts`**: 723 lines, 19 `registerTool` calls (Story 4.3 baseline). The `runDevSession` registration is at lines 682–722. Delete this block. Add three new blocks following the same DomainError-handling pattern (see `claimStory`'s handler at lines 455–484 for the canonical try/catch shape).
 
-- **`plugins/crew/mcp-server/src/skills/dev-reviewer-cycle.ts`**: 230 lines. The orchestration logic across `runDevReviewerCycle` is what moves into `processDevTranscript` (lines 100–147 = handoff parse + grammar-drift handling) and `processReviewerTranscript` (lines 168–229 = verdict parse + rework / ready / blocked / grammar-drift handling). Read the file end-to-end before authoring the two new tools — the chat-line strings are the canonical source.
+- **`plugins/flow/mcp-server/src/skills/dev-reviewer-cycle.ts`**: 230 lines. The orchestration logic across `runDevReviewerCycle` is what moves into `processDevTranscript` (lines 100–147 = handoff parse + grammar-drift handling) and `processReviewerTranscript` (lines 168–229 = verdict parse + rework / ready / blocked / grammar-drift handling). Read the file end-to-end before authoring the two new tools — the chat-line strings are the canonical source.
 
-- **`plugins/crew/mcp-server/src/tools/run-dev-session.ts`**: 123 lines. The `readManifestFromDisk` / `writeManifestToDisk` helpers at lines 100–123 move into the new `manifest-io.ts` verbatim. The `runDevSession` function itself is deleted.
+- **`plugins/flow/mcp-server/src/tools/run-dev-session.ts`**: 123 lines. The `readManifestFromDisk` / `writeManifestToDisk` helpers at lines 100–123 move into the new `manifest-io.ts` verbatim. The `runDevSession` function itself is deleted.
 
-- **`plugins/crew/mcp-server/src/skills/start-loop.ts`**: ~400 lines. The outer claim-loop logic (the `while` loop that iterates `listClaimableTodos`, calls `claim`, surfaces `claiming <ref>` lines, terminates on queue-drained) is the source material for `claim-next-story.ts`. Read sections in this file:
+- **`plugins/flow/mcp-server/src/skills/start-loop.ts`**: ~400 lines. The outer claim-loop logic (the `while` loop that iterates `listClaimableTodos`, calls `claim`, surfaces `claiming <ref>` lines, terminates on queue-drained) is the source material for `claim-next-story.ts`. Read sections in this file:
   - `QUEUE_DRAINED_LINE` and `WAITING_ON_IN_PROGRESS_LINE` exports (verbatim string constants — preserve in `claim-next-story.ts`)
   - `processCandidate` function (single-candidate logic — adapt to the single-iteration tool shape)
   - Outer loop structure (the prose layer now drives this iteration)
 
 ### Tests that will run on this story
 
-- All existing vitest suites under `plugins/crew/mcp-server/`. The new tool-count assertions catch any new tool not in the new triple.
+- All existing vitest suites under `plugins/flow/mcp-server/`. The new tool-count assertions catch any new tool not in the new triple.
 - New unit tests for `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`.
 - New integration test composing the two transcript-processor tools (no live Claude Code).
 - AC6 content-structure tests for SKILL.md anchors and tool source-file anchors.
@@ -410,7 +410,7 @@ Per `plugins/crew/docs/user-surface-acs.md` §How the gate uses this, AC5 (user-
 
 ### Coding conventions to follow
 
-- TypeScript strict mode (already on in `plugins/crew/mcp-server/tsconfig.json`).
+- TypeScript strict mode (already on in `plugins/flow/mcp-server/tsconfig.json`).
 - camelCase tool names (`processDevTranscript`, not `process_dev_transcript`).
 - Discriminated unions with literal `next: "..."` fields for return types — matches the `parseHandoff` / `parseVerdict` precedent.
 - TSDoc at top of every new file citing the behavioural-contract source path.
@@ -420,18 +420,18 @@ Per `plugins/crew/docs/user-surface-acs.md` §How the gate uses this, AC5 (user-
 
 ### Project Structure Notes
 
-- The plugin's MCP server lives under `plugins/crew/mcp-server/`. Its `src/tools/` directory holds MCP-tool entry points; `src/skills/` holds pure helpers that tools compose (parsers, orchestration logic — though after this story `src/skills/` shrinks because the two big helpers are deleted).
-- The skill files live under `plugins/crew/skills/<skill-name>/SKILL.md`. The `crew:start` skill is at `plugins/crew/skills/start/SKILL.md`.
-- The catalogue (role templates) lives at `plugins/crew/catalogue/`; team-instantiated personas live at `<targetRepoRoot>/team/<role>/PERSONA.md` in the target repo (not in the plugin).
-- The build output at `plugins/crew/mcp-server/dist/` is tracked in git (per CLAUDE.md §Process notes — `/plugin install` does not run a build step).
+- The plugin's MCP server lives under `plugins/flow/mcp-server/`. Its `src/tools/` directory holds MCP-tool entry points; `src/skills/` holds pure helpers that tools compose (parsers, orchestration logic — though after this story `src/skills/` shrinks because the two big helpers are deleted).
+- The skill files live under `plugins/flow/skills/<skill-name>/SKILL.md`. The `crew:start` skill is at `plugins/flow/skills/start/SKILL.md`.
+- The catalogue (role templates) lives at `plugins/flow/catalogue/`; team-instantiated personas live at `<targetRepoRoot>/team/<role>/PERSONA.md` in the target repo (not in the plugin).
+- The build output at `plugins/flow/mcp-server/dist/` is tracked in git (per CLAUDE.md §Process notes — `/plugin install` does not run a build step).
 
 ### References
 
 - Epic: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md` § Story 4.3b
 - Story 4.3 spec (the precursor, whose `runDevSession` this story refactors): `_bmad-output/implementation-artifacts/4-3-dev-reviewer-handoff-reviewer-spawn-and-rework-signal.md`
 - Story 4.2 spec (the outer claim-loop, whose `runStartLoop` is also refactored): `_bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md`
-- User-surface AC convention: `plugins/crew/docs/user-surface-acs.md`
-- PR #103 reviewer's Info-2 finding (the production bug this story closes): `plugins/crew/mcp-server/src/tools/run-dev-session.ts:73-80`
+- User-surface AC convention: `plugins/flow/docs/user-surface-acs.md`
+- PR #103 reviewer's Info-2 finding (the production bug this story closes): `plugins/flow/mcp-server/src/tools/run-dev-session.ts:73-80`
 - Epic 4 carry-forward retro (the explicit follow-up commitment): epic file lines 9–14
 - Architecture: `_bmad-output/planning-artifacts/architecture/` (sharded — start at `index.md`; relevant sections: §Agent invocation model, §MCP Tool Naming, §Skill prose ↔ MCP layer split)
 - PRD: `_bmad-output/planning-artifacts/prd-crew-v1/` (sharded — start at `index.md`; relevant FRs: FR15, FR17, FR18, FR19, FR24, FR26, FR27, FR28)
@@ -459,32 +459,32 @@ No blocking issues encountered.
 ### File List
 
 **New files:**
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts`
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`
-- `plugins/crew/mcp-server/src/lib/manifest-io.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/processors-content.test.ts`
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts`
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`
+- `plugins/flow/mcp-server/src/lib/manifest-io.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/processors-content.test.ts`
 
 **Modified files:**
-- `plugins/crew/skills/start/SKILL.md` (substantial rewrite — front-matter + steps + inner-cycle section + failure-modes update)
-- `plugins/crew/mcp-server/src/tools/register.ts` (removed `runDevSession`; added `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`)
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts` (AC6 anchor assertions)
-- `plugins/crew/mcp-server/src/skills/__tests__/parsers-content.test.ts` (removed dev-reviewer-cycle.ts references)
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` (tool count 19 → 21)
-- `plugins/crew/mcp-server/dist/` (rebuilt)
+- `plugins/flow/skills/start/SKILL.md` (substantial rewrite — front-matter + steps + inner-cycle section + failure-modes update)
+- `plugins/flow/mcp-server/src/tools/register.ts` (removed `runDevSession`; added `claimNextStory`, `processDevTranscript`, `processReviewerTranscript`)
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill-content.test.ts` (AC6 anchor assertions)
+- `plugins/flow/mcp-server/src/skills/__tests__/parsers-content.test.ts` (removed dev-reviewer-cycle.ts references)
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` (tool count 19 → 21)
+- `plugins/flow/mcp-server/dist/` (rebuilt)
 
 **Deleted files:**
-- `plugins/crew/mcp-server/src/tools/run-dev-session.ts`
-- `plugins/crew/mcp-server/src/skills/dev-reviewer-cycle.ts`
-- `plugins/crew/mcp-server/src/skills/start-loop.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-session.test.ts`
-- `plugins/crew/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts`
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill.integration.test.ts`
+- `plugins/flow/mcp-server/src/tools/run-dev-session.ts`
+- `plugins/flow/mcp-server/src/skills/dev-reviewer-cycle.ts`
+- `plugins/flow/mcp-server/src/skills/start-loop.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/run-dev-session.test.ts`
+- `plugins/flow/mcp-server/src/skills/__tests__/dev-reviewer-cycle.test.ts`
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill.integration.test.ts`
 
 ### Change Log
 

@@ -192,13 +192,13 @@ class TestDefaultBaseSubcommand:
     """(5d) default-base subcommand prints the resolved base to stdout."""
 
     def _run(self, config_root: Path | None = None) -> subprocess.CompletedProcess:
-        env: dict = {"CREW_SHIP_SKIP_CWD_CHECK": "1"}
+        env: dict = {"FLOW_SHIP_SKIP_CWD_CHECK": "1"}
         if config_root is not None:
             # Set PYTHONPATH so the child process picks up the right ship.py
             # and point it at a tmp dir that has the right config.
             import os
             env.update(os.environ)
-            env["CREW_SHIP_SKIP_CWD_CHECK"] = "1"
+            env["FLOW_SHIP_SKIP_CWD_CHECK"] = "1"
         return subprocess.run(
             [sys.executable, str(Path(__file__).parent / "ship.py"), "default-base"],
             capture_output=True,
@@ -229,7 +229,7 @@ class TestDefaultBaseSubcommand:
             [sys.executable, str(child_ship), "default-base"],
             capture_output=True,
             text=True,
-            env={**os.environ, "CREW_SHIP_SKIP_CWD_CHECK": "1"},
+            env={**os.environ, "FLOW_SHIP_SKIP_CWD_CHECK": "1"},
         )
         assert rc.returncode == 0, f"stderr: {rc.stderr}"
         assert rc.stdout.strip() == "dev"
@@ -248,7 +248,7 @@ class TestDefaultBaseSubcommand:
             [sys.executable, str(child_ship), "default-base"],
             capture_output=True,
             text=True,
-            env={**os.environ, "CREW_SHIP_SKIP_CWD_CHECK": "1"},
+            env={**os.environ, "FLOW_SHIP_SKIP_CWD_CHECK": "1"},
         )
         assert rc.returncode == 0, f"stderr: {rc.stderr}"
         assert rc.stdout.strip() == "main"

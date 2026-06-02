@@ -6,7 +6,7 @@ Status: ready-for-dev
 ## Story
 
 As the operator (and the PM staking the product thesis on this),
-I want a real low-risk feature run all the way through the native cockpit — `crew:author` → `crew:judge` (five lenses) → Quality Lead → `ready` → drain → merge — with a human spot-check of the judge verdicts against the rubric,
+I want a real low-risk feature run all the way through the native cockpit — `flow:author` → `flow:judge` (five lenses) → Quality Lead → `ready` → drain → merge — with a human spot-check of the judge verdicts against the rubric,
 so that the re-foundation is proven to **produce stories that meet the bar a human would apply**, not merely to run without error. The machinery exists (Epic 9) and the schema now carries everything the rubric grades (10.1–10.4); whether it yields *good* stories is the one thing untested. This is a validation story — its deliverable is evidence (a recorded run + a spot-check), not new product code — and it is the gate that makes the arc "real".
 
 ## Dependencies
@@ -19,7 +19,7 @@ so that the re-foundation is proven to **produce stories that meet the bar a hum
 
 **AC1 — a real feature traverses author → judge → QL → ready → drain → merge on native, green (integration):**
 
-A real low-risk feature is authored natively via `crew:author` (producing an enriched §3 native story that clears Tier-0), graded by the five-lens `crew:judge` panel, adjudicated by the Quality Lead to `ready`, blessed, claimed by the drain, built, reviewed, and merged with the full suite green — entirely through the native path, no BMad surface in the loop. The run is recorded (the merged PR + the captured cockpit/drain output). Observable spine: one real feature ships end-to-end on native, hands-off through the gates a human only spot-checks.
+A real low-risk feature is authored natively via `flow:author` (producing an enriched §3 native story that clears Tier-0), graded by the five-lens `flow:judge` panel, adjudicated by the Quality Lead to `ready`, blessed, claimed by the drain, built, reviewed, and merged with the full suite green — entirely through the native path, no BMad surface in the loop. The run is recorded (the merged PR + the captured cockpit/drain output). Observable spine: one real feature ships end-to-end on native, hands-off through the gates a human only spot-checks.
 
 artifact: _bmad-output/planning-artifacts/native-pipeline-proof-2026-NN.md
 
@@ -50,14 +50,14 @@ artifact: _bmad-output/planning-artifacts/native-pipeline-proof-2026-NN.md
 **Builds:** evidence. A documented end-to-end run of a real low-risk feature through the native cockpit + drain, a human spot-check of the verdicts, and a Tier-0-has-teeth demonstration. No new product code.
 
 **Does NOT build:**
-- Any new tool, schema, or skill — it uses the existing cockpit (`crew:author`/`crew:judge`/`crew:ready`/`crew:board`) and the drain.
+- Any new tool, schema, or skill — it uses the existing cockpit (`flow:author`/`flow:judge`/`flow:ready`/`flow:board`) and the drain.
 - Rubric or Quality-Lead changes — discrepancies are *logged* as follow-ups, not fixed here (that is Epic 6b's calibration loop).
 
 ### How to run it (the validation procedure)
 
 1. Pick a **real, low-risk** feature (a genuine small improvement to crew, not a toy) so the proof is honest.
-2. `crew:author` it → confirm the native story clears Tier-0 (10.1–10.3) and carries a sensible `risk_tier` (10.4).
-3. `crew:judge` → capture the five per-lens verdicts; `crew:ready`/Quality Lead → adjudicate to `ready` (or escalate, per K=2).
+2. `flow:author` it → confirm the native story clears Tier-0 (10.1–10.3) and carries a sensible `risk_tier` (10.4).
+3. `flow:judge` → capture the five per-lens verdicts; `flow:ready`/Quality Lead → adjudicate to `ready` (or escalate, per K=2).
 4. Drain it (claim → dev → review → gate → merge) on a branch to `main`; full suite green.
 5. **Spot-check:** a human compares the verdicts to the rubric and records the conclusion.
 6. Run the deliberately-thin draft (AC3) and record that it is bounced.
@@ -80,5 +80,5 @@ artifact: _bmad-output/planning-artifacts/native-pipeline-proof-2026-NN.md
 
 - [Source: _bmad-output/planning-artifacts/native-refoundation-plan-2026-05-31.md §7] — proving the pipeline is the real residual risk; run a real feature end-to-end with a human spot-check of verdicts vs rubric.
 - [Source: _bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md §3] — the rubric the spot-check applies (five lenses; Verifiability behaviour-not-string; Considered risk-tiered bar).
-- [Source: plugins/crew/skills/{author,judge,ready,board}/SKILL.md] — the cockpit surfaces the proof exercises.
+- [Source: plugins/flow/skills/{author,judge,ready,board}/SKILL.md] — the cockpit surfaces the proof exercises.
 - [Source: _bmad-output/implementation-artifacts/10-4-plumb-risk-tier-into-native-draft.md, 10-6-cutover-native-primary-bmad-ingest-only.md] — the risk-tier plumbing and the cutover the proof validates.

@@ -14,11 +14,11 @@ so that **`gh` rate limits, auth expiry, and network blips don't cascade into sp
 
 ### What this story is, in one sentence
 
-Populate `plugins/crew/permissions/gh-error-map.yaml` with the v1 (exit_code, stderr_regex) → class rows, add a parser + classifier that the existing `gh` execa wrapper (`plugins/crew/mcp-server/src/lib/gh.ts`) calls on every non-zero-exit result to convert mapped failures into a typed `GhRecoverableError` carrying its class, and route that error through a tool-layer side-effect so the in-progress manifest is stamped with `blocked_by: gh-<class>` rather than reaching the "marked failed" terminal state — keeping the recoverable-error → blocked transition entirely in the tool layer (NOT in SKILL.md prose), per `feedback_prose_mut_steps_need_seam.md`.
+Populate `plugins/flow/permissions/gh-error-map.yaml` with the v1 (exit_code, stderr_regex) → class rows, add a parser + classifier that the existing `gh` execa wrapper (`plugins/flow/mcp-server/src/lib/gh.ts`) calls on every non-zero-exit result to convert mapped failures into a typed `GhRecoverableError` carrying its class, and route that error through a tool-layer side-effect so the in-progress manifest is stamped with `blocked_by: gh-<class>` rather than reaching the "marked failed" terminal state — keeping the recoverable-error → blocked transition entirely in the tool layer (NOT in SKILL.md prose), per `feedback_prose_mut_steps_need_seam.md`.
 
 ### What this story fixes (and why it needs its own story)
 
-Story 4.4 shipped the `gh` execa wrapper (`plugins/crew/mcp-server/src/lib/gh.ts`) with `gh_allow` subcommand enforcement and `assertNoNegativeFlags` arg refusal, plus a `GhPrCreateFailedError` raised on non-zero exit from `gh pr create` and "stdout did not contain a PR URL" diagnostics. That error is **terminal** — when it propagates up through `runDevTerminalAction`, the dev subagent's `Task` returns a hard failure to the SKILL.md prose, and the manifest is left in `in-progress/` with no `blocked_by` field. The next `/crew:start` pass sees `waiting-on-in-progress` forever.
+Story 4.4 shipped the `gh` execa wrapper (`plugins/flow/mcp-server/src/lib/gh.ts`) with `gh_allow` subcommand enforcement and `assertNoNegativeFlags` arg refusal, plus a `GhPrCreateFailedError` raised on non-zero exit from `gh pr create` and "stdout did not contain a PR URL" diagnostics. That error is **terminal** — when it propagates up through `runDevTerminalAction`, the dev subagent's `Task` returns a hard failure to the SKILL.md prose, and the manifest is left in `in-progress/` with no `blocked_by` field. The next `/flow:start` pass sees `waiting-on-in-progress` forever.
 
 That behaviour is wrong for *recoverable* failures. Three concrete cases NFR18 names:
 
@@ -43,8 +43,8 @@ This story explicitly does NOT introduce the `blocked/` directory move; Story 5.
 - (d) Change the existing `gh_allow` subcommand allowlist enforcement (`GhSubcommandDeniedError`) or `assertNoNegativeFlags` refusal (`NegativeCapabilityDeniedError`). Those are checks BEFORE spawn; this story adds a check AFTER spawn on the result. The two paths are orthogonal and both remain in the wrapper.
 - (e) Change `runDevTerminalAction`'s contract. The composite tool continues to raise `GhPrCreateFailedError` on unmapped failures; on mapped failures the underlying `gh` wrapper now raises `GhRecoverableError` instead, which propagates up through `runDevTerminalAction` unchanged. No new return shape on the success path.
 - (f) Add retroactive classification for past failures (no telemetry replay). The classifier runs only on live wrapper invocations from this story's merge forward.
-- (g) Add a target-repo override path for `gh-error-map.yaml`. v1 uses the shipped plugin-side map only. (A future story may add a `<target-repo>/.crew/gh-error-map.yaml` override using the same merge pattern as Story 4.9's risk-tiering override; not in scope here.)
-- (h) Touch `plugins/crew/skills/start/SKILL.md` prose. The recoverable-error → blocked transition is fully tool-layer (wrapper raises, `processDevTranscript` stamps). The prose only learns about the new `next: "done-blocked-gh-<class>"` value as one more case in its existing switch — that prose update is informational (a chat line announcing the block), not mutating. See § Implementation strategy for the prose-vs-tool placement weighing.
+- (g) Add a target-repo override path for `gh-error-map.yaml`. v1 uses the shipped plugin-side map only. (A future story may add a `<target-repo>/.flow/gh-error-map.yaml` override using the same merge pattern as Story 4.9's risk-tiering override; not in scope here.)
+- (h) Touch `plugins/flow/skills/start/SKILL.md` prose. The recoverable-error → blocked transition is fully tool-layer (wrapper raises, `processDevTranscript` stamps). The prose only learns about the new `next: "done-blocked-gh-<class>"` value as one more case in its existing switch — that prose update is informational (a chat line announcing the block), not mutating. See § Implementation strategy for the prose-vs-tool placement weighing.
 - (i) Touch `processReviewerTranscript`. The reviewer subagent doesn't (yet) call `gh` from within its inner loop in a way that triggers recoverable failures during the dev cycle — reviewer `gh` calls happen in Stories 4.6/4.6b/4.7/4.8 and those stories will route reviewer-side recoverable errors through their own paths. v1's routing point is `processDevTranscript` only.
 - (j) Add `blocked_by` to any new schema. The execution-manifest schema already declares `blocked_by?: string` (Story 3.5 / 3.7); this story uses the existing field with new string values: `gh-defer | gh-retry | gh-needs-human`.
 - (k) Mutate the manifest from inside `lib/gh.ts`. The wrapper RAISES; the routing tool (`processDevTranscript`) WRITES. Separation of concerns: the wrapper is a pure execa adapter with classification; the manifest mutation lives in the same tool that already handles `blocked_by: handoff-grammar` and `blocked_by: reviewer-grammar` (`processDevTranscript` / `processReviewerTranscript`).
@@ -56,7 +56,7 @@ This story explicitly does NOT introduce the `blocked/` directory move; Story 5.
 
 ## Acceptance Criteria
 
-> AC1, AC2, and AC3 are verbatim from the epic. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal YAML parsing, execa-wrapper post-result classification, and vitest integration. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1, AC2, and AC3 are verbatim from the epic. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal YAML parsing, execa-wrapper post-result classification, and vitest integration. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** `plugins/<plugin>/permissions/gh-error-map.yaml`,
@@ -86,7 +86,7 @@ vitest stubs `gh` to return each mapped error class and asserts story stays in `
 - (1c) **`stderr_regex` semantics:** when present, the string is compiled as a JavaScript regex (default flags) at parse time. A regex that fails to compile raises `MalformedGhErrorMapError` with `reason: "stderr_regex did not compile"` and the offending pattern. When absent, the entry matches solely on `exit_code`.
 - (1d) **Match precedence:** the classifier walks `entries` in file order and returns the first matching row's `class`. Match logic: `result.exitCode === entry.exit_code` AND (if `stderr_regex` present, `entry.stderr_regex.test(result.stderr)`). No match → classifier returns `null`. This means entries with stricter (regex-bearing) conditions for the same exit code MUST appear before catch-all entries with the same exit code; the parser does NOT reorder.
 - (1e) **No unknown top-level keys:** the parser rejects unknown top-level keys (`MalformedGhErrorMapError`). Unknown per-entry keys are also rejected — strict-mode Zod schema. (Rationale: typos in `stderr_regex` would be silently ignored otherwise.)
-- (1f) **Shipped v1 row set** (the contents the dev agent writes into `plugins/crew/permissions/gh-error-map.yaml`):
+- (1f) **Shipped v1 row set** (the contents the dev agent writes into `plugins/flow/permissions/gh-error-map.yaml`):
 
     ```yaml
     # gh-error-map.yaml — NFR18 error-class table.
@@ -130,15 +130,15 @@ vitest stubs `gh` to return each mapped error class and asserts story stays in `
   - `{ next: "done-blocked-gh-defer"; chatLog: string[] }`
   - `{ next: "done-blocked-gh-retry"; chatLog: string[] }`
   - `{ next: "done-blocked-gh-needs-human"; chatLog: string[] }`
-  Each carries a verbatim chat line: `gh recoverable error (class=<class>) — story <ref> blocked. blocked_by stamped to gh-<class>. Operator action: <action-hint>.` Action hints: defer → "wait and re-run /crew:start", retry → "transient network error; re-run /crew:start (v2 will auto-retry)", needs-human → "run `gh auth login` then re-run /crew:start".
+  Each carries a verbatim chat line: `gh recoverable error (class=<class>) — story <ref> blocked. blocked_by stamped to gh-<class>. Operator action: <action-hint>.` Action hints: defer → "wait and re-run /flow:start", retry → "transient network error; re-run /flow:start (v2 will auto-retry)", needs-human → "run `gh auth login` then re-run /flow:start".
 - (2g) **Manifest read-write atomicity:** the write follows the existing `manifest-io.ts` pattern (`readManifest` → spread → `writeManifest`). No new atomic-rename primitive needed; `writeManifest` already uses Story 1.6's atomic rename. The manifest stays in `in-progress/` for v1 (Story 5.1 will move it to `blocked/`).
 - (2h) **No-double-stamp guard:** if the manifest already carries `blocked_by`, `processDevTranscript` OVERWRITES it with the new `gh-${class}` value (the most-recent failure wins). This matches the existing `blocked_by: handoff-grammar` write behaviour. (Rationale: a story that drifted into handoff-grammar then re-ran and hit a recoverable error should reflect the more actionable failure.)
 - (2i) **Wrapper-direct callers:** any caller of `gh()` that runs OUTSIDE `runDevTerminalAction` (e.g. future reviewer-side `gh pr diff` in Story 4.6) will see `GhRecoverableError` propagate uncaught. Those callers' stories will route the error in their own ways. v1's only production caller is `runDevTerminalAction`, and the error propagates through it unchanged (the composite tool does not catch the recoverable error — it lets it bubble to the dev subagent, which then emits the locked marker line per (2e)).
 
 **AC3 unpacked.** The integration suite covers each mapped class plus the unmapped fall-through:
 
-- (3a) **Fixture base:** tmpdir with `git init`, an `.crew/state/in-progress/<ref>.yaml` manifest, a fixture story spec with three ACs (mirrors Story 4.4's integration fixture). A stubbed `execaImpl` is injected into `runDevTerminalAction`; the stub returns scripted `{ stdout, stderr, exitCode }` for `gh` invocations.
-- (3b) **`defer` class:** stub `gh pr create` to return `{ exitCode: 4, stderr: "API rate limit exceeded", stdout: "" }`. Drive `runDevTerminalAction` end-to-end. Assert: (i) `runDevTerminalAction` raises `GhRecoverableError` with `class: "defer"`, (ii) the dev subagent's transcript (simulated by passing a transcript string into `processDevTranscript` that contains the verbatim locked line `gh-recoverable: class=defer subcommand=pr-create exit=4`) routes through `processDevTranscript` which returns `{ next: "done-blocked-gh-defer", chatLog: [...] }`, (iii) the manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` is read back and carries `blocked_by: "gh-defer"`, (iv) the manifest stays in `in-progress/` (no file moved to a hypothetical `blocked/` dir; existence-check both dirs), (v) the chat line matches the verbatim shape from (2f).
+- (3a) **Fixture base:** tmpdir with `git init`, an `.flow/state/in-progress/<ref>.yaml` manifest, a fixture story spec with three ACs (mirrors Story 4.4's integration fixture). A stubbed `execaImpl` is injected into `runDevTerminalAction`; the stub returns scripted `{ stdout, stderr, exitCode }` for `gh` invocations.
+- (3b) **`defer` class:** stub `gh pr create` to return `{ exitCode: 4, stderr: "API rate limit exceeded", stdout: "" }`. Drive `runDevTerminalAction` end-to-end. Assert: (i) `runDevTerminalAction` raises `GhRecoverableError` with `class: "defer"`, (ii) the dev subagent's transcript (simulated by passing a transcript string into `processDevTranscript` that contains the verbatim locked line `gh-recoverable: class=defer subcommand=pr-create exit=4`) routes through `processDevTranscript` which returns `{ next: "done-blocked-gh-defer", chatLog: [...] }`, (iii) the manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` is read back and carries `blocked_by: "gh-defer"`, (iv) the manifest stays in `in-progress/` (no file moved to a hypothetical `blocked/` dir; existence-check both dirs), (v) the chat line matches the verbatim shape from (2f).
 - (3c) **`needs-human` class:** stub `gh pr create` to return `{ exitCode: 4, stderr: "gh auth login required", stdout: "" }`. Assert mirror of (3b) with `class: "needs-human"`, `blocked_by: "gh-needs-human"`, and the auth-action chat line.
 - (3d) **`retry` class:** stub `gh pr create` to return `{ exitCode: 1, stderr: "dial tcp: lookup api.github.com: i/o timeout", stdout: "" }`. Assert mirror of (3b) with `class: "retry"`, `blocked_by: "gh-retry"`, and the retry-action chat line.
 - (3e) **Unmapped failure stays terminal:** stub `gh pr create` to return `{ exitCode: 1, stderr: "pull request already exists for branch", stdout: "" }` (a real `gh` error string that does NOT match any v1 row). Assert: (i) the wrapper does NOT raise `GhRecoverableError`, (ii) the existing `GhPrCreateFailedError` path is taken instead, (iii) the manifest does NOT carry `blocked_by: gh-*` (it may carry nothing or another `blocked_by` from earlier in the cycle — assert no `gh-*` prefix).
@@ -155,14 +155,14 @@ vitest stubs `gh` to return each mapped error class and asserts story stays in `
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Add `gh-error-map.yaml` schema + parser (AC: 1, 3)**
-  - [ ] 1.1 Create `plugins/crew/mcp-server/src/schemas/gh-error-map.ts` with a Zod schema for `{ entries: GhErrorMapEntry[] }`. `GhErrorMapEntry` = `{ exit_code: z.number().int(), stderr_regex: z.string().optional(), class: z.enum(["defer", "retry", "needs-human"]) }`. Strict mode (no unknown keys, top-level or per-entry).
-  - [ ] 1.2 Create `plugins/crew/mcp-server/src/lib/gh-error-map.ts`. Export:
+  - [ ] 1.1 Create `plugins/flow/mcp-server/src/schemas/gh-error-map.ts` with a Zod schema for `{ entries: GhErrorMapEntry[] }`. `GhErrorMapEntry` = `{ exit_code: z.number().int(), stderr_regex: z.string().optional(), class: z.enum(["defer", "retry", "needs-human"]) }`. Strict mode (no unknown keys, top-level or per-entry).
+  - [ ] 1.2 Create `plugins/flow/mcp-server/src/lib/gh-error-map.ts`. Export:
     - `parseGhErrorMap(filePath: string): Promise<{ entries: ParsedGhErrorMapEntry[] }>` — reads YAML, validates via Zod, compiles each `stderr_regex` into a `RegExp` (catches compile errors and re-raises as `MalformedGhErrorMapError`).
     - `loadGhErrorMap(pluginRoot: string): Promise<{ entries: ParsedGhErrorMapEntry[] }>` — load-once cache keyed by absolute path; resolves `<pluginRoot>/permissions/gh-error-map.yaml`.
     - `classifyGhError(result: { exitCode: number; stderr: string }, map: { entries: ParsedGhErrorMapEntry[] }): "defer" | "retry" | "needs-human" | null` — walks `entries` in order, returns first matching class or `null`.
     - `__resetGhErrorMapCacheForTests()` — test-only cache reset.
   - [ ] 1.3 Add `MalformedGhErrorMapError` typed error to `errors.ts` with fields `{ filePath, reason, rowIndex?: number, offendingKey?: string }`.
-  - [ ] 1.4 Unit tests in `plugins/crew/mcp-server/src/lib/__tests__/gh-error-map.test.ts`:
+  - [ ] 1.4 Unit tests in `plugins/flow/mcp-server/src/lib/__tests__/gh-error-map.test.ts`:
     - parser happy path (the shipped v1 rows)
     - each malformed case from AC3h
     - `classifyGhError` returns first match in order (AC3f)
@@ -171,7 +171,7 @@ vitest stubs `gh` to return each mapped error class and asserts story stays in `
     - cache memoisation (two calls → one parse) and `__resetGhErrorMapCacheForTests` resets
 
 - [ ] **Task 2 — Populate `gh-error-map.yaml` with v1 rows (AC: 1)**
-  - [ ] 2.1 Edit `plugins/crew/permissions/gh-error-map.yaml`. Replace `entries: []` with the v1 row set from AC1f (auth → needs-human, rate-limit → defer, network → retry). Preserve the existing header comments and add a pointer to this spec's § Behavioural contract.
+  - [ ] 2.1 Edit `plugins/flow/permissions/gh-error-map.yaml`. Replace `entries: []` with the v1 row set from AC1f (auth → needs-human, rate-limit → defer, network → retry). Preserve the existing header comments and add a pointer to this spec's § Behavioural contract.
   - [ ] 2.2 Spot-check the file parses cleanly via `parseGhErrorMap` in a unit test (separate from Task 1.4's fixture-driven tests — this test loads the shipped file directly).
 
 - [ ] **Task 3 — Add `GhRecoverableError` and wrap `gh()` post-result classification (AC: 2, 3)**
@@ -182,21 +182,21 @@ vitest stubs `gh` to return each mapped error class and asserts story stays in `
   - [ ] 3.5 Confirm the existing `assertNoNegativeFlags` and `gh_allow` pre-spawn checks are unchanged (their tests stay green).
 
 - [ ] **Task 4 — Extend `processDevTranscript` with recoverable-error parser + manifest stamp (AC: 2, 3)**
-  - [ ] 4.1 In `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`, ADD a new recoverable-error parse step BEFORE the existing `parseHandoff` call. Grep the transcript for `/^gh-recoverable: class=(defer|retry|needs-human) subcommand=([a-z0-9-]+) exit=(\d+)/m`.
+  - [ ] 4.1 In `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`, ADD a new recoverable-error parse step BEFORE the existing `parseHandoff` call. Grep the transcript for `/^gh-recoverable: class=(defer|retry|needs-human) subcommand=([a-z0-9-]+) exit=(\d+)/m`.
   - [ ] 4.2 On match: `readManifest` → write back with `blocked_by: "gh-${class}"` → return new union variant `{ next: "done-blocked-gh-${class}", chatLog: [<verbatim line from AC2f>] }`.
   - [ ] 4.3 Extend the `ProcessDevTranscriptResult` type union with three new literal variants from AC2f.
   - [ ] 4.4 Unit tests in `__tests__/process-dev-transcript.test.ts`: each class branch (defer / retry / needs-human) stamps the right `blocked_by` and returns the right `next`; the manifest is read-modify-written exactly once per branch; locked-phrase drift falls through to handoff-grammar (AC3j); recoverable + handoff coexistence (AC3k).
   - [ ] 4.5 Cover the chat-line verbatim shape per AC2f in the test assertions (exact-string match including action hint).
 
 - [ ] **Task 5 — Update generalist-dev persona body to instruct the locked marker line (AC: 2)**
-  - [ ] 5.1 In `plugins/crew/catalogue/generalist-dev.md`, add a paragraph to the persona body's instruction set: "If any `gh`-invoking tool raises `GhRecoverableError`, emit the verbatim line `gh-recoverable: class=<defer|retry|needs-human> subcommand=<subcommand> exit=<exitCode>` as the last line of your final message before exiting. Do NOT emit the handoff phrase in that case." Use the same prose-fidelity bar Story 4.3 set for the handoff phrase.
+  - [ ] 5.1 In `plugins/flow/catalogue/generalist-dev.md`, add a paragraph to the persona body's instruction set: "If any `gh`-invoking tool raises `GhRecoverableError`, emit the verbatim line `gh-recoverable: class=<defer|retry|needs-human> subcommand=<subcommand> exit=<exitCode>` as the last line of your final message before exiting. Do NOT emit the handoff phrase in that case." Use the same prose-fidelity bar Story 4.3 set for the handoff phrase.
   - [ ] 5.2 No test changes — persona body is a knowledge-edit, not a contract-shape change. A future story may add a structural-anchor test asserting the locked-phrase text is present in the persona body.
 
 - [ ] **Task 6 — Integration suite for the recoverable-error path (AC: 2, 3)**
-  - [ ] 6.1 Create `plugins/crew/mcp-server/src/tools/__tests__/gh-recoverable.integration.test.ts`.
+  - [ ] 6.1 Create `plugins/flow/mcp-server/src/tools/__tests__/gh-recoverable.integration.test.ts`.
   - [ ] 6.2 Fixture: reuse the Story 4.4 `runDevTerminalAction` fixture pattern (tmpdir + git init + in-progress manifest + fixture spec). Inject `execaImpl` stub.
   - [ ] 6.3 Cover AC3b (defer), AC3c (needs-human), AC3d (retry), AC3e (unmapped fall-through), AC3f (precedence), AC3g (optional regex), AC3j (drift falls through), AC3k (recoverable + handoff coexistence) — eight scenarios.
-  - [ ] 6.4 Each scenario asserts: (i) the wrapper raises the right error type, (ii) `processDevTranscript` returns the right `next` literal, (iii) the in-progress manifest carries the right `blocked_by` value, (iv) the manifest file is still in `<.crew/state/in-progress/>`, never in a hypothetical `<.crew/state/blocked/>` dir, never deleted.
+  - [ ] 6.4 Each scenario asserts: (i) the wrapper raises the right error type, (ii) `processDevTranscript` returns the right `next` literal, (iii) the in-progress manifest carries the right `blocked_by` value, (iv) the manifest file is still in `<.flow/state/in-progress/>`, never in a hypothetical `<.flow/state/blocked/>` dir, never deleted.
   - [ ] 6.5 Add `beforeEach` calling `__resetGhErrorMapCacheForTests()` (AC3i).
 
 - [ ] **Task 7 — Build, full vitest suite, fs-guard regression (AC: all)**
@@ -237,7 +237,7 @@ The `retry` class is a label that flags "this was a network blip; a retry would 
 
 - A retry without back-off + cap is a thundering-herd hazard against `gh`'s rate limiter.
 - The simplest correct retry implementation requires a clock, a cap, and a telemetry hook — none in scope here.
-- Blocking on a retry-class error costs the operator one `/crew:start` re-run, which is acceptable v1 friction.
+- Blocking on a retry-class error costs the operator one `/flow:start` re-run, which is acceptable v1 friction.
 
 The label still earns its keep: future Story (likely 4.12-era or 5.x) builds the retry runtime and keys off the `gh-retry` `blocked_by` value to auto-unblock + retry. v1 surfaces the label; v2 acts on it.
 
@@ -308,30 +308,30 @@ The new utility file `lib/gh-error-map.ts`, the extended `lib/gh.ts`, and the ex
 ### File map (likely — refine during implementation)
 
 **New files:**
-- `plugins/crew/mcp-server/src/lib/gh-error-map.ts` (parser + classifier + load-once cache)
-- `plugins/crew/mcp-server/src/schemas/gh-error-map.ts` (Zod schema)
-- `plugins/crew/mcp-server/src/lib/__tests__/gh-error-map.test.ts` (unit tests)
-- `plugins/crew/mcp-server/src/tools/__tests__/gh-recoverable.integration.test.ts` (integration suite)
+- `plugins/flow/mcp-server/src/lib/gh-error-map.ts` (parser + classifier + load-once cache)
+- `plugins/flow/mcp-server/src/schemas/gh-error-map.ts` (Zod schema)
+- `plugins/flow/mcp-server/src/lib/__tests__/gh-error-map.test.ts` (unit tests)
+- `plugins/flow/mcp-server/src/tools/__tests__/gh-recoverable.integration.test.ts` (integration suite)
 
 **Modified files (NOT locked):**
-- `plugins/crew/permissions/gh-error-map.yaml` (replace `entries: []` with v1 rows from AC1f; preserve header comments and add spec pointer)
-- `plugins/crew/mcp-server/src/lib/gh.ts` (add post-result classification call; raise `GhRecoverableError` on non-null class)
-- `plugins/crew/mcp-server/src/lib/__tests__/gh.test.ts` (or sibling — check first; add wrapper-side classification tests)
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (add recoverable-error parser before `parseHandoff`; new union variants; new manifest-stamp branch)
-- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (cover the three new class branches, drift fallback, coexistence)
-- `plugins/crew/mcp-server/src/errors.ts` (add `GhRecoverableError`, `MalformedGhErrorMapError`)
-- `plugins/crew/catalogue/generalist-dev.md` (persona body: instruction to emit the locked recoverable-error marker line)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/permissions/gh-error-map.yaml` (replace `entries: []` with v1 rows from AC1f; preserve header comments and add spec pointer)
+- `plugins/flow/mcp-server/src/lib/gh.ts` (add post-result classification call; raise `GhRecoverableError` on non-null class)
+- `plugins/flow/mcp-server/src/lib/__tests__/gh.test.ts` (or sibling — check first; add wrapper-side classification tests)
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (add recoverable-error parser before `parseHandoff`; new union variants; new manifest-stamp branch)
+- `plugins/flow/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (cover the three new class branches, drift fallback, coexistence)
+- `plugins/flow/mcp-server/src/errors.ts` (add `GhRecoverableError`, `MalformedGhErrorMapError`)
+- `plugins/flow/catalogue/generalist-dev.md` (persona body: instruction to emit the locked recoverable-error marker line)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 **Locked files (NOT modified by this story):**
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` — outer-loop claim primitive owned by Story 4.3b. No changes needed; recoverable errors surface AFTER claim, in the dev transcript.
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` — atomic claim primitive owned by Story 4.1. No changes; this story doesn't touch claim semantics.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` — atomic complete primitive owned by Story 4.1 (and called internally by `processReviewerTranscript` per Story 4.3c). No changes; recoverable errors never reach `completeStory` (the dev cycle blocks before the reviewer runs).
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` — reviewer-transcript routing owned by Story 4.3b / 4.3c. No changes; reviewer-side `gh` recoverable errors will be routed in Stories 4.6 / 4.6b / 4.7 / 4.8, not here. (v1's only recoverable-error routing point is `processDevTranscript` because v1's only production `gh` caller is `runDevTerminalAction`, which the dev subagent invokes.)
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` — composite tool from Story 4.4. The new `GhRecoverableError` propagates THROUGH it unchanged; no `try/catch`, no shape change. (The composite raises the recoverable error; the dev subagent emits the locked marker line per Task 5.1; `processDevTranscript` then handles it.)
-- `plugins/crew/mcp-server/src/lib/manifest-io.ts` — already provides atomic `readManifest` / `writeManifest`. Used as-is.
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — `blocked_by?: string` field already declared (Story 3.5 / 3.7). v1's new values (`gh-defer`, `gh-retry`, `gh-needs-human`) are plain strings; no schema change needed.
-- `plugins/crew/skills/start/SKILL.md` — prose layer only learns three new switch cases by reading new `next` literals. The new switch cases emit informational chat lines (already-pushed `chatLog` strings from `processDevTranscript`) — no mutating step in the prose. (SKILL.md may need a minimal additive edit listing the three new `next` cases, but this is informational prose, not a contract-shape change. The integration suite asserts the manifest stamp via the tool layer, not via SKILL.md text.)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` — outer-loop claim primitive owned by Story 4.3b. No changes needed; recoverable errors surface AFTER claim, in the dev transcript.
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` — atomic claim primitive owned by Story 4.1. No changes; this story doesn't touch claim semantics.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` — atomic complete primitive owned by Story 4.1 (and called internally by `processReviewerTranscript` per Story 4.3c). No changes; recoverable errors never reach `completeStory` (the dev cycle blocks before the reviewer runs).
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` — reviewer-transcript routing owned by Story 4.3b / 4.3c. No changes; reviewer-side `gh` recoverable errors will be routed in Stories 4.6 / 4.6b / 4.7 / 4.8, not here. (v1's only recoverable-error routing point is `processDevTranscript` because v1's only production `gh` caller is `runDevTerminalAction`, which the dev subagent invokes.)
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts` — composite tool from Story 4.4. The new `GhRecoverableError` propagates THROUGH it unchanged; no `try/catch`, no shape change. (The composite raises the recoverable error; the dev subagent emits the locked marker line per Task 5.1; `processDevTranscript` then handles it.)
+- `plugins/flow/mcp-server/src/lib/manifest-io.ts` — already provides atomic `readManifest` / `writeManifest`. Used as-is.
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — `blocked_by?: string` field already declared (Story 3.5 / 3.7). v1's new values (`gh-defer`, `gh-retry`, `gh-needs-human`) are plain strings; no schema change needed.
+- `plugins/flow/skills/start/SKILL.md` — prose layer only learns three new switch cases by reading new `next` literals. The new switch cases emit informational chat lines (already-pushed `chatLog` strings from `processDevTranscript`) — no mutating step in the prose. (SKILL.md may need a minimal additive edit listing the three new `next` cases, but this is informational prose, not a contract-shape change. The integration suite asserts the manifest stamp via the tool layer, not via SKILL.md text.)
 
 ### Dependencies
 

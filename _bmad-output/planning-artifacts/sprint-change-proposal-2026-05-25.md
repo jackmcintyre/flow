@@ -6,7 +6,7 @@
 
 ## Issue summary
 
-A single `/crew:start` invocation on bmad:4.14 exposed three compounding tool defects (MCP idle-reap, no orphan-recovery in the outer loop, transient dev transcript). Cascade produced one orphaned story, two half-shipped PRs, and a full rollback to `0a3f2b7`. Full timeline + root causes in the postmortem.
+A single `/flow:start` invocation on bmad:4.14 exposed three compounding tool defects (MCP idle-reap, no orphan-recovery in the outer loop, transient dev transcript). Cascade produced one orphaned story, two half-shipped PRs, and a full rollback to `0a3f2b7`. Full timeline + root causes in the postmortem.
 
 ## Impact analysis
 
@@ -28,7 +28,7 @@ A single `/crew:start` invocation on bmad:4.14 exposed three compounding tool de
 2. **5.11** next (orphan recovery — depends on 5.10).
 3. **5.12** independently (MCP reap resilience — may resolve via Anthropic-side knob).
 
-**Dogfooding pause:** `/crew:start` remains paused until 5.10 + 5.11 + at least one of 5.12's three accepted paths is merged. Substrate work uses `/ship-story` on the `dev` branch.
+**Dogfooding pause:** `/flow:start` remains paused until 5.10 + 5.11 + at least one of 5.12's three accepted paths is merged. Substrate work uses `/ship-story` on the `dev` branch.
 
 ## Detailed change proposals
 

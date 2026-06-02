@@ -7,7 +7,7 @@ Source: ship-story retro comments on every Epic-4 PR merged into `dev` post-roll
 **18 stories on `dev`** post-rollback. Five of those were force-rolled-back from `main` on 2026-05-25 and reshipped on `dev` (4.9, 4.9b, 4.10, 4.10b, 4.12 — original PRs #135/#138/#142/#143/#144 closed unmerged). The list below is what's on `dev` now — the canonical Epic-4 set:
 
 - 4.1 — claim-story / complete-story MCP tools (#101)
-- 4.2 — `/crew:start` skill + per-story dev subagent spawn (#102)
+- 4.2 — `/flow:start` skill + per-story dev subagent spawn (#102)
 - 4.3 — dev→reviewer handoff + reviewer spawn signal (#103)
 - 4.3b — harness Task-spawn seam (#105)
 - 4.3c — completeStory side-effect on ready-for-merge (#107)
@@ -57,7 +57,7 @@ Nearly every story shipped at **1 of 3** CI passes. No story exceeded 2. CI flak
 
 ## What hurt (PM-relevant)
 
-- **The 2026-05-25 dogfood rollback.** One `/crew:start` on `bmad:4.14` produced a 10-minute subagent run that crossed the MCP idle-reap threshold. Three latent tool defects compounded into a 22-commit rollback. Postmortem at `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md`.
+- **The 2026-05-25 dogfood rollback.** One `/flow:start` on `bmad:4.14` produced a 10-minute subagent run that crossed the MCP idle-reap threshold. Three latent tool defects compounded into a 22-commit rollback. Postmortem at `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md`.
 
   **Decision sequence (the part the postmortem calls L2 "fix-forward reflex"):**
   1. 4.14 dev subagent returns, `processDevTranscript` finds MCP disconnected → instead of stopping, instrument the server.
@@ -74,7 +74,7 @@ Nearly every story shipped at **1 of 3** CI passes. No story exceeded 2. CI flak
 
   *Technical (tool-layer):*
   - **L1a — MCP idle-reaped during long subagent runs.** Claude Code host closes child stdin after ~10 min idle; subagent run crossed the threshold. SDK is innocent (standalone repro: clean `beforeExit` / `exit 0` on stdin close). Pre-existing — memory `project_mcp_server_silent_disconnect` already flagged it. No user-configurable knob in `~/.claude/settings.json`.
-  - **L1b — `/crew:start` has no orphan-recovery branch.** Stale `claimed_by` on dead session ULID; outer loop ignores and alphabetically picks next `to-do/` story. No operator-visible "reattach <story>" affordance.
+  - **L1b — `/flow:start` has no orphan-recovery branch.** Stale `claimed_by` on dead session ULID; outer loop ignores and alphabetically picks next `to-do/` story. No operator-visible "reattach <story>" affordance.
   - **L1c — Dev transcript is transient.** Captured only in parent chat as a string, never persisted before being passed into `processDevTranscript`. Lost on MCP death even though the PR had already been opened with the locked handoff phrase. Fixed in Phase A by Story 5.10 (PR #148).
   - **L4 — Manifest `depends_on` drift vs spec prose** (planner defect). Story 4.9b prose declared a dep on 4.9; manifest `depends_on: []`. Claim-time filter only consults the array. Captured for Story 5.13.
   - **L5-stamp — `blocked_by` does not reflect cause** (tool defect). When 4.9b's dev returned a clean BLOCKED prose without the locked phrase, `processDevTranscript` stamped `blocked_by: handoff-grammar`. True cause was dependency. Every non-handoff path collapses into the same reason, making post-mortem triage harder. Carry-forward fix needed alongside 5.13.
@@ -82,7 +82,7 @@ Nearly every story shipped at **1 of 3** CI passes. No story exceeded 2. CI flak
   *Process (mine — orchestrator-side):*
   - **L2 — Fix-forward reflex.** Each degraded-state step looked locally rational; aggregate was three half-shipped stories and zero answers on the actual MCP defect. Jack's "no confidence" call arrived later than my own judgement should have triggered the same stop. Now memorialised as `feedback_stop_dont_fix_forward`.
   - **L3 — Auto-mode misuse.** The auto-mode preamble biases toward action without check-ins for *unclear direction* — it does not authorise continuing a multi-step loop after the loop has failed once. Discrete failure modes (orphan, blocked, wrong story claimed) are check-in triggers regardless of auto-mode.
-  - **L6 — Pre-dogfood hygiene was not enforced.** Branch protection on `main` is load-bearing but should not be the only safety net. No pre-flight checklist for clean `.crew/state`, no stale-worktree check, no stale-branch sweep. The dogfood-era residue was indistinguishable from "in-progress work" at rollback time. Memory `feedback_never_commit_to_local_main` was violated during the dogfood era.
+  - **L6 — Pre-dogfood hygiene was not enforced.** Branch protection on `main` is load-bearing but should not be the only safety net. No pre-flight checklist for clean `.flow/state`, no stale-worktree check, no stale-branch sweep. The dogfood-era residue was indistinguishable from "in-progress work" at rollback time. Memory `feedback_never_commit_to_local_main` was violated during the dogfood era.
   - **L7 — No postmortem reference before first attempt.** The dogfood era's first commit (`c8d8b14`) had no rollback-rehearsal or prior-burn document to ground in. This retro + the postmortem are now that reference for next time.
 
   **Detection / observability gaps surfaced by the cascade:**
@@ -90,7 +90,7 @@ Nearly every story shipped at **1 of 3** CI passes. No story exceeded 2. CI flak
   - No telemetry on MCP child lifecycle. The 15-line diag logger that nailed the reap RCA was reverted post-rollback; pattern preserved as `project_diag_instrumentation_pattern` for next RCA.
   - `blocked_by` is a single-string sink (see L5-stamp) — no distinction between handoff-grammar, deps-drift, quota-exhaustion, or worktree-leak. Each will mislead triage until typed.
 
-- **Smoke-harness setup friction.** 4.6's first smoke needed 7 round-trips before clean signal. 4.3c burned ~5. The `/crew:smoke` wrapper (Story 4.14) was the right answer — and was the very story that triggered the rollback. Remains unshipped.
+- **Smoke-harness setup friction.** 4.6's first smoke needed 7 round-trips before clean signal. 4.3c burned ~5. The `/flow:smoke` wrapper (Story 4.14) was the right answer — and was the very story that triggered the rollback. Remains unshipped.
 - **Session-quota death mid-flight (4.10b pre-rollback).** Dev subagent's Claude account quota expired mid-task. The transcript fell through to `processDevTranscript` and was misclassified as handoff-grammar drift. Recovery was fully manual. Captured as 4.12 retro AC6 (typed `SessionQuotaExhaustedError`).
 - **Worktree isolation is on the honour system.** During 4.10b (pre-rollback) the dev persona worked straight on `main`, producing 8 modified + 6 new files uncommitted. A `git reset` would have evaporated the story.
 - **`ship.py` cwd leaks** kept tripping the worktree-cwd guard (4.3, 4.4, 4.7, 4.10). The guard works as designed but the friction is real.
@@ -113,13 +113,13 @@ Promoted from individual story retros + cross-session handoffs to epic-level les
 
 ## Carry-forward to Epic 5
 
-### Pre-dogfood gate (must close before `/crew:start` is unparked)
+### Pre-dogfood gate (must close before `/flow:start` is unparked)
 
 From the recovery plan (`~/.claude/plans/dazzling-herding-lollipop.md`). None are negotiable.
 
 - [x] **Phase A — Story 5.10 (transcript persist).** PR #148 merged. Closes L1c.
 - [x] **Phase B — Epic 4 close-out.** 4.9, 4.9b, 4.10, 4.10b, 4.11, 4.12 all merged on `dev`. Epic 4 retro = this document.
-- [ ] **Phase C — Stories 5.11 + 5.12.** Specs need authoring. Close L1a (MCP child resilient to stdin close) and L1b (orphan-recovery branch in `/crew:start`).
+- [ ] **Phase C — Stories 5.11 + 5.12.** Specs need authoring. Close L1a (MCP child resilient to stdin close) and L1b (orphan-recovery branch in `/flow:start`).
 - [ ] **Phase D — Story 5.13 (planner-validator at scan time).** Stub not yet added; needs `/bmad-correct-course` first. Closes L4 (prose-vs-manifest dep drift).
 - [ ] **Phase E — `dev → main` promotion.** Batched promotion + branch-protection re-enabled + clean-workspace check.
 - [ ] **Base-branch-override follow-up story.** Single story folding three workflow fixes:
@@ -131,28 +131,28 @@ The dogfood pause lifts only when every box ticks AND Jack makes a separate deci
 
 ### Strong follow-ups (queue for early Epic 5, post-gate)
 
-- **`/crew:smoke` wrapper skill** — cherry-pick from PR #146.
+- **`/flow:smoke` wrapper skill** — cherry-pick from PR #146.
 - **Reviewer `gh pr comment` PR-scope guard** (4.6 smoke posted on production PR #108).
 - **Standards-criterion cross-check** in reviewer's summary body — auto-merge gate (4.10b) is unsafe without it.
 - **Catalogue → hired-team refresh path** — stale persona text after catalogue bumps.
 - **Worktree-contract assertion in dev spawn** (4.11 retro AC-W1).
-- **`/crew:scan` silent-skip on bad filenames** (`project_native_scan_silent_skip`).
+- **`/flow:scan` silent-skip on bad filenames** (`project_native_scan_silent_skip`).
 - **MCP boundary Zod validation** at `register.ts` (#153 reviewer Low finding).
 - **Typed `blocked_by` reasons** (replace single-string sink with `handoff-grammar | deps-drift | quota-exhausted | worktree-leak | …`). Pairs with L5-stamp; ships alongside 5.13.
 - **Re-enable `main` branch-protection "block force pushes" rule** after Phase E promotion. Easy to forget after the manual toggle at rollback time.
-- **Pre-dogfood hygiene checklist** (clean `.crew/state`, no stale worktrees, no leftover branches, `git status` clean on trunk). Memorialise before the first resumption attempt — L6 carry-forward.
+- **Pre-dogfood hygiene checklist** (clean `.flow/state`, no stale worktrees, no leftover branches, `git status` clean on trunk). Memorialise before the first resumption attempt — L6 carry-forward.
 - **Keep the 15-line diag instrumentation pattern as a known-good shape** (`project_diag_instrumentation_pattern`) for the next MCP RCA — cheap to re-land if the reap ever recurs.
 
 ### Open risks not closed in Epic 4
 
 - **Reviewer rubber-stamp class** closed for *artifact-missing* (4.6 smoke); **not** closed for *artifact-present-but-wrong*. Auto-merge gate + risk-tier classifier + agreement metric are the long-term oversight, but none have live data yet.
 - **Dev subagent failure modes** (session quota, worktree leak, locked-phrase drift) each caught once; each will recur unless surfaced as a typed error class.
-- **Phase C/D/E story specs** assume the inner cycle drains cleanly. Until L1a/L1b/L4 close, no Phase C story can be trusted under `/crew:start`.
+- **Phase C/D/E story specs** assume the inner cycle drains cleanly. Until L1a/L1b/L4 close, no Phase C story can be trusted under `/flow:start`.
 
 ## Strategic posture
 
 - **Are we still on the "ready for dogfood" path? Not yet.** Substrate is largely there; what blocks dogfood is Phase C/D/E plus the base-branch-override follow-up. None are large; all must close.
 - **Two governing rules from the rollback, now memorialised in `CLAUDE.md`:**
-  - **Dogfooding (`/crew:start`) is paused** until L1a/L1b are fixed. Use `/ship-story` interim. (Memory: `project_dogfood_paused_until_l1`.)
+  - **Dogfooding (`/flow:start`) is paused** until L1a/L1b are fixed. Use `/ship-story` interim. (Memory: `project_dogfood_paused_until_l1`.)
   - **Stop, don't fix forward.** When a tool I'm orchestrating fails unexpectedly, halt and ask. Auto-mode does not authorise continuing a multi-step loop that has already failed once. (Memory: `feedback_stop_dont_fix_forward`.)
 - **Recommendation:** Open Epic 5 with Phase C (5.11 + 5.12) as the first sprint, then Phase D (5.13), then the base-branch-override story, then Phase E (`dev → main` + branch protection re-enabled). Cherry-pick smoke-harness wrapper from #146 in parallel. Hold the dogfood pause until every gate box ticks. The substrate work proved we can ship clean under `/ship-story`; dogfood readiness is a substrate problem, not a product problem.

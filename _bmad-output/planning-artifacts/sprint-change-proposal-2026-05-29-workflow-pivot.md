@@ -3,7 +3,7 @@ date: 2026-05-29 (workflow-pivot planning session)
 author: Jack (PM decisions) + Claude (analysis + drafting)
 scope: **Major** — swaps the orchestration substrate; touches Architecture and Epics 4/5/6, authorises net-new workstreams, and re-sequences the epic plan. Product behaviour / PRD unchanged.
 trigger: The 2026-05-29 stateless-workflow spike — the persistent-MCP-server disconnect that has blocked every clean autonomous cycle is removed *by construction* when the crew tools run as stateless one-shot processes under the Workflow primitive.
-supersedes: the daemon-survival workstream (stories 5.12 / 5.25 / 5.30 / 5.31 / 5.32) and the `/crew:start`-loop + `/watch`-polling orchestration model.
+supersedes: the daemon-survival workstream (stories 5.12 / 5.25 / 5.30 / 5.31 / 5.32) and the `/flow:start`-loop + `/watch`-polling orchestration model.
 status: **APPROVED (PM, 2026-05-29 planning session)** — core decisions confirmed (go stateless; Stage-1 dogfood target; governed self-evolution). This proposal authorises Stage-1 story authoring (via bmad-create-story) and the archive actions in §4. The two filing choices in §5 remain open.
 ---
 
@@ -11,7 +11,7 @@ status: **APPROVED (PM, 2026-05-29 planning session)** — core decisions confir
 
 ## 1. Issue Summary
 
-crew's continuous-flow loop (the always-on MCP server driving `/crew:start`) has **never completed one clean autonomous cycle** — the server is SIGTERM-cascaded whenever a subagent returns, stalling the loop mid-drain. The prior fix attempt (a parent-owned detached daemon, stories 5.31/5.32) was unproven.
+crew's continuous-flow loop (the always-on MCP server driving `/flow:start`) has **never completed one clean autonomous cycle** — the server is SIGTERM-cascaded whenever a subagent returns, stalling the loop mid-drain. The prior fix attempt (a parent-owned detached daemon, stories 5.31/5.32) was unproven.
 
 The **2026-05-29 spike** established a better answer: run the crew tools as **stateless one-shot CLI processes** under the dynamic **Workflow** primitive (deterministic JS scripts that spawn one-shot subagents). There is no long-lived process to kill, so the disconnect is **gone by construction** — the spike ran a full claim→dev→PR→review→merge cycle this way *while the old daemon was simultaneously throwing keepalive timeouts*. It also surfaced and fixed a second, independent, deterministic blocker (a commit-message regex that rejected every real story ref).
 
@@ -19,7 +19,7 @@ The **2026-05-29 spike** established a better answer: run the crew tools as **st
 
 ## 2. Impact Analysis
 
-**Headline: ~80% of shipped engineering survives.** Every load-bearing decision tool the design depends on (claim, dev-handoff parse, verdict derivation, risk-tier, auto-merge, scan, persona/retro machinery) already exists, built across Epics 1–6. The pivot rewrites *how those tools are driven* (workflow scripts over one-shot CLI seam-agents, not an MCP-daemon-backed `/crew:start` loop) and **deletes the daemon-survival work**. Because we chose stateless, the original design's single hardest prerequisite — proving a detached daemon survives the `agent()`-return path — is **moot**, which materially lowers pivot risk.
+**Headline: ~80% of shipped engineering survives.** Every load-bearing decision tool the design depends on (claim, dev-handoff parse, verdict derivation, risk-tier, auto-merge, scan, persona/retro machinery) already exists, built across Epics 1–6. The pivot rewrites *how those tools are driven* (workflow scripts over one-shot CLI seam-agents, not an MCP-daemon-backed `/flow:start` loop) and **deletes the daemon-survival work**. Because we chose stateless, the original design's single hardest prerequisite — proving a detached daemon survives the `agent()`-return path — is **moot**, which materially lowers pivot risk.
 
 ### Artefact impact
 
@@ -29,7 +29,7 @@ The **2026-05-29 spike** established a better answer: run the crew tools as **st
 | `architecture/core-architectural-decisions.md` | **Revise.** "Single persistent MCP server" topology, the Task-tool per-story agent-invocation model, and the 10-step implementation sequence are superseded by stateless one-shot seams + the §11 build order. Recovery leads with filesystem-position, not heartbeat. |
 | `architecture/implementation-patterns-consistency-rules.md` | **Revise.** §8 (SKILL.md prose orchestration) → loop control moves into the workflow script; §7/§12 (locked-phrase grammar) → verdict transports via the reviewer-result *file*, not chat. Tool-naming, frontmatter, JSONL, TS, commit/PR conventions all survive. |
 | `architecture/skill-calibration-loop.md` | **Minor revise.** Reframe `/accept-proposal` as the `apply` run-boundary; proposal types, telemetry, effectiveness helpers all survive. |
-| `epics/epic-4-...md` (dev-review loop) | **Revise** → becomes the serial `drain` workflow. All decision tools reused; `/crew:start` skill + prose seams (4.2/4.3b/4.3c) replaced by `drain.workflow.js`. |
+| `epics/epic-4-...md` (dev-review loop) | **Revise** → becomes the serial `drain` workflow. All decision tools reused; `/flow:start` skill + prose seams (4.2/4.3b/4.3c) replaced by `drain.workflow.js`. |
 | `epics/epic-5-...md` (orchestration/recovery) | **Supersede→archive (majority).** Daemon-survival (5.12/5.25/5.30/5.31/5.32) and `/watch` polling (5.3/5.4/5.5) superseded. Recovery model = filesystem position + workflow resume-journal. **Bug-fix code (≈15 stories) MUST be preserved** (see caution below). |
 | `epics/epic-6-...md` (calibration) | **Revise** → retro/apply workflows. 6.1–6.3 (proposal drafting) reused as-is; 6b apply tools map to the `apply` workflow. |
 | `epics/epic-list.md`, `overview.md` | **Replace** with the revised epic set (§3); archive the pre-pivot copies. |
@@ -39,7 +39,7 @@ The **2026-05-29 spike** established a better answer: run the crew tools as **st
 
 ### Technical impact / must-preserve caution
 
-The spike's CLI shim (`plugins/crew/mcp-server/src/cli.ts`) already exposes 16 of the seam tools as one-shot commands. **Do not archive by deletion:** ≈15 Epic-5 stories are live bug fixes (the reviewer-verifies-nothing fix line, parser-widening, orphan recovery, the commit-message fix). Their *specs* may archive; their *code + tests* are part of the silent-failure baseline and must be inventoried before the Epic-5 file moves, or the new engine silently re-inherits defects already paid for.
+The spike's CLI shim (`plugins/flow/mcp-server/src/cli.ts`) already exposes 16 of the seam tools as one-shot commands. **Do not archive by deletion:** ≈15 Epic-5 stories are live bug fixes (the reviewer-verifies-nothing fix line, parser-widening, orphan recovery, the commit-message fix). Their *specs* may archive; their *code + tests* are part of the silent-failure baseline and must be inventoried before the Epic-5 file moves, or the new engine silently re-inherits defects already paid for.
 
 ## 3. Recommended Approach
 
@@ -78,7 +78,7 @@ The old daemon-precondition epic is **dropped** (moot under stateless).
 | M1 | **AC-heading regex alignment** (reviewer must parse em-dash ACs — closes the verifies-nothing bug; 41 headings affected) | `src/lib/extract-acs-from-spec.ts:50` + tests | S |
 | M2 | Agent-discipline: evidence-only (never write the manifest; preserve judgment) | `catalogue/generalist-dev.md`, `generalist-reviewer.md` + team copies | S |
 | M3 | Productionise the CLI shim + wire `processReviewerYield`, `scanOrphanedInProgress` | `src/cli.ts` (+ dist) | S–M |
-| M4 | `drain.workflow.js` — stateless serial drain, one-story scope, parameterised tunables | `plugins/crew/workflows/drain.workflow.js` (net-new) | M |
+| M4 | `drain.workflow.js` — stateless serial drain, one-story scope, parameterised tunables | `plugins/flow/workflows/drain.workflow.js` (net-new) | M |
 | M5 | Bootstrap story + dogfood run + verification | authored via bmad-create-story; run + verify | S + run |
 
 ### 4.2 Archive actions (per crew convention: `planning-artifacts/archive/` is gitignored)

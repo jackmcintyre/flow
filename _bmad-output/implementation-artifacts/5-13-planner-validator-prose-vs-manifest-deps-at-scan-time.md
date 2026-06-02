@@ -9,12 +9,12 @@ Status: review
 ## Story
 
 As a **plugin operator**,
-I want **`/crew:scan` to refuse to write a `to-do/` manifest when the `depends_on` set drifts from the dependencies declared in the spec's prose, AND I want `blocked_by` to be a typed Zod enum rather than a free string**,
+I want **`/flow:scan` to refuse to write a `to-do/` manifest when the `depends_on` set drifts from the dependencies declared in the spec's prose, AND I want `blocked_by` to be a typed Zod enum rather than a free string**,
 so that **planner-author mistakes are caught at scan time (before claim time, when they are cheap to fix), and `blocked/` manifests can be programmatically routed — each typed reason carries an operator hint instead of being re-surfaced as the inscrutable generic "clear blocked_by and re-run" prose**.
 
 ### What this story is, in one sentence
 
-Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: (1) extract dep references from the spec body using a small, conservative set of patterns and refuse the scan write when those references drift from the manifest's `depends_on`; (2) turn `blocked_by` from a `union(literals, z.string())` fallback into a closed `z.enum([...])` of thirteen typed members; (3) update `/crew:start`'s blocked-recovery surface to render a per-case operator hint keyed off the typed value.
+Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: (1) extract dep references from the spec body using a small, conservative set of patterns and refuse the scan write when those references drift from the manifest's `depends_on`; (2) turn `blocked_by` from a `union(literals, z.string())` fallback into a closed `z.enum([...])` of thirteen typed members; (3) update `/flow:start`'s blocked-recovery surface to render a per-case operator hint keyed off the typed value.
 
 ### Why this is independent of 5.10 / 5.11 / 5.12
 
@@ -25,7 +25,7 @@ Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: 
 - (a) Add a generic prose-vs-manifest validator for every field. The validator is scoped to `depends_on` only.
 - (b) Re-author or re-format any spec body to make dep extraction easier. The patterns are chosen to match what authors already write in 5.10 / 5.11 / 5.12.
 - (c) Add new `blocked_by` reasons beyond the thirteen members listed in AC2. Every existing writer must map cleanly; if one does not, the spec author flagged that for promotion to AC discussion (see Migration table below — all current writers map).
-- (d) Migrate `/crew:scan`'s rendered output away from its current structured-text shape (see `renderScanResult` in `scan-sources.ts`). A new `blocked:` summary line line for `deps-drift` is added; the existing block/skipped/created/updated lines stay.
+- (d) Migrate `/flow:scan`'s rendered output away from its current structured-text shape (see `renderScanResult` in `scan-sources.ts`). A new `blocked:` summary line line for `deps-drift` is added; the existing block/skipped/created/updated lines stay.
 - (e) Change the runtime semantics of any existing `blocked_by` writer beyond replacing the string literal with the typed value (the Zod boundary catches future drift; the call sites do not change).
 
 ---
@@ -33,17 +33,17 @@ Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: 
 ## Acceptance Criteria
 
 <!--
-AC1 (user-surface) judgement: `/crew:scan` is an operator-invoked slash command and its rendered output is the natural verification path. A `[deps-drift]` line printed to the operator's chat (via `renderScanResult`) is the observable surface. Tagging.
+AC1 (user-surface) judgement: `/flow:scan` is an operator-invoked slash command and its rendered output is the natural verification path. A `[deps-drift]` line printed to the operator's chat (via `renderScanResult`) is the observable surface. Tagging.
 
 AC2 not user-surface: schema-only change; no operator surface beyond AC3.
 
-AC3 (user-surface) judgement: explicitly touches `/crew:start`'s blocked-recovery output (operator-observable TUI text per memory `project_blocked_recovery_prose_lies`). Tagging.
+AC3 (user-surface) judgement: explicitly touches `/flow:start`'s blocked-recovery output (operator-observable TUI text per memory `project_blocked_recovery_prose_lies`). Tagging.
 
 AC4 / AC5: vitest only, do not tag.
 -->
 
 **AC1 (user-surface):**
-**Given** an operator running `/crew:scan` against a target repo containing a source spec whose prose declares a dep that the manifest's `depends_on` omits (or vice versa — manifest declares a dep that prose does not),
+**Given** an operator running `/flow:scan` against a target repo containing a source spec whose prose declares a dep that the manifest's `depends_on` omits (or vice versa — manifest declares a dep that prose does not),
 **When** the scan runs and `scanSources` extracts dep references from the spec body using **exactly two** patterns: (i) lines matching `/^Depends on:\s*(.+)$/m` in the spec body (comma- or space-separated ref list following the colon), and (ii) blockquote lines matching `/^>\s*Depends on (?:Story\s+)?(.+)$/m` (the `> Depends on Story X.Y` convention used in 5.10 / 5.11 / 5.12),
 **Then** the scan refuses to write the `to-do/` manifest for that ref, writes a `blocked/` manifest with `blocked_by: "deps-drift"` and a `discipline_violations` entry whose `code` is `deps-drift-prose-vs-manifest` carrying the symmetric-difference detail, the rendered result string carries a new line `[deps-drift] <ref> — prose: {refA, refB}, manifest: {refA}` (one line per drifted ref), and that line appears in the operator's terminal output verbatim. _(Closes pre-Epic-5 enhancement plan item.)_
 
@@ -63,7 +63,7 @@ Ref-token grammar inside (i) and (ii): a ref token is matched by either `^native
 -->
 
 **AC2:**
-**Given** the `ExecutionManifestSchema` in `plugins/crew/mcp-server/src/schemas/execution-manifest.ts`,
+**Given** the `ExecutionManifestSchema` in `plugins/flow/mcp-server/src/schemas/execution-manifest.ts`,
 **When** the schema is parsed,
 **Then** `blocked_by` is a closed `z.enum([...])` with exactly these thirteen members and no `z.string()` fallback (the closed enum required by this story, audit-derived from live writers + one reserved schema member; `deps-drift` is the new member this story introduces): `handoff-grammar`, `gh-defer`, `gh-retry`, `gh-needs-human`, `reviewer-no-session-result`, `reviewer-verdict-needs-changes`, `reviewer-verdict-blocked`, `routing-failure`, `routing-self-yield`, `planning-discipline`, `orphan-no-transcript`, `reviewer-grammar`, `deps-drift`. Any manifest write attempting a value outside this set fails the Zod parse at the schema boundary with the canonical Zod enum error.
 
@@ -115,12 +115,12 @@ Summary: **10 live writers** identified (process-dev-transcript ×2, process-rev
 -->
 
 **AC3 (user-surface):**
-**Given** `/crew:start` encountering a `blocked/` manifest in its outer-loop blocked-recovery surface (per project memory `project_blocked_recovery_prose_lies`),
+**Given** `/flow:start` encountering a `blocked/` manifest in its outer-loop blocked-recovery surface (per project memory `project_blocked_recovery_prose_lies`),
 **When** the start skill renders the per-case operator hint for that manifest,
-**Then** the rendered hint is keyed off the typed `blocked_by` value (case-of-thirteen) — no generic `clear blocked_by and re-run` fallback for known reasons — and each enum member resolves to a verbatim hint of the form `[<enum-member>] <ref> — <operator action>` (e.g. `[deps-drift] <ref> — fix the spec's "Depends on:" prose or the source story's ## Dependencies section, then re-run /crew:scan`). The thirteen hints are written into a single exported `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>` in `mcp-server/src/lib/blocked-by-hints.ts`. The `/crew:start` SKILL.md is updated only to reference this seam via tool return; the hint text itself lives in the tool-written artefact (deterministic seam — per memory `feedback_default_to_deterministic_seams`).
+**Then** the rendered hint is keyed off the typed `blocked_by` value (case-of-thirteen) — no generic `clear blocked_by and re-run` fallback for known reasons — and each enum member resolves to a verbatim hint of the form `[<enum-member>] <ref> — <operator action>` (e.g. `[deps-drift] <ref> — fix the spec's "Depends on:" prose or the source story's ## Dependencies section, then re-run /flow:scan`). The thirteen hints are written into a single exported `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>` in `mcp-server/src/lib/blocked-by-hints.ts`. The `/flow:start` SKILL.md is updated only to reference this seam via tool return; the hint text itself lives in the tool-written artefact (deterministic seam — per memory `feedback_default_to_deterministic_seams`).
 
 <!--
-Rationale for AC3 user-surface tag: the rendered hint appears in the operator's chat output (TUI) when /crew:start hits a blocked manifest. The text is directly observable per project memory `project_blocked_recovery_prose_lies` — the whole point of this AC is that the OLD generic prose was a paper-only fix; the NEW typed hints are the load-bearing one. Tagging.
+Rationale for AC3 user-surface tag: the rendered hint appears in the operator's chat output (TUI) when /flow:start hits a blocked manifest. The text is directly observable per project memory `project_blocked_recovery_prose_lies` — the whole point of this AC is that the OLD generic prose was a paper-only fix; the NEW typed hints are the load-bearing one. Tagging.
 -->
 
 **AC4 (integration):**
@@ -130,7 +130,7 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
 
 **AC5 (integration):**
 **Given** the codebase post-migration,
-**When** the dev agent runs `pnpm -r test` AND a separate `grep -rn 'blocked_by:' plugins/crew/mcp-server/src/` ignoring `.d.ts` and JSDoc-comment lines,
+**When** the dev agent runs `pnpm -r test` AND a separate `grep -rn 'blocked_by:' plugins/flow/mcp-server/src/` ignoring `.d.ts` and JSDoc-comment lines,
 **Then** every test passes AND every `blocked_by` string literal in non-test source maps to one of the thirteen enum members. Tests that previously asserted free-string fallback behaviour (the `"some-future-value"` test at `execution-manifest.test.ts:120-126`) are flipped to assert the Zod throw. No test references a `blocked_by` value not in the enum. _(integration)_
 
 ---
@@ -141,18 +141,18 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
 
 **NEW:**
 
-- `plugins/crew/mcp-server/src/lib/extract-dep-refs.ts` — pure function `extractDepRefsFromSpecBody(body: string): Set<string>`. Reads patterns (i) `^Depends on:\s*(.+)$/gm` and (ii) `^>\s*Depends on (?:Story\s+)?(.+)$/gm`. Splits each capture by comma or whitespace; trims; filters tokens against `NATIVE_REF_RE` / `BMAD_REF_RE` (re-exported or duplicated from `parse-native-story.ts`); returns the union as a `Set`. Tokens that fail both ref regexes are silently dropped (NOT warned to stderr in v1; see Edge cases). No I/O.
-- `plugins/crew/mcp-server/src/lib/blocked-by-hints.ts` — exports `BlockedBy` (the union type derived from the Zod enum) and `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>`. Each hint is a single-line string of the form `[<member>] {ref} — {operator-action}` where `{ref}` is a literal placeholder the caller substitutes at render time.
+- `plugins/flow/mcp-server/src/lib/extract-dep-refs.ts` — pure function `extractDepRefsFromSpecBody(body: string): Set<string>`. Reads patterns (i) `^Depends on:\s*(.+)$/gm` and (ii) `^>\s*Depends on (?:Story\s+)?(.+)$/gm`. Splits each capture by comma or whitespace; trims; filters tokens against `NATIVE_REF_RE` / `BMAD_REF_RE` (re-exported or duplicated from `parse-native-story.ts`); returns the union as a `Set`. Tokens that fail both ref regexes are silently dropped (NOT warned to stderr in v1; see Edge cases). No I/O.
+- `plugins/flow/mcp-server/src/lib/blocked-by-hints.ts` — exports `BlockedBy` (the union type derived from the Zod enum) and `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>`. Each hint is a single-line string of the form `[<member>] {ref} — {operator-action}` where `{ref}` is a literal placeholder the caller substitutes at render time.
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — replace the `blocked_by` union (lines 130-138) with `z.enum([...])` of thirteen members; export the inferred type `BlockedBy = z.infer<...>`. Update JSDoc to enumerate the thirteen members and link to `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the closed-enum rationale.
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — within the `currentState === null` branch (today's discipline-violation path lives at line 362-404), insert a new prior gate: extract prose refs from `story.raw_path`'s contents (re-read the source file's bytes; the parsed `SourceStory` does not retain the raw body — see § Edge cases for the no-double-read decision). Compute symmetric difference vs `story.depends_on`. If non-empty: write a `blocked/` manifest with `blocked_by: "deps-drift"` and `discipline_violations: [{ code: "deps-drift-prose-vs-manifest", field: "depends_on", detail: <human description of the drift set> }]`. Append the ref to `result.blockedRefs`. Add a new field `depsDriftRefs: Array<{ ref: string; proseRefs: string[]; manifestRefs: string[] }>` to `ScanResult` (a typed addition next to `blockedRefs`). Update `renderScanResult` to emit one `[deps-drift] <ref> — prose: {...}, manifest: {...}` line per entry, immediately above the existing `blocked:` summary line. Also runs in the existing `currentState === "blocked"` re-evaluation branch (line 284-355) symmetrically — if the source's drift changes from `planning-discipline` to `deps-drift` or vice versa, the blocked manifest is rewritten with the new typed reason. The `deps-drift` gate runs **before** `validateAgainstDiscipline` (a drift is a planner-author mistake; surfacing it before discipline gives the operator the more actionable signal first).
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (lines 122, 152) — no semantic change; the literal strings already match enum members. Verify post-Zod that the existing `blocked_by: \`gh-${errorClass}\`` template expression produces only `gh-defer | gh-retry | gh-needs-human` (the only three `errorClass` values) — if a future `errorClass` value were added, Zod would catch it at write time.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (lines 142, 171, 187) — no semantic change.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts` (lines 131, 154) — no semantic change.
-- `plugins/crew/mcp-server/src/tools/block-orphan-no-transcript.ts` (line 81) — no semantic change.
-- `plugins/crew/skills/start/SKILL.md` — the failure-mode bullets at lines 185-191, 167 currently include the legacy free-text `clear blocked_by and re-run` phrases. Replace each with a one-line cross-reference to `BLOCKED_BY_HINTS[<member>]` (e.g. "Recovery hint: see `BLOCKED_BY_HINTS["reviewer-verdict-needs-changes"]`."). The hint text itself stays in the tool artefact, not in the SKILL.md (deterministic seam).
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — replace the `blocked_by` union (lines 130-138) with `z.enum([...])` of thirteen members; export the inferred type `BlockedBy = z.infer<...>`. Update JSDoc to enumerate the thirteen members and link to `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the closed-enum rationale.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — within the `currentState === null` branch (today's discipline-violation path lives at line 362-404), insert a new prior gate: extract prose refs from `story.raw_path`'s contents (re-read the source file's bytes; the parsed `SourceStory` does not retain the raw body — see § Edge cases for the no-double-read decision). Compute symmetric difference vs `story.depends_on`. If non-empty: write a `blocked/` manifest with `blocked_by: "deps-drift"` and `discipline_violations: [{ code: "deps-drift-prose-vs-manifest", field: "depends_on", detail: <human description of the drift set> }]`. Append the ref to `result.blockedRefs`. Add a new field `depsDriftRefs: Array<{ ref: string; proseRefs: string[]; manifestRefs: string[] }>` to `ScanResult` (a typed addition next to `blockedRefs`). Update `renderScanResult` to emit one `[deps-drift] <ref> — prose: {...}, manifest: {...}` line per entry, immediately above the existing `blocked:` summary line. Also runs in the existing `currentState === "blocked"` re-evaluation branch (line 284-355) symmetrically — if the source's drift changes from `planning-discipline` to `deps-drift` or vice versa, the blocked manifest is rewritten with the new typed reason. The `deps-drift` gate runs **before** `validateAgainstDiscipline` (a drift is a planner-author mistake; surfacing it before discipline gives the operator the more actionable signal first).
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (lines 122, 152) — no semantic change; the literal strings already match enum members. Verify post-Zod that the existing `blocked_by: \`gh-${errorClass}\`` template expression produces only `gh-defer | gh-retry | gh-needs-human` (the only three `errorClass` values) — if a future `errorClass` value were added, Zod would catch it at write time.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (lines 142, 171, 187) — no semantic change.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts` (lines 131, 154) — no semantic change.
+- `plugins/flow/mcp-server/src/tools/block-orphan-no-transcript.ts` (line 81) — no semantic change.
+- `plugins/flow/skills/start/SKILL.md` — the failure-mode bullets at lines 185-191, 167 currently include the legacy free-text `clear blocked_by and re-run` phrases. Replace each with a one-line cross-reference to `BLOCKED_BY_HINTS[<member>]` (e.g. "Recovery hint: see `BLOCKED_BY_HINTS["reviewer-verdict-needs-changes"]`."). The hint text itself stays in the tool artefact, not in the SKILL.md (deterministic seam).
 - All `__tests__/**` files in the Migration table (twelve files) — replace any free-string `blocked_by:` literal with a typed enum member or convert the existing "string fallback" assertion to a Zod-throw assertion.
 
 ### Sequencing
@@ -162,7 +162,7 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
    - `blocked-by-hints.ts` + a unit test asserting every enum member has a hint.
 2. **Migrate the schema:** `execution-manifest.ts` enum change. Run `pnpm -r test`; identify and update every test that fails because of the closed-enum change. This batch is mechanical — most diffs are zero-semantic-shift literal swaps; the only behavioural-shift is the `some-future-value` test which flips from "string fallback passes" to "Zod throws".
 3. **Wire the scan-sources gate:** add the `extractDepRefsFromSpecBody` call + drift comparison + `blocked/` write + `[deps-drift]` render. Integration test in `tools/__tests__/scan-sources.integration.test.ts` (or `tools/__tests__/scan-sources.test.ts` — whichever already exists; dev agent reads the existing test file conventions before writing).
-4. **Surface `BLOCKED_BY_HINTS` in `/crew:start`:** thread the lookup through whatever prose path the SKILL.md uses today to render the blocked-recovery line; if no current TS seam exists, add a `renderBlockedRecoveryHint(manifest: ExecutionManifest): string` helper alongside `BLOCKED_BY_HINTS` and have the skill prose reference its return shape verbatim.
+4. **Surface `BLOCKED_BY_HINTS` in `/flow:start`:** thread the lookup through whatever prose path the SKILL.md uses today to render the blocked-recovery line; if no current TS seam exists, add a `renderBlockedRecoveryHint(manifest: ExecutionManifest): string` helper alongside `BLOCKED_BY_HINTS` and have the skill prose reference its return shape verbatim.
 
 ### Edge cases
 
@@ -177,14 +177,14 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
 
 ### What MUST NOT be touched
 
-- The `/crew:scan` SKILL.md does NOT learn the new render shape; `renderScanResult` does all the work and the skill prose continues to call it verbatim. (Per memory `feedback_prose_mut_steps_need_seam` — prose-level mutating steps need a tool seam; AC1's render is the seam.)
+- The `/flow:scan` SKILL.md does NOT learn the new render shape; `renderScanResult` does all the work and the skill prose continues to call it verbatim. (Per memory `feedback_prose_mut_steps_need_seam` — prose-level mutating steps need a tool seam; AC1's render is the seam.)
 - The runtime semantics of `process-dev-transcript`, `process-reviewer-transcript`, `process-reviewer-yield`, and `block-orphan-no-transcript` do not change. Only the schema does.
 - No new MCP tool is registered. The drift-gate is internal to `scan-sources`.
-- `plugins/crew/mcp-server/dist/` is the committed build output. Per project CLAUDE.md, the dev agent rebuilds and commits `dist/` in the same change.
+- `plugins/flow/mcp-server/dist/` is the committed build output. Per project CLAUDE.md, the dev agent rebuilds and commits `dist/` in the same change.
 
 ### Build artefacts (`dist/` discipline)
 
-After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
+After any change in `plugins/flow/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
 
 ---
 
@@ -217,8 +217,8 @@ The `> Depends on Story 5.10` convention used in 5.10/5.11/5.12 source-note bloc
 
 ### Smoke test (operator-driven)
 
-- AC1 user-surface verification: a `/crew:scan` invocation in `tools/__tests__/scan-sources.deps-drift.test.ts` exercises the rendered output (the integration test drives the same code path the operator would). This is `automated_e2e_verified` evidence per `plugins/crew/docs/user-surface-acs.md § How the gate uses this`.
-- AC3 user-surface verification: a `/crew:start` invocation against a fixture containing a `blocked/` manifest for each enum member, asserting the rendered hint text. Driven by an integration test in `__tests__/start-skill-blocked-recovery.test.ts` (or the existing `start-skill-content.test.ts`).
+- AC1 user-surface verification: a `/flow:scan` invocation in `tools/__tests__/scan-sources.deps-drift.test.ts` exercises the rendered output (the integration test drives the same code path the operator would). This is `automated_e2e_verified` evidence per `plugins/flow/docs/user-surface-acs.md § How the gate uses this`.
+- AC3 user-surface verification: a `/flow:start` invocation against a fixture containing a `blocked/` manifest for each enum member, asserting the rendered hint text. Driven by an integration test in `__tests__/start-skill-blocked-recovery.test.ts` (or the existing `start-skill-content.test.ts`).
 
 ---
 
@@ -228,12 +228,12 @@ The `> Depends on Story 5.10` convention used in 5.10/5.11/5.12 source-note bloc
 
 Per the epic block: "Added 2026-05-27 from the pre-Epic-5 enhancement plan. Source: postmortem § L4 + Epic 4 retro § Carry-forward remediation (typed `blocked_by`). Independent of 5.10 / 5.11 / 5.12. Closes the last functional pre-dogfood gap."
 
-The story is one of three remaining items before dogfooding (`/crew:start`) can resume per CLAUDE.md § "Dogfood paused until L1 defects fixed". The other two (5.10 transcript persistence, 5.11 orphan recovery) are already in `review`/`done` status per the sprint-status file; 5.13 is the third.
+The story is one of three remaining items before dogfooding (`/flow:start`) can resume per CLAUDE.md § "Dogfood paused until L1 defects fixed". The other two (5.10 transcript persistence, 5.11 orphan recovery) are already in `review`/`done` status per the sprint-status file; 5.13 is the third.
 
 Two memory entries are directly load-bearing:
 
 - `feedback_planner_prose_must_match_manifest` — "prose declarations don't gate behaviour; only manifest fields do. Validate at scan time." This story IS the validation seam that memory describes.
-- `project_blocked_recovery_prose_lies` — "/crew:start tells operators to clear blocked_by and re-run, but the claim loop only scans to-do/; real fix needs file move + status flip + claimed_by removal." AC3 is the recovery-text fix; the orchestrator-side claim-loop fix is a separate concern (the blocked → to-do file move on `blocked_by` clear is already in `scan-sources.ts:300-316` and is correct).
+- `project_blocked_recovery_prose_lies` — "/flow:start tells operators to clear blocked_by and re-run, but the claim loop only scans to-do/; real fix needs file move + status flip + claimed_by removal." AC3 is the recovery-text fix; the orchestrator-side claim-loop fix is a separate concern (the blocked → to-do file move on `blocked_by` clear is already in `scan-sources.ts:300-316` and is correct).
 
 ### Previous-story intelligence
 
@@ -244,14 +244,14 @@ Two memory entries are directly load-bearing:
 ### Project memories cited
 
 - `feedback_default_to_deterministic_seams` — load-bearing decisions live in tool-written artefacts, not LLM prose. The closed Zod enum + `BLOCKED_BY_HINTS` table are both deterministic seams. AC3's hint text deliberately lives in the TS file, not in `SKILL.md`.
-- `feedback_prose_mut_steps_need_seam` — prose-level mutating steps need a tool seam. The `renderScanResult` extension (new `[deps-drift]` line) is the seam; the `/crew:scan` skill continues to print its return value verbatim.
+- `feedback_prose_mut_steps_need_seam` — prose-level mutating steps need a tool seam. The `renderScanResult` extension (new `[deps-drift]` line) is the seam; the `/flow:scan` skill continues to print its return value verbatim.
 - `feedback_planner_prose_must_match_manifest` — the gate AC1 codifies.
 - `project_blocked_recovery_prose_lies` — AC3 addresses the recovery-text side.
 
 ### Recent commit context (last 5)
 
-- `25926a3 feat(5): orphan-recovery branch in /crew:start (#157)` — 5.11; introduced `blockOrphanNoTranscript` writer + `orphan-no-transcript` literal.
-- `1699de3 feat(1): /crew:smoke harness wrapper skill (#156)` — unrelated to 5.13.
+- `25926a3 feat(5): orphan-recovery branch in /flow:start (#157)` — 5.11; introduced `blockOrphanNoTranscript` writer + `orphan-no-transcript` literal.
+- `1699de3 feat(1): /flow:smoke harness wrapper skill (#156)` — unrelated to 5.13.
 - `537a2a8 feat(1): ship-story base-branch override and worktree-spec fallback (#155)` — unrelated.
 - `9cee1f6 chore(1.12): add story block + reopen epic-1 for substrate follow-up` — unrelated.
 - `761b9ef docs(epic-4): add retrospective + mark sprint-status done` — referenced in source notes (Epic 4 retro § Carry-forward remediation cites typed `blocked_by`).
@@ -265,11 +265,11 @@ Two memory entries are directly load-bearing:
 - [ ] `execution-manifest.ts` `blocked_by` is `z.enum([...])` of thirteen members; JSDoc updated; type `BlockedBy` exported.
 - [ ] `scan-sources.ts` writes `blocked/` with `blocked_by: "deps-drift"` on prose/manifest drift; `renderScanResult` emits `[deps-drift]` lines; integration test covers (a)/(b)/(c)/(d) above.
 - [ ] All twelve test files in the Migration table audited; no free-string `blocked_by` literal survives in `__tests__/**`; the `some-future-value` test flips to assert Zod throw.
-- [ ] `/crew:start` SKILL.md blocked-recovery surface references `BLOCKED_BY_HINTS` (or its rendered output) rather than inlining the legacy `clear blocked_by and re-run` text.
-- [ ] `pnpm -r build` clean; `plugins/crew/mcp-server/dist/` committed in the same change.
+- [ ] `/flow:start` SKILL.md blocked-recovery surface references `BLOCKED_BY_HINTS` (or its rendered output) rather than inlining the legacy `clear blocked_by and re-run` text.
+- [ ] `pnpm -r build` clean; `plugins/flow/mcp-server/dist/` committed in the same change.
 - [ ] `pnpm -r test` passes (including the renumbered `blocked_by` assertions).
 - [ ] AC1's user-surface verification: integration test for `scan-sources.deps-drift` exercises the rendered `[deps-drift]` line.
-- [ ] AC3's user-surface verification: integration test for `/crew:start` blocked-recovery against fixtures for each enum member.
+- [ ] AC3's user-surface verification: integration test for `/flow:start` blocked-recovery against fixtures for each enum member.
 
 ### Completion note
 

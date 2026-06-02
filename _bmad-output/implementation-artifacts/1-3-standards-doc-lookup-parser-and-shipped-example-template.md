@@ -10,7 +10,7 @@ As a **plugin operator**,
 I want **a clear error pointing me at a copy-target template when `docs/standards.md` is missing or malformed, and a deterministic parser when it is valid**,
 so that **I can bootstrap a target repo without guessing the standard's required shape, and every later epic that judges work against the standard reads it through one trusted boundary**.
 
-This story stands up the **standards-doc surface**: (a) a Zod schema for the parsed shape (`version`, `criteria[]` with `name`/`what`/`check`/`anti_criterion`, `updated`), (b) a pure `parseStandardsDoc` validator that consumes the file contents and returns either a typed result or throws a typed error, (c) a `lookupStandards` helper that resolves `<targetRepoRoot>/docs/standards.md`, reads it, and returns the parsed result (throwing typed errors for missing or malformed), (d) the **shipped copy-target** template at `plugins/crew/docs/standards-example.md` which itself parses against the same schema, and (e) the vitest coverage that pins all four AC branches. **This story does not** register an MCP tool, wire into any skill, touch the rule registry, regenerate the standards doc, or read `discipline-rules.yaml` — those land in Stories 1.4 (tool boundary), 1.7 (`/status` consumer), and Epic 6 (regeneration pipeline) respectively. The lookup + parser pair this story delivers is the **read** side of `lookup-standards.ts` (the MCP tool wrapper comes in 1.4).
+This story stands up the **standards-doc surface**: (a) a Zod schema for the parsed shape (`version`, `criteria[]` with `name`/`what`/`check`/`anti_criterion`, `updated`), (b) a pure `parseStandardsDoc` validator that consumes the file contents and returns either a typed result or throws a typed error, (c) a `lookupStandards` helper that resolves `<targetRepoRoot>/docs/standards.md`, reads it, and returns the parsed result (throwing typed errors for missing or malformed), (d) the **shipped copy-target** template at `plugins/flow/docs/standards-example.md` which itself parses against the same schema, and (e) the vitest coverage that pins all four AC branches. **This story does not** register an MCP tool, wire into any skill, touch the rule registry, regenerate the standards doc, or read `discipline-rules.yaml` — those land in Stories 1.4 (tool boundary), 1.7 (`/status` consumer), and Epic 6 (regeneration pipeline) respectively. The lookup + parser pair this story delivers is the **read** side of `lookup-standards.ts` (the MCP tool wrapper comes in 1.4).
 
 ## Acceptance Criteria
 
@@ -19,7 +19,7 @@ This story stands up the **standards-doc surface**: (a) a Zod schema for the par
 **When** `lookupStandards(targetRepoRoot)` is called,
 **Then** it throws a typed `StandardsDocMissingError` whose message:
 - names the expected absolute path (`<targetRepoRoot>/docs/standards.md`),
-- points the user at `plugins/crew/docs/standards-example.md` as the copy-target,
+- points the user at `plugins/flow/docs/standards-example.md` as the copy-target,
 - is a single line, no jargon.
 
 **AC2 — Malformed `docs/standards.md` (missing required fields, or >10 criteria) → typed error citing the offending field or cap (FR46):**
@@ -28,7 +28,7 @@ This story stands up the **standards-doc surface**: (a) a Zod schema for the par
 **Then** it throws a typed `StandardsDocMalformedError` whose message:
 - names the absolute path,
 - cites either the offending YAML/Markdown path (e.g. `criteria.3.check`) **or** the criterion-count cap (`criteria.length=11 exceeds hard cap of 10 (FR46)`),
-- points the user at `plugins/crew/docs/standards-example.md` as the canonical shape.
+- points the user at `plugins/flow/docs/standards-example.md` as the canonical shape.
 
 **AC3 — Valid `docs/standards.md` → parsed result exposing `version`, `criteria[]`, `updated` (FR44):**
 **Given** a `targetRepoRoot` whose `docs/standards.md` is well-formed and within the 10-criteria cap,
@@ -41,19 +41,19 @@ This story stands up the **standards-doc surface**: (a) a Zod schema for the par
 
 **AC4 — Shipped copy-target exists, parses against the same schema, referenced from README install path (FR47):**
 **Given** the plugin tree,
-**When** I inspect `plugins/crew/docs/standards-example.md`,
+**When** I inspect `plugins/flow/docs/standards-example.md`,
 **Then**:
 - the file exists,
 - `parseStandardsDoc(readFileSync(<path>, 'utf8'))` succeeds and returns a valid `StandardsDoc` (i.e. the example is its own canonical fixture for the happy path),
-- the file is referenced by absolute repo-relative path from `plugins/crew/README.md`'s install path (the README section that walks the user through copying the standards template into their target repo).
+- the file is referenced by absolute repo-relative path from `plugins/flow/README.md`'s install path (the README section that walks the user through copying the standards template into their target repo).
 
 **AC5 (integration) — vitest covers each of the four cases against fixtures:**
-`pnpm test` from `plugins/crew/` runs a new `mcp-server/tests/standards-doc.test.ts` suite that:
+`pnpm test` from `plugins/flow/` runs a new `mcp-server/tests/standards-doc.test.ts` suite that:
 - (a) **missing branch:** points at a `targetRepoRoot` fixture with no `docs/standards.md`; asserts `StandardsDocMissingError` is thrown and the message contains the expected path string and `standards-example.md`;
 - (b) **malformed branch (missing field):** points at a fixture with a `docs/standards.md` missing the `version` field; asserts `StandardsDocMalformedError` is thrown, the message contains `version`, and the error's `zodMessage` field is populated;
 - (c) **malformed branch (>10 criteria):** points at a fixture with 11 well-formed criteria; asserts `StandardsDocMalformedError` is thrown and the message contains `exceeds hard cap of 10` and `(FR46)`;
 - (d) **valid branch:** points at a fixture containing a known-good `docs/standards.md` (a copy of `standards-example.md`); asserts the resolved `StandardsDoc.version`, `updated`, `criteria.length`, and the shape of `criteria[0]` (all four required keys present, all non-empty);
-- (e) **example self-parses:** reads `plugins/crew/docs/standards-example.md` from the source tree and asserts `parseStandardsDoc` returns a valid `StandardsDoc` (this is the same assertion as AC4 sub-bullet 2, pinned as an executable test).
+- (e) **example self-parses:** reads `plugins/flow/docs/standards-example.md` from the source tree and asserts `parseStandardsDoc` returns a valid `StandardsDoc` (this is the same assertion as AC4 sub-bullet 2, pinned as an executable test).
 
 All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), and validate-active-adapter suite (1.2b). Total expected test count: 14 tests, all green, zero skips.
 
@@ -62,7 +62,7 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
 ## Tasks / Subtasks
 
 - [x] **Task 1 — Zod schema for `StandardsDoc`** (AC: 2, 3)
-  - [x] Create `plugins/crew/mcp-server/src/schemas/standards-doc.ts`.
+  - [x] Create `plugins/flow/mcp-server/src/schemas/standards-doc.ts`.
   - [x] Export:
     - `CriterionSchema` — `z.object({ name: z.string().min(1), what: z.string().min(1), check: z.string().min(1), anti_criterion: z.string().min(1) }).strict()`.
     - `StandardsDocSchema` — `z.object({ version: z.string().regex(/^\d+\.\d+\.\d+$/), updated: z.string().min(1), criteria: z.array(CriterionSchema).min(1).max(10) }).strict()`.
@@ -73,8 +73,8 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
   - [x] No defaults. Every field is explicit. Defaults would mask malformed input.
 
 - [x] **Task 2 — Typed errors `StandardsDocMissingError` and `StandardsDocMalformedError`** (AC: 1, 2)
-  - [x] Extend `plugins/crew/mcp-server/src/errors.ts` with two new subclasses of `DomainError`. Append at the bottom of the file, after `StaleWorkspaceConfigError`. Match the existing JSDoc and constructor-options-bag style.
-  - [x] `StandardsDocMissingError` — fields: `expectedPath: string`, `copyTarget: string` (= `"plugins/crew/docs/standards-example.md"`). Constructor composes:
+  - [x] Extend `plugins/flow/mcp-server/src/errors.ts` with two new subclasses of `DomainError`. Append at the bottom of the file, after `StaleWorkspaceConfigError`. Match the existing JSDoc and constructor-options-bag style.
+  - [x] `StandardsDocMissingError` — fields: `expectedPath: string`, `copyTarget: string` (= `"plugins/flow/docs/standards-example.md"`). Constructor composes:
     > `docs/standards.md not found at <expectedPath>. Copy the shipped template from <copyTarget> to <targetRepoRoot>/docs/standards.md and edit for your project. (FR45)`
   - [x] `StandardsDocMalformedError` — fields: `sourcePath: string`, `zodMessage: string`, `copyTarget: string`. Constructor composes:
     > `docs/standards.md at <sourcePath> is malformed: <zodMessage>. See the canonical shape in <copyTarget>. (FR46)`
@@ -83,13 +83,13 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
   - [x] Do **not** touch any of the existing classes (`DomainError`, `NotImplementedError`, `InvalidWorkspaceConfigError`, `NoAdapterMatchedError`, `AmbiguousAdapterError`, `StaleWorkspaceConfigError`). Their wording is asserted by 1.1/1.2/1.2b tests.
 
 - [x] **Task 3 — Pure parser `parseStandardsDoc`** (AC: 2, 3, 4)
-  - [x] Create `plugins/crew/mcp-server/src/validators/standards-doc.ts`. (This is the first file under `validators/` — create the directory.)
+  - [x] Create `plugins/flow/mcp-server/src/validators/standards-doc.ts`. (This is the first file under `validators/` — create the directory.)
   - [x] Export a single pure function:
     `parseStandardsDoc(raw: string, sourcePath: string): StandardsDoc`
     - `raw` is the file contents as a string.
     - `sourcePath` is the absolute path the contents came from; used only for the `sourcePath` field on the returned value and the `StandardsDocMalformedError.sourcePath` field on failure.
   - [x] Algorithm:
-    1. Parse `raw` as YAML using `yamlParse` from `"yaml"` (same import pattern as `workspace-resolver.ts`). On a YAML syntax error, throw `StandardsDocMalformedError({ sourcePath, zodMessage: <error.message>, copyTarget: "plugins/crew/docs/standards-example.md" })`.
+    1. Parse `raw` as YAML using `yamlParse` from `"yaml"` (same import pattern as `workspace-resolver.ts`). On a YAML syntax error, throw `StandardsDocMalformedError({ sourcePath, zodMessage: <error.message>, copyTarget: "plugins/flow/docs/standards-example.md" })`.
     2. Pass the parsed value through `StandardsDocSchema.safeParse(...)`.
     3. On `success: false`: format the Zod error into a one-line string (see **Zod message formatting** in Dev Notes). If the failure is the `criteria.max(10)` rule, replace the Zod message with the explicit `criteria.length=<N> exceeds hard cap of 10 (FR46)` string before constructing the error. Throw `StandardsDocMalformedError({ sourcePath, zodMessage: <formatted>, copyTarget })`.
     4. On `success: true`: return `{ ...result.data, sourcePath }`.
@@ -97,18 +97,18 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
   - [x] **Does not** import `node:fs`, does not touch disk, does not call `lookupStandards`. The split between `parseStandardsDoc` (pure) and `lookupStandards` (IO) is the same boundary the resolver story established (parse vs. resolve).
 
 - [x] **Task 4 — `lookupStandards` helper (IO boundary)** (AC: 1, 3)
-  - [x] Create `plugins/crew/mcp-server/src/state/lookup-standards.ts`. (Sits alongside `workspace-resolver.ts` and `validate-active-adapter.ts` in `state/` — same convention as 1.2/1.2b: the "where we read target-repo files" boundary lives in `state/`.)
+  - [x] Create `plugins/flow/mcp-server/src/state/lookup-standards.ts`. (Sits alongside `workspace-resolver.ts` and `validate-active-adapter.ts` in `state/` — same convention as 1.2/1.2b: the "where we read target-repo files" boundary lives in `state/`.)
   - [x] Export a single async function:
     `lookupStandards(targetRepoRoot: string): Promise<StandardsDoc>`
   - [x] Algorithm:
     1. Compute `sourcePath = path.join(targetRepoRoot, "docs", "standards.md")`.
-    2. Read the file with `fs.readFile(sourcePath, "utf8")`. On `ENOENT`, throw `StandardsDocMissingError({ expectedPath: sourcePath, copyTarget: "plugins/crew/docs/standards-example.md" })`. Any other read error propagates as-is (filesystem permissions, etc. — not this story's concern).
+    2. Read the file with `fs.readFile(sourcePath, "utf8")`. On `ENOENT`, throw `StandardsDocMissingError({ expectedPath: sourcePath, copyTarget: "plugins/flow/docs/standards-example.md" })`. Any other read error propagates as-is (filesystem permissions, etc. — not this story's concern).
     3. Return `parseStandardsDoc(contents, sourcePath)` — any `StandardsDocMalformedError` thrown by the parser propagates unchanged.
   - [x] **Single-purpose IO wrapper.** No caching, no telemetry write, no git wrapper, no MCP-tool registration. Those land in Stories 1.4 / 1.5 / future.
   - [x] Use the same import style as `workspace-resolver.ts`: `import { promises as fs } from "node:fs"` and `import * as path from "node:path"`. `.js` extensions on relative imports (NodeNext).
 
-- [x] **Task 5 — Author the shipped copy-target `plugins/crew/docs/standards-example.md`** (AC: 4)
-  - [x] Create `plugins/crew/docs/standards-example.md` (the directory exists with only `.gitkeep` today — keep the gitkeep file alone, just add this one new file).
+- [x] **Task 5 — Author the shipped copy-target `plugins/flow/docs/standards-example.md`** (AC: 4)
+  - [x] Create `plugins/flow/docs/standards-example.md` (the directory exists with only `.gitkeep` today — keep the gitkeep file alone, just add this one new file).
   - [x] File format: a leading `---`-delimited YAML frontmatter block containing the full `StandardsDoc` shape, followed by an empty body or a short prose preamble that the parser ignores. Decision: **the entire file is YAML, no markdown body.** This keeps `parseStandardsDoc` trivially `yamlParse(raw)` — no frontmatter splitting, no Markdown ambiguity. The `.md` extension is preserved for editor affordances (folding, syntax) and to match FR43–FR47's `docs/standards.md` convention. Re-confirm with the project's frontmatter convention (Implementation Patterns §1: YAML-only in `---`-delimited blocks) — for this artifact we ship it as a pure YAML document for parser simplicity.
   - [x] **Concrete content** (use this verbatim as a starting point — Jack/PM can edit later, but every value must satisfy the schema today):
     ```yaml
@@ -126,7 +126,7 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
       - name: "no-canonical-fs-writes-outside-mcp"
         what: "No code path writes to canonical-state paths (manifests, personas, registry, telemetry) except through MCP tools."
         check: "Grep the diff for raw fs.writeFile/fs.writeFileSync; any hit under a canonical path is a fail."
-        anti_criterion: "Direct fs.write to .crew/state, telemetry, or docs/standards.md."
+        anti_criterion: "Direct fs.write to .flow/state, telemetry, or docs/standards.md."
       - name: "errors-are-typed"
         what: "Every named failure mode in the diff throws a DomainError subclass; uncaught throws are bugs."
         check: "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message."
@@ -136,19 +136,19 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
   - [x] **The example is its own AC4 fixture** — the test suite reads this exact file and asserts it parses. If the example breaks the schema, the test fails. This is intentional.
 
 - [x] **Task 6 — Reference the copy-target from the README install path** (AC: 4)
-  - [x] Update `plugins/crew/README.md` to include a short install-path section (if one does not already exist) that references `plugins/crew/docs/standards-example.md` as the copy-target. Repo-relative path, not absolute.
-  - [x] If the README is empty or near-empty today, add a minimal section titled `## Standards doc` with two sentences and the copy command (`cp plugins/crew/docs/standards-example.md <target-repo>/docs/standards.md`). **Do not** rewrite or restructure the rest of the README — Story 1.7 owns the full install-path walkthrough.
+  - [x] Update `plugins/flow/README.md` to include a short install-path section (if one does not already exist) that references `plugins/flow/docs/standards-example.md` as the copy-target. Repo-relative path, not absolute.
+  - [x] If the README is empty or near-empty today, add a minimal section titled `## Standards doc` with two sentences and the copy command (`cp plugins/flow/docs/standards-example.md <target-repo>/docs/standards.md`). **Do not** rewrite or restructure the rest of the README — Story 1.7 owns the full install-path walkthrough.
   - [x] If the README already references `standards-example.md`, this task is a no-op; verify the reference path is correct.
   - [x] **Do not** edit the project root `README.md` — that's outside the plugin scope and outside this story's surface.
 
 - [x] **Task 7 — Author the vitest suite and fixtures** (AC: 5)
-  - [x] Create `plugins/crew/mcp-server/tests/standards-doc.test.ts`.
-  - [x] Create fixtures under `plugins/crew/mcp-server/tests/fixtures/standards/`:
+  - [x] Create `plugins/flow/mcp-server/tests/standards-doc.test.ts`.
+  - [x] Create fixtures under `plugins/flow/mcp-server/tests/fixtures/standards/`:
     - `missing/` — directory with only a `.gitkeep`. The `docs/` subdir does NOT exist.
     - `malformed-missing-field/docs/standards.md` — well-formed YAML missing the `version` field.
     - `malformed-cap-exceeded/docs/standards.md` — 11 well-formed criteria.
-    - `valid/docs/standards.md` — a copy of `plugins/crew/docs/standards-example.md`. (Test setup may `fs.copyFile` at suite-init time instead of duplicating the content — pick whichever keeps the fixtures cleaner.)
-  - [x] One `describe` block (`lookupStandards`) with four `it` cases mapping 1:1 to AC5(a–d). One additional `describe` (`standards-example.md (shipped copy-target)`) with one `it` for AC5(e), which reads the example file directly from `plugins/crew/docs/standards-example.md`.
+    - `valid/docs/standards.md` — a copy of `plugins/flow/docs/standards-example.md`. (Test setup may `fs.copyFile` at suite-init time instead of duplicating the content — pick whichever keeps the fixtures cleaner.)
+  - [x] One `describe` block (`lookupStandards`) with four `it` cases mapping 1:1 to AC5(a–d). One additional `describe` (`standards-example.md (shipped copy-target)`) with one `it` for AC5(e), which reads the example file directly from `plugins/flow/docs/standards-example.md`.
   - [x] Assertions per branch:
     - AC5a — `expect(() => lookupStandards(fixturePath)).rejects.toThrow(StandardsDocMissingError)`; inspect `expectedPath` and message substring `standards-example.md`.
     - AC5b — `expect(...).rejects.toThrow(StandardsDocMalformedError)`; message contains `version`; thrown error's `zodMessage` is non-empty.
@@ -159,9 +159,9 @@ All five sub-tests pass alongside the smoke suite (1.1), resolver suite (1.2), a
   - [x] Imports use `.js` extensions (NodeNext): `import { lookupStandards } from "../src/state/lookup-standards.js"`, `import { parseStandardsDoc } from "../src/validators/standards-doc.js"`, `import { StandardsDocMissingError, StandardsDocMalformedError } from "../src/errors.js"`.
 
 - [x] **Task 8 — Verify install + build + test pipeline** (AC: 1, 2, 3, 4, 5)
-  - [x] `pnpm install` succeeds from `plugins/crew/` (no new runtime deps; `yaml` and `zod` already declared in 1.1/1.2).
-  - [x] `pnpm build` from `plugins/crew/` produces zero TS errors.
-  - [x] `pnpm test` from `plugins/crew/` runs the full suite: Story 1.1 smoke (3 tests) + Story 1.1 acceptance (1 test) + Story 1.2 resolver (5 tests) + Story 1.2b validate-active-adapter (3 tests) + this story's new suite (5 tests). All green, zero skips. Total: 17 tests (or whatever the current `pnpm test` baseline shows + 5).
+  - [x] `pnpm install` succeeds from `plugins/flow/` (no new runtime deps; `yaml` and `zod` already declared in 1.1/1.2).
+  - [x] `pnpm build` from `plugins/flow/` produces zero TS errors.
+  - [x] `pnpm test` from `plugins/flow/` runs the full suite: Story 1.1 smoke (3 tests) + Story 1.1 acceptance (1 test) + Story 1.2 resolver (5 tests) + Story 1.2b validate-active-adapter (3 tests) + this story's new suite (5 tests). All green, zero skips. Total: 17 tests (or whatever the current `pnpm test` baseline shows + 5).
   - [x] `pnpm-lock.yaml` is unchanged (no new deps).
 
 ---
@@ -184,26 +184,26 @@ Each failure mode produces a one-line, user-facing message. **No stack traces, n
 ### Files this story touches
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/standards-doc.ts` — Zod schema and types.
-- `plugins/crew/mcp-server/src/validators/standards-doc.ts` — pure `parseStandardsDoc` function. (Creates the `validators/` directory — architecture pins this location, see project-structure-boundaries.md line 108–112.)
-- `plugins/crew/mcp-server/src/state/lookup-standards.ts` — IO-bearing `lookupStandards` helper.
-- `plugins/crew/docs/standards-example.md` — the shipped copy-target template (FR47).
-- `plugins/crew/mcp-server/tests/standards-doc.test.ts` — the vitest suite.
-- `plugins/crew/mcp-server/tests/fixtures/standards/missing/.gitkeep`
-- `plugins/crew/mcp-server/tests/fixtures/standards/malformed-missing-field/docs/standards.md`
-- `plugins/crew/mcp-server/tests/fixtures/standards/malformed-cap-exceeded/docs/standards.md`
-- `plugins/crew/mcp-server/tests/fixtures/standards/valid/docs/standards.md` — copy of `standards-example.md`.
+- `plugins/flow/mcp-server/src/schemas/standards-doc.ts` — Zod schema and types.
+- `plugins/flow/mcp-server/src/validators/standards-doc.ts` — pure `parseStandardsDoc` function. (Creates the `validators/` directory — architecture pins this location, see project-structure-boundaries.md line 108–112.)
+- `plugins/flow/mcp-server/src/state/lookup-standards.ts` — IO-bearing `lookupStandards` helper.
+- `plugins/flow/docs/standards-example.md` — the shipped copy-target template (FR47).
+- `plugins/flow/mcp-server/tests/standards-doc.test.ts` — the vitest suite.
+- `plugins/flow/mcp-server/tests/fixtures/standards/missing/.gitkeep`
+- `plugins/flow/mcp-server/tests/fixtures/standards/malformed-missing-field/docs/standards.md`
+- `plugins/flow/mcp-server/tests/fixtures/standards/malformed-cap-exceeded/docs/standards.md`
+- `plugins/flow/mcp-server/tests/fixtures/standards/valid/docs/standards.md` — copy of `standards-example.md`.
 
 **UPDATE (minimal — preserve existing surface):**
-- `plugins/crew/mcp-server/src/errors.ts` — append `StandardsDocMissingError` and `StandardsDocMalformedError` only. Do not touch the six existing classes.
-- `plugins/crew/README.md` — append a short `## Standards doc` section referencing the copy-target (only if not already present; do not restructure existing content).
+- `plugins/flow/mcp-server/src/errors.ts` — append `StandardsDocMissingError` and `StandardsDocMalformedError` only. Do not touch the six existing classes.
+- `plugins/flow/README.md` — append a short `## Standards doc` section referencing the copy-target (only if not already present; do not restructure existing content).
 
 **MUST NOT touch:**
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts`, `validate-active-adapter.ts` — their contracts are fixed by 1.2 / 1.2b.
-- `plugins/crew/mcp-server/src/schemas/workspace-config.ts`, `plugin-manifest.ts` — settled.
-- `plugins/crew/mcp-server/src/adapters/*` — no adapter-contract change in this story.
-- `plugins/crew/mcp-server/src/server.ts`, `index.ts` — no tool registration in this story.
-- `plugins/crew/mcp-server/tests/smoke.test.ts`, `acceptance.test.ts`, `workspace-resolver.test.ts`, `validate-active-adapter.test.ts` — must still pass unchanged.
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts`, `validate-active-adapter.ts` — their contracts are fixed by 1.2 / 1.2b.
+- `plugins/flow/mcp-server/src/schemas/workspace-config.ts`, `plugin-manifest.ts` — settled.
+- `plugins/flow/mcp-server/src/adapters/*` — no adapter-contract change in this story.
+- `plugins/flow/mcp-server/src/server.ts`, `index.ts` — no tool registration in this story.
+- `plugins/flow/mcp-server/tests/smoke.test.ts`, `acceptance.test.ts`, `workspace-resolver.test.ts`, `validate-active-adapter.test.ts` — must still pass unchanged.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions.
 - Anything under `plugins/sprint-orchestrator/` — retired (does not exist in tree, mentioned only for symmetry with prior stories).
 - The project-root `README.md`, `CLAUDE.md`, `_bmad/`, `_bmad-output/_archive/` — out of scope.
@@ -215,10 +215,10 @@ Each failure mode produces a one-line, user-facing message. **No stack traces, n
 | Standards doc lives at `<target-repo>/docs/standards.md` | The ONLY supported source in v1 | PRD claude-code-plugin-project-type-requirements.md line 72 |
 | Hard cap of 10 criteria | Schema enforces `.max(10)`; violation is a typed error citing `(FR46)` | FR46; PRD domain-specific-requirements.md line 42; project-context-analysis.md line 43 |
 | Required parsed fields | `version`, `criteria[]` (with `name`/`what`/`check`/`anti_criterion`), `updated` | FR44; epic-1 AC3 for Story 1.3 |
-| Shipped copy-target location | `plugins/crew/docs/standards-example.md` | FR47; project-structure-boundaries.md line 121 |
-| Helper location (read IO) | `plugins/crew/mcp-server/src/state/lookup-standards.ts` — `state/` is the workspace-IO boundary established by 1.2/1.2b (NB: this story sits in `state/`, the MCP tool wrapper in Story 1.4 will live in `tools/lookup-standards.ts`) | project-structure-boundaries.md line 70, 96–100 |
-| Pure parser location | `plugins/crew/mcp-server/src/validators/standards-doc.ts` — architecture pins `validators/` for this exact purpose | project-structure-boundaries.md line 108–112 |
-| Schema location | `plugins/crew/mcp-server/src/schemas/standards-doc.ts` | project-structure-boundaries.md line 87, 95 |
+| Shipped copy-target location | `plugins/flow/docs/standards-example.md` | FR47; project-structure-boundaries.md line 121 |
+| Helper location (read IO) | `plugins/flow/mcp-server/src/state/lookup-standards.ts` — `state/` is the workspace-IO boundary established by 1.2/1.2b (NB: this story sits in `state/`, the MCP tool wrapper in Story 1.4 will live in `tools/lookup-standards.ts`) | project-structure-boundaries.md line 70, 96–100 |
+| Pure parser location | `plugins/flow/mcp-server/src/validators/standards-doc.ts` — architecture pins `validators/` for this exact purpose | project-structure-boundaries.md line 108–112 |
+| Schema location | `plugins/flow/mcp-server/src/schemas/standards-doc.ts` | project-structure-boundaries.md line 87, 95 |
 | Error types | New `StandardsDocMissingError` and `StandardsDocMalformedError` extending `DomainError` — distinct subclasses, not a discriminator on a single class | Implementation-patterns-consistency-rules.md §6 (Errors); 1.2b anti-pattern #8 |
 | File-naming convention | `kebab-case.ts`; test files `*.test.ts` co-located with source under `tests/` | Implementation-patterns-consistency-rules.md §6 |
 | No defaults in schema | Every standards-doc field is explicit; defaults would mask malformed input | This story (parser correctness) |
@@ -284,7 +284,7 @@ import { parse as yamlParse } from "yaml";
 import { StandardsDocMalformedError } from "../errors.js";
 import { StandardsDocSchema, type StandardsDoc } from "../schemas/standards-doc.js";
 
-const COPY_TARGET = "plugins/crew/docs/standards-example.md";
+const COPY_TARGET = "plugins/flow/docs/standards-example.md";
 
 /**
  * Parse the contents of a `docs/standards.md` file (a YAML document) into
@@ -312,7 +312,7 @@ import { StandardsDocMissingError } from "../errors.js";
 import { parseStandardsDoc } from "../validators/standards-doc.js";
 import type { StandardsDoc } from "../schemas/standards-doc.js";
 
-const COPY_TARGET = "plugins/crew/docs/standards-example.md";
+const COPY_TARGET = "plugins/flow/docs/standards-example.md";
 
 /**
  * Resolve `<targetRepoRoot>/docs/standards.md`, read it, and return the
@@ -351,11 +351,11 @@ If Zod surfaces multiple unrelated issues simultaneously, surfacing the first on
 The user sees these errors verbatim through `/status` (Story 1.7), reviewer-side standards-load failures (Epic 4), and any direct skill invocation that consumes standards. Aim for one line, no jargon. Examples (matching Task 2's pinned wording):
 
 - **Missing case (AC1):**
-  `docs/standards.md not found at /Users/jack/projects/foo/docs/standards.md. Copy the shipped template from plugins/crew/docs/standards-example.md to <target-repo>/docs/standards.md and edit for your project. (FR45)`
+  `docs/standards.md not found at /Users/jack/projects/foo/docs/standards.md. Copy the shipped template from plugins/flow/docs/standards-example.md to <target-repo>/docs/standards.md and edit for your project. (FR45)`
 - **Malformed missing-field case (AC2 / AC5b):**
-  `docs/standards.md at /Users/jack/projects/foo/docs/standards.md is malformed: version: Required. See the canonical shape in plugins/crew/docs/standards-example.md. (FR46)`
+  `docs/standards.md at /Users/jack/projects/foo/docs/standards.md is malformed: version: Required. See the canonical shape in plugins/flow/docs/standards-example.md. (FR46)`
 - **Cap-exceeded case (AC2 / AC5c):**
-  `docs/standards.md at /Users/jack/projects/foo/docs/standards.md is malformed: criteria.length=11 exceeds hard cap of 10 (FR46). See the canonical shape in plugins/crew/docs/standards-example.md. (FR46)`
+  `docs/standards.md at /Users/jack/projects/foo/docs/standards.md is malformed: criteria.length=11 exceeds hard cap of 10 (FR46). See the canonical shape in plugins/flow/docs/standards-example.md. (FR46)`
 
 ### Library / framework requirements
 
@@ -373,7 +373,7 @@ The user sees these errors verbatim through `/status` (Story 1.7), reviewer-side
 ### File structure requirements
 
 ```
-plugins/crew/
+plugins/flow/
 ├── docs/
 │   ├── .gitkeep                                  # UNCHANGED
 │   └── standards-example.md                      # NEW (FR47 copy-target)
@@ -407,8 +407,8 @@ Stay within this list. Anything else is scope creep.
 
 ### Testing requirements
 
-- All five sub-tests are unit-level vitest, in-process, no subprocess transport. Fixtures live on disk under `tests/fixtures/standards/` because `lookupStandards` is the IO boundary — exercising it means real file reads. The parser-only AC5e test reads `plugins/crew/docs/standards-example.md` directly from the source tree (resolve the path relative to the test file).
-- `pnpm test` from `plugins/crew/` must continue to run the existing 1.1/1.2/1.2b suites unchanged, plus the new 5-test suite. All green, zero skips.
+- All five sub-tests are unit-level vitest, in-process, no subprocess transport. Fixtures live on disk under `tests/fixtures/standards/` because `lookupStandards` is the IO boundary — exercising it means real file reads. The parser-only AC5e test reads `plugins/flow/docs/standards-example.md` directly from the source tree (resolve the path relative to the test file).
+- `pnpm test` from `plugins/flow/` must continue to run the existing 1.1/1.2/1.2b suites unchanged, plus the new 5-test suite. All green, zero skips.
 - Test file imports use `.js` extensions (NodeNext): `import { lookupStandards } from "../src/state/lookup-standards.js"`, etc.
 - The "valid" fixture can be a literal copy of `standards-example.md` (preferred — keeps a single source of truth) or independently authored. Pick the copy approach unless there's a reason not to; the divergence cost outweighs the marginal coverage of a second canonical example.
 - No need for mocking — every dependency in this story is either pure (parser) or stdlib (`fs`). Don't introduce `vi.mock` for `fs`; use real fixtures.
@@ -451,7 +451,7 @@ Stay within this list. Anything else is scope creep.
   - Current state (post-1.2b): exports `DomainError`, `NotImplementedError`, `InvalidWorkspaceConfigError`, `NoAdapterMatchedError`, `AmbiguousAdapterError`, `StaleWorkspaceConfigError`. Each constructor composes a user-facing one-line message in `super(...)`.
   - This story adds: `StandardsDocMissingError` and `StandardsDocMalformedError` at the bottom of the file. Match the existing JSDoc style and options-bag constructor pattern.
   - Must preserve: every existing class, exact `super(...)` wording (1.1/1.2/1.2b tests assert on those strings).
-- **`plugins/crew/README.md` (UPDATE — possibly trivial):**
+- **`plugins/flow/README.md` (UPDATE — possibly trivial):**
   - Current state: unknown (read the file before editing — if it already references `standards-example.md`, this is a no-op verification; if not, append the short section per Task 6).
   - Must preserve: every existing section. Append only.
   - **Read the file first** before deciding what to write — do not assume.
@@ -463,9 +463,9 @@ Stay within this list. Anything else is scope creep.
 
 ### Git intelligence
 
-- Recent commits (`1945c42`, `9318f29`, `1ab00d1`, `06488c2`, `e3791eb`, `fe2c20f`) show: ship-story is the conventional flow; commits are scope-prefixed (`feat(1-2): …`, `feat(1-2b): …`); the plugin slug is `crew` (renamed from `ai-engineering-team` on 2026-05-19 — use `plugins/crew/` everywhere).
+- Recent commits (`1945c42`, `9318f29`, `1ab00d1`, `06488c2`, `e3791eb`, `fe2c20f`) show: ship-story is the conventional flow; commits are scope-prefixed (`feat(1-2): …`, `feat(1-2b): …`); the plugin slug is `crew` (renamed from `ai-engineering-team` on 2026-05-19 — use `plugins/flow/` everywhere).
 - Conventional commit for this story: `feat(1-3): standards-doc lookup + parser + shipped example` (subject ≤72 chars).
-- The plugin tree under `plugins/crew/` is the only mutation surface. `pnpm-lock.yaml` should be untouched (no new deps).
+- The plugin tree under `plugins/flow/` is the only mutation surface. `pnpm-lock.yaml` should be untouched (no new deps).
 - The previous story (1.2b) shipped under `feat(1): Stale-config detection on every skill invocation (#54)` — reference its file layout patterns when in doubt.
 - Worktrees live inside the repo at `.worktrees/<key>/` (project memory `feedback_worktrees_inside_project`). The dev should use absolute paths or `git -C` when running commands during ship-story (memory `feedback_ship_story_cwd_drift`) — but this is a ship-story concern, not a code concern.
 
@@ -516,7 +516,7 @@ claude-opus-4-7
 
 ### Debug Log References
 
-- `pnpm install && pnpm build && pnpm test` from `plugins/crew/` — all green, 36 tests pass (5 new + 31 baseline).
+- `pnpm install && pnpm build && pnpm test` from `plugins/flow/` — all green, 36 tests pass (5 new + 31 baseline).
 
 ### Completion Notes List
 
@@ -524,20 +524,20 @@ claude-opus-4-7
 - Appended `StandardsDocMissingError` and `StandardsDocMalformedError` to `mcp-server/src/errors.ts` (no existing classes touched).
 - Authored pure parser `parseStandardsDoc` in `mcp-server/src/validators/standards-doc.ts` (new directory) — detects cap-violation Zod issue and replaces message with FR46 wording.
 - Authored IO helper `lookupStandards` in `mcp-server/src/state/lookup-standards.ts` (ENOENT → typed missing-error, delegates to parser).
-- Shipped copy-target `plugins/crew/docs/standards-example.md` (4 criteria, self-parses).
-- Appended `## Standards doc` section to `plugins/crew/README.md` referencing the copy-target.
+- Shipped copy-target `plugins/flow/docs/standards-example.md` (4 criteria, self-parses).
+- Appended `## Standards doc` section to `plugins/flow/README.md` referencing the copy-target.
 - Authored `mcp-server/tests/standards-doc.test.ts` + fixtures (missing, malformed-missing-field, malformed-cap-exceeded). Valid case copies the shipped example into a tmp dir at runtime.
 - No new runtime deps; `pnpm-lock.yaml` unchanged.
 
 ### File List
 
-- `plugins/crew/mcp-server/src/schemas/standards-doc.ts` (NEW)
-- `plugins/crew/mcp-server/src/validators/standards-doc.ts` (NEW)
-- `plugins/crew/mcp-server/src/state/lookup-standards.ts` (NEW)
-- `plugins/crew/mcp-server/src/errors.ts` (UPDATED — append-only)
-- `plugins/crew/docs/standards-example.md` (NEW)
-- `plugins/crew/README.md` (UPDATED — appended Standards doc section)
-- `plugins/crew/mcp-server/tests/standards-doc.test.ts` (NEW)
-- `plugins/crew/mcp-server/tests/fixtures/standards/missing/.gitkeep` (NEW)
-- `plugins/crew/mcp-server/tests/fixtures/standards/malformed-missing-field/docs/standards.md` (NEW)
-- `plugins/crew/mcp-server/tests/fixtures/standards/malformed-cap-exceeded/docs/standards.md` (NEW)
+- `plugins/flow/mcp-server/src/schemas/standards-doc.ts` (NEW)
+- `plugins/flow/mcp-server/src/validators/standards-doc.ts` (NEW)
+- `plugins/flow/mcp-server/src/state/lookup-standards.ts` (NEW)
+- `plugins/flow/mcp-server/src/errors.ts` (UPDATED — append-only)
+- `plugins/flow/docs/standards-example.md` (NEW)
+- `plugins/flow/README.md` (UPDATED — appended Standards doc section)
+- `plugins/flow/mcp-server/tests/standards-doc.test.ts` (NEW)
+- `plugins/flow/mcp-server/tests/fixtures/standards/missing/.gitkeep` (NEW)
+- `plugins/flow/mcp-server/tests/fixtures/standards/malformed-missing-field/docs/standards.md` (NEW)
+- `plugins/flow/mcp-server/tests/fixtures/standards/malformed-cap-exceeded/docs/standards.md` (NEW)

@@ -34,7 +34,7 @@ What's good about a BMad story is its **information model** — rich context, AC
 
 ## 4. The intake cockpit (gate 1) and the two-gate pipeline
 
-Today `crew:plan` is a one-shot conversation, `crew:scan` dumps everything into `to-do/`, and the drain claims anything claimable. There is **no PM-facing surface to shape, sequence, and *release* a backlog over time, and no readiness brake.** That missing surface is literally step one of the stated success target ("primes a continuous-flow backlog… walks away").
+Today `flow:plan` is a one-shot conversation, `flow:scan` dumps everything into `to-do/`, and the drain claims anything claimable. There is **no PM-facing surface to shape, sequence, and *release* a backlog over time, and no readiness brake.** That missing surface is literally step one of the stated success target ("primes a continuous-flow backlog… walks away").
 
 **Two-gate pipeline:**
 - **Gate 1 — PM owns it:** proposed → specified → **ready**. PM proposes a feature in plain language; an author drafts it into a strict story; the judge panel grades it; passes become *ready*. PM curates and sequences.
@@ -84,7 +84,7 @@ The native format and the rubric are the **same artifact**: the strict schema *i
 - **Ceiling (Structure):** if the integration AC needs more than one orthogonal assertion → it's two jobs → split.
 - Right size = *the smallest slice that still has one observable outcome a judge can verify.* Lean small by default (tighter ACs validate easier and resist rubber-stamping); the integration-AC floor stops "lean small" tipping into "shattered" — over-slicing pays a per-story orchestration tax (each story is a full claim→dev→review→gate→merge cycle + worktree + PR) and creates the integration-gap risk the ship-gate rule exists to catch.
 
-**Rubric sources (verbatim conventions live here):** `_bmad-output/_archive/planning-discipline.md` (the 5 rules), `.claude/skills/bmad-create-story/template.md` + `checklist.md`, `plugins/crew/docs/user-surface-acs.md` (tag/marker conventions + extraction regex), canonical specs `3-5-…`, `5-15-…`, `5-27-…` under `_bmad-output/implementation-artifacts/`.
+**Rubric sources (verbatim conventions live here):** `_bmad-output/_archive/planning-discipline.md` (the 5 rules), `.claude/skills/bmad-create-story/template.md` + `checklist.md`, `plugins/flow/docs/user-surface-acs.md` (tag/marker conventions + extraction regex), canonical specs `3-5-…`, `5-15-…`, `5-27-…` under `_bmad-output/implementation-artifacts/`.
 
 ---
 

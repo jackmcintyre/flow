@@ -1,12 +1,12 @@
 {
-  "name": "crew",
+  "name": "flow",
   "owner": {
     "name": "Jack McIntyre"
   },
   "plugins": [
     {
-      "name": "crew",
-      "source": "./plugins/crew",
+      "name": "flow",
+      "source": "./plugins/flow",
       "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog."
     }
   ]

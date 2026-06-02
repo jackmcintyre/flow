@@ -1,9 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "mcp__plugin_crew_crew__getStatus",
-      "mcp__plugin_crew_crew__scanOrphanedInProgress",
-      "mcp__plugin_crew_crew__buildPersonaSpawnPrompt",
+      "mcp__plugin_flow_flow__getStatus",
+      "mcp__plugin_flow_flow__scanOrphanedInProgress",
+      "mcp__plugin_flow_flow__buildPersonaSpawnPrompt",
       "mcp__hindsight__reflect",
       "Bash(git fetch *)"
     ]

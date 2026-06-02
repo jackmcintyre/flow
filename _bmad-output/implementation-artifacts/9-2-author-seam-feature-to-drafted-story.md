@@ -25,38 +25,38 @@ The author here is intentionally simpler than the full interactive planner: one 
 **AC1 — a draft that fails the discipline gate is never written (integration):**
 
 The write path is fail-closed on discipline: a candidate story that violates an authoring-time discipline rule (e.g. a state-mutating story with no integration AC) is rejected by the write tool itself with a typed error naming the violations, and no file is written. The gate does not depend on the author subagent remembering to validate first — even a direct write of a violating story is refused. A vitest drives the write path with a state-mutating candidate that lacks an integration AC and asserts: a typed discipline error is raised carrying the violation code(s), and no native-story file appears on disk.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/write-native-story.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/write-native-story.test.ts
 
 **AC2 — a passing draft materialises as a not-ready backlog item (integration):**
 
 A candidate that passes the discipline gate is written, and after a scan it appears as a backlog manifest defaulted **not-ready** — present in the backlog but not claimable by the drain until the operator blesses it. A vitest authors a passing candidate through the seam, runs the scan, and asserts: the manifest exists in the backlog state, reads not-ready, and the claim entry point does not return it.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/author-seam.test.ts
 
 **AC3 — discipline violations are returned to the operator for revision, not swallowed (integration):**
 
 When the gate refuses a draft, the seam surfaces the specific violation codes back to the operator (the refuse-and-revise path) rather than silently dropping the draft or writing a broken one. The operator can revise the feature framing and retry; nothing is written until a draft passes. A vitest drives the seam with a failing candidate and asserts the returned result carries the violation codes and writes nothing, then drives a corrected candidate and asserts it writes.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/author-seam.test.ts
 
-**AC4 — the `/crew:author` skill drives the seam (artifact):**
+**AC4 — the `/flow:author` skill drives the seam (artifact):**
 
 A skill defines the operator command: it takes a plain-language feature description, spawns the author subagent, runs the deterministic validate-then-write, and reports the draft's ref and its not-ready status. Its frontmatter lists the author tools in `allowed_tools`; its body never instructs a direct story-file write or git call — every write flows through the tool. The file exists at the skill path and is shaped like the other crew skills.
-artifact: plugins/crew/skills/author/SKILL.md
+artifact: plugins/flow/skills/author/SKILL.md
 
 **AC5 — the author subagent is a lean single-draft author (artifact):**
 
 A catalogue prompt defines the author role: one plain-language feature in, one draft story out — distinct from the planner's interactive four-step loop. Its `allowed_tools` include the validate and write tools and the backlog-inventory read; it is instructed to author the integration-AC spine first (the rubric's floor) and to hand off via the locked phrase. The file exists at the catalogue path and mirrors the planner catalogue's shape.
-artifact: plugins/crew/catalogue/author.md
+artifact: plugins/flow/catalogue/author.md
 
 **AC6 — a written draft emits exactly one telemetry event (integration):**
 
 A new closed-enum telemetry event records a draft authored, carrying the ref and title. Exactly one event is emitted per written draft and none on a refused/violating candidate. The event variant is added additively to the telemetry discriminated union, preserving its strict posture. A vitest authors one passing draft and asserts a single event lands with the right ref, and asserts no event is emitted for a refused candidate.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/author-seam.test.ts
 
 ## Definition of Done
 
 - [ ] All six ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new/updated test files cover every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new/updated test files cover every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC3 and AC6 are runnable vitest, AC4–AC5 are file-presence.
 - [ ] The discipline gate is enforced at the write tool (fail-closed), not only in subagent prose — a direct violating write is refused.
@@ -66,7 +66,7 @@ vitest: plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts
 
 ### Scope discipline — what this story does and does NOT build
 
-**Builds (the seam + the hardening):** the `/crew:author` skill, a lean author subagent catalogue prompt, the fail-closed discipline check inside the write path, and the draft-authored telemetry event.
+**Builds (the seam + the hardening):** the `/flow:author` skill, a lean author subagent catalogue prompt, the fail-closed discipline check inside the write path, and the draft-authored telemetry event.
 
 **Does NOT build (reuse or defer):** the discipline rules themselves (reuse `validateStoryAgainstDiscipline`, Story 3.5); the not-ready brake (reuse Story 9.1); the **Tier 1 panel judgment** of draft quality (Story 9.3 — this story enforces only the machine-checkable Tier 0); ordering/sequencing (Story 9.5). The author produces a *draft*; whether it is *good enough to bless* is the judge panel's call, not this seam's.
 
@@ -75,7 +75,7 @@ vitest: plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts
 The reusability map is near-total — only the operator surface and one guard are new:
 - **Validate:** `validatePlannerBacklog` / `validateStoryAgainstDiscipline` (the Story 3.5 authoring-time gate) already checks integration-AC presence for state-mutating stories and implicit `depends_on`. Reuse it verbatim as Tier 0.
 - **Write:** `writeNativeStory` already generates the ULID, renders the four-section body, round-trips through `parseNativeStory`, and writes atomically. The only change: make it **call the discipline validator and refuse (typed error) before writing** — the deterministic gate (see below).
-- **Materialise:** `scanSources` already turns native stories into to-do manifests with `ready: false` hard-written (Story 9.1). Reuse — the skill may invoke the scan or leave it to an explicit `/crew:scan`.
+- **Materialise:** `scanSources` already turns native stories into to-do manifests with `ready: false` hard-written (Story 9.1). Reuse — the skill may invoke the scan or leave it to an explicit `/flow:scan`.
 - **Brake:** the `ready: false` default and the claim filter are Story 9.1's; this story only relies on them.
 
 ### The deterministic-seam hardening (the one real code change)
@@ -95,22 +95,22 @@ The planner relies on its subagent's behavioural contract ("MUST call `validateP
 ### Files touched
 
 **NEW:**
-- `plugins/crew/skills/author/SKILL.md` — the operator seam (AC4).
-- `plugins/crew/catalogue/author.md` — the lean author subagent prompt (AC5).
-- `plugins/crew/mcp-server/src/tools/__tests__/author-seam.test.ts` — AC2, AC3, AC6.
+- `plugins/flow/skills/author/SKILL.md` — the operator seam (AC4).
+- `plugins/flow/catalogue/author.md` — the lean author subagent prompt (AC5).
+- `plugins/flow/mcp-server/src/tools/__tests__/author-seam.test.ts` — AC2, AC3, AC6.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/write-native-story.ts` — add the fail-closed discipline check before write (AC1); emit the draft-authored telemetry event (AC6).
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — add the draft-authored event variant additively (AC6).
-- `plugins/crew/mcp-server/src/errors.ts` — add the typed `DisciplineViolationError` (extend `DomainError`).
-- `plugins/crew/mcp-server/src/tools/__tests__/write-native-story.test.ts` — AC1.
+- `plugins/flow/mcp-server/src/tools/write-native-story.ts` — add the fail-closed discipline check before write (AC1); emit the draft-authored telemetry event (AC6).
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — add the draft-authored event variant additively (AC6).
+- `plugins/flow/mcp-server/src/errors.ts` — add the typed `DisciplineViolationError` (extend `DomainError`).
+- `plugins/flow/mcp-server/src/tools/__tests__/write-native-story.test.ts` — AC1.
 
 ### Existing seams to wire into (do not reinvent)
 
-- **Discipline validator:** `validateStoryAgainstDiscipline` + `isStateMutatingByHeuristic` in `plugins/crew/mcp-server/src/validators/planning-discipline.ts`; the tool wrapper `validatePlannerBacklog`.
-- **Write path:** `writeNativeStory` in `plugins/crew/mcp-server/src/tools/write-native-story.ts` (ULID, render, `parseNativeStory` round-trip, atomic write).
+- **Discipline validator:** `validateStoryAgainstDiscipline` + `isStateMutatingByHeuristic` in `plugins/flow/mcp-server/src/validators/planning-discipline.ts`; the tool wrapper `validatePlannerBacklog`.
+- **Write path:** `writeNativeStory` in `plugins/flow/mcp-server/src/tools/write-native-story.ts` (ULID, render, `parseNativeStory` round-trip, atomic write).
 - **Scan + not-ready default:** `scanSources` `composeManifest` writes `ready: false` (Story 9.1).
-- **Skill + subagent shape:** mirror `plugins/crew/skills/plan/SKILL.md` (native branch: spawn subagent from `readCatalogue`) and `plugins/crew/catalogue/planner.md` (behavioural contract, locked handoff).
+- **Skill + subagent shape:** mirror `plugins/flow/skills/plan/SKILL.md` (native branch: spawn subagent from `readCatalogue`) and `plugins/flow/catalogue/planner.md` (behavioural contract, locked handoff).
 - **Telemetry + errors:** the discriminated event union + `logTelemetryEvent`; the `DomainError` envelope and tool registration in `tools/register.ts`.
 
 ### Edge cases worth surfacing in dev/review

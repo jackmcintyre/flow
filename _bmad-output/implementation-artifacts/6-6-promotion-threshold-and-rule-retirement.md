@@ -24,33 +24,33 @@ This story closes the calibration loop's feedback arm. Story 6.5 made an accepte
 **AC1 — a deterministic helper counts per-failure-class fires over the window (integration):**
 
 A pure helper (no LLM) reads the gathered retro inputs (done manifests' `failure_class` fields plus the window's telemetry) and returns, per failure class, a fire count over the window and the rules currently registered against that class. It is fully deterministic — same inputs yield the same counts — and counts nothing it cannot source from a manifest or a telemetry event. A vitest seeds done manifests and telemetry with a known distribution of failure classes and asserts the per-class fire counts match by hand, including a class with zero fires and a class with no registered rule.
-vitest: plugins/crew/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
+vitest: plugins/flow/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
 
 **AC2 — classes crossing a configurable promotion threshold are flagged as new-rule candidates for the analyst (integration):**
 
 The helper flags every failure class whose window fire count is at or above a configurable promotion threshold (documented default) **and** has no rule already registered against it as a promotion candidate, surfacing the class and its count. These candidates are exposed to the retro analyst through the input bundle; the retro-analyst catalogue instructs it to draft one `rule` proposal per promotion candidate (carrying that class), and to draft none for a class that already has a rule. A vitest drives the helper over seeded telemetry crossing and not-crossing the threshold and asserts exactly the right classes are flagged as promotion candidates, and that an already-ruled class is not flagged.
-vitest: plugins/crew/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
+vitest: plugins/flow/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
 
 **AC3 — rules whose class has gone quiet are flagged as retirement candidates with the evidence (integration):**
 
 The helper flags every registered rule whose `target_failure_class` has not fired for at least a configurable M windows (documented default M=5) as a retirement candidate, carrying `target_rule_id`, `fire_count_over_window`, and a `recommended_action` of `retire` (zero fires) or `relax` (demote to advisory — low but non-zero fires). The analyst drafts a `rule-retirement` proposal per retirement candidate from these fields so the operator sees the count, not just the recommendation. A vitest seeds a registry plus telemetry where one rule's class is silent and another's still fires, and asserts only the silent rule is flagged, with the correct `target_rule_id`, `fire_count_over_window`, and `recommended_action`.
-vitest: plugins/crew/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
+vitest: plugins/flow/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts
 
 **AC4 — accepting a `rule-retirement` proposal removes or demotes the rule and regenerates the standards doc (integration):**
 
 A `rule-retirement`-kind apply handler is registered into the production gate. On confirm, for `recommended_action: retire` it removes the rule matching `target_rule_id` from `docs/discipline-rules.yaml`; for `relax` it demotes that rule's `level` to `advisory` in place. Either way it then regenerates `docs/standards.md` via Story 6.5b's `regenerate-standards`, returns both changed paths, and the gate commits both files plus the proposal stamp in one commit. Comments and untouched rules in the registry survive (comment-preserving write). A `target_rule_id` that matches no rule raises a typed `RuleNotFoundError` before any write, leaving the tree clean. A vitest drives an accepted `rule-retirement` (retire) and a second (relax) through the production gate and asserts: the rule is gone / demoted, the standards doc is regenerated to match, one commit carried both files, comments survived, and an unknown `target_rule_id` raises `RuleNotFoundError` with no mutation.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts
 
 **AC5 — config, catalogue, errors, and registration are wired with the DomainError envelope (artifact):**
 
 The promotion threshold and the M-window retirement horizon are configurable with documented defaults (not magic numbers buried in code). The `rule-retirement` handler is registered into `createProductionRegistry()` so `KIND_TO_STORY`'s `"Story 6.6"` pointer now resolves to a real handler; `RuleNotFoundError` is defined extending `DomainError`. The retro-analyst catalogue (`catalogue/retro-analyst.md`) is updated to instruct drafting promotion/retirement proposals strictly from the helper's computed candidates — it must not count fires itself.
-artifact: plugins/crew/mcp-server/src/lib/proposal-apply-registry.ts
+artifact: plugins/flow/mcp-server/src/lib/proposal-apply-registry.ts
 
 ## Definition of Done
 
 - [x] All five ACs met.
-- [x] `pnpm --dir plugins/crew/mcp-server test` green; the two new test files cover every integration AC clause.
-- [x] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
+- [x] `pnpm --dir plugins/flow/mcp-server test` green; the two new test files cover every integration AC clause.
+- [x] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC4 are runnable vitest, AC5 is file-presence/registration; the reviewer's runnable-AC pass should be all-green.
 - [x] The fire-count + candidate computation is a deterministic helper with hand-checkable numbers — the analyst consumes it, it does not re-derive counts in prose.
@@ -85,16 +85,16 @@ Implement `ProposalApplyHandler` for `type: "rule-retirement"` and register it i
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/lib/failure-class-fire-counts.ts` — the deterministic rollup + candidate helper.
-- `plugins/crew/mcp-server/src/lib/apply-rule-retirement.ts` — the `rule-retirement` apply handler (or co-locate with the rule handler from 6.5).
-- `plugins/crew/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts` — AC1–AC3.
-- `plugins/crew/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts` — AC4.
+- `plugins/flow/mcp-server/src/lib/failure-class-fire-counts.ts` — the deterministic rollup + candidate helper.
+- `plugins/flow/mcp-server/src/lib/apply-rule-retirement.ts` — the `rule-retirement` apply handler (or co-locate with the rule handler from 6.5).
+- `plugins/flow/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts` — AC1–AC3.
+- `plugins/flow/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts` — AC4.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/gather-retro-inputs.ts` — surface the computed promotion/retirement candidates in the bundle (or expose the helper for the analyst to call).
-- `plugins/crew/mcp-server/src/lib/proposal-apply-registry.ts` — register the `rule-retirement` handler in `createProductionRegistry()`.
-- `plugins/crew/catalogue/retro-analyst.md` — instruct drafting proposals strictly from the helper's candidates; forbid in-prose counting.
-- `plugins/crew/mcp-server/src/errors.ts` — add `RuleNotFoundError` extending `DomainError`.
+- `plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts` — surface the computed promotion/retirement candidates in the bundle (or expose the helper for the analyst to call).
+- `plugins/flow/mcp-server/src/lib/proposal-apply-registry.ts` — register the `rule-retirement` handler in `createProductionRegistry()`.
+- `plugins/flow/catalogue/retro-analyst.md` — instruct drafting proposals strictly from the helper's candidates; forbid in-prose counting.
+- `plugins/flow/mcp-server/src/errors.ts` — add `RuleNotFoundError` extending `DomainError`.
 
 ### Existing seams to wire into (do not reinvent)
 
@@ -116,8 +116,8 @@ Implement `ProposalApplyHandler` for `type: "rule-retirement"` and register it i
 ### Risk + build notes (drain context)
 
 - This is a `medium`-risk change: it registers a second canonical-state mutation handler (retirement) and feeds the analyst's proposal generation. Expect the auto-merge gate to **pause for a human merge**.
-- Code change touching lib + tool + catalogue + errors: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/crew/mcp-server` before the PR.
-- Do not write any `.crew/state` manifest. Canonical surfaces written: `docs/discipline-rules.yaml` and `docs/standards.md` (both via the retirement handler reusing 6.5/6.5b seams).
+- Code change touching lib + tool + catalogue + errors: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/flow/mcp-server` before the PR.
+- Do not write any `.flow/state` manifest. Canonical surfaces written: `docs/discipline-rules.yaml` and `docs/standards.md` (both via the retirement handler reusing 6.5/6.5b seams).
 
 ### References
 
@@ -156,19 +156,19 @@ Tests: 1882/1882 passing. Knip clean. Build green. dist/ rebuilt in same commit.
 ### File List
 
 **New files:**
-- `plugins/crew/mcp-server/src/lib/failure-class-fire-counts.ts`
-- `plugins/crew/mcp-server/src/lib/apply-rule-retirement.ts`
-- `plugins/crew/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts`
+- `plugins/flow/mcp-server/src/lib/failure-class-fire-counts.ts`
+- `plugins/flow/mcp-server/src/lib/apply-rule-retirement.ts`
+- `plugins/flow/mcp-server/src/lib/__tests__/failure-class-fire-counts.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/apply-rule-retirement.test.ts`
 
 **Modified files:**
-- `plugins/crew/mcp-server/src/errors.ts`
-- `plugins/crew/mcp-server/src/schemas/discipline-rules.ts`
-- `plugins/crew/mcp-server/src/lib/proposal-apply-registry.ts`
-- `plugins/crew/mcp-server/src/tools/gather-retro-inputs.ts`
-- `plugins/crew/catalogue/retro-analyst.md`
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`
-- `plugins/crew/mcp-server/dist/` (rebuilt)
+- `plugins/flow/mcp-server/src/errors.ts`
+- `plugins/flow/mcp-server/src/schemas/discipline-rules.ts`
+- `plugins/flow/mcp-server/src/lib/proposal-apply-registry.ts`
+- `plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts`
+- `plugins/flow/catalogue/retro-analyst.md`
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`
+- `plugins/flow/mcp-server/dist/` (rebuilt)
 - `_bmad-output/implementation-artifacts/6-6-promotion-threshold-and-rule-retirement.md`
 
 ### Change Log

@@ -25,38 +25,38 @@ The Quality Lead is the **home of the bar that the calibration loop (Epic 6b) ev
 **AC1 — the Quality Lead role is defined and instantiable (artifact):**
 
 A role catalogue file and a role permission spec define the Quality Lead — its domain, mandate, out-of-mandate, prompt, and locked phrases — shaped like the other catalogue roles, so the persona machinery can instantiate it into the team. The files exist at the catalogue and permission paths and parse against the catalogue/permission schemas.
-artifact: plugins/crew/catalogue/quality-lead.md
+artifact: plugins/flow/catalogue/quality-lead.md
 
 **AC2 — adjudication synthesises the panel verdict by the rubric's rule, deterministically (integration):**
 
 Given a panel verdict, the Quality Lead's decision follows the rubric's synthesis rule in the tool layer: all five lenses pass → `ready`-eligible; any lens fails → `rework` carrying the failed lenses' `missed` strings; a split that persists after K rounds (default 2) → `escalate`. A vitest feeds an all-pass verdict (asserts `ready`), a one-lens-fail verdict (asserts `rework` with the miss), and a split verdict at the K-th round (asserts `escalate`).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/quality-lead.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/quality-lead.test.ts
 
 **AC3 — a clean pass blesses the draft through the existing brake tool (integration):**
 
 On a `ready` decision the Quality Lead marks the draft ready by calling the Story 9.1 brake tool, not by writing the manifest directly; a `rework` or `escalate` decision leaves the draft not-ready. A vitest drives an all-pass adjudication and asserts the draft's readiness flag flips via the brake tool, and drives an `escalate` adjudication and asserts the draft stays not-ready.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/quality-lead.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/quality-lead.test.ts
 
 **AC4 — a close call escalates to the operator and never auto-passes (integration):**
 
 A split panel, or a close call still unresolved after K rounds, yields an `escalate` decision surfaced to the operator with a rationale; nothing is blessed. A vitest drives a split panel through K rounds and asserts the result is `escalate` with a populated `escalation_reason`, and that the readiness flag was never set.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/quality-lead.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/quality-lead.test.ts
 
 **AC5 — the adjudication verdict is written as schema-shaped data (integration):**
 
 The Quality Lead emits a verdict — decision (`ready` | `escalate` | `rework`), rationale, and an escalation reason when escalating — validated against a schema and persisted as the canonical record the dashboard (9.5) and the calibration loop read. A vitest asserts the emitted verdict validates against the schema and carries the decision and rationale.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/quality-lead.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/quality-lead.test.ts
 
 **AC6 — the role carries negative capability (artifact):**
 
 The Quality Lead's permission spec grants only what adjudication needs (read the panel verdict, bless via the brake tool, write its own verdict) and withholds capabilities outside its mandate (e.g. it cannot merge, push, or edit code), mirroring the reviewer's negative-capability posture. The permission file exists and lists a bounded `tools_allow`.
-artifact: plugins/crew/permissions/quality-lead.yaml
+artifact: plugins/flow/permissions/quality-lead.yaml
 
 ## Definition of Done
 
 - [ ] All six ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new test file covers every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new test file covers every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC2–AC5 runnable vitest, AC1/AC6 file-presence.
 - [ ] The bless action goes through the Story 9.1 brake tool — no direct manifest write.
@@ -84,15 +84,15 @@ artifact: plugins/crew/permissions/quality-lead.yaml
 ### Files touched
 
 **NEW:**
-- `plugins/crew/catalogue/quality-lead.md` — the role (AC1).
-- `plugins/crew/permissions/quality-lead.yaml` — bounded permissions (AC6).
-- `plugins/crew/mcp-server/src/tools/quality-lead-adjudicate.ts` — the adjudication tool.
-- `plugins/crew/mcp-server/src/schemas/adjudication-verdict.ts` — the verdict schema.
-- `plugins/crew/mcp-server/src/tools/__tests__/quality-lead.test.ts` — AC2–AC5.
+- `plugins/flow/catalogue/quality-lead.md` — the role (AC1).
+- `plugins/flow/permissions/quality-lead.yaml` — bounded permissions (AC6).
+- `plugins/flow/mcp-server/src/tools/quality-lead-adjudicate.ts` — the adjudication tool.
+- `plugins/flow/mcp-server/src/schemas/adjudication-verdict.ts` — the verdict schema.
+- `plugins/flow/mcp-server/src/tools/__tests__/quality-lead.test.ts` — AC2–AC5.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/register.ts` — register the adjudication tool.
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — add an adjudication event additively (the calibration loop's judge-the-judge input).
+- `plugins/flow/mcp-server/src/tools/register.ts` — register the adjudication tool.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — add an adjudication event additively (the calibration loop's judge-the-judge input).
 
 ### Existing seams to wire into (do not reinvent)
 

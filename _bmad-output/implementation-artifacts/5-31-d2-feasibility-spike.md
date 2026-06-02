@@ -29,7 +29,7 @@ The five questions span three failure surfaces:
 2. **Will the OS-level detachment actually work?** (Q2) — if no, D2 is dead regardless of host behaviour; the cascade reaches the daemon.
 3. **Are the three implementation patterns (framing, daemon-liveness, auth) decisions we can defend?** (Q3–Q5) — these are "engineering risk" questions, not "go/no-go" questions, but answering them up front collapses the build estimate's uncertainty band.
 
-Each of Q1 and Q2 has a binary outcome that can kill the approach. Investigating them in production code first would mean writing throwaway D2 plumbing inside `plugins/crew/` — wasted effort if Q1 says "no". The spike investigates in isolation (one-line bash shim, 30-line Node repro outside the repo) so the answer costs hours, not days.
+Each of Q1 and Q2 has a binary outcome that can kill the approach. Investigating them in production code first would mean writing throwaway D2 plumbing inside `plugins/flow/` — wasted effort if Q1 says "no". The spike investigates in isolation (one-line bash shim, 30-line Node repro outside the repo) so the answer costs hours, not days.
 
 ### Why the notes-file-only output
 
@@ -37,8 +37,8 @@ The spike's value is **the answers**, not artefacts. A notes file is grep-able b
 
 ### What this story does NOT
 
-- (a) Modify `plugins/crew/.claude-plugin/plugin.json`. The manifest is read-only for the spike; Q1 is investigated by either docs lookup or an out-of-repo test plugin.
-- (b) Modify `plugins/crew/mcp-server/src/index.ts` or any other production source. The current stdio transport setup is reference material for Q3 (framing); the spike reads it, does not change it.
+- (a) Modify `plugins/flow/.claude-plugin/plugin.json`. The manifest is read-only for the spike; Q1 is investigated by either docs lookup or an out-of-repo test plugin.
+- (b) Modify `plugins/flow/mcp-server/src/index.ts` or any other production source. The current stdio transport setup is reference material for Q3 (framing); the spike reads it, does not change it.
 - (c) Build `mcp-proxy.js`, the unix-socket bridge, the daemon lifecycle script, or any of the D2 implementation surface. The spike confirms feasibility; the v1.1 story builds.
 - (d) File the upstream Anthropic bug. That action belongs alongside Story 5.30 (Path A) and is tracked separately; it is out of scope here even though both stories ground in the same RCA.
 - (e) Update README, PRD `non-functional-requirements.md`, or any user-facing docs. Documentation follows the build, not the spike.
@@ -48,7 +48,7 @@ The spike's value is **the answers**, not artefacts. A notes file is grep-able b
 
 ### Deferred work
 
-- **Building D2.** If the spike returns `proceed-with-d2`, the v1.1 build story will be authored from the spike's notes file, scoped to: (i) `mcp-proxy.js` stdio shim with detached re-exec, (ii) per-user unix socket at `~/.crew/mcp-daemon.sock`, (iii) chosen framing per Q3 verdict, (iv) chosen daemon-liveness pattern per Q4, (v) chosen socket-auth approach per Q5. Estimated 2–3 days per the RCA memo.
+- **Building D2.** If the spike returns `proceed-with-d2`, the v1.1 build story will be authored from the spike's notes file, scoped to: (i) `mcp-proxy.js` stdio shim with detached re-exec, (ii) per-user unix socket at `~/.flow/mcp-daemon.sock`, (iii) chosen framing per Q3 verdict, (iv) chosen daemon-liveness pattern per Q4, (v) chosen socket-auth approach per Q5. Estimated 2–3 days per the RCA memo.
 - **Path B investigation.** Only triggered if the spike returns `pivot-to-path-b`. Larger surface (launchd/systemd, port discovery, HTTP transport swap, install/uninstall flow).
 - **Linux / Windows platform validation.** Out of scope for the spike (darwin only). If v1.1 ships D2 and operators on other platforms surface, follow-up spike covers the platform-specific deltas.
 - **Upstream Anthropic bug filing.** Tracked alongside Story 5.30; both stories ground in the same RCA.
@@ -98,7 +98,7 @@ exist — `mkdir -p` it as part of the first write.
 -->
 
 **AC2 (manifest support — Q1):**
-The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
+The notes file answers: does Claude Code's plugin manifest at `plugins/flow/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
 artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
@@ -110,13 +110,13 @@ out-of-repo repro: create a temp plugin dir, write a `plugin.json` whose
 MCP server binary, install the temp plugin into a clean Claude Code session, run
 `/mcp` (or equivalent) and confirm the tools list. If the shim works, verdict is yes.
 
-The current production manifest (`plugins/crew/.claude-plugin/plugin.json`) is the
+The current production manifest (`plugins/flow/.claude-plugin/plugin.json`) is the
 reference for what a working manifest looks like; quote the relevant `mcpServers` block
 if it clarifies the contract.
 -->
 
 **AC3 (OS-level detachment — Q2):**
-The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
+The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/flow/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
 artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
@@ -143,7 +143,7 @@ The repro is portable but the spike scopes to darwin (project reference platform
 -->
 
 **AC4 (JSON-RPC framing — Q3):**
-The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
+The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/flow/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
 artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
@@ -153,7 +153,7 @@ clearest path is to query Context7 for the @modelcontextprotocol/sdk docs on std
 transport framing and quote the relevant passage. Failing that, read the SDK source
 in the project's node_modules (or the GitHub repo) and quote the encode/decode loop.
 
-The current production server (`plugins/crew/mcp-server/src/index.ts`) sets up the
+The current production server (`plugins/flow/mcp-server/src/index.ts`) sets up the
 stdio transport via the SDK; quote the relevant lines to show the framing is opaque to
 our code (the SDK owns it). The shim's job is byte-forwarding — it doesn't need to
 parse JSON-RPC, just chunk-buffer correctly across socket read boundaries.
@@ -201,14 +201,14 @@ connect-probe; the hybrid pattern is the production norm.
 -->
 
 **AC6 (auth / multi-user safety — Q5):**
-The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
+The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.flow/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
 artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: threat model is "another unprivileged user on the same machine, or
 another unprivileged process running as the same user, connects to the socket and
-calls MCP tools that mutate ~/.crew/ state". Filesystem permission 0600 on the socket
-path under ~/.crew/ defeats the cross-user case (only the owning user can connect).
+calls MCP tools that mutate ~/.flow/ state". Filesystem permission 0600 on the socket
+path under ~/.flow/ defeats the cross-user case (only the owning user can connect).
 Same-user same-process case is not defended by either pattern — anyone running as the
 user can call any tool the user has access to (this is the standard unix model).
 
@@ -218,9 +218,9 @@ needs to verify peer uid programmatically (defence in depth against socket-permi
 misconfigurations) or whether 0600 + the OS enforcing it is the operative guarantee.
 
 Likely recommendation is filesystem-permission-only (0600 + parent dir 0700 on
-~/.crew/) — same model as ssh-agent, gpg-agent, docker daemon's default socket. The
+~/.flow/) — same model as ssh-agent, gpg-agent, docker daemon's default socket. The
 spike confirms this matches darwin conventions and notes any caveat (e.g., if the
-socket path is in /tmp instead of ~/.crew/, the threat model changes).
+socket path is in /tmp instead of ~/.flow/, the threat model changes).
 -->
 
 ---
@@ -240,12 +240,12 @@ Implementation order is research-then-write. The spike author can answer Q1, Q3,
 
 - [ ] **Task 3: Investigate Q1 — manifest support for shim** (AC: #2)
   - [ ] 3.1 Try the docs path first: query Context7 for `mcp manifest command field` or WebFetch https://code.claude.com/docs/en/mcp.md and locate the section on `mcpServers.<name>.command`. Quote the relevant passage.
-  - [ ] 3.2 If the docs are ambiguous, build the out-of-repo repro: create a temp plugin dir (e.g., `/tmp/d2-shim-test/`), write a `plugin.json` whose `mcpServers.test.command` points at a one-line bash script that `exec`s the real crew MCP server binary, install the temp plugin via `/plugin install /tmp/d2-shim-test/` in a clean Claude Code session, run the MCP tools list, confirm the shim works.
+  - [ ] 3.2 If the docs are ambiguous, build the out-of-repo repro: create a temp plugin dir (e.g., `/tmp/d2-shim-test/`), write a `plugin.json` whose `mcpServers.test.command` points at a one-line bash script that `exec`s the real flow MCP server binary, install the temp plugin via `/plugin install /tmp/d2-shim-test/` in a clean Claude Code session, run the MCP tools list, confirm the shim works.
   - [ ] 3.3 Write the Q1 section of the notes file with the evidence and the verdict line `manifest-supports-shim: <yes|no|unclear-with-caveats>`. If the verdict is `no`, escalate to Jack — D2 is dead.
 
 - [ ] **Task 4: Investigate Q3 — JSON-RPC framing** (AC: #4)
   - [ ] 4.1 Query Context7 for `@modelcontextprotocol/sdk stdio transport framing`. Locate the encode/decode loop in the SDK. Quote the relevant passage.
-  - [ ] 4.2 Read `plugins/crew/mcp-server/src/index.ts` to confirm the production server uses the SDK's stdio transport unchanged (no custom framing). Quote the relevant lines.
+  - [ ] 4.2 Read `plugins/flow/mcp-server/src/index.ts` to confirm the production server uses the SDK's stdio transport unchanged (no custom framing). Quote the relevant lines.
   - [ ] 4.3 Write the Q3 section of the notes file with the SDK reference, source quote, and the verdict line `framing-approach: <named-approach>`. Note any buffering gotchas the shim must handle.
 
 - [ ] **Task 5: Investigate Q4 — lockfile + stale-daemon detection** (AC: #5)
@@ -255,7 +255,7 @@ Implementation order is research-then-write. The spike author can answer Q1, Q3,
 
 - [ ] **Task 6: Investigate Q5 — auth / multi-user safety** (AC: #6)
   - [ ] 6.1 Identify the threat model in the notes (per AC6 implementation comment).
-  - [ ] 6.2 Evaluate filesystem-permission-only (0600 on socket + 0700 on `~/.crew/`) vs token-handshake-on-connect. Reference darwin's peer-credential APIs if relevant (LOCAL_PEEREPID / LOCAL_PEEREUID via getsockopt).
+  - [ ] 6.2 Evaluate filesystem-permission-only (0600 on socket + 0700 on `~/.flow/`) vs token-handshake-on-connect. Reference darwin's peer-credential APIs if relevant (LOCAL_PEEREPID / LOCAL_PEEREUID via getsockopt).
   - [ ] 6.3 Cross-reference with one adjacent local-IPC daemon's default (ssh-agent, gpg-agent, docker daemon — quoted from docs or source).
   - [ ] 6.4 Write the Q5 section of the notes file with the threat model, evaluation, reference, and verdict line `socket-auth: <filesystem-permission-only|token-handshake|other>`.
 
@@ -278,7 +278,7 @@ The RCA memo's recommendation lists D2 as a "v1.1 candidate" precisely because t
 
 ### Why notes-file-only, no production code
 
-The spike's deliverable is **decisions and evidence**, not artefacts. Writing throwaway D2 plumbing inside `plugins/crew/` would mean either (a) commenting it out for the merge, which is sloppy, or (b) leaving it active, which contaminates the production surface before the build is approved. Out-of-repo repros (Q2's `/tmp/d2-detach-repro/`, Q1's `/tmp/d2-shim-test/`) keep the production tree untouched and the evidence reproducible by quoting source + output verbatim in the notes file.
+The spike's deliverable is **decisions and evidence**, not artefacts. Writing throwaway D2 plumbing inside `plugins/flow/` would mean either (a) commenting it out for the merge, which is sloppy, or (b) leaving it active, which contaminates the production surface before the build is approved. Out-of-repo repros (Q2's `/tmp/d2-detach-repro/`, Q1's `/tmp/d2-shim-test/`) keep the production tree untouched and the evidence reproducible by quoting source + output verbatim in the notes file.
 
 ### Why the verdict is one of three exact strings
 
@@ -304,12 +304,12 @@ The project's reference platform is darwin. macOS's local-IPC threat model and p
 
 ## Locked files
 
-- `plugins/crew/.claude-plugin/plugin.json` — NOT touched. Read-only reference for Q1.
-- `plugins/crew/mcp-server/src/**` — NOT touched. Read-only reference for Q3 (current stdio transport setup at `src/index.ts`).
-- `plugins/crew/mcp-server/dist/**` — NOT touched. No build artefacts change because no source changes.
-- `plugins/crew/skills/start/SKILL.md` — NOT touched. Story 5.30 modifies it; this spike does not.
-- `plugins/crew/permissions/**` — NOT touched. No allowlist changes.
-- Any other production source under `plugins/crew/` — NOT touched. The spike's deliverable is a notes file under `_bmad-output/implementation-artifacts/spikes/`.
+- `plugins/flow/.claude-plugin/plugin.json` — NOT touched. Read-only reference for Q1.
+- `plugins/flow/mcp-server/src/**` — NOT touched. Read-only reference for Q3 (current stdio transport setup at `src/index.ts`).
+- `plugins/flow/mcp-server/dist/**` — NOT touched. No build artefacts change because no source changes.
+- `plugins/flow/skills/start/SKILL.md` — NOT touched. Story 5.30 modifies it; this spike does not.
+- `plugins/flow/permissions/**` — NOT touched. No allowlist changes.
+- Any other production source under `plugins/flow/` — NOT touched. The spike's deliverable is a notes file under `_bmad-output/implementation-artifacts/spikes/`.
 
 ### Declared-locked-file changes (explicit exceptions)
 
@@ -327,22 +327,22 @@ The project's reference platform is darwin. macOS's local-IPC threat model and p
 
 ### Files this story will NOT modify
 
-- `plugins/crew/.claude-plugin/plugin.json` — Path D2 build territory; the spike is read-only against it.
-- `plugins/crew/mcp-server/src/**` — same.
-- `plugins/crew/skills/start/SKILL.md` — Story 5.30's surface.
+- `plugins/flow/.claude-plugin/plugin.json` — Path D2 build territory; the spike is read-only against it.
+- `plugins/flow/mcp-server/src/**` — same.
+- `plugins/flow/skills/start/SKILL.md` — Story 5.30's surface.
 - README, PRD `non-functional-requirements.md`, or any other doc — follows the build, not the spike.
 
 ### Files this story reads (read-only context)
 
-- `plugins/crew/.claude-plugin/plugin.json` — for Q1 evidence (current `mcpServers` block shape).
-- `plugins/crew/mcp-server/src/index.ts` — for Q3 evidence (current stdio transport setup; confirms shim's framing job).
-- `~/.crew/mcp-lifecycle.log` — for cascade-pattern context (already cited in Story 5.30's spec; the spike does not re-investigate the RCA, only references it).
+- `plugins/flow/.claude-plugin/plugin.json` — for Q1 evidence (current `mcpServers` block shape).
+- `plugins/flow/mcp-server/src/index.ts` — for Q3 evidence (current stdio transport setup; confirms shim's framing job).
+- `~/.flow/mcp-lifecycle.log` — for cascade-pattern context (already cited in Story 5.30's spec; the spike does not re-investigate the RCA, only references it).
 - `~/.claude/plans/linked-knitting-stardust.md` — the RCA memo. Section "D2. Detached proxy + parent-owned daemon" is the spike's design starting point.
 - Claude Code MCP docs at https://code.knaude.com/docs/en/mcp.md — for Q1 evidence (correct URL is https://code.claude.com/docs/en/mcp.md; the typo'd URL exists in the source brief but the spike author should use the canonical one).
 
 ### Spec citations and evidence (read-only context)
 
-- 8/8 paired SIGTERMs in `~/.crew/mcp-lifecycle.log` across 4 distinct incidents (RCA memo at `~/.claude/plans/linked-knitting-stardust.md`) — the failure mode D2 fixes.
+- 8/8 paired SIGTERMs in `~/.flow/mcp-lifecycle.log` across 4 distinct incidents (RCA memo at `~/.claude/plans/linked-knitting-stardust.md`) — the failure mode D2 fixes.
 - Story 5.30's halt seam ships first; D2 is the structural fix that retires Story 5.30's restart-per-cascade UX cost. The two stories coexist: 5.30 is the v1 patch, this spike informs the v1.1 fix.
 - Path A (Story 5.30) costs every cascade-interrupted story one Claude Code restart. D2 costs zero restarts but 2–3 days of build time, gated on this spike returning `proceed-with-d2`.
 
@@ -355,8 +355,8 @@ No production code; no tests. The notes file is the deliverable; AC verification
 - [Source: `_bmad-output/planning-artifacts/epics/epic-5-orchestration-recovery-visibility-and-resilience.md § Story 5.31`] — this story's epic block.
 - [Source: `~/.claude/plans/linked-knitting-stardust.md` § Recommendation, step 4 + § D2] — the RCA memo identifying D2 as the v1.1 candidate.
 - [Source: `_bmad-output/implementation-artifacts/5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics.md`] — Story 5.30 (Path A), the sibling story this spike supersedes structurally in v1.1.
-- [Source: `plugins/crew/.claude-plugin/plugin.json`] — current MCP server registration; Q1 reference.
-- [Source: `plugins/crew/mcp-server/src/index.ts`] — current stdio transport setup; Q3 reference.
+- [Source: `plugins/flow/.claude-plugin/plugin.json`] — current MCP server registration; Q1 reference.
+- [Source: `plugins/flow/mcp-server/src/index.ts`] — current stdio transport setup; Q3 reference.
 - [Source: https://code.claude.com/docs/en/mcp.md] — Claude Code MCP docs; Q1 primary evidence path.
 - [Source: project memory `project_mcp_cascade_sigterm`] — the RCA distilled.
 - [Source: project memory `project_mcp_server_silent_disconnect`] — two-causes framing (idle-reap fixed; cascade pending).

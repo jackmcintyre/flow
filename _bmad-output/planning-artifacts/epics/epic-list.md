@@ -6,7 +6,7 @@
 
 **FRs covered:** FR43, FR44, FR45, FR46, FR47, FR71, FR73, FR74, FR79, FR80, FR81. **NFRs:** NFR8, NFR12, NFR13, NFR14, NFR15, NFR16, NFR17, NFR19, NFR20, NFR21.
 
-**Includes the scaffold story** (architecture's "first implementation story"): `plugins/crew/` skeleton with `.claude-plugin/plugin.json`, pnpm workspace, empty MCP server entrypoint, empty `bmad` adapter stub. Plus: `/status`, `/scan` skill shells, standards-doc lookup tool, standards-example template shipped, workspace-config Zod schema, atomic `fs.rename` state primitive (no manifests yet), pino → JSONL logger, execa wrapper with allowlist scaffold, README install path up to "the plugin sees my repo."
+**Includes the scaffold story** (architecture's "first implementation story"): `plugins/flow/` skeleton with `.claude-plugin/plugin.json`, pnpm workspace, empty MCP server entrypoint, empty `bmad` adapter stub. Plus: `/status`, `/scan` skill shells, standards-doc lookup tool, standards-example template shipped, workspace-config Zod schema, atomic `fs.rename` state primitive (no manifests yet), pino → JSONL logger, execa wrapper with allowlist scaffold, README install path up to "the plugin sees my repo."
 
 ---
 
@@ -68,7 +68,7 @@ Lands: `record-story-retro`, `apply-rule-proposal`, `apply-skill-proposal`, `app
 
 **FRs covered:** FR72. **NFRs:** NFR5.
 
-Lands: `plugins/<plugin>/example/` (BMad-shaped: primed `to-do/` queue, `docs/standards.md`, `docs/risk-tiering.md`, `.crew/config.yaml`); README install-path checkpoints (install → hire → plan → start → first merged PR); e2e canary vitest; first-run polish on `/skip-hiring`, `/scan`, error messages.
+Lands: `plugins/<plugin>/example/` (BMad-shaped: primed `to-do/` queue, `docs/standards.md`, `docs/risk-tiering.md`, `.flow/config.yaml`); README install-path checkpoints (install → hire → plan → start → first merged PR); e2e canary vitest; first-run polish on `/skip-hiring`, `/scan`, error messages.
 
 **Status (2026-05-27 reframe):** Epic 7 is **deferred past the self-bootstrap ship gate.** Its canonical scenario ("external stranger installs cold and reaches first merged PR in <1hr") is the **writeup-supporting / stretch gate**, not the v1 ship gate. The bundled example + canary suite still ships, but the timing follows Epic 6b (after self-bootstrap is demonstrably stable), not 6a. See memory `project_ship_gate_self_bootstrap` and epic-7's own Status subsection.
 

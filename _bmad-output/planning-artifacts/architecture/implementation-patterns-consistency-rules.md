@@ -19,7 +19,7 @@ The default pattern categories (REST endpoint naming, JSON wrappers, DB naming) 
 
 ## 1. Frontmatter Conventions (all *plugin-owned* Markdown / YAML artifacts)
 
-These conventions apply to artifacts the plugin authors: catalogue specs, persona files, execution manifests (`.crew/state/<state>/<ref>.yaml`), rule registry, retro proposals, skill files, workspace config. **Source story files are governed by their adapter's contract** (see §Planning Adapter Model) — BMad's frontmatter is BMad's; we read it through the adapter's normalisation, we don't enforce our conventions on it.
+These conventions apply to artifacts the plugin authors: catalogue specs, persona files, execution manifests (`.flow/state/<state>/<ref>.yaml`), rule registry, retro proposals, skill files, workspace config. **Source story files are governed by their adapter's contract** (see §Planning Adapter Model) — BMad's frontmatter is BMad's; we read it through the adapter's normalisation, we don't enforce our conventions on it.
 
 - **YAML only**, in the leading `---`-delimited block.
 - **Key naming: `snake_case`** — matches PRD examples (`depends_on`, `blocked_by`, `claimed_by`, `risk_tier`, `failure_class`, `rework_count`).

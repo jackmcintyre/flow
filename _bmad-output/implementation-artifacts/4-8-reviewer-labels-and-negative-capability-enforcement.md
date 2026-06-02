@@ -14,7 +14,7 @@ so that **I can scan the PR list and see at a glance which PRs have been agent-r
 
 ### What this story is, in one sentence
 
-Introduce a new MCP tool `applyReviewerLabels` that the `/crew:start` inner cycle invokes after `processReviewerTranscript` (and also in the error handler when the reviewer cycle fails), and tighten `generalist-reviewer.yaml` by removing two unused and potentially-destructive subcommands (`pr-comment`, `pr-review`) from `gh_allow` — so the execa wrapper structurally refuses those calls rather than relying on prose instructions not to make them.
+Introduce a new MCP tool `applyReviewerLabels` that the `/flow:start` inner cycle invokes after `processReviewerTranscript` (and also in the error handler when the reviewer cycle fails), and tighten `generalist-reviewer.yaml` by removing two unused and potentially-destructive subcommands (`pr-comment`, `pr-review`) from `gh_allow` — so the execa wrapper structurally refuses those calls rather than relying on prose instructions not to make them.
 
 ### What this story does (and why it needs its own story)
 
@@ -50,7 +50,7 @@ Story 4.8 closes both gaps: (1) adds label-posting via a new `applyReviewerLabel
 
 ## Acceptance Criteria
 
-> AC1 and AC2 derive from the epic spec for Story 4.8. AC3 is the integration suite. AC4 is the user-surface contract — the operator-observable label signal on the PR. Per `plugins/crew/docs/user-surface-acs.md`, AC4 is tagged `(user-surface)`; the others describe internal behaviour and stay untagged.
+> AC1 and AC2 derive from the epic spec for Story 4.8. AC3 is the integration suite. AC4 is the user-surface contract — the operator-observable label signal on the PR. Per `plugins/flow/docs/user-surface-acs.md`, AC4 is tagged `(user-surface)`; the others describe internal behaviour and stay untagged.
 
 **AC1:**
 **Given** the `applyReviewerLabels` MCP tool is called after a completed reviewer cycle,
@@ -84,7 +84,7 @@ vitest covers:
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
 **AC5 (user-surface):**
-**Given** a target repo where `/crew:start` has completed a reviewer pass for a story whose verdict is `NEEDS CHANGES`,
+**Given** a target repo where `/flow:start` has completed a reviewer pass for a story whose verdict is `NEEDS CHANGES`,
 **When** the inner cycle invokes `applyReviewerLabels` as part of the post-reviewer step,
 **Then** the operator can run `gh pr view <prNumber> --json labels` (or open the PR in GitHub) and observe:
 - (a) The label `reviewed-by-agent` is present on the PR.
@@ -98,7 +98,7 @@ vitest covers:
 **AC1 / AC2 unpacked.** `applyReviewerLabels` tool contract:
 
 - **(1a) Tool signature:** `applyReviewerLabels({ targetRepoRoot: string, sessionUlid: string, verdictOverride?: "reviewer-failure", role?: string, execaImpl?: typeof execa, pluginRootOverride?: string }) → Promise<ApplyReviewerLabelsResult>`. The `role` default is `"generalist-reviewer"`. The `execaImpl` and `pluginRootOverride` seams match `postReviewerComments`'s pattern.
-- **(1b) Input resolution:** the tool reads `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` via `readReviewerResultFile` (shared helper from Story 4.6b). On ENOENT (`null` return), the tool returns `{ next: "skipped-no-session-result" }` without making any `gh` calls. On malformed JSON, propagates `ReviewerResultFileMalformedError` uncaught.
+- **(1b) Input resolution:** the tool reads `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` via `readReviewerResultFile` (shared helper from Story 4.6b). On ENOENT (`null` return), the tool returns `{ next: "skipped-no-session-result" }` without making any `gh` calls. On malformed JSON, propagates `ReviewerResultFileMalformedError` uncaught.
 - **(1c) Verdict determination:** if `verdictOverride` is `"reviewer-failure"`, use that regardless of what `reviewer-result.json` says. Otherwise, use `result.recommendedVerdict` from the file.
 - **(1d) PR context:** the tool needs `{owner}`, `{repo}`, and `prNumber`. `prNumber` comes from `result.prNumber` (carried in the projection per Story 4.6 §3g). `owner`/`repo` come from calling `gh({ role, permissions, subcommand: "pr-view", args: [String(prNumber), "--json", "baseRepository"] })` — exactly as `postReviewerComments` does in Step 4. `pr-view` remains in `gh_allow`.
 - **(1e) Label call shape:** `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/issues/${prNumber}/labels", "--method", "POST", "--input", "-"], input: JSON.stringify({ labels: [labelName] }), execaImpl })`. This reuses the `--input -` pattern from `postReviewerComments` Task 4a. The `labels` endpoint accepts an array; v1 sends one label per call (two sequential calls for non-green outcomes) to keep error attribution clear.
@@ -113,7 +113,7 @@ vitest covers:
 
 **AC4 unpacked.** Integration-suite fixture and stub shape:
 
-- **(4a) Fixture base:** tmpdir with `.crew/config.yaml` (adapter: native) and `.crew/state/sessions/<sessionUlid>/reviewer-result.json` written per the variant under test. `pluginRootOverride` points to the worktree's `plugins/crew` directory.
+- **(4a) Fixture base:** tmpdir with `.flow/config.yaml` (adapter: native) and `.flow/state/sessions/<sessionUlid>/reviewer-result.json` written per the variant under test. `pluginRootOverride` points to the worktree's `plugins/flow` directory.
 - **(4b) Stub seam for `gh`:** same `makeDiscriminatingStub` pattern as Story 4.6b / 4.7, extended to route:
   - `cmd === "gh" && args[0] === "pr" && args[1] === "view"` → `{"baseRepository":{"name":"crew","owner":{"login":"jackmcintyre"}}}`.
   - `cmd === "gh" && args[0] === "api" && url.includes("/labels")` → `[{"name":"reviewed-by-agent","color":"0075ca",...}]` (the labels endpoint's array response).
@@ -127,7 +127,7 @@ vitest covers:
 - **(5a) Reproducer:** extend the Story 4.6b / 4.7 operator-smoke harness with an `applyReviewerLabels` call after the `processReviewerTranscript` mock. The same scratch repo, the same reviewer result file (verdict `NEEDS CHANGES`).
 - **(5b) Assertions:** the captured `gh api POST /labels` calls show two calls: first for `reviewed-by-agent`, second for `needs-human`. The return value is `{ next: "applied", labelsApplied: ["reviewed-by-agent", "needs-human"] }`.
 - **(5c) Non-regression:** Story 4.6b / 4.7 invariants still hold — the in-progress manifest is stamped `blocked_by: "reviewer-verdict-needs-changes"`, NOT moved to `done/`.
-- **(5d) Smoke-gate tag:** tagged per `plugins/crew/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence from a real `/crew:start` run showing `gh pr view --json labels` output.
+- **(5d) Smoke-gate tag:** tagged per `plugins/flow/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence from a real `/flow:start` run showing `gh pr view --json labels` output.
 
 ---
 
@@ -136,12 +136,12 @@ vitest covers:
 Implementation order is load-bearing.
 
 - [x] **Task 1: Remove unused subcommands from `generalist-reviewer.yaml`** (AC: #3)
-  - [x] 1.1 Open `plugins/crew/permissions/generalist-reviewer.yaml`. Remove `- pr-comment` and `- pr-review` from `gh_allow`. After this change `gh_allow` contains exactly: `pr-view`, `pr-diff`, `api`. Preserve `gh_allow_args: {}` — empty, unchanged.
-  - [x] 1.2 Verify no existing tool under `plugins/crew/mcp-server/src/tools/` calls `gh({ subcommand: "pr-comment", ... })` or `gh({ subcommand: "pr-review", ... })` with role `"generalist-reviewer"` — grep for both strings in the tools directory to confirm zero callers. If a caller is found, STOP and surface the conflict — do not remove the subcommand.
+  - [x] 1.1 Open `plugins/flow/permissions/generalist-reviewer.yaml`. Remove `- pr-comment` and `- pr-review` from `gh_allow`. After this change `gh_allow` contains exactly: `pr-view`, `pr-diff`, `api`. Preserve `gh_allow_args: {}` — empty, unchanged.
+  - [x] 1.2 Verify no existing tool under `plugins/flow/mcp-server/src/tools/` calls `gh({ subcommand: "pr-comment", ... })` or `gh({ subcommand: "pr-review", ... })` with role `"generalist-reviewer"` — grep for both strings in the tools directory to confirm zero callers. If a caller is found, STOP and surface the conflict — do not remove the subcommand.
   - [x] 1.3 **Update test fixtures that hand-write `generalist-reviewer.yaml` content.** Two test files contain literal `pr-comment` / `pr-review` lines in their fixture YAML; they will silently drift from production after Task 1.1 unless updated in the same change. After updating, the fixtures must match production's 3-entry `gh_allow` shape (`pr-view`, `pr-diff`, `api`).
-    - `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (around lines 148-153 — the multi-line `gh_allow` block).
-    - `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (around lines 267-272).
-    - Do NOT touch `plugins/crew/mcp-server/src/tools/__tests__/build-persona-spawn-prompt.test.ts` — its `pr-comment` line is on the `generalist-dev` persona fixture, NOT `generalist-reviewer`, and is unrelated to this story.
+    - `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (around lines 148-153 — the multi-line `gh_allow` block).
+    - `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (around lines 267-272).
+    - Do NOT touch `plugins/flow/mcp-server/src/tools/__tests__/build-persona-spawn-prompt.test.ts` — its `pr-comment` line is on the `generalist-dev` persona fixture, NOT `generalist-reviewer`, and is unrelated to this story.
     - Rationale: AC3 asserts the production YAML is loaded via `loadRolePermissions` and the removed subcommands are denied. Hand-written fixtures with stale entries would pass under green ACs while production drifts — exactly the bugfix-1 failure mode this project's planning discipline guards against.
   - [x] 1.4 Run `pnpm build` to confirm the YAML change does not break any TypeScript that imports the permission schema.
 
@@ -149,7 +149,7 @@ Implementation order is load-bearing.
   - [x] 2.1 Confirm `GhApiResponseShapeError` (added in Story 4.6b, `errors.ts`) accepts the shape `{ subcommand: string; url?: string; cause: unknown }`. No change needed if it does — this task is a precondition check.
 
 - [x] **Task 3: Implement `applyReviewerLabels` MCP tool** (AC: #1, #2)
-  - [x] 3.1 Create `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts`. Export `applyReviewerLabels(opts) → Promise<ApplyReviewerLabelsResult>` per AC1/AC2 unpacked signature.
+  - [x] 3.1 Create `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts`. Export `applyReviewerLabels(opts) → Promise<ApplyReviewerLabelsResult>` per AC1/AC2 unpacked signature.
   - [x] 3.2 Step 1 — read `reviewer-result.json` via `readReviewerResultFile`. On `null`, return `{ next: "skipped-no-session-result" }`.
   - [x] 3.3 Step 2 — resolve `prNumber` from `result.prNumber`. Load permissions via `loadRolePermissions(role, pluginRootOverride ?? getPluginRoot())`.
   - [x] 3.4 Step 3 — resolve `owner`/`repo` via `gh({ role, permissions, subcommand: "pr-view", args: [String(prNumber), "--json", "baseRepository"], execaImpl })`. Parse response. Raise `GhApiResponseShapeError` on parse failure (mirror `postReviewerComments` Task 4.4 pattern).
@@ -161,18 +161,18 @@ Implementation order is load-bearing.
   - [x] 3.8 Add top-of-file JSDoc citing this story spec.
 
 - [x] **Task 4: Register `applyReviewerLabels` as an MCP tool** (AC: #1, #2)
-  - [x] 4.1 Open `plugins/crew/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"applyReviewerLabels"` with a Zod input schema mirroring the options (all fields optional except `targetRepoRoot` and `sessionUlid`).
+  - [x] 4.1 Open `plugins/flow/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"applyReviewerLabels"` with a Zod input schema mirroring the options (all fields optional except `targetRepoRoot` and `sessionUlid`).
   - [x] 4.2 Wrap the handler in the existing `DomainError → { isError: true, content: [...] }` envelope.
   - [x] 4.3 Verify via the existing register-suite tests that the tool is enumerated and callable. Update the tool-count assertion (if present) to include `applyReviewerLabels`.
 
 - [x] **Task 5: Update SKILL.md inner cycle to invoke `applyReviewerLabels`** (AC: #1, #2, #5)
-  - [x] 5.1 Open `plugins/crew/skills/start/SKILL.md`. In the `allowed_tools` array, add `applyReviewerLabels`.
+  - [x] 5.1 Open `plugins/flow/skills/start/SKILL.md`. In the `allowed_tools` array, add `applyReviewerLabels`.
   - [x] 5.2 After the `processReviewerTranscript` call (which moves the manifest based on verdict), insert a new step: `applyReviewerLabels({ targetRepoRoot, sessionUlid })`. Log result to chat surface: `reviewer labels applied: ${result.labelsApplied.join(", ")} on PR #${prNumber}`.
   - [x] 5.3 In the error handler for the reviewer cycle (where `postReviewerComments` or `processReviewerTranscript` uncaught errors are surfaced): insert a best-effort `applyReviewerLabels({ targetRepoRoot, sessionUlid, verdictOverride: "reviewer-failure" })` call BEFORE surfacing the original error to the operator. Wrap this call in its own try/catch — if the label call also fails, log the secondary failure but surface the original error unchanged. (The label-on-failure call is best-effort; it MUST NOT mask the original failure.)
   - [x] 5.4 The `skipped-no-session-result` return from `applyReviewerLabels` — log a chat line "apply-reviewer-labels skipped — no reviewer-result.json" and proceed. Do NOT halt; the missing-file case is already surfaced by the prior `processReviewerTranscript` step.
 
 - [x] **Task 6: Implement the integration test suite** (AC: #4)
-  - [x] 6.1 Create `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts`.
+  - [x] 6.1 Create `plugins/flow/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts`.
   - [x] 6.2 Fixture: tmpdir per `beforeEach`; `reviewer-result.json` written per variant; `readReviewerResultFile` path resolved via `pluginRootOverride`.
   - [x] 6.3 Implement AC4 variants (4a)–(4e) as separate `it()` cases. Use `makeDiscriminatingStub` (Story 4.6b shared helper). Capture `input` option on the `gh api /labels` stub to assert the label payload.
   - [x] 6.4 Implement AC3 denial cases: load `generalist-reviewer.yaml` via `loadRolePermissions`, call `gh()` with each denied subcommand, assert `GhSubcommandDeniedError` with no execa call. Use `vi.spyOn(execaImpl, ...)` or a capturing stub to assert zero invocations.
@@ -239,22 +239,22 @@ The principle: unused permissions should be removed. `pr-comment` and `pr-review
 
 ## Locked files
 
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 — label-posting is a sibling step, not an extension of this tool)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
-- `plugins/crew/catalogue/generalist-reviewer.md` (Story 4.6)
-- `plugins/crew/permissions/gh-error-map.yaml` (Story 4.5)
-- `plugins/crew/mcp-server/src/lib/find-hunk-line.ts` (Story 4.6b)
-- `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts` (Story 4.6b / 4.7)
-- `plugins/crew/mcp-server/src/lib/plugin-version.ts` (Story 1.9)
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 — label-posting is a sibling step, not an extension of this tool)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
+- `plugins/flow/catalogue/generalist-reviewer.md` (Story 4.6)
+- `plugins/flow/permissions/gh-error-map.yaml` (Story 4.5)
+- `plugins/flow/mcp-server/src/lib/find-hunk-line.ts` (Story 4.6b)
+- `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts` (Story 4.6b / 4.7)
+- `plugins/flow/mcp-server/src/lib/plugin-version.ts` (Story 1.9)
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/permissions/generalist-reviewer.yaml`** (Stories 2.2 / 4.6 / 4.7) — Task 1 removes `pr-comment` and `pr-review` from `gh_allow`. The change is a reduction (no new entries), and is load-bearing for AC3's negative-capability enforcement.
-- **`plugins/crew/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — Task 5 adds `applyReviewerLabels` to `allowed_tools`, inserts the label step after `processReviewerTranscript`, and adds the best-effort label call in the error handler. Existing steps are UNTOUCHED.
+- **`plugins/flow/permissions/generalist-reviewer.yaml`** (Stories 2.2 / 4.6 / 4.7) — Task 1 removes `pr-comment` and `pr-review` from `gh_allow`. The change is a reduction (no new entries), and is load-bearing for AC3's negative-capability enforcement.
+- **`plugins/flow/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — Task 5 adds `applyReviewerLabels` to `allowed_tools`, inserts the label step after `processReviewerTranscript`, and adds the best-effort label call in the error handler. Existing steps are UNTOUCHED.
 
 ---
 
@@ -262,16 +262,16 @@ The principle: unused permissions should be removed. `pr-comment` and `pr-review
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Task 3)
-- `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts` (Task 6)
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Task 3)
+- `plugins/flow/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts` (Task 6)
 
 ### Files this story will modify
 
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Task 1; remove `pr-comment`, `pr-review`)
-- `plugins/crew/mcp-server/src/tools/register.ts` (Task 4)
-- `plugins/crew/skills/start/SKILL.md` (Task 5; `allowed_tools` + new post-processReviewerTranscript step + error-handler label call)
-- Operator-smoke harness under `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 7)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Task 1; remove `pr-comment`, `pr-review`)
+- `plugins/flow/mcp-server/src/tools/register.ts` (Task 4)
+- `plugins/flow/skills/start/SKILL.md` (Task 5; `allowed_tools` + new post-processReviewerTranscript step + error-handler label call)
+- Operator-smoke harness under `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 7)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 ### Current-state notes on files being modified
 
@@ -289,13 +289,13 @@ The principle: unused permissions should be removed. `pr-comment` and `pr-review
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md#Story 4.8`]
-- [Source: `plugins/crew/docs/user-surface-acs.md`]
+- [Source: `plugins/flow/docs/user-surface-acs.md`]
 - [Source: `_bmad-output/implementation-artifacts/4-7-verdict-version-stamping-and-footer-marker-idempotent-rerun.md`] (deferred-work note on `api` narrowing)
 - [Source: `_bmad-output/implementation-artifacts/4-6b-reviewer-posts-inline-comments-and-summary-verdict.md`] (label-call-via-api decision context; `makeDiscriminatingStub` pattern)
-- [Source: `plugins/crew/permissions/generalist-reviewer.yaml`] (Task 1 modifies)
-- [Source: `plugins/crew/mcp-server/src/lib/gh.ts`] (`gh()` wrapper; `gh_allow_args` exact-string semantics)
-- [Source: `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`] (shared helper; Task 3 uses)
-- [Source: `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`] (pattern for `pr-view` → owner/repo resolution; `gh api --input -` pattern)
+- [Source: `plugins/flow/permissions/generalist-reviewer.yaml`] (Task 1 modifies)
+- [Source: `plugins/flow/mcp-server/src/lib/gh.ts`] (`gh()` wrapper; `gh_allow_args` exact-string semantics)
+- [Source: `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`] (shared helper; Task 3 uses)
+- [Source: `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`] (pattern for `pr-view` → owner/repo resolution; `gh api --input -` pattern)
 
 ---
 
@@ -353,19 +353,19 @@ None — implementation proceeded without blockers.
 
 ### File List
 
-- `plugins/crew/permissions/generalist-reviewer.yaml` — removed `pr-comment`, `pr-review` from `gh_allow`
-- `plugins/crew/catalogue/generalist-reviewer.md` — removed `pr-comment`, `pr-review` from `gh_allow` (parity with permissions)
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` — new tool
-- `plugins/crew/mcp-server/src/tools/register.ts` — added `applyReviewerLabels` import and registration
-- `plugins/crew/skills/start/SKILL.md` — added `applyReviewerLabels` to `allowed_tools`, inserted step 10a, updated error handler
-- `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts` — new test suite (AC4 + AC3 denial)
-- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-8-apply-reviewer-labels.smoke.test.ts` — new smoke test (AC5)
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` — fixture updated (removed `pr-comment`, `pr-review`)
-- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` — fixture updated
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` — tool count 24 → 25
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts` — `allowed_tools` set updated (9 → 10)
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` — tool count 24 → 25
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` — tool count 24 → 25
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` — tool count 24 → 25
-- `plugins/crew/mcp-server/tests/permissions-enforcement.test.ts` — positive guard updated (pr-view + api present; pr-review + pr-comment absent)
-- `plugins/crew/mcp-server/dist/` — rebuilt
+- `plugins/flow/permissions/generalist-reviewer.yaml` — removed `pr-comment`, `pr-review` from `gh_allow`
+- `plugins/flow/catalogue/generalist-reviewer.md` — removed `pr-comment`, `pr-review` from `gh_allow` (parity with permissions)
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` — new tool
+- `plugins/flow/mcp-server/src/tools/register.ts` — added `applyReviewerLabels` import and registration
+- `plugins/flow/skills/start/SKILL.md` — added `applyReviewerLabels` to `allowed_tools`, inserted step 10a, updated error handler
+- `plugins/flow/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts` — new test suite (AC4 + AC3 denial)
+- `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-8-apply-reviewer-labels.smoke.test.ts` — new smoke test (AC5)
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` — fixture updated (removed `pr-comment`, `pr-review`)
+- `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` — fixture updated
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` — tool count 24 → 25
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill-content.test.ts` — `allowed_tools` set updated (9 → 10)
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` — tool count 24 → 25
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` — tool count 24 → 25
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` — tool count 24 → 25
+- `plugins/flow/mcp-server/tests/permissions-enforcement.test.ts` — positive guard updated (pr-view + api present; pr-review + pr-comment absent)
+- `plugins/flow/mcp-server/dist/` — rebuilt

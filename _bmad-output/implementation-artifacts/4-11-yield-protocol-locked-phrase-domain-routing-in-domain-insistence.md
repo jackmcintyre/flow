@@ -37,7 +37,7 @@ This story explicitly does NOT modify `start/SKILL.md` to wire `processReviewerY
 ### What this story does NOT
 
 - (a) Touch `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other file under `_bmad-output/implementation-artifacts/`. The orchestrator owns status transitions. The dev agent MUST NOT edit any status/state file when implementing this story.
-- (b) Modify `plugins/crew/skills/start/SKILL.md`. The wiring for `processReviewerYield` (call it after the reviewer Task returns, before `postReviewerComments`; branch on the result) lands in a sibling story. v1 ships the tool plus vitest exercise only. Same precedent as Story 4.12's `recordAgentInvoke` (whose SKILL.md wiring is also deferred). This keeps the SKILL.md edit blast radius — and its associated mid-flight inner-cycle regression risk — out of this story.
+- (b) Modify `plugins/flow/skills/start/SKILL.md`. The wiring for `processReviewerYield` (call it after the reviewer Task returns, before `postReviewerComments`; branch on the result) lands in a sibling story. v1 ships the tool plus vitest exercise only. Same precedent as Story 4.12's `recordAgentInvoke` (whose SKILL.md wiring is also deferred). This keeps the SKILL.md edit blast radius — and its associated mid-flight inner-cycle regression risk — out of this story.
 - (c) Spawn the specialist reviewer subagent. Spawning requires the Task tool, which is harness-level and only available to SKILL.md prose. This tool returns the assembled `specialistPrompt` string; the SKILL.md prose (in the wiring story) is responsible for invoking `Task` with that prompt.
 - (d) Modify `processReviewerTranscript` (Story 4.6 revision 2). The verdict-transport contract is unchanged — `reviewer-result.json` remains the binding verdict surface. `processReviewerYield` is a SEPARATE seam called BEFORE `processReviewerTranscript` when the reviewer transcript contains a yield. The no-yield path of `processReviewerYield` is a no-op stamp pass-through; the SKILL.md prose proceeds to `processReviewerTranscript` as today.
 - (e) Add specialist-reviewer verdict-transport. The yield protocol routes the review *invocation*; the specialist reviewer writes its OWN `reviewer-result.json` (the existing rev-2 contract is reused). A specialist that runs `runReviewerSession` produces the same JSON shape — no schema change. If a hired specialist's persona does NOT include `runReviewerSession` in `tools_allow`, that's a hiring/catalogue gap, not a 4-11 problem; the no-session-result blocked branch surfaces it.
@@ -46,7 +46,7 @@ This story explicitly does NOT modify `start/SKILL.md` to wire `processReviewerY
 - (h) Touch `permissions/generalist-dev.yaml`. The dev subagent does not call `processReviewerYield`; the SKILL.md prose does (when wiring lands). `permissions/generalist-reviewer.yaml` is also unchanged — the reviewer doesn't call it either; the prose layer does.
 - (i) Refactor `lookupRoleByDomain`. The existing tool (Story 2.3) is consumed as-is. The pre-existing first-encountered-on-collision behaviour (filesystem traversal order) is preserved; if a future story decides domain collisions need a routing-ambiguity diagnostic, that's an additive change in that tool, not here.
 - (j) Modify `lib/logger.ts`. The closed discriminated-union dispatch already handles new event types via the schema. Same precedent as Story 4.12 Task 1.4.
-- (k) Add configuration knobs. The locked yield phrase, the `<domain>` token, and the chain-depth cap (1) are hardcoded constants. No `.crew/config.yaml` override surface in v1.
+- (k) Add configuration knobs. The locked yield phrase, the `<domain>` token, and the chain-depth cap (1) are hardcoded constants. No `.flow/config.yaml` override surface in v1.
 - (l) Drift detection — i.e. emitting a typed error when a reviewer says something *close to* the yield phrase but not exactly. v1's parser treats any non-matching last line as `no-yield` (silently pass through). A misspelled yield attempt looks the same as no yield. Operator inspection of the reviewer's chat is the surface for that diagnosis; a future story can add a "near-miss yield" diagnostic if it surfaces as a problem.
 - (m) Change `lookup-role-by-domain.ts`'s `custom`/`_archived` skip-list. The existing exclusions are preserved verbatim.
 
@@ -63,7 +63,7 @@ This story explicitly does NOT modify `start/SKILL.md` to wire `processReviewerY
 
 ## Acceptance Criteria
 
-> AC1–AC5 are verbatim from the epic. AC6 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal yield-parser behaviour, an MCP routing tool, a persona-prose contract, a telemetry event, and a vitest fixture. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1–AC5 are verbatim from the epic. AC6 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal yield-parser behaviour, an MCP routing tool, a persona-prose contract, a telemetry event, and a vitest fixture. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** a generalist reviewer encountering work inside a hired specialist's `domain:`,
@@ -84,14 +84,14 @@ This story explicitly does NOT modify `start/SKILL.md` to wire `processReviewerY
 **When** the runtime looks up the domain,
 **Then** the yield surfaces as `[routing-failure] no hired role matches domain "<x>"` on the orchestration surface; the story is blocked with `blocked_by: routing-failure`. _(FR100)_
 
-<!-- Not user-surface: AC3's surface is the chatLog line returned by the MCP tool plus the manifest stamp. The operator eventually observes the blocked manifest via `/crew:status` (Story 1.7) but that's downstream of this story. -->
+<!-- Not user-surface: AC3's surface is the chatLog line returned by the MCP tool plus the manifest stamp. The operator eventually observes the blocked manifest via `/flow:status` (Story 1.7) but that's downstream of this story. -->
 
 **AC4:**
 **Given** any yield,
 **When** routing succeeds,
 **Then** a `yield.handoff` telemetry event records both roles and the triggering domain. _(FR103, NFR29)_
 
-<!-- Not user-surface: AC4 describes a JSONL line written to `.crew/telemetry/<YYYY-MM>.jsonl`. Internal observability data. -->
+<!-- Not user-surface: AC4 describes a JSONL line written to `.flow/telemetry/<YYYY-MM>.jsonl`. Internal observability data. -->
 
 **AC5:**
 **Given** work where no hired specialist's domain matches,
@@ -111,7 +111,7 @@ vitest covers the five yield branches against a fixture with a hired security sp
 
 - (1a) **Token-name correction.** The locked yield phrase is `This sits in <domain>'s domain — handing off.` (trailing period; placeholder token name `<domain>`, NOT `<role>`). The epic AC's `<role>` placeholder name is a documentation artefact; the value substituted at emission is the target persona's `domain:` string, not its `role:` id. Renaming the token to `<domain>` in the shipped catalogue files removes the semantic mismatch. The runtime's parser extracts the substring between `This sits in ` and `'s domain — handing off.` and treats it as a domain string fed to `lookupRoleByDomain`. The epic AC text is preserved verbatim above; the implementation pins `<domain>`.
 
-- (1b) **Parser shape.** New file `plugins/crew/mcp-server/src/skills/yield-parser.ts`. Pure function `parseYield(transcript: string): YieldParseResult`. `YieldParseResult = { ok: true; domain: string } | { ok: false; reason: "drift" | "empty" | "no-yield" }`. Mirrors `handoff-parser.ts`'s style: split on `\n`, trim trailing whitespace per line, find last non-empty line, exact-match the regex.
+- (1b) **Parser shape.** New file `plugins/flow/mcp-server/src/skills/yield-parser.ts`. Pure function `parseYield(transcript: string): YieldParseResult`. `YieldParseResult = { ok: true; domain: string } | { ok: false; reason: "drift" | "empty" | "no-yield" }`. Mirrors `handoff-parser.ts`'s style: split on `\n`, trim trailing whitespace per line, find last non-empty line, exact-match the regex.
 
 - (1c) **Parser regex.** `^This sits in (.+)'s domain — handing off\.$` — applied via `RegExp.prototype.exec` on the last non-empty line. The em-dash `—` (U+2014) is part of the literal; en-dash and hyphen do NOT match. The trailing period is part of the literal. Case-sensitive: `this sits in` does NOT match. Group 1 captures the domain string. If the captured domain is empty (the regex's `.+` prevents this, but belt-and-suspenders): return `{ ok: false, reason: "drift" }`.
 
@@ -158,7 +158,7 @@ vitest covers the five yield branches against a fixture with a hired security sp
 
 - (3b) **Manifest stamp.** Read the in-progress manifest at `manifestPath` (passed by the caller — same shape as `processReviewerTranscript`'s `manifestPath` argument), set `blocked_by: "routing-failure"` (literal kebab-case string; pins the orchestration surface vocabulary), write back via `writeManifest`. The manifest stays in `in-progress/<ref>.yaml` — atomic move to `blocked/` is Story 5.1's responsibility (same precedent as the handoff-grammar drift case in `processDevTranscript`).
 
-- (3c) **Chat-log line.** `chatLog` contains exactly one line: `[routing-failure] no hired role matches domain "<domain>" — story <ref> blocked. Clear blocked_by on the manifest and re-run /crew:start after hiring a role with this domain.` The bracketed `[routing-failure]` prefix and quoted domain string are verbatim (asserted in vitest AC6 sub-case b). The recovery hint (`re-run /crew:start`) is included so the operator has a runnable next step.
+- (3c) **Chat-log line.** `chatLog` contains exactly one line: `[routing-failure] no hired role matches domain "<domain>" — story <ref> blocked. Clear blocked_by on the manifest and re-run /flow:start after hiring a role with this domain.` The bracketed `[routing-failure]` prefix and quoted domain string are verbatim (asserted in vitest AC6 sub-case b). The recovery hint (`re-run /flow:start`) is included so the operator has a runnable next step.
 
 - (3d) **No telemetry event on failure.** Per NFR29's "every yield HANDOFF" wording, telemetry is for successful handoffs only. The durable failure record is the manifest stamp + the chat line. Adding a `yield.routing_failure` event is deferred (see § Deferred work).
 
@@ -204,9 +204,9 @@ vitest covers the five yield branches against a fixture with a hired security sp
 
 - (6b) **Fixture seeding helper.** A test-scoped helper `seedHiredTeam(targetRepoRoot, roles: Array<{ role; domain; lockedYield?; lockedHandoff?; lockedVerdict? }>)` writes a valid `PERSONA.md` per role into `<targetRepoRoot>/team/<role>/PERSONA.md` with the canonical sibling-of-catalogue shape (frontmatter + 5 required sections). Defaults: `model_tier: sonnet`, `tools_allow: [Read]`, `gh_allow: []`, `locked_phrases.handoff/yield/verdict` from the catalogue defaults (yield phrase: `This sits in <domain>'s domain — handing off.`), `hired_at: 2026-01-01T00:00:00Z`, `catalogue_version: 0.1.0`. The helper is used by every sub-case below.
 
-- (6c) **Sub-case a: success branch.** Seed team with `generalist-reviewer` (domain `code review and verdict authoring`) and `security-specialist` (domain `authentication authorization and secret handling`). Seed an in-progress manifest at `<targetRepoRoot>/.crew/state/in-progress/native:01HZTEST.yaml`. Call `processReviewerYield({ ..., fromRole: "generalist-reviewer", reviewerTranscript: "Some reviewer prose.\n\nThis sits in authentication authorization and secret handling's domain — handing off." })`. Assert: return `{ next: "spawn-specialist-reviewer", toRole: "security-specialist", specialistPrompt: <non-empty string starting with "# Security Specialist — Persona">, chatLog: ["yield routed — from generalist-reviewer to security-specialist on domain \"authentication authorization and secret handling\" — spawning specialist reviewer (clean context)"] }`. Read the current month's JSONL; assert exactly one `yield.handoff` event with `data.from_role === "generalist-reviewer"`, `data.to_role === "security-specialist"`, `data.domain === "authentication authorization and secret handling"`. The manifest is unchanged from seed (no `blocked_by` stamp).
+- (6c) **Sub-case a: success branch.** Seed team with `generalist-reviewer` (domain `code review and verdict authoring`) and `security-specialist` (domain `authentication authorization and secret handling`). Seed an in-progress manifest at `<targetRepoRoot>/.flow/state/in-progress/native:01HZTEST.yaml`. Call `processReviewerYield({ ..., fromRole: "generalist-reviewer", reviewerTranscript: "Some reviewer prose.\n\nThis sits in authentication authorization and secret handling's domain — handing off." })`. Assert: return `{ next: "spawn-specialist-reviewer", toRole: "security-specialist", specialistPrompt: <non-empty string starting with "# Security Specialist — Persona">, chatLog: ["yield routed — from generalist-reviewer to security-specialist on domain \"authentication authorization and secret handling\" — spawning specialist reviewer (clean context)"] }`. Read the current month's JSONL; assert exactly one `yield.handoff` event with `data.from_role === "generalist-reviewer"`, `data.to_role === "security-specialist"`, `data.domain === "authentication authorization and secret handling"`. The manifest is unchanged from seed (no `blocked_by` stamp).
 
-- (6d) **Sub-case b: routing-failure branch.** Seed team with `generalist-reviewer` only (no security-specialist). Call with the same `reviewerTranscript` as (6c). Assert: return `{ next: "done-blocked-routing-failure", chatLog: ["[routing-failure] no hired role matches domain \"authentication authorization and secret handling\" — story native:01HZTEST blocked. Clear blocked_by on the manifest and re-run /crew:start after hiring a role with this domain."] }`. Read the manifest; assert `blocked_by === "routing-failure"`. Assert no `yield.handoff` event in JSONL (and no JSONL file at all — telemetry directory should not be created on the failure path).
+- (6d) **Sub-case b: routing-failure branch.** Seed team with `generalist-reviewer` only (no security-specialist). Call with the same `reviewerTranscript` as (6c). Assert: return `{ next: "done-blocked-routing-failure", chatLog: ["[routing-failure] no hired role matches domain \"authentication authorization and secret handling\" — story native:01HZTEST blocked. Clear blocked_by on the manifest and re-run /flow:start after hiring a role with this domain."] }`. Read the manifest; assert `blocked_by === "routing-failure"`. Assert no `yield.handoff` event in JSONL (and no JSONL file at all — telemetry directory should not be created on the failure path).
 
 - (6e) **Sub-case c: self-yield branch.** Seed team with `security-specialist` (domain `authentication authorization and secret handling`). Call with `fromRole: "security-specialist"` and the same yield phrase that resolves to the security-specialist's own domain. Assert: return `{ next: "done-blocked-routing-self-yield", chatLog: ["[routing-failure] self-yield rejected — security-specialist attempted to yield to its own domain \"authentication authorization and secret handling\"; in-domain insistence applies"] }`. Manifest `blocked_by === "routing-self-yield"`. No telemetry event written.
 
@@ -214,7 +214,7 @@ vitest covers the five yield branches against a fixture with a hired security sp
 
 - (6g) **Sub-case e: drift branch (silent pass-through).** Call with `reviewerTranscript: "This sits in the security specialist's domain - handing off."` (en-dash instead of em-dash; off-spec wording). Assert: return `{ next: "no-yield", chatLog: [] }`. Manifest unchanged. No JSONL. This is the intentional silent-pass-through v1 behaviour; operator inspection of the chat is the surface for diagnosing the misspelling.
 
-- (6h) **Sub-case f: in-domain insistence prose anchor.** A separate `it()` block reads each of the four shipped specialist catalogue files (`plugins/crew/catalogue/security-specialist.md`, `.../test-specialist.md`, `.../docs-specialist.md`, `.../debugger.md`) via `fs.readFile`. For each, assert the file contains the verbatim sentence `MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.` via `string.includes`. Also assert each of the six generalist catalogue files (`generalist-dev.md`, `generalist-reviewer.md`, `planner.md`, `hiring-manager.md`, `orchestrator.md`, `retro-analyst.md`) does NOT contain the sentence (negative assertion — the contract is specialist-only).
+- (6h) **Sub-case f: in-domain insistence prose anchor.** A separate `it()` block reads each of the four shipped specialist catalogue files (`plugins/flow/catalogue/security-specialist.md`, `.../test-specialist.md`, `.../docs-specialist.md`, `.../debugger.md`) via `fs.readFile`. For each, assert the file contains the verbatim sentence `MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.` via `string.includes`. Also assert each of the six generalist catalogue files (`generalist-dev.md`, `generalist-reviewer.md`, `planner.md`, `hiring-manager.md`, `orchestrator.md`, `retro-analyst.md`) does NOT contain the sentence (negative assertion — the contract is specialist-only).
 
 - (6i) **Sub-case g: empty-transcript pass-through.** Call with `reviewerTranscript: ""`. Assert: return `{ next: "no-yield", chatLog: [] }`. No manifest write, no JSONL.
 
@@ -233,56 +233,56 @@ vitest covers the five yield branches against a fixture with a hired security sp
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [ ] **Task 1: Yield parser** (AC: #1)
-  - [ ] 1.1 Create `plugins/crew/mcp-server/src/skills/yield-parser.ts`.
+  - [ ] 1.1 Create `plugins/flow/mcp-server/src/skills/yield-parser.ts`.
   - [ ] 1.2 Export `parseYield(transcript: string): YieldParseResult` matching § AC1 unpacked (1b)–(1d).
   - [ ] 1.3 Export the locked-phrase template as `YIELD_PHRASE_TEMPLATE = "This sits in <domain>'s domain — handing off."` for use by persona renderers/tests.
   - [ ] 1.4 Export `YIELD_PHRASE_REGEX = /^This sits in (.+)'s domain — handing off\.$/` (also `as const` if it helps TS inference; otherwise plain const).
   - [ ] 1.5 JSDoc citing this story key, FR99, FR100, the locked-phrase invariant, and the `<domain>`-vs-`<role>` token-name correction.
-  - [ ] 1.6 Create `plugins/crew/mcp-server/src/skills/__tests__/yield-parser.test.ts` covering AC6 sub-case (6k) — the parser unit tests.
+  - [ ] 1.6 Create `plugins/flow/mcp-server/src/skills/__tests__/yield-parser.test.ts` covering AC6 sub-case (6k) — the parser unit tests.
 
 - [ ] **Task 2: Extend telemetry event schema with `yield.handoff`** (AC: #4)
-  - [ ] 2.1 In `plugins/crew/mcp-server/src/schemas/telemetry-events.ts`, append `YieldHandoffEventSchema` after the existing entries. Discriminator `"yield.handoff"`. `data: { from_role: z.string().min(1), to_role: z.string().min(1), domain: z.string().min(1) }`. `.strict()` on both event and data objects.
+  - [ ] 2.1 In `plugins/flow/mcp-server/src/schemas/telemetry-events.ts`, append `YieldHandoffEventSchema` after the existing entries. Discriminator `"yield.handoff"`. `data: { from_role: z.string().min(1), to_role: z.string().min(1), domain: z.string().min(1) }`. `.strict()` on both event and data objects.
   - [ ] 2.2 Add `YieldHandoffEventSchema` to the `TelemetryEventSchema` discriminated union (now 6 entries total).
   - [ ] 2.3 Export the new schema and inferred type (`YieldHandoffEvent`).
   - [ ] 2.4 No behavioural change to `lib/logger.ts` — its discriminated-union dispatch already handles new event types via the schema.
-  - [ ] 2.5 Add schema-strict tests to `plugins/crew/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (Story 4.12 created this file; append a sub-describe for `yield.handoff`): (i) valid event parses; (ii) `.strict()` rejects extra keys on event and data; (iii) empty strings rejected on `from_role`/`to_role`/`domain`.
+  - [ ] 2.5 Add schema-strict tests to `plugins/flow/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (Story 4.12 created this file; append a sub-describe for `yield.handoff`): (i) valid event parses; (ii) `.strict()` rejects extra keys on event and data; (iii) empty strings rejected on `from_role`/`to_role`/`domain`.
 
 - [ ] **Task 3: Typed error for routing-self-yield (optional — caller-side guard)** (AC: #2)
   - [ ] 3.1 No new typed error class is required. The self-yield branch returns a `done-blocked-routing-self-yield` discriminator and stamps `blocked_by: routing-self-yield`; no error is thrown (it's a normal control-flow branch, not an exception). If a future story decides operator-surface telemetry is needed for self-yields, it can be added additively.
 
 - [ ] **Task 4: `processReviewerYield` MCP tool** (AC: #1, #3, #4, #5)
-  - [ ] 4.1 Create `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts`.
+  - [ ] 4.1 Create `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts`.
   - [ ] 4.2 Implement the algorithm per AC1 unpacked (1e): parseYield → if no-yield return; else lookupRoleByDomain → if no match stamp + return routing-failure; if self-yield stamp + return self-yield; else buildPersonaSpawnPrompt → emit telemetry → return spawn-specialist-reviewer.
   - [ ] 4.3 Emit `yield.handoff` event ONLY on the success branch (AC4 unpacked 4b). Wrap the `logTelemetryEvent` call in try/catch; on failure, log via the existing typed-error path and continue (return the spawn prompt regardless).
   - [ ] 4.4 Use `readManifest` / `writeManifest` from `lib/manifest-io.js` for the manifest stamp (same pattern as `processDevTranscript`).
   - [ ] 4.5 JSDoc cites this story key, FR99, FR100, FR101, FR102, FR103, FR104, NFR29, the chain-depth-cap-of-1 contract, and the self-yield guard.
 
 - [ ] **Task 5: MCP-tool registration** (AC: all)
-  - [ ] 5.1 Register `processReviewerYield` in `plugins/crew/mcp-server/src/tools/register.ts`. Bump any tool-count assertion in `__tests__/tool-registration.test.ts` (if present — search for "tool count" / "27"; 4.12 left it at 27, this story moves it to 28).
+  - [ ] 5.1 Register `processReviewerYield` in `plugins/flow/mcp-server/src/tools/register.ts`. Bump any tool-count assertion in `__tests__/tool-registration.test.ts` (if present — search for "tool count" / "27"; 4.12 left it at 27, this story moves it to 28).
   - [ ] 5.2 Do NOT add `processReviewerYield` to any `permissions/*.yaml` file — the tool is called by SKILL.md prose (in the future wiring story), not by subagents. Same precedent as `processDevTranscript` / `processReviewerTranscript` (neither appears in subagent allowlists).
 
 - [ ] **Task 6: Catalogue locked-phrase token rename + trailing-period fix** (AC: #1)
-  - [ ] 6.1 Update every shipped `plugins/crew/catalogue/*.md` file whose frontmatter declares `locked_phrases.yield`: rename token `<role>` → `<domain>` and add the trailing period. Final string: `This sits in <domain>'s domain — handing off.`.
+  - [ ] 6.1 Update every shipped `plugins/flow/catalogue/*.md` file whose frontmatter declares `locked_phrases.yield`: rename token `<role>` → `<domain>` and add the trailing period. Final string: `This sits in <domain>'s domain — handing off.`.
   - [ ] 6.2 Affected files (from catalogue audit): `generalist-reviewer.md`, `security-specialist.md`, `test-specialist.md`, `docs-specialist.md`, `debugger.md`, `planner.md`, `orchestrator.md`, `retro-analyst.md`, `hiring-manager.md`, `generalist-dev.md`. Touch only the `locked_phrases.yield` value; preserve all other frontmatter and body content byte-equal.
   - [ ] 6.3 No persona-schema change. `LockedPhrasesSchema` already accepts the new string as `z.string().min(1)`. The token-placeholder regex enforcement (Story 4.3 Task 5's substitution-instruction line) extracts `<token>` patterns generically — renaming `<role>` to `<domain>` flows through `buildPersonaSpawnPrompt` without code change.
   - [ ] 6.4 Add a structural-anchor test (or extend an existing catalogue-content test) that asserts every shipped catalogue file's `locked_phrases.yield` value equals `YIELD_PHRASE_TEMPLATE` (imported from `yield-parser.ts`) — pins the lock against accidental drift.
 
 - [ ] **Task 7: In-domain insistence prose contract** (AC: #2)
-  - [ ] 7.1 Edit each shipped specialist catalogue file (`plugins/crew/catalogue/security-specialist.md`, `test-specialist.md`, `docs-specialist.md`, `debugger.md`). In the `## Mandate` section, add the verbatim sentence (as a bullet, at the end of the list): `- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.`
+  - [ ] 7.1 Edit each shipped specialist catalogue file (`plugins/flow/catalogue/security-specialist.md`, `test-specialist.md`, `docs-specialist.md`, `debugger.md`). In the `## Mandate` section, add the verbatim sentence (as a bullet, at the end of the list): `- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.`
   - [ ] 7.2 Do NOT edit generalist catalogue files (`generalist-dev.md`, `generalist-reviewer.md`, `planner.md`, `hiring-manager.md`, `orchestrator.md`, `retro-analyst.md`). The contract is specialist-only.
   - [ ] 7.3 The structural anchor test (AC6 sub-case f) is implemented in Task 8.
 
 - [ ] **Task 8: Integration test suite** (AC: #6)
-  - [ ] 8.1 Create `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-yield.test.ts`. Implement sub-cases (6c)–(6g), (6i)–(6j), (6m) from AC6 unpacked.
-  - [ ] 8.2 Add the in-domain insistence prose-anchor test as `plugins/crew/mcp-server/src/__tests__/in-domain-insistence-prose.test.ts` (sub-case (6h)). Lives under `src/__tests__/` (not `tools/__tests__/`) because it's a cross-catalogue contract test, not a per-tool test.
-  - [ ] 8.3 Add the catalogue locked-phrase anchor test as `plugins/crew/mcp-server/src/__tests__/yield-phrase-locked.test.ts` (Task 6.4). Imports `YIELD_PHRASE_TEMPLATE` from `yield-parser.ts`; reads each shipped catalogue file via `gray-matter` (already used elsewhere — confirm via grep), asserts `data.locked_phrases.yield === YIELD_PHRASE_TEMPLATE`.
+  - [ ] 8.1 Create `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-yield.test.ts`. Implement sub-cases (6c)–(6g), (6i)–(6j), (6m) from AC6 unpacked.
+  - [ ] 8.2 Add the in-domain insistence prose-anchor test as `plugins/flow/mcp-server/src/__tests__/in-domain-insistence-prose.test.ts` (sub-case (6h)). Lives under `src/__tests__/` (not `tools/__tests__/`) because it's a cross-catalogue contract test, not a per-tool test.
+  - [ ] 8.3 Add the catalogue locked-phrase anchor test as `plugins/flow/mcp-server/src/__tests__/yield-phrase-locked.test.ts` (Task 6.4). Imports `YIELD_PHRASE_TEMPLATE` from `yield-parser.ts`; reads each shipped catalogue file via `gray-matter` (already used elsewhere — confirm via grep), asserts `data.locked_phrases.yield === YIELD_PHRASE_TEMPLATE`.
   - [ ] 8.4 All tmpdir fixtures MUST use `await fs.mkdtemp(path.join(os.tmpdir(), "yield-protocol-"))` — never bare string concatenation, never `${tmpdir()}/...` interpolation. (Pre-empt the Story 4-9 / 4-12 validator catch.)
   - [ ] 8.5 Zod-error-message assertions, if any, MUST use the Zod 4.x output format (`"Invalid option"` not v3's `"Invalid enum value"`). For literal custom errors prefer `{ message: "..." }` form, not v3's `errorMap`. (Pre-empt the Story 4-9 / 4-12 validator catch.)
 
 - [ ] **Task 9: Build, vitest, dist** (AC: all)
-  - [ ] 9.1 `pnpm --dir plugins/crew/mcp-server build` passes with no TypeScript errors.
-  - [ ] 9.2 `pnpm --dir plugins/crew/mcp-server test` passes (existing 1077 tests from Story 4.12 + the new tests from this story; final total reported in the PR retro).
-  - [ ] 9.3 Commit `plugins/crew/mcp-server/dist/` with rebuilt output. (Project rule: dist is tracked because `/plugin install` does not run a build step. See `plugins/crew/docs/README-install.md` § Build artefacts.)
+  - [ ] 9.1 `pnpm --dir plugins/flow/mcp-server build` passes with no TypeScript errors.
+  - [ ] 9.2 `pnpm --dir plugins/flow/mcp-server test` passes (existing 1077 tests from Story 4.12 + the new tests from this story; final total reported in the PR retro).
+  - [ ] 9.3 Commit `plugins/flow/mcp-server/dist/` with rebuilt output. (Project rule: dist is tracked because `/plugin install` does not run a build step. See `plugins/flow/docs/README-install.md` § Build artefacts.)
   - [ ] 9.4 No leftover `TODO(4.11)` / `TODO(4-11)` comments in any touched source file.
 
 ---
@@ -307,7 +307,7 @@ A specialist that itself yields creates a routing chain. v1's user model is: gen
 
 ### Why telemetry covers success only
 
-NFR29 says "every yield HANDOFF is recorded". The natural reading is: a handoff is the successful routing event. A routing failure (no hired match) is not a handoff — there is no second agent involved. The durable failure record is the manifest stamp + chat line + (eventually) the operator's `/crew:status` surface. Splitting `yield.routing_failure` into a separate event for downstream analytics is an additive future change; it's not load-bearing for the in-flight operator surface.
+NFR29 says "every yield HANDOFF is recorded". The natural reading is: a handoff is the successful routing event. A routing failure (no hired match) is not a handoff — there is no second agent involved. The durable failure record is the manifest stamp + chat line + (eventually) the operator's `/flow:status` surface. Splitting `yield.routing_failure` into a separate event for downstream analytics is an additive future change; it's not load-bearing for the in-flight operator surface.
 
 ### Why the in-domain insistence contract is prose + routing-guard, not a runtime LLM check
 
@@ -327,26 +327,26 @@ Every PR not involving a domain-specialist hire goes through the no-yield branch
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The SKILL.md wiring for `processReviewerYield` lands in a sibling story; v1 ships the tool and the parser only.
-- `plugins/crew/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. The discriminated-union dispatch already handles new event types via the schema; no logger change needed.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — DO NOT modify. The revision-2 contract (read `reviewer-result.json`, switch on `recommendedVerdict`) is unchanged.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5 / 4.8b) — DO NOT modify. The dev transcript path is unrelated to the reviewer-side yield seam.
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — DO NOT modify. The reviewer session writer (which produces `reviewer-result.json`) is unchanged; yield is a separate parser path on the chat transcript.
-- `plugins/crew/mcp-server/src/tools/lookup-role-by-domain.ts` (Story 2.3) — DO NOT modify. Consumed as-is; first-encountered-on-collision behaviour preserved verbatim.
-- `plugins/crew/mcp-server/src/tools/build-persona-spawn-prompt.ts` (Story 4.2) — DO NOT modify. Consumed as-is; the existing `<token>` substitution-instruction line (Story 4.3 Task 5) already handles `<domain>` placeholders generically.
-- `plugins/crew/mcp-server/src/tools/read-persona.ts` (Story 2.3) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12) — DO NOT modify. `processReviewerYield` is not a subagent-callable tool.
-- `plugins/crew/mcp-server/src/schemas/persona.ts` / `catalogue.ts` (Story 2.1 / 2.3) — DO NOT modify. `LockedPhrasesSchema` already accepts the renamed yield string; no schema change.
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The SKILL.md wiring for `processReviewerYield` lands in a sibling story; v1 ships the tool and the parser only.
+- `plugins/flow/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. The discriminated-union dispatch already handles new event types via the schema; no logger change needed.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — DO NOT modify. The revision-2 contract (read `reviewer-result.json`, switch on `recommendedVerdict`) is unchanged.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5 / 4.8b) — DO NOT modify. The dev transcript path is unrelated to the reviewer-side yield seam.
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — DO NOT modify. The reviewer session writer (which produces `reviewer-result.json`) is unchanged; yield is a separate parser path on the chat transcript.
+- `plugins/flow/mcp-server/src/tools/lookup-role-by-domain.ts` (Story 2.3) — DO NOT modify. Consumed as-is; first-encountered-on-collision behaviour preserved verbatim.
+- `plugins/flow/mcp-server/src/tools/build-persona-spawn-prompt.ts` (Story 4.2) — DO NOT modify. Consumed as-is; the existing `<token>` substitution-instruction line (Story 4.3 Task 5) already handles `<domain>` placeholders generically.
+- `plugins/flow/mcp-server/src/tools/read-persona.ts` (Story 2.3) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12) — DO NOT modify. `processReviewerYield` is not a subagent-callable tool.
+- `plugins/flow/mcp-server/src/schemas/persona.ts` / `catalogue.ts` (Story 2.1 / 2.3) — DO NOT modify. `LockedPhrasesSchema` already accepts the renamed yield string; no schema change.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/schemas/telemetry-events.ts`** (Story 1.5; locked-by-default because the closed discriminated union is contract surface) — Task 2 appends `YieldHandoffEventSchema` to the closed union. Additive-extension pattern explicitly anticipated by the file's "Closed set in v1" docstring; same precedent as Story 4.12's three additions.
-- **`plugins/crew/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 5 registers one new tool. Bump the tool-count assertion in `__tests__/tool-registration.test.ts` from 27 to 28.
-- **`plugins/crew/catalogue/*.md`** (Story 2.1; locked because the shipped catalogue is the canonical role definitions surface) — Task 6 renames the locked-phrase token `<role>` → `<domain>` and adds the trailing period across every shipped catalogue file that carries a `locked_phrases.yield` value (frontmatter-only edit; no body changes). Task 7 adds the in-domain insistence sentence to each shipped specialist catalogue file's `## Mandate` section (body-only edit; no frontmatter changes). Together these are the smallest possible catalogue surface needed to deliver AC1 and AC2; no other catalogue content is touched.
+- **`plugins/flow/mcp-server/src/schemas/telemetry-events.ts`** (Story 1.5; locked-by-default because the closed discriminated union is contract surface) — Task 2 appends `YieldHandoffEventSchema` to the closed union. Additive-extension pattern explicitly anticipated by the file's "Closed set in v1" docstring; same precedent as Story 4.12's three additions.
+- **`plugins/flow/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 5 registers one new tool. Bump the tool-count assertion in `__tests__/tool-registration.test.ts` from 27 to 28.
+- **`plugins/flow/catalogue/*.md`** (Story 2.1; locked because the shipped catalogue is the canonical role definitions surface) — Task 6 renames the locked-phrase token `<role>` → `<domain>` and adds the trailing period across every shipped catalogue file that carries a `locked_phrases.yield` value (frontmatter-only edit; no body changes). Task 7 adds the in-domain insistence sentence to each shipped specialist catalogue file's `## Mandate` section (body-only edit; no frontmatter changes). Together these are the smallest possible catalogue surface needed to deliver AC1 and AC2; no other catalogue content is touched.
 
 ---
 
@@ -354,38 +354,38 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/skills/yield-parser.ts` (Task 1.1)
-- `plugins/crew/mcp-server/src/skills/__tests__/yield-parser.test.ts` (Task 1.6)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts` (Task 4.1)
-- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-yield.test.ts` (Task 8.1)
-- `plugins/crew/mcp-server/src/__tests__/in-domain-insistence-prose.test.ts` (Task 8.2)
-- `plugins/crew/mcp-server/src/__tests__/yield-phrase-locked.test.ts` (Task 8.3)
+- `plugins/flow/mcp-server/src/skills/yield-parser.ts` (Task 1.1)
+- `plugins/flow/mcp-server/src/skills/__tests__/yield-parser.test.ts` (Task 1.6)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts` (Task 4.1)
+- `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-yield.test.ts` (Task 8.1)
+- `plugins/flow/mcp-server/src/__tests__/in-domain-insistence-prose.test.ts` (Task 8.2)
+- `plugins/flow/mcp-server/src/__tests__/yield-phrase-locked.test.ts` (Task 8.3)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — Task 2.1–2.3 (append `YieldHandoffEventSchema`).
-- `plugins/crew/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` — Task 2.5 (append sub-describe for `yield.handoff`).
-- `plugins/crew/mcp-server/src/tools/register.ts` — Task 5.1 (register `processReviewerYield`).
-- `plugins/crew/mcp-server/src/tools/__tests__/tool-registration.test.ts` (or the equivalent count-assertion test, if present) — Task 5.1 (bump 27 → 28).
-- `plugins/crew/catalogue/generalist-reviewer.md` — Task 6 (token rename + trailing period in `locked_phrases.yield`).
-- `plugins/crew/catalogue/generalist-dev.md` — Task 6.
-- `plugins/crew/catalogue/security-specialist.md` — Tasks 6 + 7 (token rename + in-domain insistence sentence).
-- `plugins/crew/catalogue/test-specialist.md` — Tasks 6 + 7.
-- `plugins/crew/catalogue/docs-specialist.md` — Tasks 6 + 7.
-- `plugins/crew/catalogue/debugger.md` — Tasks 6 + 7.
-- `plugins/crew/catalogue/planner.md` — Task 6.
-- `plugins/crew/catalogue/orchestrator.md` — Task 6.
-- `plugins/crew/catalogue/retro-analyst.md` — Task 6.
-- `plugins/crew/catalogue/hiring-manager.md` — Task 6.
-- `plugins/crew/mcp-server/dist/` — Task 9.3 (rebuilt output committed).
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — Task 2.1–2.3 (append `YieldHandoffEventSchema`).
+- `plugins/flow/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` — Task 2.5 (append sub-describe for `yield.handoff`).
+- `plugins/flow/mcp-server/src/tools/register.ts` — Task 5.1 (register `processReviewerYield`).
+- `plugins/flow/mcp-server/src/tools/__tests__/tool-registration.test.ts` (or the equivalent count-assertion test, if present) — Task 5.1 (bump 27 → 28).
+- `plugins/flow/catalogue/generalist-reviewer.md` — Task 6 (token rename + trailing period in `locked_phrases.yield`).
+- `plugins/flow/catalogue/generalist-dev.md` — Task 6.
+- `plugins/flow/catalogue/security-specialist.md` — Tasks 6 + 7 (token rename + in-domain insistence sentence).
+- `plugins/flow/catalogue/test-specialist.md` — Tasks 6 + 7.
+- `plugins/flow/catalogue/docs-specialist.md` — Tasks 6 + 7.
+- `plugins/flow/catalogue/debugger.md` — Tasks 6 + 7.
+- `plugins/flow/catalogue/planner.md` — Task 6.
+- `plugins/flow/catalogue/orchestrator.md` — Task 6.
+- `plugins/flow/catalogue/retro-analyst.md` — Task 6.
+- `plugins/flow/catalogue/hiring-manager.md` — Task 6.
+- `plugins/flow/mcp-server/dist/` — Task 9.3 (rebuilt output committed).
 
 ### Conventions to pre-empt validator catches
 
 - **Zod 4.x error format.** This codebase is on Zod 4.x. Any vitest assertion against a Zod error message MUST use the v4 output format: `"Invalid option"` (not v3's `"Invalid enum value"`); `{ message: "..." }` form for literal custom errors (not v3's `errorMap` callback). Verified against Story 4-9 / 4-12 pass-2 validator catches.
 - **Tmpdir fixtures.** Every test fixture that creates a tmpdir MUST use `await fs.mkdtemp(path.join(os.tmpdir(), "yield-protocol-"))`. Never bare string concatenation; never `${os.tmpdir()}/foo` interpolation; never a fixed path. Verified against Story 4-9 / 4-12 pass-2 validator catches.
-- **Cross-AC consistency.** Every error-path clause MUST agree across (i) the AC unpacked sections above, (ii) the Tasks list, (iii) the Implementation strategy, and (iv) the AC6 sub-cases. Specifically: the routing-failure manifest stamp value is `"routing-failure"` (kebab-case, no trailing dot) in every reference; the self-yield manifest stamp value is `"routing-self-yield"` (same convention); the success chat-line format is exactly `yield routed — from <fromRole> to <toRole> on domain "<domain>" — spawning specialist reviewer (clean context)` with the em-dash separator and quoted domain string; the failure chat-line format is exactly `[routing-failure] no hired role matches domain "<domain>" — story <ref> blocked. Clear blocked_by on the manifest and re-run /crew:start after hiring a role with this domain.` with the bracketed prefix; the locked yield phrase is exactly `This sits in <domain>'s domain — handing off.` with em-dash and trailing period. Any inconsistency in these literals is a spec defect — re-read both spec and tests before changing.
+- **Cross-AC consistency.** Every error-path clause MUST agree across (i) the AC unpacked sections above, (ii) the Tasks list, (iii) the Implementation strategy, and (iv) the AC6 sub-cases. Specifically: the routing-failure manifest stamp value is `"routing-failure"` (kebab-case, no trailing dot) in every reference; the self-yield manifest stamp value is `"routing-self-yield"` (same convention); the success chat-line format is exactly `yield routed — from <fromRole> to <toRole> on domain "<domain>" — spawning specialist reviewer (clean context)` with the em-dash separator and quoted domain string; the failure chat-line format is exactly `[routing-failure] no hired role matches domain "<domain>" — story <ref> blocked. Clear blocked_by on the manifest and re-run /flow:start after hiring a role with this domain.` with the bracketed prefix; the locked yield phrase is exactly `This sits in <domain>'s domain — handing off.` with em-dash and trailing period. Any inconsistency in these literals is a spec defect — re-read both spec and tests before changing.
 - **Test fixture for `tool-registration.test.ts`.** If the tool-count assertion is absent (some Epic-1 stories elided it), Task 5.1 is a no-op for the test bump; just register the tool. Grep for `\.toHaveLength\(27\)` / `\.toBe\(27\)` in the test directory to confirm.
-- **The `gray-matter` dependency.** Task 8.3's catalogue-content test parses YAML frontmatter via `gray-matter`. Grep for `gray-matter` in `plugins/crew/mcp-server/package.json` to confirm it's already present; it is used by `parsePersonaFile` and `parseCatalogueFile`. If not present at the top level, import via `from "gray-matter"` (the transitive dep through the existing parsers is sufficient for vitest discovery).
+- **The `gray-matter` dependency.** Task 8.3's catalogue-content test parses YAML frontmatter via `gray-matter`. Grep for `gray-matter` in `plugins/flow/mcp-server/package.json` to confirm it's already present; it is used by `parsePersonaFile` and `parseCatalogueFile`. If not present at the top level, import via `from "gray-matter"` (the transitive dep through the existing parsers is sufficient for vitest discovery).
 
 ### Status flip clause
 

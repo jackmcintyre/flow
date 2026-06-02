@@ -13,10 +13,10 @@ so that **my first install of the plugin gives me a concrete, runnable confirmat
 This story closes Epic 1 by tying every primitive built in 1.1–1.6 into a single user-visible surface:
 
 1. **`getStatus` MCP tool** — a new tool at `mcp-server/src/tools/get-status.ts` that composes (a) `getPluginVersion()` from Story 1.1, (b) `resolveWorkspace()` from Story 1.2, (c) `validateActiveAdapter()` from Story 1.2b, and (d) `lookupStandards()` from Story 1.3 to return a typed `StatusReport`. Registered against the MCP server via `server.registerTool(...)` in a new `mcp-server/src/tools/register.ts` that wires every tool the plugin ships (today: only `getStatus`; later stories append).
-2. **`/<plugin>:status` skill** — a new slash-command Markdown file at `plugins/crew/skills/status.md` (using the skill-file shape pinned by `architecture/implementation-patterns-consistency-rules.md` §8). The skill's job: invoke the `getStatus` MCP tool, then print one canonical status block to the user.
-3. **`docs/README-install.md`** — a new walkthrough at `plugins/crew/docs/README-install.md` covering install path through "the plugin sees my repo" (FR73 partial — the full install path lands in Epic 7 Story 7.2). Six checkpoints, each runnable, each with the exact expected output line.
-4. **Plugin README update** — `plugins/crew/README.md` becomes a one-screen pointer to `docs/README-install.md` for the install path and to the PRD for the broader vision. The current standards-doc paragraph collapses into a single link into `README-install.md` step 3.
-5. **Root README update** — `README.md` at the repo root currently still references the legacy `sprint-orchestrator` plugin (lines 1–60). Replace with a one-page pointer at `plugins/crew/docs/README-install.md`. The full first-run-in-5-minutes flow lands in Epic 7 Story 7.2; v1 of Epic 1 just retires the stale copy and points to the install walkthrough.
+2. **`/<plugin>:status` skill** — a new slash-command Markdown file at `plugins/flow/skills/status.md` (using the skill-file shape pinned by `architecture/implementation-patterns-consistency-rules.md` §8). The skill's job: invoke the `getStatus` MCP tool, then print one canonical status block to the user.
+3. **`docs/README-install.md`** — a new walkthrough at `plugins/flow/docs/README-install.md` covering install path through "the plugin sees my repo" (FR73 partial — the full install path lands in Epic 7 Story 7.2). Six checkpoints, each runnable, each with the exact expected output line.
+4. **Plugin README update** — `plugins/flow/README.md` becomes a one-screen pointer to `docs/README-install.md` for the install path and to the PRD for the broader vision. The current standards-doc paragraph collapses into a single link into `README-install.md` step 3.
+5. **Root README update** — `README.md` at the repo root currently still references the legacy `sprint-orchestrator` plugin (lines 1–60). Replace with a one-page pointer at `plugins/flow/docs/README-install.md`. The full first-run-in-5-minutes flow lands in Epic 7 Story 7.2; v1 of Epic 1 just retires the stale copy and points to the install walkthrough.
 6. **Vitest coverage (epic AC4)** — a new integration test at `mcp-server/tests/get-status.test.ts` drives the MCP tool against (a) a fresh target repo with a missing `docs/standards.md`, (b) a configured target repo with a valid `docs/standards.md`, (c) a target repo with a malformed `docs/standards.md`. Each produces the expected status-line text per the rules pinned in this spec.
 
 **This story does NOT** (a) introduce a "cycle" concept beyond a `current_cycle: "none"` placeholder — cycle archival lands in Epic 6 Story 6.12; (b) ship the full first-run-in-5-minutes README (Epic 7 Story 7.2); (c) wire `/status` into the orchestration loop or watch surface (Epic 5); (d) cache the status report across invocations — every call re-resolves; (e) emit telemetry from `getStatus` — `/status` is a read-only diagnostic, no `skill.invoke` event from the MCP tool layer for v1 (skills emit their own `skill.invoke` events in later stories); (f) add any new domain errors — every failure mode in this story is already covered by errors from Stories 1.2 / 1.2b / 1.3.
@@ -28,7 +28,7 @@ The seam: every install walkthrough, every recovery doc, every CI smoke check fr
 ## Acceptance Criteria
 
 **AC1 — `/<plugin>:status` against a freshly cloned repo with the plugin loaded and a valid target-repo config prints the canonical status block (FR74):**
-**Given** a target repo with `<targetRepoRoot>/.crew/config.yaml` resolving cleanly (Story 1.2 AC1) and `<targetRepoRoot>/docs/standards.md` parsing cleanly against `StandardsDocSchema` (Story 1.3),
+**Given** a target repo with `<targetRepoRoot>/.flow/config.yaml` resolving cleanly (Story 1.2 AC1) and `<targetRepoRoot>/docs/standards.md` parsing cleanly against `StandardsDocSchema` (Story 1.3),
 **When** the user runs `/<plugin>:status` from inside Claude Code with that target repo loaded,
 **Then** the skill calls the `getStatus` MCP tool (and nothing else under the hood — no direct `fs.read` from the skill body, no shelled `node` script),
 **And** the tool returns a `StatusReport` whose fields satisfy the `StatusReportSchema` defined in `mcp-server/src/schemas/status-report.ts` (see Task 1),
@@ -53,31 +53,31 @@ cycle: <none | <ulid>>
 **When** `/<plugin>:status` is invoked,
 **Then** the code path is byte-identical to the split-repo case — `getStatus` accepts `targetRepoRoot` as its single input argument and does not branch on "is this the plugin's own repo,"
 **And** the rendered status block uses the same five-line grammar from AC1,
-**And** the integration test at `mcp-server/tests/get-status.test.ts` includes an explicit `it("same-repo and split-repo produce identical renders for identical fixture state")` case that pre-seeds two tmp dirs with byte-identical `.crew/config.yaml` + `docs/standards.md`, calls `getStatus` against each, and asserts the rendered string of the second is equal to the first after substituting the target-repo path,
+**And** the integration test at `mcp-server/tests/get-status.test.ts` includes an explicit `it("same-repo and split-repo produce identical renders for identical fixture state")` case that pre-seeds two tmp dirs with byte-identical `.flow/config.yaml` + `docs/standards.md`, calls `getStatus` against each, and asserts the rendered string of the second is equal to the first after substituting the target-repo path,
 **And** `/<plugin>:status` is invoked the same way (same skill file, same MCP tool name, same argument shape) in both cases — no parallel skill, no parallel tool, no environment-variable switch.
 
 **AC3 — `docs/README-install.md` walks install through "the plugin sees my repo" with six verifiable checkpoints (FR71, FR73):**
-**Given** the new walkthrough at `plugins/crew/docs/README-install.md`,
+**Given** the new walkthrough at `plugins/flow/docs/README-install.md`,
 **When** a fresh reader follows the checkpoints in order,
 **Then** the file contains EXACTLY these six numbered checkpoints, each with the exact runnable command and the exact expected confirmation line — checkpoint copy MUST satisfy the `CHECKPOINT_BLOCK_REGEX` from Task 3:
 
 1. **Install Claude Code.** Command: `claude --version`. Expected confirmation: a line matching `^claude \d+\.\d+\.\d+`.
-2. **Clone the repo and install plugin dependencies.** Command: `git clone https://github.com/jackmcintyre/crew.git && cd crew && pnpm --dir plugins/crew install`. Expected confirmation: the final line of `pnpm install` matches `^(Done|Already up to date)` (pnpm prints one of these on success).
-3. **Load the plugin into Claude Code.** Command (inside Claude Code, from repo root): `/plugin install plugins/crew`. Expected confirmation: Claude Code prints `Plugin installed: crew@<semver>` where `<semver>` matches the `SEMVER_REGEX` from `plugin-manifest.ts`.
-4. **Restart Claude Code.** Command: quit and reopen Claude Code (no shell command). Expected confirmation: after reopen, the `/crew:` slash-command namespace appears in tab-complete with at least `/crew:status` listed.
-5. **Copy the standards template into your target repo.** Command: `cp plugins/crew/docs/standards-example.md <target-repo>/docs/standards.md`. Expected confirmation: `ls <target-repo>/docs/standards.md` returns the path (file now exists). The walkthrough notes that `<target-repo>` may be the same as the cloned `crew` repo (Jack's same-repo case) or a different repo (Maya's split-repo case) — no behavioural difference (back-reference AC2).
-6. **Run `/<plugin>:status` and see the expected line.** Command (inside Claude Code, with `<target-repo>` loaded as the workspace): `/crew:status`. Expected confirmation: a status block whose first line matches `^crew v\d+\.\d+\.\d+(?:-[\w.]+)?$` and whose `standards:` line starts with `standards: ok`.
+2. **Clone the repo and install plugin dependencies.** Command: `git clone https://github.com/jackmcintyre/crew.git && cd crew && pnpm --dir plugins/flow install`. Expected confirmation: the final line of `pnpm install` matches `^(Done|Already up to date)` (pnpm prints one of these on success).
+3. **Load the plugin into Claude Code.** Command (inside Claude Code, from repo root): `/plugin install plugins/flow`. Expected confirmation: Claude Code prints `Plugin installed: crew@<semver>` where `<semver>` matches the `SEMVER_REGEX` from `plugin-manifest.ts`.
+4. **Restart Claude Code.** Command: quit and reopen Claude Code (no shell command). Expected confirmation: after reopen, the `/flow:` slash-command namespace appears in tab-complete with at least `/flow:status` listed.
+5. **Copy the standards template into your target repo.** Command: `cp plugins/flow/docs/standards-example.md <target-repo>/docs/standards.md`. Expected confirmation: `ls <target-repo>/docs/standards.md` returns the path (file now exists). The walkthrough notes that `<target-repo>` may be the same as the cloned `crew` repo (Jack's same-repo case) or a different repo (Maya's split-repo case) — no behavioural difference (back-reference AC2).
+6. **Run `/<plugin>:status` and see the expected line.** Command (inside Claude Code, with `<target-repo>` loaded as the workspace): `/flow:status`. Expected confirmation: a status block whose first line matches `^crew v\d+\.\d+\.\d+(?:-[\w.]+)?$` and whose `standards:` line starts with `standards: ok`.
 
 The walkthrough's "Expected confirmation" copy for each checkpoint MUST be a single fenced code block tagged `text`, exactly matching the literal string shape above. The file MUST NOT include any steps beyond these six — full install (running the example sprint, scanning sources, running `/start`) is explicitly out of scope and lives in Epic 7 Story 7.2 (a forward-reference note at the bottom of the file points there).
 
 **AC4 — vitest integration coverage of `getStatus` against missing / valid / malformed standards (epic AC4):**
-`pnpm test` from `plugins/crew/` adds one new test file (`mcp-server/tests/get-status.test.ts`). The suite asserts:
-- **AC4a (valid standards.md):** Pre-seed `<root>/.crew/config.yaml` with a minimal valid config (re-use the fixture pattern from `workspace-resolver.test.ts`) and `<root>/docs/standards.md` with a copy of `plugins/crew/docs/standards-example.md`. Call `getStatus({ targetRepoRoot: root })`. Assert: (i) the returned `StatusReport` parses against `StatusReportSchema` with `standards.state === "ok"`, (ii) `report.adapter.state === "ok"` and `adapter.name === "bmad"`, (iii) `report.pluginVersion` matches `SEMVER_REGEX`, (iv) `renderStatus(report)` returns a string whose first line equals `crew v${report.pluginVersion}` and whose `standards:` line starts with `standards: ok — `.
-- **AC4b (missing standards.md):** Pre-seed `<root>/.crew/config.yaml` only. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw), (ii) `report.standards.state === "missing"`, (iii) `report.standards.path === path.join(root, "docs", "standards.md")`, (iv) `renderStatus(report)` produces a `standards: missing — <abs-path>` line, (v) `report.adapter.state === "ok"` (a missing standards doc does not invalidate the adapter — it just downgrades the standards line).
-- **AC4c (malformed standards.md):** Re-use one of the existing standards-doc fixture trees from `mcp-server/tests/fixtures/standards/malformed-*/` (Story 1.3). Pre-seed `<root>/.crew/config.yaml`. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw — the malformed case is a downgraded status, not a hard failure), (ii) `report.standards.state === "malformed"`, (iii) `report.standards.zodMessage` is a non-empty string surfaced from the underlying `StandardsDocMalformedError`, (iv) `renderStatus(report)` produces a `standards: malformed — <abs-path>` line.
-- **AC4d (stale adapter config):** Pre-seed `<root>/.crew/config.yaml` with `adapter: bmad` but **no** BMad markers in the tree (i.e. `BmadAdapter.detect(root)` returns `false`). Pre-seed `<root>/docs/standards.md` validly. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw — `validateActiveAdapter` is caught and projected into the report shape, not propagated), (ii) `report.adapter.state === "mismatched"`, (iii) `report.adapter.otherMatchingAdapters` is an array (possibly empty), (iv) `renderStatus(report)` produces an `adapter: bmad (mismatched)` line, (v) the `standards:` line is still `ok` (a mismatched adapter does not invalidate the standards line).
-- **AC4e (same-repo / split-repo identical render):** Set up two tmp dirs A and B with byte-identical `.crew/config.yaml` + `docs/standards.md` contents. Call `getStatus({ targetRepoRoot: A })` and `getStatus({ targetRepoRoot: B })`. Substitute the absolute path of B into the rendered string for A and assert string equality with B's render. Documents the FR74 one-code-path invariant.
-- **AC4f (README-install.md self-consistency):** Read `plugins/crew/docs/README-install.md` from disk. Assert: (i) the file contains exactly six checkpoint blocks matched by the `CHECKPOINT_BLOCK_REGEX` from Task 3 — `^\d+\.\s+\*\*[^*]+\.\*\*` — , (ii) checkpoint 6's "Expected confirmation" code block contains the literal substring `crew v` and the literal substring `standards: ok`, (iii) the file ends with a `> See Story 7.2 (Epic 7) for the full first-run walkthrough.` forward-reference line.
+`pnpm test` from `plugins/flow/` adds one new test file (`mcp-server/tests/get-status.test.ts`). The suite asserts:
+- **AC4a (valid standards.md):** Pre-seed `<root>/.flow/config.yaml` with a minimal valid config (re-use the fixture pattern from `workspace-resolver.test.ts`) and `<root>/docs/standards.md` with a copy of `plugins/flow/docs/standards-example.md`. Call `getStatus({ targetRepoRoot: root })`. Assert: (i) the returned `StatusReport` parses against `StatusReportSchema` with `standards.state === "ok"`, (ii) `report.adapter.state === "ok"` and `adapter.name === "bmad"`, (iii) `report.pluginVersion` matches `SEMVER_REGEX`, (iv) `renderStatus(report)` returns a string whose first line equals `crew v${report.pluginVersion}` and whose `standards:` line starts with `standards: ok — `.
+- **AC4b (missing standards.md):** Pre-seed `<root>/.flow/config.yaml` only. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw), (ii) `report.standards.state === "missing"`, (iii) `report.standards.path === path.join(root, "docs", "standards.md")`, (iv) `renderStatus(report)` produces a `standards: missing — <abs-path>` line, (v) `report.adapter.state === "ok"` (a missing standards doc does not invalidate the adapter — it just downgrades the standards line).
+- **AC4c (malformed standards.md):** Re-use one of the existing standards-doc fixture trees from `mcp-server/tests/fixtures/standards/malformed-*/` (Story 1.3). Pre-seed `<root>/.flow/config.yaml`. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw — the malformed case is a downgraded status, not a hard failure), (ii) `report.standards.state === "malformed"`, (iii) `report.standards.zodMessage` is a non-empty string surfaced from the underlying `StandardsDocMalformedError`, (iv) `renderStatus(report)` produces a `standards: malformed — <abs-path>` line.
+- **AC4d (stale adapter config):** Pre-seed `<root>/.flow/config.yaml` with `adapter: bmad` but **no** BMad markers in the tree (i.e. `BmadAdapter.detect(root)` returns `false`). Pre-seed `<root>/docs/standards.md` validly. Call `getStatus(...)`. Assert: (i) the call resolves (does NOT throw — `validateActiveAdapter` is caught and projected into the report shape, not propagated), (ii) `report.adapter.state === "mismatched"`, (iii) `report.adapter.otherMatchingAdapters` is an array (possibly empty), (iv) `renderStatus(report)` produces an `adapter: bmad (mismatched)` line, (v) the `standards:` line is still `ok` (a mismatched adapter does not invalidate the standards line).
+- **AC4e (same-repo / split-repo identical render):** Set up two tmp dirs A and B with byte-identical `.flow/config.yaml` + `docs/standards.md` contents. Call `getStatus({ targetRepoRoot: A })` and `getStatus({ targetRepoRoot: B })`. Substitute the absolute path of B into the rendered string for A and assert string equality with B's render. Documents the FR74 one-code-path invariant.
+- **AC4f (README-install.md self-consistency):** Read `plugins/flow/docs/README-install.md` from disk. Assert: (i) the file contains exactly six checkpoint blocks matched by the `CHECKPOINT_BLOCK_REGEX` from Task 3 — `^\d+\.\s+\*\*[^*]+\.\*\*` — , (ii) checkpoint 6's "Expected confirmation" code block contains the literal substring `crew v` and the literal substring `standards: ok`, (iii) the file ends with a `> See Story 7.2 (Epic 7) for the full first-run walkthrough.` forward-reference line.
 
 All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-active-adapter 1.2b, standards-doc 1.3, permissions/canonical-fs 1.4, telemetry + git-commit 1.5, manifest-state-machine 1.6); total expected: existing baseline + new `get-status.test.ts`; all green, zero skips.
 
@@ -86,7 +86,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — `StatusReport` schema + types** (AC: 1, 2, 4)
-  - [ ] Create `plugins/crew/mcp-server/src/schemas/status-report.ts`. Define `StatusReportSchema` as a Zod object:
+  - [ ] Create `plugins/flow/mcp-server/src/schemas/status-report.ts`. Define `StatusReportSchema` as a Zod object:
     ```ts
     export const StatusReportSchema = z.object({
       pluginVersion: z.string().regex(SEMVER_REGEX),
@@ -116,7 +116,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] No default values. Every field is required at parse time — defenders against partial reports leaking out of the tool.
 
 - [ ] **Task 2 — `getStatus` tool + `renderStatus` helper** (AC: 1, 2, 4)
-  - [ ] Create `plugins/crew/mcp-server/src/tools/get-status.ts`. Export two functions:
+  - [ ] Create `plugins/flow/mcp-server/src/tools/get-status.ts`. Export two functions:
     1. `async function getStatus(opts: { targetRepoRoot: string }): Promise<StatusReport>` — composes the four primitives. **Algorithm (do not deviate):**
        1. `pluginVersion = getPluginVersion()`.
        2. `let workspace; let adapterReport;`
@@ -142,11 +142,11 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Do not** read `<targetRepoRoot>` directly — every read goes through the existing primitives (`resolveWorkspace`, `validateActiveAdapter`, `lookupStandards`). No new IO seam in this file.
 
 - [ ] **Task 3 — Register `getStatus` against the MCP server** (AC: 1, 2)
-  - [ ] Create `plugins/crew/mcp-server/src/tools/register.ts`. Export `registerAllTools(server: AiEngineeringTeamServer): void`. Body: a single call `server.registerTool({ name: "getStatus", description: "Return a typed status report for the resolved target repo (plugin version, adapter, standards-doc state, cycle).", inputSchema: { type: "object", properties: { targetRepoRoot: { type: "string" } }, required: ["targetRepoRoot"] }, handler: async (args) => { const root = z.string().min(1).parse(args.targetRepoRoot); const report = await getStatus({ targetRepoRoot: root }); return { content: [{ type: "text" as const, text: renderStatus(report) }] }; } })`. This file is the registration seam — every future story that ships a tool appends a `server.registerTool(...)` call here, keeping `server.ts` free of tool-specific imports.
+  - [ ] Create `plugins/flow/mcp-server/src/tools/register.ts`. Export `registerAllTools(server: AiEngineeringTeamServer): void`. Body: a single call `server.registerTool({ name: "getStatus", description: "Return a typed status report for the resolved target repo (plugin version, adapter, standards-doc state, cycle).", inputSchema: { type: "object", properties: { targetRepoRoot: { type: "string" } }, required: ["targetRepoRoot"] }, handler: async (args) => { const root = z.string().min(1).parse(args.targetRepoRoot); const report = await getStatus({ targetRepoRoot: root }); return { content: [{ type: "text" as const, text: renderStatus(report) }] }; } })`. This file is the registration seam — every future story that ships a tool appends a `server.registerTool(...)` call here, keeping `server.ts` free of tool-specific imports.
   - [ ] Wire `registerAllTools` into `mcp-server/src/index.ts` (the stdio entrypoint): import it after `createServer(...)` and call it before `server.connect(transport)`. **Do not** call it from `createServer` itself — keeping `createServer` tool-free is what lets `acceptance.test.ts` (Story 1.1) still assert "zero tools registered" on a bare `createServer()` call. The integration test at `mcp-server/tests/get-status.test.ts` (Task 5) calls `registerAllTools` explicitly on a fresh `createServer()` to test the end-to-end MCP path.
 
 - [ ] **Task 4 — `skills/status.md`** (AC: 1, 2)
-  - [ ] Create `plugins/crew/skills/status.md`. Follow the skill-file shape from `architecture/implementation-patterns-consistency-rules.md` §8:
+  - [ ] Create `plugins/flow/skills/status.md`. Follow the skill-file shape from `architecture/implementation-patterns-consistency-rules.md` §8:
     ```markdown
     ---
     name: crew:status
@@ -154,7 +154,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     allowed_tools: [Read]
     ---
 
-    # /crew:status
+    # /flow:status
 
     # What this skill does
 
@@ -162,7 +162,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
     # Prerequisites
 
-    A target repo with `.crew/config.yaml` resolved (auto-detected on first run by the workspace resolver — see `docs/README-install.md` checkpoint 5).
+    A target repo with `.flow/config.yaml` resolved (auto-detected on first run by the workspace resolver — see `docs/README-install.md` checkpoint 5).
 
     # Steps
 
@@ -171,20 +171,20 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
     # Failure modes
 
-    - **No `.crew/config.yaml` and no adapter matches:** the tool throws `NoAdapterMatchedError`. The skill surfaces the error message verbatim — it already tells the user to either init a planning tool the plugin understands or follow `docs/README-install.md` step 5.
-    - **`.crew/config.yaml` exists but the listed adapter no longer matches the repo:** the status line shows `adapter: <name> (mismatched)` and lists any other matching adapters the user can switch to. No exception is thrown — the report itself carries the downgrade.
-    - **`docs/standards.md` missing or malformed:** the `standards:` line shows `missing` or `malformed` (with the absolute path). Run `cp plugins/crew/docs/standards-example.md <target-repo>/docs/standards.md` to fix (README-install.md checkpoint 5).
+    - **No `.flow/config.yaml` and no adapter matches:** the tool throws `NoAdapterMatchedError`. The skill surfaces the error message verbatim — it already tells the user to either init a planning tool the plugin understands or follow `docs/README-install.md` step 5.
+    - **`.flow/config.yaml` exists but the listed adapter no longer matches the repo:** the status line shows `adapter: <name> (mismatched)` and lists any other matching adapters the user can switch to. No exception is thrown — the report itself carries the downgrade.
+    - **`docs/standards.md` missing or malformed:** the `standards:` line shows `missing` or `malformed` (with the absolute path). Run `cp plugins/flow/docs/standards-example.md <target-repo>/docs/standards.md` to fix (README-install.md checkpoint 5).
     ```
   - [ ] **Do not** put any logic in the skill body beyond "call the tool, print the result." All status-string assembly lives in `renderStatus` on the TS side, which is unit-tested.
   - [ ] `allowed_tools: [Read]` is intentional — the skill only reads the MCP tool's text response. No `Bash`, no `Edit`, no `Task`. (FR81 / NFR12 — minimum-necessary surface.)
 
 - [ ] **Task 5 — Integration test `get-status.test.ts`** (AC: 1, 2, 4)
-  - [ ] Create `plugins/crew/mcp-server/tests/get-status.test.ts`. Mirror the layout of `workspace-resolver.test.ts` for tmp-dir setup. Imports: `getStatus`, `renderStatus` (from `../src/tools/get-status.js`), `StatusReportSchema` (from `../src/schemas/status-report.js`), `SEMVER_REGEX` (from `../src/schemas/plugin-manifest.js`), and the standards-doc fixtures already on disk under `mcp-server/tests/fixtures/standards/`.
+  - [ ] Create `plugins/flow/mcp-server/tests/get-status.test.ts`. Mirror the layout of `workspace-resolver.test.ts` for tmp-dir setup. Imports: `getStatus`, `renderStatus` (from `../src/tools/get-status.js`), `StatusReportSchema` (from `../src/schemas/status-report.js`), `SEMVER_REGEX` (from `../src/schemas/plugin-manifest.js`), and the standards-doc fixtures already on disk under `mcp-server/tests/fixtures/standards/`.
   - [ ] **Test cases:**
     - `it("AC4a — valid standards.md → standards.state=ok, render starts with 'crew v', 'standards: ok — '")` — pre-seed valid config + standards, assert per AC4a.
     - `it("AC4b — missing standards.md → standards.state=missing, render contains 'standards: missing — '")` — pre-seed config only.
     - `it("AC4c — malformed standards.md → standards.state=malformed, zodMessage non-empty")` — re-use `mcp-server/tests/fixtures/standards/malformed-missing-field/docs/standards.md`.
-    - `it("AC4d — stale adapter config → adapter.state=mismatched")` — pre-seed `.crew/config.yaml` with `adapter: bmad` against a tree where `BmadAdapter.detect()` returns false (re-use the technique from `validate-active-adapter.test.ts`).
+    - `it("AC4d — stale adapter config → adapter.state=mismatched")` — pre-seed `.flow/config.yaml` with `adapter: bmad` against a tree where `BmadAdapter.detect()` returns false (re-use the technique from `validate-active-adapter.test.ts`).
     - `it("AC4e — same-repo and split-repo produce identical renders for identical fixture state")` — set up tmp dirs A and B with byte-identical content, assert string equality after path substitution.
     - `it("AC4f — docs/README-install.md is well-formed (six checkpoints, ends with Story 7.2 forward-ref)")` — read the file with `readFileSync`, run the `CHECKPOINT_BLOCK_REGEX` (line-anchored, multiline) and assert exactly six matches; assert the file ends with the literal forward-reference line.
     - `it("AC1/AC3 — render's first line matches /^crew v\\d+\\.\\d+\\.\\d+(?:-[\\w.]+)?$/ and standards line starts with 'standards: ok — '")` — anchors the README checkpoint 6 expected-confirmation copy against the actual renderer output. **This is the self-consistency test** that pins README copy to renderer output: if either drifts, the test fails loud.
@@ -192,7 +192,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Test fixtures:** Re-use `BmadAdapter.detect`-friendly fixture trees from `workspace-resolver.test.ts` and `validate-active-adapter.test.ts`. Do not invent new adapter fixtures. The `malformed-cap-exceeded` and `malformed-missing-field` standards fixtures from 1.3 are already in tree — point at them.
   - [ ] **Determinism:** No `Date.now()`, no `Math.random()`, no network. All fixture state is on disk; the tool's only non-deterministic input is the absolute tmp path, which is substituted out in AC4e.
 
-- [ ] **Task 6 — `plugins/crew/docs/README-install.md`** (AC: 3, 4f)
+- [ ] **Task 6 — `plugins/flow/docs/README-install.md`** (AC: 3, 4f)
   - [ ] Create the file. Top-level heading: `# Install crew`. One-paragraph intro: "Six checkpoints from clone to seeing the plugin recognise your repo. Each step has one runnable command and one expected confirmation line. If a checkpoint fails, the failure is local to that step — don't proceed."
   - [ ] Render the six checkpoints in the order pinned by AC3. Each checkpoint MUST conform to this regex (line-anchored, multiline):
     ```ts
@@ -203,7 +203,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] Final line of the file: `> See Story 7.2 (Epic 7) for the full first-run walkthrough.` — exactly this text, on its own line, no trailing punctuation drift. **Asserted by AC4f.**
   - [ ] **Do not** include the example sprint, `/scan`, `/start`, `/watch`, or PR-merge steps — those are Story 7.2's surface. **Do not** include a "Troubleshooting" section — that is Story 7.5.
 
-- [ ] **Task 7 — Update `plugins/crew/README.md`** (AC: 3)
+- [ ] **Task 7 — Update `plugins/flow/README.md`** (AC: 3)
   - [ ] Rewrite the plugin README to a one-screen pointer:
     ```markdown
     # crew
@@ -233,17 +233,17 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
     ## Status
 
-    Active build. Epic 1 (plugin foundation) is in progress; the plugin is installable but not yet runnable end-to-end. See `plugins/crew/docs/README-install.md` for the install checkpoints available today.
+    Active build. Epic 1 (plugin foundation) is in progress; the plugin is installable but not yet runnable end-to-end. See `plugins/flow/docs/README-install.md` for the install checkpoints available today.
 
     ## Install
 
-    See [`plugins/crew/docs/README-install.md`](plugins/crew/docs/README-install.md).
+    See [`plugins/flow/docs/README-install.md`](plugins/flow/docs/README-install.md).
 
     ## Repository layout
 
     ```
-    plugins/crew/                  — the plugin (MCP server, skills, adapters)
-    plugins/crew/docs/             — install walkthrough, standards template
+    plugins/flow/                  — the plugin (MCP server, skills, adapters)
+    plugins/flow/docs/             — install walkthrough, standards template
     _bmad-output/                  — planning artifacts (PRD, epics, stories) — gitignored
     ```
 
@@ -255,7 +255,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Do not** add the "Run your first example sprint in 5 minutes" section here — that's Story 7.2.
 
 - [ ] **Task 9 — Smoke verification (no automated test gate — manual sanity check)**
-  - [ ] From `plugins/crew/`: `pnpm install && pnpm build && pnpm test`. All suites green, including the new `get-status.test.ts`.
+  - [ ] From `plugins/flow/`: `pnpm install && pnpm build && pnpm test`. All suites green, including the new `get-status.test.ts`.
   - [ ] Spot-check the rendered status block by running `node` against a minimal harness — left as a dev-aid, not committed:
     ```ts
     import { getStatus, renderStatus } from "./mcp-server/dist/tools/get-status.js";
@@ -278,17 +278,17 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 ### Files to create
 
-- `plugins/crew/mcp-server/src/schemas/status-report.ts` (NEW)
-- `plugins/crew/mcp-server/src/tools/get-status.ts` (NEW)
-- `plugins/crew/mcp-server/src/tools/register.ts` (NEW — the tool-registration seam future stories extend)
-- `plugins/crew/skills/status.md` (NEW)
-- `plugins/crew/docs/README-install.md` (NEW)
-- `plugins/crew/mcp-server/tests/get-status.test.ts` (NEW)
+- `plugins/flow/mcp-server/src/schemas/status-report.ts` (NEW)
+- `plugins/flow/mcp-server/src/tools/get-status.ts` (NEW)
+- `plugins/flow/mcp-server/src/tools/register.ts` (NEW — the tool-registration seam future stories extend)
+- `plugins/flow/skills/status.md` (NEW)
+- `plugins/flow/docs/README-install.md` (NEW)
+- `plugins/flow/mcp-server/tests/get-status.test.ts` (NEW)
 
 ### Files to modify
 
-- `plugins/crew/mcp-server/src/index.ts` — import `registerAllTools` and call it before `server.connect`. Do NOT touch `createServer` in `server.ts` (Story 1.1 acceptance asserts a bare `createServer()` registers zero tools).
-- `plugins/crew/README.md` — rewrite to a one-screen pointer per Task 7.
+- `plugins/flow/mcp-server/src/index.ts` — import `registerAllTools` and call it before `server.connect`. Do NOT touch `createServer` in `server.ts` (Story 1.1 acceptance asserts a bare `createServer()` registers zero tools).
+- `plugins/flow/README.md` — rewrite to a one-screen pointer per Task 7.
 - `README.md` (repo root) — rewrite to retire sprint-orchestrator references per Task 8.
 
 ### Files NOT to modify (read-only context)
@@ -341,7 +341,7 @@ If the implementation deviates from any of the four above, both the spec example
 
 ### Git intelligence (recent commits informing this story)
 
-- `b4dbaa6 chore: rename claude-dev-loop → crew everywhere (repo + plugin namespace)` — confirms plugin name is `crew`, slash-command namespace is `/crew:`. The skill's `name: crew:status` reflects this.
+- `b4dbaa6 chore: rename claude-dev-loop → crew everywhere (repo + plugin namespace)` — confirms plugin name is `crew`, slash-command namespace is `/flow:`. The skill's `name: crew:status` reflects this.
 - `bbdc10c feat(1.6): atomic fs.rename state-machine primitive` — last completed story; this story closes Epic 1.
 - `a4b2a36 feat(ship-story): persist resolve JSON, surface reviewer notes, tighten validator` — orthogonal harness work, no impact on this story.
 

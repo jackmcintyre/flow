@@ -47,7 +47,7 @@ Story 4.6 closes that loop by moving "did I actually read the diff?" and "did I 
 
 ## Acceptance Criteria
 
-> AC1, AC2, AC3, AC4 are verbatim from the epic. AC5 is the user-surface contract this story makes — the operator-observable promise that the rubber-stamp failure mode is closed. Per `plugins/crew/docs/user-surface-acs.md`, AC5 tagged `(user-surface)`; the others describe internal reviewer behaviour and stay untagged. AC4 retains its `(integration)` tag.
+> AC1, AC2, AC3, AC4 are verbatim from the epic. AC5 is the user-surface contract this story makes — the operator-observable promise that the rubber-stamp failure mode is closed. Per `plugins/flow/docs/user-surface-acs.md`, AC5 tagged `(user-surface)`; the others describe internal reviewer behaviour and stay untagged. AC4 retains its `(integration)` tag.
 
 **AC1:**
 **Given** a PR opened by the dev subagent,
@@ -62,7 +62,7 @@ Story 4.6 closes that loop by moving "did I actually read the diff?" and "did I 
 <!-- Not user-surface: AC2 describes in-memory data shape for downstream (Story 4.6b) consumption. -->
 
 **AC3:**
-**Given** the standards-doc lookup AND the executed AC results, **When** the reviewer's composite tool returns, **Then** (a) the criteria array is held in memory keyed by id so each can be checked against the diff independently, AND (b) `runReviewerSession` persists a structured `reviewer-result.json` to `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/` containing `recommendedVerdict` derived deterministically from `acResults` (literal: `"READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED"`), AND (c) `processReviewerTranscript` reads that file and returns the corresponding result variant — the verdict transport is the file, not the chat. _(FR32)_
+**Given** the standards-doc lookup AND the executed AC results, **When** the reviewer's composite tool returns, **Then** (a) the criteria array is held in memory keyed by id so each can be checked against the diff independently, AND (b) `runReviewerSession` persists a structured `reviewer-result.json` to `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/` containing `recommendedVerdict` derived deterministically from `acResults` (literal: `"READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED"`), AND (c) `processReviewerTranscript` reads that file and returns the corresponding result variant — the verdict transport is the file, not the chat. _(FR32)_
 
 <!-- Not user-surface: AC3 is the structural-anchor AC asserting (i) an internal data shape and (ii) the file-based verdict transport. Revised 2026-05-24 (revision 2) to fold in deterministic-verdict-transport. -->
 
@@ -73,10 +73,10 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
 
 **AC5 (user-surface):**
 **Given** a target repo with a ready story whose dev subagent fails to produce the AC artifact (the canonical 4.3c rubber-stamp scenario reproduced),
-**When** the operator runs `/crew:start` against that scratch repo end-to-end and the reviewer subagent reaches the verdict step,
+**When** the operator runs `/flow:start` against that scratch repo end-to-end and the reviewer subagent reaches the verdict step,
 **Then** the operator observes (a) the in-progress manifest stamped with `blocked_by: "reviewer-verdict-needs-changes"` (or the equivalent variant for `BLOCKED`) — derived from `recommendedVerdict` in the persisted `reviewer-result.json`, NOT from chat-prose scraping — AND (b) the missing artifact (`target-file.txt`) is referenced in either the reviewer's chat output OR the `acResults[0].reason` field of the persisted `reviewer-result.json`, AND (c) the manifest does NOT move to `done/`. The 4.3c rubber-stamp behaviour (green verdict against a missing artifact) is no longer observable; AND the 2026-05-24 trial-7 failure mode (correct semantics defeated by `done-blocked-reviewer-grammar` because the reviewer LLM appended trailing prose after the verdict sentinel) is no longer possible — the verdict transport is structured, not prose. _(FR30, FR31, FR32 — operator-observable promise)_
 
-<!-- User-surface: AC5 names `/crew:start`, the operator's chat surface, and the manifest's `blocked_by` stamp (now derived from the persisted file). Revised 2026-05-24 (revision 2): the verdict text is no longer the load-bearing chat artifact — the file is. AC5's prose-reference clause is satisfied by EITHER chat OR the persisted reason field. Smoke-gate this AC via operator-smoke before merging. -->
+<!-- User-surface: AC5 names `/flow:start`, the operator's chat surface, and the manifest's `blocked_by` stamp (now derived from the persisted file). Revised 2026-05-24 (revision 2): the verdict text is no longer the load-bearing chat artifact — the file is. AC5's prose-reference clause is satisfied by EITHER chat OR the persisted reason field. Smoke-gate this AC via operator-smoke before merging. -->
 
 ### Expanded acceptance specifics (folded into AC1–AC5 above; each clause maps to an AC for the AC-table gate)
 
@@ -92,7 +92,7 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
 
 **AC2 unpacked.** AC execution mechanics, applicability matrix, and the `acResults` shape:
 
-- (2a) **AC enumeration via existing `extractAcsFromSpec`:** the composite tool reuses `lib/extract-acs-from-spec.ts` to enumerate ACs from the source story's spec path. The adapter's `SourceStory` carries `specPath` (verify shape in `adapters/adapter.ts`; native adapter returns `specPath = <targetRepoRoot>/.crew/native-stories/<ULID>.md`). The tool calls `extractAcsFromSpec(specPath)` and gets back an `AcEntry[]` (`{ index, firstLine }`). v1 extends the existing extractor by ALSO capturing the `(user-surface)`/`(integration)`/`(<tag>)` parenthetical tag and the full body lines (until the next AC heading or end of section). The extended return type is `AcEntry[]` with new fields `tag?: string` and `body: string[]`. The extractor change is additive — existing callers (Story 4.4) read only `{ index, firstLine }` and are unaffected. (Declared locked-file change — see § Locked files.)
+- (2a) **AC enumeration via existing `extractAcsFromSpec`:** the composite tool reuses `lib/extract-acs-from-spec.ts` to enumerate ACs from the source story's spec path. The adapter's `SourceStory` carries `specPath` (verify shape in `adapters/adapter.ts`; native adapter returns `specPath = <targetRepoRoot>/.flow/native-stories/<ULID>.md`). The tool calls `extractAcsFromSpec(specPath)` and gets back an `AcEntry[]` (`{ index, firstLine }`). v1 extends the existing extractor by ALSO capturing the `(user-surface)`/`(integration)`/`(<tag>)` parenthetical tag and the full body lines (until the next AC heading or end of section). The extended return type is `AcEntry[]` with new fields `tag?: string` and `body: string[]`. The extractor change is additive — existing callers (Story 4.4) read only `{ index, firstLine }` and are unaffected. (Declared locked-file change — see § Locked files.)
 - (2b) **Applicability classifier:** for each `AcEntry`, the tool classifies applicability by scanning `body` lines:
   - **`runnable-artifact-check`:** body contains a line matching `/^artifact:\s*(\S+)$/` (e.g. `artifact: hello-a.txt`). The artifact path is resolved relative to `targetRepoRoot`.
   - **`runnable-vitest`:** body contains a line matching `/^vitest:\s*(.+)$/` (e.g. `vitest: completeStory atomically renames manifest`). The capture group is the test-name filter passed to `pnpm vitest --run -t "<name>"`.
@@ -126,15 +126,15 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
   1. If `Object.values(acResults).some(r => r.status === "fail")` → `"NEEDS CHANGES"`.
   2. Else if `acResults` is empty OR `Object.values(acResults).some(r => r.applicability === "manual-check-required")` → `"BLOCKED"`. (Empty `acResults` means no runnable check exists to certify correctness — per (2h), no-AC stories produce `recommendedVerdict: "BLOCKED"`.)
   3. Else → `"READY FOR MERGE"`. (Every AC is `runnable-*` AND status `"pass"`.)
-- (3g) **Persisted `reviewer-result.json` side-effect (NEW — revision 2):** before returning, `runReviewerSession` serialises the full `ReviewerSessionResult` to disk via `atomicWriteFile` (Story 1.6's helper) at the path `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`. File contents shape: `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }` (the `sourceStory` and `prDiff` fields are NOT persisted — they're heavy reads kept in-memory only for the return value; only the verdict-relevant projection lives on disk). The directory is created via `mkdir -p` semantics if absent. This is the same tool-layer side-effect pattern as Story 4.3c's `completeStory` call inside `processReviewerTranscript`: load-bearing decisions live in the tool layer, not in LLM prose.
+- (3g) **Persisted `reviewer-result.json` side-effect (NEW — revision 2):** before returning, `runReviewerSession` serialises the full `ReviewerSessionResult` to disk via `atomicWriteFile` (Story 1.6's helper) at the path `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`. File contents shape: `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }` (the `sourceStory` and `prDiff` fields are NOT persisted — they're heavy reads kept in-memory only for the return value; only the verdict-relevant projection lives on disk). The directory is created via `mkdir -p` semantics if absent. This is the same tool-layer side-effect pattern as Story 4.3c's `completeStory` call inside `processReviewerTranscript`: load-bearing decisions live in the tool layer, not in LLM prose.
 - (3h) **The persisted file is the verdict transport (NEW — revision 2):** the reviewer's chat output is informational only after revision 2. `processReviewerTranscript` reads `reviewer-result.json` and uses its `recommendedVerdict` field as the authoritative verdict. The locked-phrase `**Verdict: <SENTINEL>**` line in the reviewer's chat is no longer parsed — the reviewer LLM may emit it or omit it; either way the manifest mutation is decided by the file's `recommendedVerdict`. See § Mid-flight revision history for why this matters (trial 7 of the 2026-05-24 smoke).
 
 **AC4 unpacked.** vitest integration suite — fixture shape, stub shape, assertions:
 
-- (4a) **Fixture base:** a tmpdir created by `mkdtempSync(path.join(os.tmpdir(), "crew-4-6-"))`, structured as:
-  - `<tmp>/.crew/config.yaml` declaring `active_adapter: native`.
-  - `<tmp>/.crew/native-stories/01HZ-fixture-story.md` with a planning-discipline-compliant spec containing 3 ACs: AC1 with `artifact: hello-a.txt`, AC2 with `vitest: fixture passing test`, AC3 with no marker (manual-check-required).
-  - `<tmp>/.crew/state/in-progress/native:01HZ-fixture-story.yaml` manifest claimed by the test session.
+- (4a) **Fixture base:** a tmpdir created by `mkdtempSync(path.join(os.tmpdir(), "flow-4-6-"))`, structured as:
+  - `<tmp>/.flow/config.yaml` declaring `active_adapter: native`.
+  - `<tmp>/.flow/native-stories/01HZ-fixture-story.md` with a planning-discipline-compliant spec containing 3 ACs: AC1 with `artifact: hello-a.txt`, AC2 with `vitest: fixture passing test`, AC3 with no marker (manual-check-required).
+  - `<tmp>/.flow/state/in-progress/native:01HZ-fixture-story.yaml` manifest claimed by the test session.
   - `<tmp>/docs/standards.md` matching the shipped `standards-example.md` (4 criteria, valid).
   - A real `hello-a.txt` file at `<tmp>/hello-a.txt` (the artifact AC1 expects).
   - A vitest test in `<tmp>/__tests__/fixture.test.ts` named `"fixture passing test"` that the runner can hit.
@@ -151,15 +151,15 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
 - (4i) **Negative path — `pr-diff` recoverable error:** a fifth test case stubs `execaImpl` to return `{ exitCode: 4, stderr: "API rate limit exceeded", stdout: "" }`. Asserts the wrapper raises `GhRecoverableError({ class: "defer", subcommand: "pr-diff" })` and it propagates through `runReviewerSession` uncaught. (Reviewer-side recoverable-error routing is a future story; v1 just ensures the error is not swallowed.)
 - (4j) **Negative path — adapter read error:** a sixth test case deletes the source-story file before invocation; asserts `SourceFileNotFoundError` propagates from `runReviewerSession` uncaught.
 
-- (4k) **`reviewer-result.json` persistence (NEW — revision 2):** after the happy-path invocation in (4d), assert: (i) the file exists at `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`; (ii) parsing it yields an object with keys `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }`; (iii) `recommendedVerdict === "READY FOR MERGE"` (all ACs pass in the happy fixture). For the missing-artifact case (4f), assert the file exists and `recommendedVerdict === "NEEDS CHANGES"`. For an all-manual-check case (synthesise a third fixture variant if needed, or use the existing one with all artifact/vitest markers stripped), assert `recommendedVerdict === "BLOCKED"`.
+- (4k) **`reviewer-result.json` persistence (NEW — revision 2):** after the happy-path invocation in (4d), assert: (i) the file exists at `<tmp>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`; (ii) parsing it yields an object with keys `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }`; (iii) `recommendedVerdict === "READY FOR MERGE"` (all ACs pass in the happy fixture). For the missing-artifact case (4f), assert the file exists and `recommendedVerdict === "NEEDS CHANGES"`. For an all-manual-check case (synthesise a third fixture variant if needed, or use the existing one with all artifact/vitest markers stripped), assert `recommendedVerdict === "BLOCKED"`.
 
-- (4l) **`processReviewerTranscript` reads the file (NEW — revision 2):** a new test (or new test file `process-reviewer-transcript.test.ts` extension) pre-populates `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` with a hand-crafted object carrying `recommendedVerdict: "READY FOR MERGE"` and a fully-passing `acResults`; invokes `processReviewerTranscript` with an empty (or arbitrary-prose) `reviewerTranscript` arg; asserts the result variant is the existing `done-merged` (or whatever the current 4.3c happy-path variant is named) and that `completeStory` was invoked. Repeat with `recommendedVerdict: "NEEDS CHANGES"` → assert the in-progress `blocked_by` stamp is set to `"reviewer-verdict-needs-changes"`. Repeat with `"BLOCKED"` → assert `blocked_by: "reviewer-verdict-blocked"`. Verdict text in the chat is irrelevant for these assertions — the file drives the outcome.
+- (4l) **`processReviewerTranscript` reads the file (NEW — revision 2):** a new test (or new test file `process-reviewer-transcript.test.ts` extension) pre-populates `<tmp>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` with a hand-crafted object carrying `recommendedVerdict: "READY FOR MERGE"` and a fully-passing `acResults`; invokes `processReviewerTranscript` with an empty (or arbitrary-prose) `reviewerTranscript` arg; asserts the result variant is the existing `done-merged` (or whatever the current 4.3c happy-path variant is named) and that `completeStory` was invoked. Repeat with `recommendedVerdict: "NEEDS CHANGES"` → assert the in-progress `blocked_by` stamp is set to `"reviewer-verdict-needs-changes"`. Repeat with `"BLOCKED"` → assert `blocked_by: "reviewer-verdict-blocked"`. Verdict text in the chat is irrelevant for these assertions — the file drives the outcome.
 
 - (4m) **Missing-file path (NEW — revision 2):** invoke `processReviewerTranscript` against a tmpdir where `<sessionUlid>/reviewer-result.json` does NOT exist; assert the returned variant is the new `done-blocked-no-session-result` with `blocked_by: "reviewer-no-session-result"` stamped on the in-progress manifest. This is the rubber-stamp protection analogous to Story 4.3c's reviewer-grammar protection: if the reviewer subagent skipped the tool invocation entirely, the operator gets a loud blocker rather than a silent rubber-stamp.
 
 **AC5 unpacked.** The user-surface contract and the smoke-gate evidence:
 
-- (5a) **Reproducer scenario (the 4.3c rubber-stamp scenario, made deterministic):** a scratch repo configured for `/crew:start` end-to-end (mirrors the 4.3c smoke harness in `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/`). One source story in `.crew/native-stories/` with one AC: `artifact: target-file.txt`. The dev subagent's persona prompt is patched (in the smoke harness only) to terminate without creating `target-file.txt` — i.e. the dev "claims" it built the artifact and emits the handoff phrase, but the file is not on disk. This is the deterministic version of what the 4.3c smoke caught accidentally.
+- (5a) **Reproducer scenario (the 4.3c rubber-stamp scenario, made deterministic):** a scratch repo configured for `/flow:start` end-to-end (mirrors the 4.3c smoke harness in `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/`). One source story in `.flow/native-stories/` with one AC: `artifact: target-file.txt`. The dev subagent's persona prompt is patched (in the smoke harness only) to terminate without creating `target-file.txt` — i.e. the dev "claims" it built the artifact and emits the handoff phrase, but the file is not on disk. This is the deterministic version of what the 4.3c smoke caught accidentally.
 - (5b) **Operator-observable manifest state (revised 2026-05-24 — revision 2):** the binding contract is the manifest's `blocked_by` stamp, NOT the chat verdict line. After Story 4.6 lands, the in-progress manifest carries `blocked_by: "reviewer-verdict-needs-changes"` (or `"reviewer-verdict-blocked"` for the manual-check variant), derived deterministically by `processReviewerTranscript` from `reviewer-result.json`'s `recommendedVerdict` field. The reviewer's chat MAY also emit `**Verdict: NEEDS CHANGES**` for human readability but this is no longer parsed — the persona prose is unconstrained after the `runReviewerSession` invocation. The 2026-05-24 trial-7 failure mode (trailing prose after the verdict sentinel defeating the locked-phrase parser) is mechanically impossible because the parser has been retired.
 - (5c) **Manifest-state assertion:** at the end of the inner cycle, the manifest state is determined by `recommendedVerdict` in the persisted `reviewer-result.json` (per Task 8b.3):
   - On `recommendedVerdict === "NEEDS CHANGES"` → manifest's `blocked_by` IS stamped with `"reviewer-verdict-needs-changes"` and the manifest stays in `in-progress/`.
@@ -167,7 +167,7 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
   - On `recommendedVerdict === "READY FOR MERGE"` → existing 4.3c semantics apply (`completeStory` fires, manifest moves to `done/`).
   For the AC5 reproducer scenario (missing `target-file.txt` → AC1 `status: "fail"`), `recommendedVerdict === "NEEDS CHANGES"` and the manifest carries `blocked_by: "reviewer-verdict-needs-changes"`, remaining in `in-progress/`.
 - (5d) **Missing-artifact reference (revised 2026-05-24 — revision 2):** the literal `target-file.txt` MUST appear in EITHER the reviewer's transcript summary OR the persisted `reviewer-result.json`'s `acResults[<index>].reason` field for the failing AC, alongside a fail-signal word (one of `"missing"`, `"not found"`, `"ENOENT"`, `"fail"`). The `reason` field is mechanically guaranteed: per (2c), the `runnable-artifact-check` runner's failure reason is `"artifact missing at <path> (ENOENT)"` — which contains `target-file.txt` and `"missing"`/`"ENOENT"` by construction. The chat-prose path is best-effort (the persona is instructed in the revised Task 8 to fold reasons into the summary, but the smoke gate passes if the file alone carries the reference — the operator can inspect the file). This is the deliberate revision-2 loosening: the load-bearing artifact-path reference lives in the structured file; the chat is a nicety, not a contract.
-- (5e) **Smoke-gate evidence:** operator-smoke evidence (per `plugins/crew/docs/user-surface-acs.md` § Pre-PR gate) is mandatory before merge. The smoke can be either (i) the automated `operator-smoke` vitest harness driving the scratch repo, or (ii) an operator pasting verbatim Claude Code transcript output from a manual `/crew:start` run. The smoke must show the reproducer scenario producing a non-READY-FOR-MERGE verdict and the manifest staying in `in-progress/`.
+- (5e) **Smoke-gate evidence:** operator-smoke evidence (per `plugins/flow/docs/user-surface-acs.md` § Pre-PR gate) is mandatory before merge. The smoke can be either (i) the automated `operator-smoke` vitest harness driving the scratch repo, or (ii) an operator pasting verbatim Claude Code transcript output from a manual `/flow:start` run. The smoke must show the reproducer scenario producing a non-READY-FOR-MERGE verdict and the manifest staying in `in-progress/`.
 
 ---
 
@@ -176,24 +176,24 @@ vitest drives the reviewer's read-and-execute phase against a fixture PR and ass
 The implementation order below is **load-bearing**. Some files have ordering constraints (e.g. `register.ts` cannot expose `runReviewerSession` until the tool exists). Follow it.
 
 - [ ] **Task 1: Extend `extractAcsFromSpec` to capture tag + body** (AC: #2)
-  - [ ] 1.1 Open `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts`. Extend `AcEntry` interface with `tag: string | null` and `body: string[]`.
+  - [ ] 1.1 Open `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts`. Extend `AcEntry` interface with `tag: string | null` and `body: string[]`.
   - [ ] 1.2 In the parser loop, capture the parenthetical tag from `headingMatch[2]` (already captured by the existing regex; just unwrap parens and trim). Populate `tag`.
   - [ ] 1.3 After locating the AC heading, collect every subsequent non-blank line until the next AC heading or end of file into `body`. Do NOT trim individual lines; preserve verbatim. (The applicability classifier in Task 4 needs verbatim body to grep for `artifact:` / `vitest:`.)
   - [ ] 1.4 Update existing call sites that destructure only `{ index, firstLine }` — verify they still compile (TS-structural pass; the additive fields are ignored).
-  - [ ] 1.5 Add unit tests in `plugins/crew/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts` (create if absent): tagged AC, untagged AC, multi-line body, AC with no body.
+  - [ ] 1.5 Add unit tests in `plugins/flow/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts` (create if absent): tagged AC, untagged AC, multi-line body, AC with no body.
 
 - [ ] **Task 2: Add `pr-diff` to reviewer permissions** (AC: #1)
-  - [ ] 2.1 Edit `plugins/crew/permissions/generalist-reviewer.yaml`. Add `- pr-diff` to the `gh_allow` list. Preserve the existing entries (`pr-view`, `pr-comment`, `pr-review`).
-  - [ ] 2.2 Verify the Story 2.2 schema accepts `pr-diff` (the schema is "any string"; no schema change needed). Add a unit-test fixture in `plugins/crew/permissions/__tests__/` (if such a suite exists) that loads the updated YAML and asserts `pr-diff` is in `gh_allow`.
+  - [ ] 2.1 Edit `plugins/flow/permissions/generalist-reviewer.yaml`. Add `- pr-diff` to the `gh_allow` list. Preserve the existing entries (`pr-view`, `pr-comment`, `pr-review`).
+  - [ ] 2.2 Verify the Story 2.2 schema accepts `pr-diff` (the schema is "any string"; no schema change needed). Add a unit-test fixture in `plugins/flow/permissions/__tests__/` (if such a suite exists) that loads the updated YAML and asserts `pr-diff` is in `gh_allow`.
 
 - [ ] **Task 3: Add the `slugify-standards-criterion` helper + duplicate-id error** (AC: #3)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/slugify-standards-criterion.ts` exporting `slugifyStandardsCriterion(name: string): string`. Implementation per (3b): lowercase, replace `/[^a-z0-9]+/g` with `-`, trim leading/trailing dashes. Pure function, no deps.
+  - [ ] 3.1 Create `plugins/flow/mcp-server/src/lib/slugify-standards-criterion.ts` exporting `slugifyStandardsCriterion(name: string): string`. Implementation per (3b): lowercase, replace `/[^a-z0-9]+/g` with `-`, trim leading/trailing dashes. Pure function, no deps.
   - [ ] 3.2 Add unit tests covering: typical name, name with capitals, name with punctuation, leading/trailing whitespace, all-non-alnum (edge case — returns empty string; the caller raises `DuplicateStandardsCriterionIdError` if more than one criterion produces empty).
-  - [ ] 3.3 Open `plugins/crew/mcp-server/src/errors.ts`. Add a new `DuplicateStandardsCriterionIdError` extending the existing `DomainError` base; constructor takes `{ criterionId: string; names: string[] }`; message format: `"Two or more standards criteria slugify to the same id '<criterionId>': <names.join(', ')>. Rename one in docs/standards.md to make ids unique."`.
+  - [ ] 3.3 Open `plugins/flow/mcp-server/src/errors.ts`. Add a new `DuplicateStandardsCriterionIdError` extending the existing `DomainError` base; constructor takes `{ criterionId: string; names: string[] }`; message format: `"Two or more standards criteria slugify to the same id '<criterionId>': <names.join(', ')>. Rename one in docs/standards.md to make ids unique."`.
   - [ ] 3.4 Add a new `PrUrlNotFoundInDevTranscriptError` extending `DomainError`; constructor takes `{ ref: string; transcriptTail: string }` (the transcript-tail field is the last ~500 chars of the dev transcript for diagnostics); message format: `"Could not parse a GitHub PR URL from the dev subagent's transcript for story <ref>. Expected a line containing 'https://github.com/.../pull/<n>'. Last 500 chars of transcript: <transcriptTail>"`.
 
 - [ ] **Task 4: Implement `runReviewerSession` composite tool** (AC: #1, #2, #3)
-  - [ ] 4.1 Create `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`. Export `runReviewerSession(opts) → Promise<ReviewerSessionResult>` with the option shape from (1a). Add the `execaImpl?: typeof execa` test seam (4b).
+  - [ ] 4.1 Create `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`. Export `runReviewerSession(opts) → Promise<ReviewerSessionResult>` with the option shape from (1a). Add the `execaImpl?: typeof execa` test seam (4b).
   - [ ] 4.2 Implement the three reads in fixed order per (1e): `readSourceStory` (via `resolveWorkspace(...).activeAdapter`), `gh pr-diff` (via `gh()` wrapper with the reviewer's loaded `RolePermissions`), `lookupStandards`. Each read's result populates a field on the in-progress `ReviewerSessionResult`.
   - [ ] 4.3 After all three reads return, build `standardsByCriterionId` via `slugifyStandardsCriterion` per (3a). Detect duplicates per (3c) and throw `DuplicateStandardsCriterionIdError` if any.
   - [ ] 4.4 Call `extractAcsFromSpec(sourceStory.specPath)` to enumerate ACs. For each AC, run the applicability classifier per (2b) and the per-applicability runner per (2c). Build `acResults: Record<number, AcResult>` keyed by `ac.index`. Execute serially per (2f). Apply the 90s timeout per (2g).
@@ -213,16 +213,16 @@ The implementation order below is **load-bearing**. Some files have ordering con
       recommendedVerdict: RecommendedVerdict;
     }
     ```
-  - [ ] 4.6 **Persist `reviewer-result.json` (NEW — revision 2)** before returning. Use `atomicWriteFile` (Story 1.6) to write the projection `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }` to `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`. Create the parent directory via `mkdir -p` semantics if absent. The full `ReviewerSessionResult` (including `sourceStory` and `prDiff`) is still returned in-memory; only the verdict-relevant projection persists. See (3g) for shape rationale.
+  - [ ] 4.6 **Persist `reviewer-result.json` (NEW — revision 2)** before returning. Use `atomicWriteFile` (Story 1.6) to write the projection `{ sessionUlid, ref, recommendedVerdict, acResults, standardsByCriterionId, sourceStoryRef, prNumber }` to `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`. Create the parent directory via `mkdir -p` semantics if absent. The full `ReviewerSessionResult` (including `sourceStory` and `prDiff`) is still returned in-memory; only the verdict-relevant projection persists. See (3g) for shape rationale.
   - [ ] 4.7 Add a top-of-file JSDoc citing this story spec at the behavioural-contract anchor (mirrors `process-reviewer-transcript.ts`'s pattern). Call out the deterministic-verdict-transport contract explicitly.
 
 - [ ] **Task 5: Register `runReviewerSession` as an MCP tool** (AC: #1)
-  - [ ] 5.1 Open `plugins/crew/mcp-server/src/tools/register.ts`. Add the import for `runReviewerSession`. Register it under the tool name `"runReviewerSession"` with a Zod input schema mirroring `RunReviewerSessionOptions` (`targetRepoRoot`, `sessionUlid`, `ref`, `prNumber: z.number().int().positive()`, `role: z.string().optional()`).
+  - [ ] 5.1 Open `plugins/flow/mcp-server/src/tools/register.ts`. Add the import for `runReviewerSession`. Register it under the tool name `"runReviewerSession"` with a Zod input schema mirroring `RunReviewerSessionOptions` (`targetRepoRoot`, `sessionUlid`, `ref`, `prNumber: z.number().int().positive()`, `role: z.string().optional()`).
   - [ ] 5.2 Wrap the handler in the existing `DomainError → { isError: true, content: [...] }` envelope used by other tools.
   - [ ] 5.3 Verify via the existing register-suite tests that the tool is enumerated and callable.
 
 - [ ] **Task 6: Extend `processDevTranscript` to parse the PR URL** (AC: #1, #5)
-  - [ ] 6.1 Open `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`. On the `spawn-reviewer` happy path (after `parseHandoff` returns ok and BEFORE building the reviewer prompt), grep the transcript for the rightmost `https://github.com/[^/]+/[^/]+/pull/(\d+)` match. The dev subagent emits the PR URL after `gh pr create` (Story 4.4); v1 takes the rightmost match to allow for multiple URL mentions.
+  - [ ] 6.1 Open `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`. On the `spawn-reviewer` happy path (after `parseHandoff` returns ok and BEFORE building the reviewer prompt), grep the transcript for the rightmost `https://github.com/[^/]+/[^/]+/pull/(\d+)` match. The dev subagent emits the PR URL after `gh pr create` (Story 4.4); v1 takes the rightmost match to allow for multiple URL mentions.
   - [ ] 6.2 If no match: throw `PrUrlNotFoundInDevTranscriptError` per (1g). The error propagates through `register.ts`'s envelope and surfaces to the SKILL.md prose, which displays it and exits the inner cycle.
   - [ ] 6.3 If matched: extract the trailing integer as `prNumber` and add it to the `spawn-reviewer` result:
     ```ts
@@ -232,13 +232,13 @@ The implementation order below is **load-bearing**. Some files have ordering con
   - [ ] 6.5 Add a unit test under `__tests__/process-dev-transcript.test.ts`: (i) transcript with one PR URL → prNumber returned; (ii) transcript with two PR URLs → rightmost wins; (iii) transcript with no PR URL → `PrUrlNotFoundInDevTranscriptError` thrown.
 
 - [ ] **Task 7: Update the SKILL.md reviewer-spawn block** (AC: #1, #5)
-  - [ ] 7.1 Open `plugins/crew/skills/start/SKILL.md`. In the `allowed_tools` array (line 4), add `runReviewerSession`. (Set-equality widens from the current seven-tool set.)
+  - [ ] 7.1 Open `plugins/flow/skills/start/SKILL.md`. In the `allowed_tools` array (line 4), add `runReviewerSession`. (Set-equality widens from the current seven-tool set.)
   - [ ] 7.2 In step 8 (reviewer-spawn `initial_context`), add `prNumber: <prNumber>` to the YAML block.
   - [ ] 7.3 Update step 7's switch on `next`: the `spawn-reviewer` case stores both `reviewerPrompt` AND `prNumber` (the new field from Task 6.3).
   - [ ] 7.4 Do NOT add prose instructions to the SKILL.md telling the reviewer to "read the source story, the PR diff, and standards.md" — that prose-flake instruction is precisely what this story removes. The persona prompt (Task 8) carries the structured instruction.
 
 - [ ] **Task 8: Update the `generalist-reviewer` persona (REVISED 2026-05-24 — revision 2)** (AC: #1, #2, #3, #5)
-  - [ ] 8.1 Open `plugins/crew/catalogue/generalist-reviewer.md`. In the `tools_allow` block at top, add `runReviewerSession` (so `loadRolePermissions` reflects it; though SKILL.md's `allowed_tools` is the binding gate).
+  - [ ] 8.1 Open `plugins/flow/catalogue/generalist-reviewer.md`. In the `tools_allow` block at top, add `runReviewerSession` (so `loadRolePermissions` reflects it; though SKILL.md's `allowed_tools` is the binding gate).
   - [ ] 8.2 Rewrite the `## Prompt` section so the reviewer's ONLY mandatory action is to invoke `runReviewerSession({ targetRepoRoot, sessionUlid, ref, prNumber })` using the `initial_context` values. After that single tool call returns, the chat output is informational — the persona may compose a human-readable summary, comments, or footer markers in any form. None of it is parsed.
   - [ ] 8.3 **REMOVE the prose rule** "MUST emit `**Verdict: <SENTINEL>**` as the final non-empty line of your chat." That rule was the trial-7 break point. Replace with: "The tool's persisted `reviewer-result.json` carries the binding verdict. Your chat is for the human operator — be clear and helpful but do not worry about machine-parseable verdict grammar."
   - [ ] 8.4 Add a soft prose recommendation (NOT a parser contract): "When summarising for the operator, quote each failing AC's `reason` field verbatim — especially the artifact path. The operator's first question is 'what's missing?'." This is best-effort. The structured file already carries `reason` verbatim for the manifest stamp.
@@ -246,8 +246,8 @@ The implementation order below is **load-bearing**. Some files have ordering con
   - [ ] 8.6 **Locked-phrase catalogue entry `verdict` (decision recorded — revision 2):** keep the entry declared in the catalogue YAML (`locked_phrases:` block) as a documentation guideline — useful for humans authoring future reviewer personas — but the parser no longer enforces it. Add a `# enforcement: deprecated — see Story 4.6 revision 2` comment alongside the entry so future readers understand its status. Do NOT delete the entry in this story (cross-cutting catalogue cleanup belongs in a separate housekeeping story).
 
 - [ ] **Task 8b: Rewrite `processReviewerTranscript` to read from `reviewer-result.json` (NEW — revision 2)** (AC: #3, #4, #5)
-  - [ ] 8b.1 Open `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`. **Drop the `reviewerTranscript` parameter** (rationale: the chat is no longer load-bearing; keeping it as a vestigial param would invite future drift where someone tries to consult it again). The public input shape becomes `{ targetRepoRoot, sessionUlid, ref }`. Update all callers (SKILL.md prose builders, `register.ts` envelope, any tests).
-  - [ ] 8b.2 Replace the `parseVerdict(reviewerTranscript)` call (line ~99) with a `readReviewerResultFile({ targetRepoRoot, sessionUlid })` helper that reads, parses, and Zod-validates `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`. On `ENOENT`, return the new `done-blocked-no-session-result` variant (see 8b.4). On JSON parse error or Zod-validation failure, raise a typed `ReviewerResultFileMalformedError` and let it propagate.
+  - [ ] 8b.1 Open `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`. **Drop the `reviewerTranscript` parameter** (rationale: the chat is no longer load-bearing; keeping it as a vestigial param would invite future drift where someone tries to consult it again). The public input shape becomes `{ targetRepoRoot, sessionUlid, ref }`. Update all callers (SKILL.md prose builders, `register.ts` envelope, any tests).
+  - [ ] 8b.2 Replace the `parseVerdict(reviewerTranscript)` call (line ~99) with a `readReviewerResultFile({ targetRepoRoot, sessionUlid })` helper that reads, parses, and Zod-validates `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`. On `ENOENT`, return the new `done-blocked-no-session-result` variant (see 8b.4). On JSON parse error or Zod-validation failure, raise a typed `ReviewerResultFileMalformedError` and let it propagate.
   - [ ] 8b.3 Switch on `recommendedVerdict`:
     - `"READY FOR MERGE"` → existing happy-path (call `completeStory`, return the done-merged variant). Manifest moves to `done/`.
     - `"NEEDS CHANGES"` → stamp `blocked_by: "reviewer-verdict-needs-changes"` on the in-progress manifest; return a new `done-blocked-reviewer-needs-changes` variant. Manifest stays in `in-progress/`.
@@ -256,31 +256,31 @@ The implementation order below is **load-bearing**. Some files have ordering con
   - [ ] 8b.5 **Deprecate (delete, not just stop calling) the verdict-grammar variants** `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` from the return-union. Rationale: `runReviewerSession` is now the ONLY valid reviewer path; there is no backward-compat shape to preserve. The verdict-grammar guard is structurally subsumed by `done-blocked-no-session-result`. Migrate any existing tests that asserted those variants — they now assert `done-blocked-no-session-result` where the scenario was "reviewer didn't emit a parseable verdict".
   - [ ] 8b.6 Remove the `import { parseVerdict } from "../skills/verdict-parser.js"` statement. The function is no longer called.
   - [ ] 8b.7 Update the file-level JSDoc to cite Story 4.6 revision 2 as the source of the deterministic-verdict-transport contract. Cross-reference Story 4.3c's `completeStory` side-effect pattern as the precedent.
-  - [ ] 8b.8 Add `ReviewerResultFileMalformedError` to `plugins/crew/mcp-server/src/errors.ts`: constructor `{ path: string; cause: unknown }`; message: `"reviewer-result.json at <path> is malformed or fails schema validation. Cause: <cause>. This is a bug in runReviewerSession; the file should always be schema-valid when present."`.
+  - [ ] 8b.8 Add `ReviewerResultFileMalformedError` to `plugins/flow/mcp-server/src/errors.ts`: constructor `{ path: string; cause: unknown }`; message: `"reviewer-result.json at <path> is malformed or fails schema validation. Cause: <cause>. This is a bug in runReviewerSession; the file should always be schema-valid when present."`.
 
 - [ ] **Task 8c: Verdict-parser disposition (NEW — revision 2)** (no AC; cleanup)
-  - [ ] 8c.1 Audit callers of `parseVerdict` after Task 8b lands: `grep -rn "parseVerdict\|verdict-parser" plugins/crew/mcp-server/src plugins/crew/skills`. Expected post-8b state: only the `verdict-parser.test.ts` unit suite and the `parsers-content.test.ts` structural-anchor test reference it.
+  - [ ] 8c.1 Audit callers of `parseVerdict` after Task 8b lands: `grep -rn "parseVerdict\|verdict-parser" plugins/flow/mcp-server/src plugins/flow/skills`. Expected post-8b state: only the `verdict-parser.test.ts` unit suite and the `parsers-content.test.ts` structural-anchor test reference it.
   - [ ] 8c.2 **Decision recorded — keep but mark deprecated (Option c).** Rationale: no runtime caller after 8b, but two test suites (`verdict-parser.test.ts`, `parsers-content.test.ts` AC5(ii)) assert the file's existence/exports. Deleting the file would cascade test deletions and might mask a future regression where someone re-introduces verdict-grammar parsing. Mark deprecated by adding a top-of-file JSDoc to `verdict-parser.ts`: `/** @deprecated Story 4.6 revision 2 moved verdict transport to the persisted reviewer-result.json file. No runtime caller. Retained for documentation of the historical grammar; remove in a future housekeeping story once the parsers-content structural-anchor test is also retired. */`. Do NOT delete in this story.
-  - [ ] 8c.3 Add a brief note to `plugins/crew/mcp-server/src/skills/verdict-parser.ts`'s exports comment that the locked-phrase grammar is now an authoring guideline, not a runtime parser contract.
+  - [ ] 8c.3 Add a brief note to `plugins/flow/mcp-server/src/skills/verdict-parser.ts`'s exports comment that the locked-phrase grammar is now an authoring guideline, not a runtime parser contract.
 
 
-  - [ ] 9.1 Create `plugins/crew/mcp-server/src/tools/__tests__/run-reviewer-session.test.ts`. Build the fixture from (4a) in a `beforeEach` using `mkdtempSync`. Tear down with `rmSync(..., { recursive: true })`.
+  - [ ] 9.1 Create `plugins/flow/mcp-server/src/tools/__tests__/run-reviewer-session.test.ts`. Build the fixture from (4a) in a `beforeEach` using `mkdtempSync`. Tear down with `rmSync(..., { recursive: true })`.
   - [ ] 9.2 Implement the three-reads-ordering assertion (4c) using `vi.spyOn` on the adapter's `readSourceStory`, the injected `execaImpl`, and `lookupStandards`. Assert `invocationCallOrder` strict-less-than triples.
   - [ ] 9.3 Implement the structured-result assertions (4d), (4e).
   - [ ] 9.4 Implement each negative path (4f), (4g), (4h), (4i), (4j) as separate `it()` cases.
   - [ ] 9.5 Use the existing test-cache reset (`__resetGhErrorMapCacheForTests` from Story 4.5) in `beforeEach` to keep the gh-error-map cache deterministic across cases.
-  - [ ] 9.6 **File-persistence assertions (NEW — revision 2):** implement (4k) — assert `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` exists and parses to the expected shape after each happy/fail/blocked variant; assert `recommendedVerdict` matches the deterministic algorithm in (3f) for each fixture.
+  - [ ] 9.6 **File-persistence assertions (NEW — revision 2):** implement (4k) — assert `<tmp>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` exists and parses to the expected shape after each happy/fail/blocked variant; assert `recommendedVerdict` matches the deterministic algorithm in (3f) for each fixture.
   - [ ] 9.7 **`processReviewerTranscript` file-read coverage (NEW — revision 2):** extend `process-reviewer-transcript.test.ts` per (4l) and (4m): pre-populated-file cases for each `recommendedVerdict` literal, missing-file case asserting `done-blocked-no-session-result`, malformed-JSON case asserting `ReviewerResultFileMalformedError`. Drop or migrate any existing tests that exercised the now-deleted `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` variants.
 
 - [ ] **Task 10: Operator-smoke wiring for AC5** (AC: #5)
-  - [ ] 10.1 Extend the existing operator-smoke harness (in `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/`) with the reproducer scenario from (5a): scratch repo, one ready story with `artifact: target-file.txt`, a stubbed dev-persona override that handoffs without creating the artifact.
-  - [ ] 10.2 Drive `/crew:start` end-to-end against the scratch repo (the harness already drives the inner cycle for 4.3b/4.3c; extend it to capture the reviewer's verdict transcript).
-  - [ ] 10.3 **Revised 2026-05-24 (revision 2).** Assert per (5b): the in-progress manifest's `blocked_by` field is `"reviewer-verdict-needs-changes"` (or `"reviewer-verdict-blocked"`). The reviewer's chat verdict line is no longer asserted — the file-derived stamp is the contract. Assert per (5d): the literal `target-file.txt` and a fail-signal word appear in EITHER the captured chat transcript OR `.crew/state/sessions/<sessionUlid>/reviewer-result.json`'s `acResults[<index>].reason` field. The persisted-file branch is mechanically guaranteed by the artifact-check runner's reason format (2c).
-  - [ ] 10.4 Assert per (5c): the manifest is at `.crew/state/in-progress/<ref>.yaml` AND NOT at `.crew/state/done/<ref>.yaml` after the inner cycle exits. Additionally assert `.crew/state/sessions/<sessionUlid>/reviewer-result.json` exists and `recommendedVerdict === "NEEDS CHANGES"`.
-  - [ ] 10.5 Tag the test file so it runs in the pre-PR smoke gate per `plugins/crew/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence in lieu of automated smoke per § Pre-PR gate.
+  - [ ] 10.1 Extend the existing operator-smoke harness (in `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/`) with the reproducer scenario from (5a): scratch repo, one ready story with `artifact: target-file.txt`, a stubbed dev-persona override that handoffs without creating the artifact.
+  - [ ] 10.2 Drive `/flow:start` end-to-end against the scratch repo (the harness already drives the inner cycle for 4.3b/4.3c; extend it to capture the reviewer's verdict transcript).
+  - [ ] 10.3 **Revised 2026-05-24 (revision 2).** Assert per (5b): the in-progress manifest's `blocked_by` field is `"reviewer-verdict-needs-changes"` (or `"reviewer-verdict-blocked"`). The reviewer's chat verdict line is no longer asserted — the file-derived stamp is the contract. Assert per (5d): the literal `target-file.txt` and a fail-signal word appear in EITHER the captured chat transcript OR `.flow/state/sessions/<sessionUlid>/reviewer-result.json`'s `acResults[<index>].reason` field. The persisted-file branch is mechanically guaranteed by the artifact-check runner's reason format (2c).
+  - [ ] 10.4 Assert per (5c): the manifest is at `.flow/state/in-progress/<ref>.yaml` AND NOT at `.flow/state/done/<ref>.yaml` after the inner cycle exits. Additionally assert `.flow/state/sessions/<sessionUlid>/reviewer-result.json` exists and `recommendedVerdict === "NEEDS CHANGES"`.
+  - [ ] 10.5 Tag the test file so it runs in the pre-PR smoke gate per `plugins/flow/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence in lieu of automated smoke per § Pre-PR gate.
 
 - [ ] **Task 11: Update CLAUDE.md / docs (if affected)** (no AC; housekeeping)
-  - [ ] 11.1 Skim `plugins/crew/docs/` for any reviewer-flow doc that names "the reviewer reads X" in prose. Update to reference `runReviewerSession` if such doc exists. Do NOT create new docs; only update if a doc with this content already exists.
+  - [ ] 11.1 Skim `plugins/flow/docs/` for any reviewer-flow doc that names "the reviewer reads X" in prose. Update to reference `runReviewerSession` if such doc exists. Do NOT create new docs; only update if a doc with this content already exists.
 
 ---
 
@@ -296,7 +296,7 @@ The implementation order below is **load-bearing**. Some files have ordering con
 - **MUST propagate any read or execution error verbatim.** `SourceFileNotFoundError`, `StandardsDocMissingError`, `StandardsDocMalformedError`, `GhRecoverableError`, and `GhSubcommandDeniedError` all reach the SKILL.md prose unchanged. The composite tool does not swallow, retry, or paper over.
 - **MUST stop the reviewer cycle on any read error.** The persona never composes a verdict against an incomplete read. The operator sees the typed error verbatim.
 - **MUST derive `recommendedVerdict` deterministically from `acResults` (revision 2).** The algorithm in (3f) is closed: any-fail → `NEEDS CHANGES`; else any-manual → `BLOCKED`; else `READY FOR MERGE`. The LLM does not decide; the tool does.
-- **MUST persist `reviewer-result.json` to `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/` before returning (revision 2).** Atomic write via Story 1.6's helper. Schema per (3g). This is the verdict transport.
+- **MUST persist `reviewer-result.json` to `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/` before returning (revision 2).** Atomic write via Story 1.6's helper. Schema per (3g). This is the verdict transport.
 - **MUST read `reviewer-result.json` in `processReviewerTranscript` (revision 2).** No chat-scraping. Missing file → `done-blocked-no-session-result`. Present file → switch on `recommendedVerdict`.
 
 ### MUST NOT
@@ -352,7 +352,7 @@ The chosen approach localises the change to one MCP tool's return shape (declare
 
 ### Why this story is `user-surface`
 
-ACs 1–4 describe internal reviewer behaviour. On the surface, that reads as substrate. But the contract this story is making is "the reviewer's verdict is now trustworthy" — and trust is observed at the operator's chat surface. Operator-smoke is the only gate that can verify the rubber-stamp failure mode is closed; substrate-budget (three review passes per `plugins/crew/docs/user-surface-acs.md`) is too narrow given the LLM-determinism risk inherent in reviewer behaviour. AC5 makes that user-surface contract explicit and gateable.
+ACs 1–4 describe internal reviewer behaviour. On the surface, that reads as substrate. But the contract this story is making is "the reviewer's verdict is now trustworthy" — and trust is observed at the operator's chat surface. Operator-smoke is the only gate that can verify the rubber-stamp failure mode is closed; substrate-budget (three review passes per `plugins/flow/docs/user-surface-acs.md`) is too narrow given the LLM-determinism risk inherent in reviewer behaviour. AC5 makes that user-surface contract explicit and gateable.
 
 ---
 
@@ -360,23 +360,23 @@ ACs 1–4 describe internal reviewer behaviour. On the surface, that reads as su
 
 The following files are off-limits to this story's implementation (mutations would break previously-shipped contracts). If a change to any of these appears necessary, STOP and surface the conflict — do not edit.
 
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1; the atomic-move primitive)
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` (Story 4.1)
-- `plugins/crew/permissions/gh-error-map.yaml` (Story 4.5; v1 row set is fixed)
-- ~~`plugins/crew/skills/verdict-parser.js` and `plugins/crew/mcp-server/src/skills/verdict-parser.ts` (the verdict-grammar surface; Story 4.3b/4.3c)~~ **Revision 2:** no longer fully locked — Task 8c.2 adds a deprecation JSDoc to the source file. No code change to exports; the file's runtime callers are removed by Task 8b.6. See declared-locked-file changes below.
-- `plugins/crew/skills/handoff-parser.js` and `plugins/crew/mcp-server/src/skills/handoff-parser.ts` (the handoff-grammar surface; Story 4.3)
-- ~~`plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.3b/4.3c; the verdict-parse-and-mutate path is unchanged)~~ **Revision 2 — REMOVED FROM LOCKED LIST.** This file is substantively rewritten by Task 8b. See declared-locked-file changes below for the bounded scope.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1; the atomic-move primitive)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` (Story 4.1)
+- `plugins/flow/permissions/gh-error-map.yaml` (Story 4.5; v1 row set is fixed)
+- ~~`plugins/flow/skills/verdict-parser.js` and `plugins/flow/mcp-server/src/skills/verdict-parser.ts` (the verdict-grammar surface; Story 4.3b/4.3c)~~ **Revision 2:** no longer fully locked — Task 8c.2 adds a deprecation JSDoc to the source file. No code change to exports; the file's runtime callers are removed by Task 8b.6. See declared-locked-file changes below.
+- `plugins/flow/skills/handoff-parser.js` and `plugins/flow/mcp-server/src/skills/handoff-parser.ts` (the handoff-grammar surface; Story 4.3)
+- ~~`plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.3b/4.3c; the verdict-parse-and-mutate path is unchanged)~~ **Revision 2 — REMOVED FROM LOCKED LIST.** This file is substantively rewritten by Task 8b. See declared-locked-file changes below for the bounded scope.
 
 ### Declared-locked-file changes (explicit exceptions)
 
 The following files would otherwise be locked but MUST be modified by this story; the change is bounded and described explicitly to make the deviation auditable.
 
-- **`plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`** (Stories 4.3b / 4.5) — extended in Task 6 to parse the PR URL out of the dev transcript on the happy-path `spawn-reviewer` branch and add `prNumber: number` to that result variant. Existing `done-blocked-handoff-grammar`, `done-blocked-gh-defer`, `done-blocked-gh-retry`, `done-blocked-gh-needs-human` branches and the recoverable-error pre-check are UNTOUCHED. The new `PrUrlNotFoundInDevTranscriptError` raises only on the happy path when the dev claims handoff but did not push a PR. Rationale: `processDevTranscript` is the unique consumer of the dev transcript; the PR URL lives only in that transcript; localising the extraction to one tool is the minimum-surface change.
-- **`plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts`** (Story 4.4) — extended in Task 1 with two additive fields on `AcEntry` (`tag`, `body`). Existing callers that destructure `{ index, firstLine }` are unaffected. Rationale: avoiding a parallel parser is a deliberate reuse-not-reinvent choice (CLAUDE.md anti-pattern: "wheel reinvention").
-- **`plugins/crew/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c) — extended in Task 7 with one new entry in `allowed_tools` (`runReviewerSession`) and one new field in the reviewer-spawn `initial_context` block (`prNumber`). The inner-cycle steps and the completion seam (4.3c) are UNTOUCHED. (Revision 2: the SKILL.md prose call to `processReviewerTranscript` now omits the `reviewerTranscript` arg per Task 8b.1 — adjust the call site only; the surrounding prose is unchanged.)
-- **`plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`** (Stories 4.3b / 4.3c) — **substantively rewritten by Task 8b (revision 2).** Bounded scope: (i) drop the `reviewerTranscript` input parameter (deliberate choice — see Task 8b.1 rationale); (ii) replace the chat-scraping `parseVerdict` call with a `reviewer-result.json` file read; (iii) switch on the file's `recommendedVerdict` literal to drive manifest mutations; (iv) add `done-blocked-no-session-result` to the return-union; (v) delete `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` variants from the return-union (no backward-compat path — `runReviewerSession` is now the only valid reviewer entrypoint); (vi) preserve the existing `completeStory` call on the `READY FOR MERGE` branch byte-identical; (vii) preserve the existing recoverable-error / rework-signal branches unrelated to verdict parsing. The public output shape changes in two ways: the input parameter `reviewerTranscript` drops, and the return-union swaps two variants for one. Document the migration in the file-level JSDoc.
-- **`plugins/crew/mcp-server/src/skills/verdict-parser.ts`** (Story 4.3) — Task 8c.2 adds a top-of-file `@deprecated` JSDoc. No code change to exports. The `.js` sibling at `plugins/crew/skills/verdict-parser.js` is NOT modified (the catalogue is documentation-only post-revision-2).
+- **`plugins/flow/mcp-server/src/tools/process-dev-transcript.ts`** (Stories 4.3b / 4.5) — extended in Task 6 to parse the PR URL out of the dev transcript on the happy-path `spawn-reviewer` branch and add `prNumber: number` to that result variant. Existing `done-blocked-handoff-grammar`, `done-blocked-gh-defer`, `done-blocked-gh-retry`, `done-blocked-gh-needs-human` branches and the recoverable-error pre-check are UNTOUCHED. The new `PrUrlNotFoundInDevTranscriptError` raises only on the happy path when the dev claims handoff but did not push a PR. Rationale: `processDevTranscript` is the unique consumer of the dev transcript; the PR URL lives only in that transcript; localising the extraction to one tool is the minimum-surface change.
+- **`plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts`** (Story 4.4) — extended in Task 1 with two additive fields on `AcEntry` (`tag`, `body`). Existing callers that destructure `{ index, firstLine }` are unaffected. Rationale: avoiding a parallel parser is a deliberate reuse-not-reinvent choice (CLAUDE.md anti-pattern: "wheel reinvention").
+- **`plugins/flow/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c) — extended in Task 7 with one new entry in `allowed_tools` (`runReviewerSession`) and one new field in the reviewer-spawn `initial_context` block (`prNumber`). The inner-cycle steps and the completion seam (4.3c) are UNTOUCHED. (Revision 2: the SKILL.md prose call to `processReviewerTranscript` now omits the `reviewerTranscript` arg per Task 8b.1 — adjust the call site only; the surrounding prose is unchanged.)
+- **`plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`** (Stories 4.3b / 4.3c) — **substantively rewritten by Task 8b (revision 2).** Bounded scope: (i) drop the `reviewerTranscript` input parameter (deliberate choice — see Task 8b.1 rationale); (ii) replace the chat-scraping `parseVerdict` call with a `reviewer-result.json` file read; (iii) switch on the file's `recommendedVerdict` literal to drive manifest mutations; (iv) add `done-blocked-no-session-result` to the return-union; (v) delete `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` variants from the return-union (no backward-compat path — `runReviewerSession` is now the only valid reviewer entrypoint); (vi) preserve the existing `completeStory` call on the `READY FOR MERGE` branch byte-identical; (vii) preserve the existing recoverable-error / rework-signal branches unrelated to verdict parsing. The public output shape changes in two ways: the input parameter `reviewerTranscript` drops, and the return-union swaps two variants for one. Document the migration in the file-level JSDoc.
+- **`plugins/flow/mcp-server/src/skills/verdict-parser.ts`** (Story 4.3) — Task 8c.2 adds a top-of-file `@deprecated` JSDoc. No code change to exports. The `.js` sibling at `plugins/flow/skills/verdict-parser.js` is NOT modified (the catalogue is documentation-only post-revision-2).
 
 ---
 
@@ -384,24 +384,24 @@ The following files would otherwise be locked but MUST be modified by this story
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Task 4)
-- `plugins/crew/mcp-server/src/tools/__tests__/run-reviewer-session.test.ts` (Task 9)
-- `plugins/crew/mcp-server/src/lib/slugify-standards-criterion.ts` (Task 3.1)
-- `plugins/crew/mcp-server/src/lib/__tests__/slugify-standards-criterion.test.ts` (Task 3.2)
-- `plugins/crew/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts` (Task 1.5; create if absent)
-- Operator-smoke fixture additions under `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 10)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Task 4)
+- `plugins/flow/mcp-server/src/tools/__tests__/run-reviewer-session.test.ts` (Task 9)
+- `plugins/flow/mcp-server/src/lib/slugify-standards-criterion.ts` (Task 3.1)
+- `plugins/flow/mcp-server/src/lib/__tests__/slugify-standards-criterion.test.ts` (Task 3.2)
+- `plugins/flow/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts` (Task 1.5; create if absent)
+- Operator-smoke fixture additions under `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 10)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts` (Task 1; additive fields)
-- `plugins/crew/mcp-server/src/errors.ts` (Task 3.3, 3.4, 8b.8; three new error classes — adds `ReviewerResultFileMalformedError` in revision 2)
-- `plugins/crew/mcp-server/src/tools/register.ts` (Task 5; register the new tool; revision 2: also adjust `processReviewerTranscript` envelope to match its new input shape)
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Task 6; PR-URL parsing + new error)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Task 8b — NEW in revision 2; substantive rewrite per declared-locked-file change)
-- `plugins/crew/mcp-server/src/skills/verdict-parser.ts` (Task 8c — NEW in revision 2; @deprecated JSDoc only, no code change)
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Task 2; add `pr-diff`)
-- `plugins/crew/catalogue/generalist-reviewer.md` (Task 8; persona prompt rewrite — revision 2 removes the locked-phrase MUST and softens to authoring guidelines)
-- `plugins/crew/skills/start/SKILL.md` (Task 7; allowed_tools + initial_context; revision 2: also drop the `reviewerTranscript` arg from the `processReviewerTranscript` call site)
+- `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts` (Task 1; additive fields)
+- `plugins/flow/mcp-server/src/errors.ts` (Task 3.3, 3.4, 8b.8; three new error classes — adds `ReviewerResultFileMalformedError` in revision 2)
+- `plugins/flow/mcp-server/src/tools/register.ts` (Task 5; register the new tool; revision 2: also adjust `processReviewerTranscript` envelope to match its new input shape)
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Task 6; PR-URL parsing + new error)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Task 8b — NEW in revision 2; substantive rewrite per declared-locked-file change)
+- `plugins/flow/mcp-server/src/skills/verdict-parser.ts` (Task 8c — NEW in revision 2; @deprecated JSDoc only, no code change)
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Task 2; add `pr-diff`)
+- `plugins/flow/catalogue/generalist-reviewer.md` (Task 8; persona prompt rewrite — revision 2 removes the locked-phrase MUST and softens to authoring guidelines)
+- `plugins/flow/skills/start/SKILL.md` (Task 7; allowed_tools + initial_context; revision 2: also drop the `reviewerTranscript` arg from the `processReviewerTranscript` call site)
 
 ### Current-state notes on files being modified
 
@@ -421,19 +421,19 @@ The following files would otherwise be locked but MUST be modified by this story
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md#Story 4.6`]
-- [Source: `plugins/crew/docs/user-surface-acs.md`] (user-surface tag conventions)
+- [Source: `plugins/flow/docs/user-surface-acs.md`] (user-surface tag conventions)
 - [Source: `_bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md`] (the rubber-stamp evidence this story closes)
 - [Source: `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md`] (reviewer-spawn surface)
 - [Source: `_bmad-output/implementation-artifacts/4-5-gh-error-map-yaml-and-recoverable-error-classification.md`] (gh wrapper + recoverable-error contract)
 - [Source: `_bmad-output/implementation-artifacts/4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action.md`] (PR-URL emission in dev transcript)
 - [Source: `_bmad-output/implementation-artifacts/3-4-native-adapter-planner-subagent-and-plan-skill.md`] (adapter `readSourceStory` contract)
 - [Source: `_bmad-output/implementation-artifacts/1-3-standards-doc-lookup-parser-and-shipped-example-template.md`] (`lookupStandards` + StandardsDoc schema)
-- [Source: `plugins/crew/mcp-server/src/state/lookup-standards.ts`] (function the new tool calls)
-- [Source: `plugins/crew/mcp-server/src/schemas/standards-doc.ts`] (Criterion / StandardsDoc shape)
-- [Source: `plugins/crew/mcp-server/src/lib/gh.ts`] (gh wrapper)
-- [Source: `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts`] (AC extractor — Task 1 extends)
-- [Source: `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`] (locked; verdict-parse surface unchanged)
-- [Source: `plugins/crew/skills/start/SKILL.md`] (the prose layer Task 7 widens)
+- [Source: `plugins/flow/mcp-server/src/state/lookup-standards.ts`] (function the new tool calls)
+- [Source: `plugins/flow/mcp-server/src/schemas/standards-doc.ts`] (Criterion / StandardsDoc shape)
+- [Source: `plugins/flow/mcp-server/src/lib/gh.ts`] (gh wrapper)
+- [Source: `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts`] (AC extractor — Task 1 extends)
+- [Source: `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`] (locked; verdict-parse surface unchanged)
+- [Source: `plugins/flow/skills/start/SKILL.md`] (the prose layer Task 7 widens)
 - Project memory: `project_reviewer_rubber_stamps.md` (the originating evidence)
 - Project memory: `feedback_prose_mut_steps_need_seam.md` (the pattern being applied)
 
@@ -448,7 +448,7 @@ The following files would otherwise be locked but MUST be modified by this story
 
 ### From Story 4.3c
 
-- The rubber-stamp scenario is reproducible: PR #105 retro confirmed two trials, one rubber-stamped. The operator-smoke harness already drives `/crew:start` end-to-end against a scratch repo; Story 4.6's AC5 smoke extends it minimally.
+- The rubber-stamp scenario is reproducible: PR #105 retro confirmed two trials, one rubber-stamped. The operator-smoke harness already drives `/flow:start` end-to-end against a scratch repo; Story 4.6's AC5 smoke extends it minimally.
 - `processReviewerTranscript` is the verdict-parse surface and is locked. This story does not alter how the verdict is parsed; only what the reviewer composes before emitting.
 
 ### From Story 4.3b
@@ -522,7 +522,7 @@ The `tools_allow` list previously contained stale dead entries (`readSourceStory
 
 ### M4: `pluginRootOverride` test seam
 
-`RunReviewerSessionOptions.pluginRootOverride` is an optional test seam that overrides the `getPluginRoot()` call used by `loadRolePermissions`. Production callers do not pass it. It was added to allow `runReviewerSession` integration tests to point at the project's real `plugins/crew/permissions/` directory from a tmpdir context without requiring a full plugin install. A JSDoc comment on the param in `run-reviewer-session.ts` marks it as a test seam. Future stories that add new tools with a `pluginRootOverride` seam should follow the same pattern.
+`RunReviewerSessionOptions.pluginRootOverride` is an optional test seam that overrides the `getPluginRoot()` call used by `loadRolePermissions`. Production callers do not pass it. It was added to allow `runReviewerSession` integration tests to point at the project's real `plugins/flow/permissions/` directory from a tmpdir context without requiring a full plugin install. A JSDoc comment on the param in `run-reviewer-session.ts` marks it as a test seam. Future stories that add new tools with a `pluginRootOverride` seam should follow the same pattern.
 
 ### Issue 2: discriminating execaImpl stub
 
@@ -530,7 +530,7 @@ The original `makeGhExecaStub` in `run-reviewer-session.test.ts` returned identi
 
 ### Issue 1: AC5 operator-smoke harness
 
-AC5's operator-smoke contract is covered by a deterministic CI harness under `src/__tests__/operator-smoke-helpers/` that drives the inner cycle with a stubbed dev persona (claims handoff but does not create `target-file.txt`) and a stubbed reviewer `runReviewerSession` that returns a structured fail for the missing artifact. The harness asserts the reviewer returns a non-`READY FOR MERGE` verdict and the manifest stays in `in-progress/`. The operator-driven step (Step 8.5) remains the gate for human evidence before merge, per `plugins/crew/docs/user-surface-acs.md`.
+AC5's operator-smoke contract is covered by a deterministic CI harness under `src/__tests__/operator-smoke-helpers/` that drives the inner cycle with a stubbed dev persona (claims handoff but does not create `target-file.txt`) and a stubbed reviewer `runReviewerSession` that returns a structured fail for the missing artifact. The harness asserts the reviewer returns a non-`READY FOR MERGE` verdict and the manifest stays in `in-progress/`. The operator-driven step (Step 8.5) remains the gate for human evidence before merge, per `plugins/flow/docs/user-surface-acs.md`.
 
 ---
 
@@ -544,7 +544,7 @@ The "Reviewer Findings — Decisions" section above captures the fix-pass decisi
 
 ### Revision 2 (post-operator-smoke, 2026-05-24 — this revision)
 
-**Smoke evidence — trial 7 of 7.** Operator-smoke on 2026-05-24 ran 7 trials of `/crew:start` against the deterministic rubber-stamp reproducer (the `target-file.txt`-missing fixture). The SUBSTANTIVE contract was met on trial 7: `runReviewerSession` correctly detected ENOENT for `target-file.txt`, the AC executor flagged AC1 fail with `reason: "artifact missing at <path> (ENOENT)"`, and the reviewer persona composed `**Verdict: NEEDS CHANGES**` referencing the missing artifact by path. The semantics worked.
+**Smoke evidence — trial 7 of 7.** Operator-smoke on 2026-05-24 ran 7 trials of `/flow:start` against the deterministic rubber-stamp reproducer (the `target-file.txt`-missing fixture). The SUBSTANTIVE contract was met on trial 7: `runReviewerSession` correctly detected ENOENT for `target-file.txt`, the AC executor flagged AC1 fail with `reason: "artifact missing at <path> (ENOENT)"`, and the reviewer persona composed `**Verdict: NEEDS CHANGES**` referencing the missing artifact by path. The semantics worked.
 
 **But the user flow broke.** The reviewer LLM appended a courteous footer ("Handoff to generalist-dev — verdict recorded.") AFTER the `**Verdict: NEEDS CHANGES**` sentinel line. The locked-phrase parser in `verdict-parser.ts` requires the sentinel to be the FINAL non-empty line; trial 7's transcript violated that anchor; `processReviewerTranscript` returned `done-blocked-reviewer-grammar` instead of the intended `done-blocked-reviewer-verdict`. In production this means: reviewer correctly catches the bug → operator sees "blocked, needs human intervention" instead of "needs changes, dev should iterate" → the dev iteration cannot auto-proceed. Trust contract intact in semantics, broken in the operator's surface.
 
@@ -553,7 +553,7 @@ The "Reviewer Findings — Decisions" section above captures the fix-pass decisi
 **Architectural shift (this revision folds in).**
 
 1. `runReviewerSession` derives `recommendedVerdict: "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED"` deterministically from `acResults` per the closed algorithm in (3f). The tool decides; the LLM does not.
-2. `runReviewerSession` persists `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning (atomic write per Story 1.6's helper). Same shape pattern as Story 4.3c's `completeStory` call inside `processReviewerTranscript`.
+2. `runReviewerSession` persists `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning (atomic write per Story 1.6's helper). Same shape pattern as Story 4.3c's `completeStory` call inside `processReviewerTranscript`.
 3. `processReviewerTranscript` reads the persisted file and switches on `recommendedVerdict`. The `reviewerTranscript` parameter is dropped — the chat is no longer load-bearing. Missing file → `done-blocked-no-session-result` (rubber-stamp protection analogous to 4.3c's verdict-grammar guard, but at the structural seam).
 4. Reviewer persona chat becomes purely informational. The persona's only verdict-related obligation is to invoke `runReviewerSession`. Locked-phrase `verdict` entry remains in the catalogue as a documentation guideline; the parser is retired.
 5. AC3, AC4, AC5 reworked per the sections above to assert the file-based transport.

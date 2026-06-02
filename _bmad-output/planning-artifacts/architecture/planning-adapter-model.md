@@ -43,7 +43,7 @@ type ChangeEvent =
   | { kind: "removed"; ref: string };
 ```
 
-Adapters live in `mcp-server/src/adapters/<name>/` and self-register via `mcp-server/src/adapters/registry.ts`. The MCP server resolves the active adapter on every skill invocation via `<target-repo>/.crew/config.yaml`.
+Adapters live in `mcp-server/src/adapters/<name>/` and self-register via `mcp-server/src/adapters/registry.ts`. The MCP server resolves the active adapter on every skill invocation via `<target-repo>/.flow/config.yaml`.
 
 ## Story refs
 
@@ -56,7 +56,7 @@ Adapters live in `mcp-server/src/adapters/<name>/` and self-register via `mcp-se
 
 ## Execution manifest
 
-Lives at `<target-repo>/.crew/state/<state>/<ref>.yaml`. State transitions are atomic `fs.rename` between the four `<state>/` directories. Manifest shape:
+Lives at `<target-repo>/.flow/state/<state>/<ref>.yaml`. State transitions are atomic `fs.rename` between the four `<state>/` directories. Manifest shape:
 
 ```yaml
 ref: "bmad:1.2.3"
@@ -108,13 +108,13 @@ The BMad retro (`bmad-retrospective`) coexists with our retro analyst. They look
 
 ## Native adapter — for users without a planning tool
 
-A built-in adapter that authors story files directly under `<target-repo>/.crew/native-stories/<ref>.md` using the body shape pinned in Pattern §2. Functionally equivalent to the original "plugin owns stories" design, now scoped to one adapter rather than the whole product.
+A built-in adapter that authors story files directly under `<target-repo>/.flow/native-stories/<ref>.md` using the body shape pinned in Pattern §2. Functionally equivalent to the original "plugin owns stories" design, now scoped to one adapter rather than the whole product.
 
 `/<plugin>:plan` invokes the planner agent against the native adapter only. For external adapters, the skill is a pointer back to the source tool.
 
 ## Configuration
 
-`<target-repo>/.crew/config.yaml`:
+`<target-repo>/.flow/config.yaml`:
 
 ```yaml
 adapter: bmad                   # "bmad" | "native" | <future adapter name>
@@ -136,13 +136,13 @@ If no config exists on first skill invocation, the plugin runs `detect()` agains
 | §Decisions A — "Story file format: Markdown + YAML frontmatter" | Applies to the native adapter's source files and to plugin-owned manifests. External adapters define their own contract. |
 | §Patterns §1 — Frontmatter conventions | Applies to plugin-owned artifacts only. Source story frontmatter belongs to the adapter. |
 | §Patterns §2 — Story body shape | Applies to the native adapter only. (Edited in place above.) |
-| Original `<target-repo>/stories/` tree | Replaced by `<target-repo>/.crew/state/{to-do,in-progress,blocked,done}/<ref>.yaml`. Source stories live wherever the tool puts them. |
+| Original `<target-repo>/stories/` tree | Replaced by `<target-repo>/.flow/state/{to-do,in-progress,blocked,done}/<ref>.yaml`. Source stories live wherever the tool puts them. |
 | FR55 (story-level retro into story frontmatter) | Satisfied by writing to the execution manifest's `lessons:` block. The PRD's `lessons[]`, `failure_class`, `duration_seconds`, `rework_count` all survive verbatim — just in a different file. |
 | FR78 (discard a built feature) | For external adapters, the user does this in their planning tool *and* marks `withdrawn: true` in our manifest. The plugin's `/<plugin>:plan` skill for external adapters offers a "mark as withdrawn" affordance that does the manifest write. |
 
 ## Risks introduced by this model
 
 - **Source drift while a story is in flight.** Mitigated by `source_hash` + drift detection (above).
-- **Adapter quality determines product quality.** A buggy BMad adapter that misreads dependencies is indistinguishable from a planning miss. Mitigation: each adapter ships with its own integration test suite that exercises a fixture target repo of the relevant shape; BMad's fixture is committed to `plugins/crew/adapters/bmad/fixtures/`.
+- **Adapter quality determines product quality.** A buggy BMad adapter that misreads dependencies is indistinguishable from a planning miss. Mitigation: each adapter ships with its own integration test suite that exercises a fixture target repo of the relevant shape; BMad's fixture is committed to `plugins/flow/adapters/bmad/fixtures/`.
 - **Cross-adapter dependency edges.** `depends_on` can cross adapter namespaces (mixed-adapter repo). Allowed but not actively supported in v1; the adapter registry handles cross-namespace lookups, but no skill assumes mixed repos in its UX.
 - **Adapter detection ambiguity on greenfield repos.** A near-empty repo may match no adapter (or both). Mitigation: `detect()` returns false on ambiguity; first invocation prompts the user to choose explicitly; choice persists to config.

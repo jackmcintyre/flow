@@ -9,7 +9,7 @@ Status: review
 ## Story
 
 As a **plugin operator**,
-I want **`/crew:scan` to recognise BMad AC headings in the descriptive shape (`**AC1 — <description>:**`) in addition to today's strict shape (`**AC1:**` or `**AC1 (tag):**`)**,
+I want **`/flow:scan` to recognise BMad AC headings in the descriptive shape (`**AC1 — <description>:**`) in addition to today's strict shape (`**AC1:**` or `**AC1 (tag):**`)**,
 so that **the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` scans clean and the Phase 2 canary can resume**.
 
 ### What this story is, in one sentence
@@ -35,13 +35,13 @@ This is a single-line regex change in `parse-bmad-story.ts` plus unit-test cover
 
 **AC1:**
 
-The `headingRe` regex in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:220` is widened to also accept an optional em-dash-separated description between the digit and the colon: `/^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/` (or equivalent — the dev may refine the exact pattern as long as the corpus walk in AC2 passes). The description token is discarded; it's documentation. The parenthetical tag (when present) continues to behave as today (`(integration)` and `(user-surface)` map to `kind: "integration"`, anything else to `kind: "unit"`). Unit tests cover: (a) strict shape `**AC1:**` (regression — must still parse); (b) tagged shape `**AC2 (integration):**` (regression); (c) descriptive shape `**AC3 — Some title:**`; (d) descriptive + tagged shape `**AC4 — Some title (integration):**`.
-`artifact: plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts`
+The `headingRe` regex in `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts:220` is widened to also accept an optional em-dash-separated description between the digit and the colon: `/^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/` (or equivalent — the dev may refine the exact pattern as long as the corpus walk in AC2 passes). The description token is discarded; it's documentation. The parenthetical tag (when present) continues to behave as today (`(integration)` and `(user-surface)` map to `kind: "integration"`, anything else to `kind: "unit"`). Unit tests cover: (a) strict shape `**AC1:**` (regression — must still parse); (b) tagged shape `**AC2 (integration):**` (regression); (c) descriptive shape `**AC3 — Some title:**`; (d) descriptive + tagged shape `**AC4 — Some title (integration):**`.
+`artifact: plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts`
 
 **AC2 (integration):**
 
-Extend (or supersede) the corpus-walk test at `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (introduced by Story 5.14) so it asserts the full `parseBmadStory` pipeline — not just `Status:` round-trip — completes for every `.md` file in `_bmad-output/implementation-artifacts/`. After widening, the 17 currently-malformed files (`1-1, 1-2, 1-2b, 1-3, 1-4, 1-5, 1-6, 1-7, 1-7a, 1-10, 1-13, 2-4, 2-5, 4-2, 5-10, 5-12, 5-14`) MUST parse without throwing AND yield `acceptance_criteria` arrays with at least one AC each. Note: this AC also closes a likely gap in the 5.14 test — if the 5.14 test had asserted full pipeline parsing, the 17 files would have failed it pre-merge. Verify and extend.
-`vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
+Extend (or supersede) the corpus-walk test at `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (introduced by Story 5.14) so it asserts the full `parseBmadStory` pipeline — not just `Status:` round-trip — completes for every `.md` file in `_bmad-output/implementation-artifacts/`. After widening, the 17 currently-malformed files (`1-1, 1-2, 1-2b, 1-3, 1-4, 1-5, 1-6, 1-7, 1-7a, 1-10, 1-13, 2-4, 2-5, 4-2, 5-10, 5-12, 5-14`) MUST parse without throwing AND yield `acceptance_criteria` arrays with at least one AC each. Note: this AC also closes a likely gap in the 5.14 test — if the 5.14 test had asserted full pipeline parsing, the 17 files would have failed it pre-merge. Verify and extend.
+`vitest: plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
 
 ---
 
@@ -51,13 +51,13 @@ Extend (or supersede) the corpus-walk test at `plugins/crew/mcp-server/src/adapt
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts` — widen the `headingRe` regex inside `parseAcceptanceCriteria` (currently line 220). Update the adjacent comment on line 218 (which currently reads ``// AC headings look like `**AC1:**` or `**AC2 (user-surface):**`.``) to also document the descriptive shape. No other code in this file changes — the throw site at lines 234-238, the capture-group consumption at line 227 (`m[1]!` is still the digit, `m[2]?.trim()` is still the parenthetical tag), and the kind classification at line 251 are all unchanged.
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — extend (or supersede) the existing 5.14 test so it asserts full `parseBmadStory` pipeline completion plus a non-empty `acceptance_criteria` array for every `.md` file in the corpus. The current test (per 5.14) only gates on `Status:`-vocabulary errors and tolerates AC-heading format failures as "pre-existing out-of-scope" errors logged via `console.warn`. After this story, those AC-heading failures MUST become test failures. The 5.14 test's structure (corpus root resolution via 7-segment `path.resolve(__dirname, ...)`, filename filter via `PARSEABLE_FILENAME_RE`, `beforeAll` existence check) is reused verbatim.
-- `plugins/crew/docs/spikes/bmad-format.md` — extend the "Acceptance criteria shape" section (around lines 73–101) to document the descriptive-shape allowance. Add one or two example lines next to the existing `**AC1:**` / `**AC2 (user-surface):**` / `**AC3 (integration):**` block showing `**AC4 — Some descriptive title:**` and `**AC5 — Some title (integration):**`. Note that the descriptive token is discarded. This docs update rides in the same change set.
+- `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts` — widen the `headingRe` regex inside `parseAcceptanceCriteria` (currently line 220). Update the adjacent comment on line 218 (which currently reads ``// AC headings look like `**AC1:**` or `**AC2 (user-surface):**`.``) to also document the descriptive shape. No other code in this file changes — the throw site at lines 234-238, the capture-group consumption at line 227 (`m[1]!` is still the digit, `m[2]?.trim()` is still the parenthetical tag), and the kind classification at line 251 are all unchanged.
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — extend (or supersede) the existing 5.14 test so it asserts full `parseBmadStory` pipeline completion plus a non-empty `acceptance_criteria` array for every `.md` file in the corpus. The current test (per 5.14) only gates on `Status:`-vocabulary errors and tolerates AC-heading format failures as "pre-existing out-of-scope" errors logged via `console.warn`. After this story, those AC-heading failures MUST become test failures. The 5.14 test's structure (corpus root resolution via 7-segment `path.resolve(__dirname, ...)`, filename filter via `PARSEABLE_FILENAME_RE`, `beforeAll` existence check) is reused verbatim.
+- `plugins/flow/docs/spikes/bmad-format.md` — extend the "Acceptance criteria shape" section (around lines 73–101) to document the descriptive-shape allowance. Add one or two example lines next to the existing `**AC1:**` / `**AC2 (user-surface):**` / `**AC3 (integration):**` block showing `**AC4 — Some descriptive title:**` and `**AC5 — Some title (integration):**`. Note that the descriptive token is discarded. This docs update rides in the same change set.
 
 **NEW:**
 
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` — unit-test file for the AC-heading regex widening (AC1 unit coverage). If a co-located test for AC heading shapes already exists, extend it instead of creating a new file. As of the previous story, `__tests__/` contains `parse-bmad-story.ship-gate.test.ts`, `map-bmad-status.test.ts`, and `parse-bmad-story-corpus.integration.test.ts`; no dedicated AC-heading shape test exists, so a new file is the cleanest landing spot. Cases:
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` — unit-test file for the AC-heading regex widening (AC1 unit coverage). If a co-located test for AC heading shapes already exists, extend it instead of creating a new file. As of the previous story, `__tests__/` contains `parse-bmad-story.ship-gate.test.ts`, `map-bmad-status.test.ts`, and `parse-bmad-story-corpus.integration.test.ts`; no dedicated AC-heading shape test exists, so a new file is the cleanest landing spot. Cases:
   - Strict shape `**AC1:**` parses with one AC, `kind: "unit"`. (Regression.)
   - Tagged shape `**AC2 (integration):**` parses with one AC, `kind: "integration"`. (Regression.)
   - Tagged shape `**AC3 (user-surface):**` parses with one AC, `kind: "integration"` (user-surface maps to integration per the existing rule at line 251). (Regression.)
@@ -87,7 +87,7 @@ Extend (or supersede) the corpus-walk test at `plugins/crew/mcp-server/src/adapt
 
 ### Build artefact reminder
 
-`plugins/crew/mcp-server/dist/` is checked into git (`/plugin install` copies the tree as-is and does not run a build step). After changing `src/`, run `pnpm build` and commit `dist/` in the same change. CI fails on drift. See `plugins/crew/docs/README-install.md` § Build artefacts.
+`plugins/flow/mcp-server/dist/` is checked into git (`/plugin install` copies the tree as-is and does not run a build step). After changing `src/`, run `pnpm build` and commit `dist/` in the same change. CI fails on drift. See `plugins/flow/docs/README-install.md` § Build artefacts.
 
 ---
 
@@ -160,16 +160,16 @@ The test walks the corpus directly via `fs.readdirSync` and does NOT hard-code t
 - `MalformedBmadStoryError` message format changes.
 - Touching `bmad-create-story` skill output templates (the upstream skill already emits this shape; the parser is what's behind).
 - `reconcileStatus`, `mapBmadStatusToExecution`, `BmadStatus` type — all untouched by this story.
-- Any change to `/crew:scan` skill prose or surface (substrate-only).
+- Any change to `/flow:scan` skill prose or surface (substrate-only).
 - Any change to `sprint-status.yaml` (state file — the orchestrator owns transitions).
 
 ### Test strategy summary
 
-- **AC1 unit coverage** lands in `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` (new file). Seven cases: four positive shapes + two regression cases + one negative case (the double-hyphen rejection).
-- **AC2 integration coverage** extends `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (existing 5.14 file). Adds a full-pipeline `describe` block; removes the `otherErrors` warn-only branch.
+- **AC1 unit coverage** lands in `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` (new file). Seven cases: four positive shapes + two regression cases + one negative case (the double-hyphen rejection).
+- **AC2 integration coverage** extends `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (existing 5.14 file). Adds a full-pipeline `describe` block; removes the `otherErrors` warn-only branch.
 - The existing `parse-bmad-story.ship-gate.test.ts`, `map-bmad-status.test.ts`, and the 5.14 Status gates are unaffected and MUST continue to pass.
 
-Run order during dev: `pnpm typecheck` → `pnpm test` from the repo root. Both must pass before opening the PR. Also run `pnpm build` from `plugins/crew/mcp-server/` and commit `dist/` per the build-artefact rule.
+Run order during dev: `pnpm typecheck` → `pnpm test` from the repo root. Both must pass before opening the PR. Also run `pnpm build` from `plugins/flow/mcp-server/` and commit `dist/` per the build-artefact rule.
 
 ---
 
@@ -182,9 +182,9 @@ Sequenced after Story 5.14 (which introduced the corpus-walk test this story ext
 ## References
 
 - Stub: `_bmad-output/planning-artifacts/epics/epic-5-orchestration-recovery-visibility-and-resilience.md` § Story 5.17 (lines 363–379).
-- Parser location: `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:217–253` (`parseAcceptanceCriteria` function); regex at line 220; throw site at lines 234–238.
-- Corpus test (introduced by 5.14): `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`.
-- Format spike (needs update in this change): `plugins/crew/docs/spikes/bmad-format.md` § "Acceptance criteria shape" (lines ~73–101).
+- Parser location: `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts:217–253` (`parseAcceptanceCriteria` function); regex at line 220; throw site at lines 234–238.
+- Corpus test (introduced by 5.14): `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`.
+- Format spike (needs update in this change): `plugins/flow/docs/spikes/bmad-format.md` § "Acceptance criteria shape" (lines ~73–101).
 - Canonical regression target: `_bmad-output/implementation-artifacts/1-1-scaffold-the-plugin-skeleton.md` line 17 (`**AC1 — Install & build pass cleanly:**`).
 - Related: Story 5.14 § "Two-mirror invariant" Dev Notes — the AC regex has no equivalent mirror; single point of edit.
 - Related: Story 5.18 (deferred) — structural Markdown AST parser; do NOT pre-empt it here.
@@ -201,7 +201,7 @@ Sequenced after Story 5.14 (which introduced the corpus-walk test this story ext
 - New AC `kind` taxonomy values beyond today's `unit | integration`.
 - Schema migration of `BmadStatus`, `mapBmadStatusToExecution`, or any consumer downstream of `parseBmadStory`. All return-shape contracts unchanged.
 - Any change to the `bmad-create-story` skill output template (the upstream skill already emits this shape).
-- Any change to `/crew:scan` skill prose or surface (substrate-only).
+- Any change to `/flow:scan` skill prose or surface (substrate-only).
 - Any change to `sprint-status.yaml` (state file — the orchestrator owns transitions).
 
 ---
@@ -226,11 +226,11 @@ All 1467 tests pass. Build clean. `dist/` committed.
 
 ## File List
 
-- `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts` (modified — regex widening + comment update)
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` (new — AC1 unit tests)
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (modified — AC2 full-pipeline gate)
-- `plugins/crew/docs/spikes/bmad-format.md` (modified — AC-heading shape docs update)
-- `plugins/crew/mcp-server/dist/` (rebuilt — all changed src files compiled)
+- `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts` (modified — regex widening + comment update)
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` (new — AC1 unit tests)
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (modified — AC2 full-pipeline gate)
+- `plugins/flow/docs/spikes/bmad-format.md` (modified — AC-heading shape docs update)
+- `plugins/flow/mcp-server/dist/` (rebuilt — all changed src files compiled)
 - `_bmad-output/implementation-artifacts/5-17-bmad-parser-ac-heading-regex-widening.md` (this file — Status updated)
 
 ---

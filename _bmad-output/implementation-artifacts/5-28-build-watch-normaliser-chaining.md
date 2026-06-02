@@ -15,23 +15,23 @@ This story is a tight follow-up to Story 5.24 (post-build normaliser). 5.24 cove
 
 **AC1 (user-surface):**
 
-`pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle.
+`pnpm --dir plugins/flow/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle.
 
 <!-- user-surface: AC1 names `pnpm build:watch` — a CLI command the operator types verbatim per CLAUDE.md's "Dev loop" guidance — so rubric (ii) applies. -->
  No new runtime or dev dependencies are introduced — `package.json` `dependencies` / `devDependencies` blocks are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
-artifact: plugins/crew/mcp-server/package.json
-artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+artifact: plugins/flow/mcp-server/package.json
+artifact: plugins/flow/mcp-server/scripts/watch-and-normalise.mjs
 
 **AC2 (user-surface):**
 
 <!-- user-surface: AC2 also requires the operator to run `pnpm build:watch` and observe `git status` go clean — both are CLI surfaces the operator directly invokes/inspects, so rubric (ii) and (iv) apply. -->
-With a clean working tree, running `pnpm --dir plugins/crew/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
-artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+With a clean working tree, running `pnpm --dir plugins/flow/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
+artifact: plugins/flow/mcp-server/scripts/watch-and-normalise.mjs
 
 **AC3 (integration):**
 
-A vitest test in `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` spawns `pnpm build:watch` (or the wrapper script directly) as a child process inside a tmp project copy (or the package under test, using a scratch dist output dir), triggers an idempotent source touch that forces a `.d.ts` re-emit, waits for the normaliser to settle (poll-with-timeout, ~5–10s cap), and asserts the resulting `.d.ts` files are byte-identical to what `pnpm build` (one-shot) produces from the same source. Child process and any spawned tsc workers are torn down unconditionally (try/finally + process-group teardown).
-vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
+A vitest test in `plugins/flow/mcp-server/tests/build-watch-determinism.test.ts` spawns `pnpm build:watch` (or the wrapper script directly) as a child process inside a tmp project copy (or the package under test, using a scratch dist output dir), triggers an idempotent source touch that forces a `.d.ts` re-emit, waits for the normaliser to settle (poll-with-timeout, ~5–10s cap), and asserts the resulting `.d.ts` files are byte-identical to what `pnpm build` (one-shot) produces from the same source. Child process and any spawned tsc workers are torn down unconditionally (try/finally + process-group teardown).
+vitest: plugins/flow/mcp-server/tests/build-watch-determinism.test.ts
 
 **AC4:**
 
@@ -44,16 +44,16 @@ artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chai
 
 **New:**
 
-- `plugins/crew/mcp-server/scripts/watch-and-normalise.mjs` — small Node wrapper. Spawns `tsc -p tsconfig.json --watch` as a child process (inherit stdio so the operator still sees tsc's "File change detected." / "Found N errors." lines), and runs the normaliser whenever tsc reports a successful emit. Re-uses the existing `normaliseDistTree` export from `scripts/normalise-dist.mjs` (do not duplicate the regex logic).
-- `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` — integration test per AC3.
+- `plugins/flow/mcp-server/scripts/watch-and-normalise.mjs` — small Node wrapper. Spawns `tsc -p tsconfig.json --watch` as a child process (inherit stdio so the operator still sees tsc's "File change detected." / "Found N errors." lines), and runs the normaliser whenever tsc reports a successful emit. Re-uses the existing `normaliseDistTree` export from `scripts/normalise-dist.mjs` (do not duplicate the regex logic).
+- `plugins/flow/mcp-server/tests/build-watch-determinism.test.ts` — integration test per AC3.
 
 **Modified:**
 
-- `plugins/crew/mcp-server/package.json` — change `build:watch` script from `tsc -p tsconfig.json --watch` to `node scripts/watch-and-normalise.mjs`. No changes to `dependencies` / `devDependencies`.
+- `plugins/flow/mcp-server/package.json` — change `build:watch` script from `tsc -p tsconfig.json --watch` to `node scripts/watch-and-normalise.mjs`. No changes to `dependencies` / `devDependencies`.
 
 **Untouched (DO NOT modify):**
 
-- `plugins/crew/mcp-server/scripts/normalise-dist.mjs` — this is Story 5.24's seam. Re-use the `normaliseDistTree` export; don't fork or refactor it. If the export signature isn't already convenient for the wrapper, add a tiny adapter inside `watch-and-normalise.mjs` rather than modifying the normaliser itself.
+- `plugins/flow/mcp-server/scripts/normalise-dist.mjs` — this is Story 5.24's seam. Re-use the `normaliseDistTree` export; don't fork or refactor it. If the export signature isn't already convenient for the wrapper, add a tiny adapter inside `watch-and-normalise.mjs` rather than modifying the normaliser itself.
 - `pnpm build` script in `package.json` — already correct; do not touch.
 
 ### Recommended approach (dev picks the seam, but this is the smallest viable shape)
@@ -157,7 +157,7 @@ None. Leaf story — depends only on Story 5.24's `normaliseDistTree` export (al
 - [ ] All ACs met. `pnpm build:watch` runs the normaliser on every recompile.
 - [ ] AC3 integration test green in the standard `pnpm test` suite. No orphan `tsc --watch` processes left after the test run.
 - [ ] Root cause and design choice documented in Dev Notes (AC4) — technical specifics, not hand-waving.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` passes; `dist/` rebuilt and staged in the same commit.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` passes; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `dev`. CI green (CI still uses `pnpm build`, which already chains the normaliser — should be a no-op for CI). The PR diff also serves as a self-check: with the wrapper in place, the developer's local working tree should stay clean throughout authoring the PR.
 - [ ] Reviewer cycle clean (no rubber-stamp guard fires; AC markers above are clean enough for the reviewer's deterministic classifier).
 - [ ] `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` entry 16 marked "Folded into 5.28."
@@ -176,9 +176,9 @@ The bare `tsc -p tsconfig.json --watch` command in the old `build:watch` script 
 
 ## File List
 
-- `plugins/crew/mcp-server/scripts/watch-and-normalise.mjs` (new)
-- `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` (new)
-- `plugins/crew/mcp-server/package.json` (modified — `build:watch` script)
+- `plugins/flow/mcp-server/scripts/watch-and-normalise.mjs` (new)
+- `plugins/flow/mcp-server/tests/build-watch-determinism.test.ts` (new)
+- `plugins/flow/mcp-server/package.json` (modified — `build:watch` script)
 - `_bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md` (updated Dev Notes, File List, Change Log, Status)
 
 ## Change Log

@@ -6,7 +6,7 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **every cycle's retro to produce a single proposal markdown file under `<target-repo>/.crew/retro-proposals/<ISO>.md`, carrying any of seven typed proposals**,
+I want **every cycle's retro to produce a single proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md`, carrying any of seven typed proposals**,
 So that **the calibration loop covers the full surface — what not to do (rules), what to always do (skills), and how to evolve the team — with each proposal kind validated at the boundary**.
 
 This is the third and final story of Epic 6a (per the 2026-05-27 reframe). 6.1 ships the per-story retro substrate; 6.2 ships the skill + subagent + input-gathering; 6.3 ships the schema + writer that lets the subagent emit a structured artifact. After 6.3, retros run end-to-end and produce inert proposal markdown — Jack reviews by hand, decides what to apply (or not). The `/accept-proposal` mutation gate is Epic 6b (Story 6.4+) and out of scope here.
@@ -20,30 +20,30 @@ This is the third and final story of Epic 6a (per the 2026-05-27 reframe). 6.1 s
 
 **AC1:**
 
-`writeRetroProposal({ targetRepoRoot, isoTimestamp, proposals })` writes exactly one markdown file at `<targetRepoRoot>/.crew/retro-proposals/<isoTimestamp>.md`. The file's structure is: a YAML frontmatter block carrying the validated `proposals` array, followed by an operator-readable rendered Markdown body that lists each proposal as an H2 section with a one-line summary and the structured fields rendered as a definition list. The parent directory is mkdir-p'd if absent. The write goes through `writeManagedFile` (canonical-fs guard). The tool refuses with a typed `RetroProposalAlreadyExistsError` if the target file already exists — proposals are immutable artifacts (idempotency by ISO timestamp; collisions are bugs in the caller, not silent overwrites). _(FR58)_
-artifact: plugins/crew/mcp-server/src/tools/write-retro-proposal.ts
+`writeRetroProposal({ targetRepoRoot, isoTimestamp, proposals })` writes exactly one markdown file at `<targetRepoRoot>/.flow/retro-proposals/<isoTimestamp>.md`. The file's structure is: a YAML frontmatter block carrying the validated `proposals` array, followed by an operator-readable rendered Markdown body that lists each proposal as an H2 section with a one-line summary and the structured fields rendered as a definition list. The parent directory is mkdir-p'd if absent. The write goes through `writeManagedFile` (canonical-fs guard). The tool refuses with a typed `RetroProposalAlreadyExistsError` if the target file already exists — proposals are immutable artifacts (idempotency by ISO timestamp; collisions are bugs in the caller, not silent overwrites). _(FR58)_
+artifact: plugins/flow/mcp-server/src/tools/write-retro-proposal.ts
 
 **AC2:**
 
 The Zod schema `RetroProposalSchema` is a `z.discriminatedUnion("type", [...])` over **exactly seven** discriminator literals: `rule | rule-retirement | skill-create | skill-revise | skill-supersede | skill-retire | team-change`. Closed enum, no `z.string()` fallback. Each variant carries the fields required by its kind (per AC3–AC7 below). Every proposal additionally carries a stable `id: ULID`, a `created_at: ISO-8601` timestamp, and a `rationale: string.min(1)` (one-paragraph justification). The schema is `.strict()` on every variant. _(FR59, Architecture §Skill calibration loop)_
-artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts
+artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts
 
 **AC3:**
 
 A `rule` proposal carries: `text: string.min(1)` (the rule criterion phrased operator-readably), `target_failure_class: string.min(1)`, `recommended_promotion_level: z.enum(["must", "should", "advisory"])`. Validation refuses unknown promotion levels and missing fields. _(FR59)_
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
 
 (One test per AC3–AC7 — see AC8.)
 
 **AC4:**
 
 A `skill-create` proposal carries: `proposed_path: string.min(1)` (path relative to target repo, e.g. `.crew/skills/<name>.md`), `frontmatter_description: string.min(1)`, `body: string.min(1)` (the proposed skill body markdown, excluding frontmatter — the apply tool in 6.7 stitches frontmatter and body together). Validation refuses absolute paths starting with `/` outside the target repo, and refuses paths containing `..` segments (path-traversal guard). _(FR59)_
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
 
 **AC5:**
 
 A `team-change` proposal carries: `action: z.enum(["hire", "unhire"])`, `target_role: string.regex(/^[a-z0-9-]+$/)` (kebab-cased role name matching the catalogue convention), `justification: string.min(1)`, `predicted_impact: { affected_failure_classes: string[] }` (which failure classes are expected to change as a result). Validation refuses non-kebab-cased role names and empty `affected_failure_classes` arrays (a team change with no predicted impact has no observable signal). _(FR106)_
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
 
 **AC6:**
 
@@ -52,35 +52,35 @@ The four remaining proposal types are schema-defined with the minimum fields nee
 - `skill-revise`: `target_skill_path: string.min(1)`, `revised_body: string.min(1)`, `version_bump: z.enum(["patch", "minor"])`. _(Architecture §Skill calibration loop)_
 - `skill-supersede`: `superseded_skill_path: string.min(1)`, `replacement: skill-create variant nested` — i.e. carries an embedded `skill-create` shape (`proposed_path`, `frontmatter_description`, `body`). The "two-half acceptance" semantics from the epic file (either half can be accepted independently) is Epic 6b's apply-time concern; the schema captures both halves in one record. _(Architecture §Skill calibration loop)_
 - `skill-retire`: `target_skill_path: string.min(1)`, `last_invoked_at: ISO-8601 | null` (null when the skill never fired).
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts
 
 **AC7:**
 
 `RetroProposalFileSchema` wraps the file-level shape: `{ iso_timestamp: ISO-8601, cycle_window: { from: ISO-8601, to: ISO-8601 } | null, proposals: RetroProposal[].min(0) }`. The proposals array MAY be empty — a retro that finds nothing worth proposing is a valid retro and produces an empty proposals file (still records that the retro ran). `.strict()` on the wrapper. _(FR58, FR59)_
-artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts
+artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts
 
 **AC8 (integration):**
 
-Vitest in `plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` covers, at minimum:
+Vitest in `plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` covers, at minimum:
 - One happy-path test per proposal type (seven tests) — valid fixture parses cleanly.
 - One Zod-rejection test per proposal type (seven tests) — at least one missing or out-of-enum field per variant rejected with `MalformedRetroProposalError`.
 - Discriminated-union behaviour: a proposal with `type: "rule"` and `proposed_path` (a `skill-create` field) fails — the discriminator rules out cross-variant field smuggling.
 - Path-traversal guard on `skill-create` (AC4): `proposed_path: "../../etc/passwd"` rejected.
 - Empty `proposals: []` round-trips through `RetroProposalFileSchema`.
 
-Plus the writer integration: `plugins/crew/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts` covers:
+Plus the writer integration: `plugins/flow/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts` covers:
 - Happy path: write a file with mixed proposal types; read back; assert frontmatter parses cleanly through `RetroProposalFileSchema`; assert body markdown contains an H2 per proposal.
 - Collision refusal: writing twice with the same `isoTimestamp` against the same target throws `RetroProposalAlreadyExistsError`.
 - Empty proposals: `proposals: []` produces a valid file with frontmatter `proposals: []` and a body that says "No proposals produced this cycle."
 - Path-traversal in `isoTimestamp` (defense in depth): `isoTimestamp: "../escape"` rejected at the writer boundary (the writer validates the timestamp matches an ISO-8601 regex before forming the path).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts
 
-(Also covered by `plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` — see Test plan.)
+(Also covered by `plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` — see Test plan.)
 
 **AC9:**
 
-`writeRetroProposal` is registered in `plugins/crew/mcp-server/src/tools/register.ts` with the standard `DomainError` envelope. Tool name: `writeRetroProposal` (camelCase per project convention). The retro-analyst's permission allowlist (`plugins/crew/permissions/retro-analyst.yaml`) is **not** modified by this story — that addition belongs to Story 6.2's AC5. (If 6.2 lands first, the allowlist already mentions `writeRetroProposal`, which is fine — the tool registration completes the wiring.)
-artifact: plugins/crew/mcp-server/src/tools/register.ts
+`writeRetroProposal` is registered in `plugins/flow/mcp-server/src/tools/register.ts` with the standard `DomainError` envelope. Tool name: `writeRetroProposal` (camelCase per project convention). The retro-analyst's permission allowlist (`plugins/flow/permissions/retro-analyst.yaml`) is **not** modified by this story — that addition belongs to Story 6.2's AC5. (If 6.2 lands first, the allowlist already mentions `writeRetroProposal`, which is fine — the tool registration completes the wiring.)
+artifact: plugins/flow/mcp-server/src/tools/register.ts
 
 ## Implementation Notes
 
@@ -95,21 +95,21 @@ artifact: plugins/crew/mcp-server/src/tools/register.ts
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/retro-proposal.ts` — the Zod schemas (`LessonSchema` from 6.1 is NOT reused here; retro proposals are a different shape).
-- `plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` — AC3–AC8 schema tests.
-- `plugins/crew/mcp-server/src/tools/write-retro-proposal.ts` — the writer.
-- `plugins/crew/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts` — AC8 writer tests.
+- `plugins/flow/mcp-server/src/schemas/retro-proposal.ts` — the Zod schemas (`LessonSchema` from 6.1 is NOT reused here; retro proposals are a different shape).
+- `plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts` — AC3–AC8 schema tests.
+- `plugins/flow/mcp-server/src/tools/write-retro-proposal.ts` — the writer.
+- `plugins/flow/mcp-server/src/tools/__tests__/write-retro-proposal.test.ts` — AC8 writer tests.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/register.ts` — register `writeRetroProposal` per AC9. Place after the other write-path registrations (group with `writeNativeStory` / `recordStoryRetro` from 6.1).
-- `plugins/crew/mcp-server/src/errors.ts` — add two typed errors:
+- `plugins/flow/mcp-server/src/tools/register.ts` — register `writeRetroProposal` per AC9. Place after the other write-path registrations (group with `writeNativeStory` / `recordStoryRetro` from 6.1).
+- `plugins/flow/mcp-server/src/errors.ts` — add two typed errors:
   - `MalformedRetroProposalError` (Zod-failure carrier; mirrors `MalformedExecutionManifestError`'s shape).
   - `RetroProposalAlreadyExistsError` (collision carrier with `{ absPath, isoTimestamp }`).
 
 ### Schema shape (binding)
 
 ```ts
-// plugins/crew/mcp-server/src/schemas/retro-proposal.ts
+// plugins/flow/mcp-server/src/schemas/retro-proposal.ts
 
 const UlidSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "must be a ULID");
 const IsoTimestampSchema = z.string().datetime({ offset: false }).refine((s) => s.endsWith("Z"), "must be UTC");
@@ -210,7 +210,7 @@ The `.strict()` posture is non-negotiable on every variant — memory `feedback_
 ### Writer shape (binding)
 
 ```ts
-// plugins/crew/mcp-server/src/tools/write-retro-proposal.ts
+// plugins/flow/mcp-server/src/tools/write-retro-proposal.ts
 
 export interface WriteRetroProposalOptions {
   targetRepoRoot: string;
@@ -229,7 +229,7 @@ export async function writeRetroProposal(opts: WriteRetroProposalOptions): Promi
 Steps:
 1. Validate `isoTimestamp` via `IsoTimestampSchema.parse` — defends against path-traversal in the filename component.
 2. Validate the file shape via `RetroProposalFileSchema.parse({ iso_timestamp: opts.isoTimestamp, cycle_window: opts.cycleWindow ?? null, proposals: opts.proposals })`. Failures throw `MalformedRetroProposalError`.
-3. Form the absolute path: `path.join(targetRepoRoot, ".crew", "retro-proposals", `${isoTimestamp}.md`)`.
+3. Form the absolute path: `path.join(targetRepoRoot, ".flow", "retro-proposals", `${isoTimestamp}.md`)`.
 4. `fs.mkdir(parentDir, { recursive: true })` — first-ever retro creates the dir.
 5. Check for collision via `fs.access` — if file exists, throw `RetroProposalAlreadyExistsError({ absPath, isoTimestamp })`. **Do not overwrite.** Proposals are immutable.
 6. Render the file: YAML frontmatter via `yaml.stringify` (lineWidth 0) wrapped in `---\n...\n---\n`, followed by a rendered Markdown body. The body shape:
@@ -280,7 +280,7 @@ Standard: rebuild and stage `dist/` in the same commit. Verify deterministic dis
 
 ### Edge cases worth surfacing in dev/review
 
-- **ISO timestamp granularity.** ms-precision (`2026-05-28T14:32:11.123Z`) is the convention from `TelemetryEventBase`. Two retros within the same millisecond would collide; the analyst should treat collision as a bug and surface it (the typed error suffices). Operators running `/crew:retro` twice in one second is a corner case worth noting but not engineering against.
+- **ISO timestamp granularity.** ms-precision (`2026-05-28T14:32:11.123Z`) is the convention from `TelemetryEventBase`. Two retros within the same millisecond would collide; the analyst should treat collision as a bug and surface it (the typed error suffices). Operators running `/flow:retro` twice in one second is a corner case worth noting but not engineering against.
 - **Frontmatter size.** Skill-create proposals carry a `body` field that could be hundreds of lines. The frontmatter YAML will get large; that's fine — operator-readable rendering is in the body, frontmatter is structured. Don't truncate or summarise.
 - **`skill-supersede` nested validation.** The `replacement` field embeds a `skill-create`-shaped object. The current schema uses `z.object(SkillCreateBody).strict()` rather than `SkillCreateProposalSchema` to avoid double-discriminator confusion (the outer `type: "skill-supersede"` is the discriminator; the inner replacement doesn't need its own `type` literal). Confirm this in dev — if it makes the schema harder to maintain, factor SkillCreateBody differently.
 - **`last_invoked_at: null` vs absent.** AC6 says `null` when the skill never fired. Use `z.nullable()` not `z.optional()` — null is the explicit "no data" value; absent would mean "didn't measure," which is a different statement. Operators reading the proposal should see `last_invoked_at: null`, not the field missing.
@@ -288,21 +288,21 @@ Standard: rebuild and stage `dist/` in the same commit. Verify deterministic dis
 
 ### Architectural fit / references
 
-- **FR58** (single proposal markdown file under `<target-repo>/.crew/retro-proposals/<ISO>.md`) — `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md` line 87. The PRD originally named `_bmad-output/retro-proposals/...`; the epic file (more recent) corrects this to `<target-repo>/.crew/retro-proposals/...`. The epic location is binding.
+- **FR58** (single proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md`) — `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md` line 87. The PRD originally named `_bmad-output/retro-proposals/...`; the epic file (more recent) corrects this to `<target-repo>/.flow/retro-proposals/...`. The epic location is binding.
 - **FR59** (the seven proposal types and per-type field shapes) — same file, line 88. The PRD lists three types; the epic file + architecture extend to seven. The epic + architecture are binding.
 - **FR106** (team-change predicted-impact field) — same file (search for FR106; defined later in the FR list around team-fitness).
 - **Architecture §Skill calibration loop** — `_bmad-output/planning-artifacts/architecture/skill-calibration-loop.md`. The seven types and the inter-relationships (skill-supersede pairs, skill-retire ↔ rule-retirement symmetry) all live here.
-- **Existing schema patterns to mirror** — `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (closed-enum, `.strict()`, typed-error parse helper) and `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (discriminated union over `type`). The retro-proposal schema sits at the intersection of those two patterns.
+- **Existing schema patterns to mirror** — `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (closed-enum, `.strict()`, typed-error parse helper) and `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (discriminated union over `type`). The retro-proposal schema sits at the intersection of those two patterns.
 - **Deterministic seam principle** — memory `feedback_default_to_deterministic_seams`. Every variant `.strict()`, no `z.string()` fallbacks, validation at write-time AND apply-time (6.4 re-reads through `parseRetroProposalFile`).
 
 ## Definition of Done
 
 - [ ] All nine ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; both new test files cover every AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; both new test files cover every AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean — AC1, AC7, AC9 are file-presence; AC3–AC8 are runnable vitest; reviewer's runnable-AC pass should be all-green.
-- [ ] No canonical-state mutation outside `<target-repo>/.crew/retro-proposals/` (the new dir is itself a write surface, but it's not yet inputs to any mutation tool until Epic 6b lands).
+- [ ] No canonical-state mutation outside `<target-repo>/.flow/retro-proposals/` (the new dir is itself a write surface, but it's not yet inputs to any mutation tool until Epic 6b lands).
 - [ ] Schema additions are additive only — no existing schema in `src/schemas/` is rewritten or weakened.
 
 ## Dev Notes

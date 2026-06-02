@@ -8,13 +8,13 @@ Status: done
 
 ## Story
 
-As a **plugin operator running `/crew:start` against a multi-story backlog**,
+As a **plugin operator running `/flow:start` against a multi-story backlog**,
 I want **`processReviewerTranscript` to atomically complete the story whenever it parses a `READY FOR MERGE` verdict — moving the in-progress manifest to `done/` BEFORE it returns to the prose layer**,
 so that **the queue actually drains across multiple stories: today the manifest stays in `in-progress/` after a green reviewer verdict, the next `claimNextStory` returns `waiting-on-in-progress` forever, and the second (and third…) ready story is never claimed without manual intervention.**
 
 ### What this story is, in one sentence
 
-Move the `completeStory` invocation from the SKILL.md prose layer INTO `processReviewerTranscript`'s `done-ready-for-merge` branch as an internal function call. The MCP tool becomes the source of atomicity for the verdict-parse + manifest-move pair; its return shape gains a `completed: true` flag so the SKILL.md prose can confirm the move and emit the verbatim chat line `story <ref> moved to done — claiming next` before looping back to `claimNextStory`. The two `done-blocked-*` branches are unchanged (they MUST NOT call `completeStory`). The `allowed_tools` array stays at the Story 4.3b seven-tool set — `completeStory` is called as an internal function import, not through the MCP allowed_tools surface, so it does NOT need a permission entry on the `/crew:start` skill for this story.
+Move the `completeStory` invocation from the SKILL.md prose layer INTO `processReviewerTranscript`'s `done-ready-for-merge` branch as an internal function call. The MCP tool becomes the source of atomicity for the verdict-parse + manifest-move pair; its return shape gains a `completed: true` flag so the SKILL.md prose can confirm the move and emit the verbatim chat line `story <ref> moved to done — claiming next` before looping back to `claimNextStory`. The two `done-blocked-*` branches are unchanged (they MUST NOT call `completeStory`). The `allowed_tools` array stays at the Story 4.3b seven-tool set — `completeStory` is called as an internal function import, not through the MCP allowed_tools surface, so it does NOT need a permission entry on the `/flow:start` skill for this story.
 
 ### Smoke evidence (why we're revising mid-flight)
 
@@ -38,11 +38,11 @@ Concrete shape:
 - On the reviewer-grammar-drift branch: no change — manifest gets `blocked_by: "reviewer-grammar"` stamped, no `completeStory` call, no `completed` field.
 - On the `NEEDS CHANGES` (rework) branch: no change — `rework_count` increments, no `completeStory` call.
 
-The `allowed_tools` array on `/crew:start`'s SKILL.md REVERTS from the original spec's eight-tool widening to Story 4.3b's seven-tool set. `completeStory` is invoked as an internal Node import from `process-reviewer-transcript.ts`; the prose layer never invokes it directly. The MCP tool-surface permission gate is not in this story's call path.
+The `allowed_tools` array on `/flow:start`'s SKILL.md REVERTS from the original spec's eight-tool widening to Story 4.3b's seven-tool set. `completeStory` is invoked as an internal Node import from `process-reviewer-transcript.ts`; the prose layer never invokes it directly. The MCP tool-surface permission gate is not in this story's call path.
 
 ### What this story fixes (and why it needs its own story)
 
-Story 4.3b (PR #105) shipped the refactored `/crew:start` inner cycle. Story 4.3c's first implementation attempted the queue-drain fix at the prose layer; operator-smoke proved that approach is non-deterministic for a mutating side-effect. This revision moves the side-effect into the tool layer so it CAN'T be skipped — there is no longer a prose step to forget.
+Story 4.3b (PR #105) shipped the refactored `/flow:start` inner cycle. Story 4.3c's first implementation attempted the queue-drain fix at the prose layer; operator-smoke proved that approach is non-deterministic for a mutating side-effect. This revision moves the side-effect into the tool layer so it CAN'T be skipped — there is no longer a prose step to forget.
 
 Three concrete gaps the revision closes:
 
@@ -56,10 +56,10 @@ This story remains a **temporary bridge fix** until Story 4.10b's auto-merge gat
 
 - (a) Touch `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other file under `_bmad-output/implementation-artifacts/`. The orchestrator owns status transitions. The dev agent MUST NOT edit any status / state file when implementing this story.
 - (b) Implement Story 4.10b's auto-merge gate. The `completeStory` call this story adds is the v1 bridge — it ignores PR state. Story 4.10b will replace the bare call with a gate; this story does not pre-empt that work.
-- (c) Modify the `completeStory` MCP tool's behaviour, signature, or error model. The tool already exists (Story 4.1) and is registered in `plugins/crew/mcp-server/src/tools/register.ts`. Story 4.3c only adds a new internal-function caller (`process-reviewer-transcript.ts`); the tool body, its `inputSchema`, its `WrongClaimantError` / `InProgressHandEditError` / `ManifestNotFoundError` raises, and its dist artefacts are byte-identical before and after this story. **`plugins/crew/mcp-server/src/tools/complete-story.ts` is LOCKED — do not modify.**
+- (c) Modify the `completeStory` MCP tool's behaviour, signature, or error model. The tool already exists (Story 4.1) and is registered in `plugins/flow/mcp-server/src/tools/register.ts`. Story 4.3c only adds a new internal-function caller (`process-reviewer-transcript.ts`); the tool body, its `inputSchema`, its `WrongClaimantError` / `InProgressHandEditError` / `ManifestNotFoundError` raises, and its dist artefacts are byte-identical before and after this story. **`plugins/flow/mcp-server/src/tools/complete-story.ts` is LOCKED — do not modify.**
 - (d) Change the chat-surface lines from Story 4.3b. The existing `handoff received`, `reviewer verdict: READY FOR MERGE`, `reviewer verdict: NEEDS CHANGES`, `reviewer verdict: BLOCKED`, `handoff grammar drift`, and `reviewer grammar drift` lines stay byte-identical. We ADD one new line emitted by the prose layer: `story <ref> moved to done — claiming next`.
 - (e) Auto-resolve `blocked_by` on either `done-blocked-*` branch. The `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` branches MUST NOT call `completeStory`. The story stays in `in-progress/` with `blocked_by` semantics unchanged from Story 4.3b.
-- (f) Widen the `/crew:start` SKILL.md `allowed_tools` array. **This is a REVERSAL from the original spec.** Original Story 4.3c added `completeStory` to `allowed_tools` (7 → 8). The revision REVERTS that change: `completeStory` is now called internally from `process-reviewer-transcript.ts`, so the skill's prose layer does not need a permission entry. Final `allowed_tools` stays at exactly the Story 4.3b seven-tool set: `[getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]`. **Why we reversed this:** the original architectural decision placed the mutating step at the prose layer, which required the permission entry. The smoke-evidence above proved the prose-layer approach is non-deterministic; moving the call to the tool layer means the prose never invokes `completeStory` directly, so the permission entry is no longer needed. See feedback memory `feedback_prose_mut_steps_need_seam.md`.
+- (f) Widen the `/flow:start` SKILL.md `allowed_tools` array. **This is a REVERSAL from the original spec.** Original Story 4.3c added `completeStory` to `allowed_tools` (7 → 8). The revision REVERTS that change: `completeStory` is now called internally from `process-reviewer-transcript.ts`, so the skill's prose layer does not need a permission entry. Final `allowed_tools` stays at exactly the Story 4.3b seven-tool set: `[getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]`. **Why we reversed this:** the original architectural decision placed the mutating step at the prose layer, which required the permission entry. The smoke-evidence above proved the prose-layer approach is non-deterministic; moving the call to the tool layer means the prose never invokes `completeStory` directly, so the permission entry is no longer needed. See feedback memory `feedback_prose_mut_steps_need_seam.md`.
 - (g) Add a `done-handoff-but-no-review-yet` completion path. Story 4.3b declared that branch in the discriminated-union return type for ABI stability; it is NOT returnable from v1. Story 4.3c does NOT add a `completeStory` call for this branch either.
 - (h) Change the rework branch. `next: "rework-dev"` continues to loop back to step 3 (dev spawn) inside the inner cycle. `rework_count` is incremented in-place by `processReviewerTranscript` and the manifest stays in `in-progress/`. No `completeStory` call.
 - (i) Move the `completeStory` call out of `processReviewerTranscript` into some other tool (e.g. `claimNextStory`). The completion signal originates in the inner cycle's reviewer verdict; co-locating the move with the parse is the whole point of this revision.
@@ -73,19 +73,19 @@ This story remains a **temporary bridge fix** until Story 4.10b's auto-merge gat
 
 ## Acceptance Criteria
 
-> AC1 and AC5 are user-surface per `plugins/crew/docs/user-surface-acs.md` rubric. AC2 is internal logic (about NOT calling a tool on blocked branches) — no tag. AC3 is structural / unit-test anchored — no tag. AC4 is the integration test — `(integration)` tag.
+> AC1 and AC5 are user-surface per `plugins/flow/docs/user-surface-acs.md` rubric. AC2 is internal logic (about NOT calling a tool on blocked branches) — no tag. AC3 is structural / unit-test anchored — no tag. AC4 is the integration test — `(integration)` tag.
 
 **AC1 (user-surface):**
-**Given** the SKILL.md prose's inner cycle has just received `{ next: "done-ready-for-merge", completed: true, chatLog: [...] }` from `processReviewerTranscript` for a story with ref `<ref>` originally in `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml`,
+**Given** the SKILL.md prose's inner cycle has just received `{ next: "done-ready-for-merge", completed: true, chatLog: [...] }` from `processReviewerTranscript` for a story with ref `<ref>` originally in `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml`,
 **When** the prose handles the verdict,
-**Then** (a) the manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` no longer exists and a manifest at `<targetRepoRoot>/.crew/state/done/<ref>.yaml` exists with `status: "done"` and the original `claimed_by` preserved (this is the side-effect of `processReviewerTranscript`'s internal `completeStory` call, performed BEFORE the tool returned to the prose); (b) the prose surfaces every entry of the returned `chatLog` (including the `reviewer verdict: READY FOR MERGE — story <ref> ready for merge gate` line) to the operator in order; (c) the prose reads the `completed: true` flag and emits the verbatim chat-surface line `story <ref> moved to done — claiming next` (no paraphrase, no reordering, no leading or trailing whitespace beyond a newline), AFTER surfacing the chatLog and BEFORE the next `claimNextStory` call; (d) only after this line is emitted does the prose return to outer loop step 4 (`claimNextStory`). _(FR19, FR-new; closes the queue-drain stall observed in PR #105 operator smoke and the prose-determinism flake observed in the 2026-05-22 smoke)_
+**Then** (a) the manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` no longer exists and a manifest at `<targetRepoRoot>/.flow/state/done/<ref>.yaml` exists with `status: "done"` and the original `claimed_by` preserved (this is the side-effect of `processReviewerTranscript`'s internal `completeStory` call, performed BEFORE the tool returned to the prose); (b) the prose surfaces every entry of the returned `chatLog` (including the `reviewer verdict: READY FOR MERGE — story <ref> ready for merge gate` line) to the operator in order; (c) the prose reads the `completed: true` flag and emits the verbatim chat-surface line `story <ref> moved to done — claiming next` (no paraphrase, no reordering, no leading or trailing whitespace beyond a newline), AFTER surfacing the chatLog and BEFORE the next `claimNextStory` call; (d) only after this line is emitted does the prose return to outer loop step 4 (`claimNextStory`). _(FR19, FR-new; closes the queue-drain stall observed in PR #105 operator smoke and the prose-determinism flake observed in the 2026-05-22 smoke)_
 
-<!-- User-surface: AC1 names `/crew:start`'s observable chat surface (rubric iv — a chat-surface line) AND the on-disk manifest state at `<targetRepoRoot>/.crew/state/done/<ref>.yaml` (rubric iii). The trigger has moved from prose-driven to tool-driven; the user-observable contract is identical. -->
+<!-- User-surface: AC1 names `/flow:start`'s observable chat surface (rubric iv — a chat-surface line) AND the on-disk manifest state at `<targetRepoRoot>/.flow/state/done/<ref>.yaml` (rubric iii). The trigger has moved from prose-driven to tool-driven; the user-observable contract is identical. -->
 
 **AC2:**
 **Given** `processReviewerTranscript` is parsing a reviewer transcript whose verdict sentinel is `BLOCKED`, OR whose final-line grammar is drifted/missing/unknown,
 **When** the tool handles either case,
-**Then** (a) the tool MUST NOT call `completeStory` — the story stays in `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` with `blocked_by` stamped only on the grammar-drift branch (per Story 4.3b semantics); (b) the returned object MUST NOT contain a `completed: true` field on either branch (the field is exclusive to the `done-ready-for-merge` shape); (c) the prose layer surfaces the existing verbatim `reviewer verdict: BLOCKED — story <ref> awaiting human` or `reviewer grammar drift — story <ref> blocked. …` line from the returned chatLog; (d) the prose MUST NOT emit the `story <ref> moved to done — claiming next` line on either branch; (e) the prose returns to outer loop step 4 (`claimNextStory`). _(Architecture clarity; preserves Story 4.3b semantics; prevents accidental completion of a blocked story)_
+**Then** (a) the tool MUST NOT call `completeStory` — the story stays in `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` with `blocked_by` stamped only on the grammar-drift branch (per Story 4.3b semantics); (b) the returned object MUST NOT contain a `completed: true` field on either branch (the field is exclusive to the `done-ready-for-merge` shape); (c) the prose layer surfaces the existing verbatim `reviewer verdict: BLOCKED — story <ref> awaiting human` or `reviewer grammar drift — story <ref> blocked. …` line from the returned chatLog; (d) the prose MUST NOT emit the `story <ref> moved to done — claiming next` line on either branch; (e) the prose returns to outer loop step 4 (`claimNextStory`). _(Architecture clarity; preserves Story 4.3b semantics; prevents accidental completion of a blocked story)_
 
 <!-- Not user-surface: AC2 is a MUST-NOT assertion about internal tool logic. The user-observed chat lines on these branches are unchanged from Story 4.3b. -->
 
@@ -93,12 +93,12 @@ This story remains a **temporary bridge fix** until Story 4.10b's auto-merge gat
 The following structural and behavioural anchors MUST be present:
 
 - (i) The `processReviewerTranscript` return type union includes the green-branch shape `{ next: "done-ready-for-merge"; completed: true; chatLog: string[] }`. The `completed` field is a literal-true type. The three non-green branches do NOT carry this field. (TypeScript type assertion — `tsc` catches drift; unit test asserts the field's presence on a green-branch fixture.)
-- (ii) A unit test in `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (or a sibling test file) asserts: when `processReviewerTranscript` is invoked with a `READY FOR MERGE` transcript against a seeded in-progress manifest, the manifest at `in-progress/<ref>.yaml` no longer exists and a manifest at `done/<ref>.yaml` exists with `status: "done"` and preserved `claimed_by`, AND the returned object has `completed: true`. The assertion is the seam contract.
+- (ii) A unit test in `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (or a sibling test file) asserts: when `processReviewerTranscript` is invoked with a `READY FOR MERGE` transcript against a seeded in-progress manifest, the manifest at `in-progress/<ref>.yaml` no longer exists and a manifest at `done/<ref>.yaml` exists with `status: "done"` and preserved `claimed_by`, AND the returned object has `completed: true`. The assertion is the seam contract.
 - (iii) The same test file asserts: when `processReviewerTranscript` is invoked with a `BLOCKED` transcript, the manifest stays at `in-progress/<ref>.yaml` (no `done/` entry created), the returned object does NOT have a `completed` field, and the returned `next` is `"done-blocked-reviewer-verdict"`.
 - (iv) The same test file asserts: when `processReviewerTranscript` is invoked with a grammar-drift transcript (e.g. missing the `**Verdict: …**` sentinel), the manifest stays at `in-progress/<ref>.yaml` with `blocked_by: "reviewer-grammar"` stamped, no `done/` entry created, the returned object does NOT have a `completed` field, and the returned `next` is `"done-blocked-reviewer-grammar"`.
-- (v) The SKILL.md prose at `plugins/crew/skills/start/SKILL.md` still contains the verbatim chat-line literal `story <ref> moved to done — claiming next` in its `# Inner cycle: dev → reviewer → rework` section's `## Reviewer spawn` verdict-handling block (em dash character `—` (U+2014), lowercase, no internal punctuation drift). AC1 prose anchor — informational chat line stays prose-emitted. Asserted by the existing `start-skill-content.test.ts`.
+- (v) The SKILL.md prose at `plugins/flow/skills/start/SKILL.md` still contains the verbatim chat-line literal `story <ref> moved to done — claiming next` in its `# Inner cycle: dev → reviewer → rework` section's `## Reviewer spawn` verdict-handling block (em dash character `—` (U+2014), lowercase, no internal punctuation drift). AC1 prose anchor — informational chat line stays prose-emitted. Asserted by the existing `start-skill-content.test.ts`.
 - (vi) The SKILL.md prose contains an instruction to loop back to outer loop step 4 (`claimNextStory`) on the `done-ready-for-merge` branch after emitting the new chat line. Substring match on `claimNextStory` within the verdict-handling block.
-- (vii) The `/crew:start` SKILL.md front-matter `allowed_tools` array, parsed as an unordered set, equals exactly the Story 4.3b seven-tool set `{getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}` — set-equality, order-agnostic, exactly seven entries. The set-equality assertion catches both a stray `completeStory` entry (if a prior implementation pass left it in) and any unexpected addition. **This REVERSES the original spec's 7 → 8 widening; the AC3 anchor count vs Story 4.3b is `7 stays at 7`, not `8`.**
+- (vii) The `/flow:start` SKILL.md front-matter `allowed_tools` array, parsed as an unordered set, equals exactly the Story 4.3b seven-tool set `{getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}` — set-equality, order-agnostic, exactly seven entries. The set-equality assertion catches both a stray `completeStory` entry (if a prior implementation pass left it in) and any unexpected addition. **This REVERSES the original spec's 7 → 8 widening; the AC3 anchor count vs Story 4.3b is `7 stays at 7`, not `8`.**
 - (viii) The `# Failure modes` section of SKILL.md mentions that `completeStory`'s errors (`InProgressHandEditError`, `WrongClaimantError`) can surface through `processReviewerTranscript` on the `READY FOR MERGE` branch. Substring match on `completeStory` within the failure-modes section. The wording change vs the original spec: errors now propagate THROUGH `processReviewerTranscript` (not from a prose-layer call), because that is the actual call site.
 
 <!-- Not user-surface: AC3 covers TypeScript type, unit test, and content-structure anchors. The user-observable behaviour is anchored by AC1 (chat line + on-disk state) and AC5 (live operator smoke). -->
@@ -108,13 +108,13 @@ vitest covers the full claim → dev → reviewer-ready → claim-next loop end-
 
 - (a) Calls `claimNextStory` → asserts `{ next: "spawn-dev", ref, title, manifestPath, chatLog }`, asserts the manifest moved to `in-progress/`.
 - (b) Calls `processDevTranscript` with a scripted handoff-phrase transcript → asserts `{ next: "spawn-reviewer", reviewerPrompt, chatLog }`.
-- (c) Calls `processReviewerTranscript` with a scripted `READY FOR MERGE` transcript → asserts `{ next: "done-ready-for-merge", completed: true, chatLog }`. **No external `completeStory` call is made by the test code on this branch — the test asserts that the side-effect was performed internally by `processReviewerTranscript` before it returned.** Specifically: asserts the manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` no longer exists and `<targetRepoRoot>/.crew/state/done/<ref>.yaml` exists with parsed manifest `status === "done"` and preserved `claimed_by === sessionUlid`.
+- (c) Calls `processReviewerTranscript` with a scripted `READY FOR MERGE` transcript → asserts `{ next: "done-ready-for-merge", completed: true, chatLog }`. **No external `completeStory` call is made by the test code on this branch — the test asserts that the side-effect was performed internally by `processReviewerTranscript` before it returned.** Specifically: asserts the manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` no longer exists and `<targetRepoRoot>/.flow/state/done/<ref>.yaml` exists with parsed manifest `status === "done"` and preserved `claimed_by === sessionUlid`.
 - (d) Asserts the synthetic chat log (assembled by the test as the SKILL.md prose would assemble it — concatenating returned `chatLog`s plus the simulated `story <ref> moved to done — claiming next` line emitted after observing `completed: true`) contains the verbatim line `story <ref> moved to done — claiming next` exactly once per story, AFTER the `reviewer verdict: READY FOR MERGE — story <ref> ready for merge gate` line for that story.
 
 After both stories have been driven through the loop, the test then:
 
 - (e) Calls `claimNextStory` a third time → asserts `{ next: "queue-drained", chatLog: [<verbatim queue-drained line>] }`.
-- (f) Asserts final on-disk state: `<targetRepoRoot>/.crew/state/to-do/` is empty, `<targetRepoRoot>/.crew/state/in-progress/` is empty, `<targetRepoRoot>/.crew/state/done/` contains exactly the two ref files with `status: "done"`. No `blocked/` content created.
+- (f) Asserts final on-disk state: `<targetRepoRoot>/.flow/state/to-do/` is empty, `<targetRepoRoot>/.flow/state/in-progress/` is empty, `<targetRepoRoot>/.flow/state/done/` contains exactly the two ref files with `status: "done"`. No `blocked/` content created.
 
 Negative-coverage assertions (within the same test file):
 
@@ -122,11 +122,11 @@ Negative-coverage assertions (within the same test file):
 - (h) Reviewer-grammar-drift branch: Same shape as (g) but with an unrecognised reviewer-final-line sentinel; asserts manifest in `in-progress/` with `blocked_by: "reviewer-grammar"`, `done/` empty, returned object has no `completed` field.
 
 **AC5 (user-surface):**
-**Given** an operator running `/crew:start` against a scratch repo seeded with two ready source stories, hired `generalist-dev` and `generalist-reviewer` personas, and a real Claude Code session,
+**Given** an operator running `/flow:start` against a scratch repo seeded with two ready source stories, hired `generalist-dev` and `generalist-reviewer` personas, and a real Claude Code session,
 **When** the operator observes the live session through to natural termination,
 **Then** they see (a) the Story 4.2 outer-loop lines for the first story; (b) the Story 4.3b inner-cycle lines for the first story through to `reviewer verdict: READY FOR MERGE — story <ref-A> ready for merge gate`; (c) the verbatim line `story <ref-A> moved to done — claiming next`; (d) the outer-loop lines for the second story; (e) the inner-cycle lines for the second story through to `reviewer verdict: READY FOR MERGE — story <ref-B> ready for merge gate`; (f) the verbatim line `story <ref-B> moved to done — claiming next`; (g) the queue-drained line; (h) on-disk state shows `to-do/` empty, `in-progress/` empty, and `done/<ref-A>.yaml` and `done/<ref-B>.yaml` both present with `status: "done"`. The operator MUST NOT observe the queue-stall bug (the `waiting on in-progress work` line between stories). **Per feedback memory `feedback_prose_mut_steps_need_seam.md`, this smoke MUST be run at least twice (two independent fresh-session trials), and both trials MUST pass.** A single-trial pass is insufficient evidence — the 2026-05-22 flake passed once and failed once on the same code. _(closes the PR #105 carry-forward AND the 2026-05-22 prose-determinism flake)_
 
-<!-- User-surface: AC5 names `/crew:start` (rubric i), the chat-surface lines (rubric iv), and the on-disk manifest state (rubric iii). The double-trial requirement is the determinism guardrail — a single trial is insufficient to prove the seam holds because the original prose-layer implementation passed a single trial before being caught by the second. -->
+<!-- User-surface: AC5 names `/flow:start` (rubric i), the chat-surface lines (rubric iv), and the on-disk manifest state (rubric iii). The double-trial requirement is the determinism guardrail — a single trial is insufficient to prove the seam holds because the original prose-layer implementation passed a single trial before being caught by the second. -->
 
 ---
 
@@ -153,7 +153,7 @@ The new architecture moves the MUST list onto `processReviewerTranscript` (the m
 - **MUST NOT** invoke `completeStory` directly. The prose layer is not in the call path for the mutating step anymore. (This is enforceable structurally: `completeStory` is not in `allowed_tools`.)
 - **MUST NOT** emit the `story <ref> moved to done — claiming next` line on any non-green branch (BLOCKED, grammar drift, handoff drift, or rework). The line is a successful-completion signal.
 - **NEVER** mutate the manifest from the SKILL.md prose layer directly. The prose has no `writeManagedFile` in `allowed_tools` and never will under v1.
-- **NEVER** modify `sprint-status.yaml`, source story files, `.git/` content, or any file outside `<targetRepoRoot>/.crew/state/`.
+- **NEVER** modify `sprint-status.yaml`, source story files, `.git/` content, or any file outside `<targetRepoRoot>/.flow/state/`.
 
 ### Chat-line emission ownership table
 
@@ -185,7 +185,7 @@ The `completeStory` MCP tool is unchanged by this story. Its behaviour, signatur
 
 ### Manifest re-entry semantics
 
-After `processReviewerTranscript` returns from the green branch, the manifest at `<targetRepoRoot>/.crew/state/done/<ref>.yaml` has `status: "done"` and the original `claimed_by` preserved. The story is invisible to subsequent `claimNextStory` calls. Identical to the original spec.
+After `processReviewerTranscript` returns from the green branch, the manifest at `<targetRepoRoot>/.flow/state/done/<ref>.yaml` has `status: "done"` and the original `claimed_by` preserved. The story is invisible to subsequent `claimNextStory` calls. Identical to the original spec.
 
 ### Forward compatibility with Story 4.10b
 
@@ -200,11 +200,11 @@ Story 4.3c locks in two invariants 4.10b will preserve:
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — REVERT the original Task 1 (`allowed_tools` widening). (AC: 3(vii))**
-  - [ ] 1.1 Open `plugins/crew/skills/start/SKILL.md`. Locate the front-matter `allowed_tools` array. If `completeStory` is present (from the original Story 4.3c implementation), REMOVE it. Final array equals exactly the Story 4.3b seven-tool set: `[getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]`.
+  - [ ] 1.1 Open `plugins/flow/skills/start/SKILL.md`. Locate the front-matter `allowed_tools` array. If `completeStory` is present (from the original Story 4.3c implementation), REMOVE it. Final array equals exactly the Story 4.3b seven-tool set: `[getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]`.
   - [ ] 1.2 No other front-matter changes.
 
 - [ ] **Task 2 — Extend `processReviewerTranscript` to call `completeStory` on the green branch. (AC: 1, 3(i), 3(ii))**
-  - [ ] 2.1 Open `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`. Import `completeStory` from `./complete-story.js`.
+  - [ ] 2.1 Open `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`. Import `completeStory` from `./complete-story.js`.
   - [ ] 2.2 Update the return-type union: change the green-branch shape from `{ next: "done-ready-for-merge"; chatLog: string[] }` to `{ next: "done-ready-for-merge"; completed: true; chatLog: string[] }`. The `completed` field is literal-typed `true`.
   - [ ] 2.3 In the `if (sentinel === "READY FOR MERGE")` block: AFTER pushing the existing `reviewer verdict: READY FOR MERGE — …` line into `chatLog`, call `await completeStory({ targetRepoRoot, ref, sessionUlid })` (note: `sessionUlid` is currently in `opts` and is unused in the existing implementation — confirm it is still available on the options shape; it is, per the current `ProcessReviewerTranscriptOptions` interface).
   - [ ] 2.4 Update the return statement on the green branch to include `completed: true as const`.
@@ -213,7 +213,7 @@ Story 4.3c locks in two invariants 4.10b will preserve:
   - [ ] 2.7 Verify no changes to the `NEEDS CHANGES`, `BLOCKED`, or grammar-drift branches.
 
 - [ ] **Task 3 — Update the SKILL.md `# Inner cycle` prose to drive on `completed: true`. (AC: 1, 3(v), 3(vi))**
-  - [ ] 3.1 Open `plugins/crew/skills/start/SKILL.md`. Locate the `## Reviewer spawn` subsection's step that switches on the `next` field returned by `processReviewerTranscript`.
+  - [ ] 3.1 Open `plugins/flow/skills/start/SKILL.md`. Locate the `## Reviewer spawn` subsection's step that switches on the `next` field returned by `processReviewerTranscript`.
   - [ ] 3.2 If the original Story 4.3c implementation added prose like `call completeStory({ targetRepoRoot, ref, sessionUlid })`, REMOVE that prose. The prose layer no longer invokes `completeStory`.
   - [ ] 3.3 On the `done-ready-for-merge` branch, the prose MUST instruct: (1) surface every entry of the returned `chatLog`; (2) confirm `completed: true` is present on the returned object (the prose should mention this flag by name as a structural anchor for AC3); (3) emit the verbatim chat line `story <ref> moved to done — claiming next` (em dash U+2014); (4) return to outer loop step 4 (`claimNextStory`).
   - [ ] 3.4 Update or add an absolute-modal invariant statement in the verdict-handling prose: `MUST NOT invoke completeStory directly — processReviewerTranscript performs the move internally on the done-ready-for-merge branch.` This anchors the new architecture in the prose for future readers.
@@ -221,48 +221,48 @@ Story 4.3c locks in two invariants 4.10b will preserve:
   - [ ] 3.6 Verify the inner-cycle prose still contains every Story 4.3b anchor — no regressions.
 
 - [ ] **Task 4 — Update `# Failure modes` for the new propagation path. (AC: 3(viii))**
-  - [ ] 4.1 In `plugins/crew/skills/start/SKILL.md`'s `# Failure modes` section, ensure there is a bullet or sentence noting that `completeStory`'s errors (`InProgressHandEditError`, `WrongClaimantError`, `ManifestNotFoundError`) can propagate THROUGH `processReviewerTranscript` on the green branch. If the original Story 4.3c implementation has wording about prose-layer `completeStory` calls, REWRITE to reflect that the call now lives inside `processReviewerTranscript`.
+  - [ ] 4.1 In `plugins/flow/skills/start/SKILL.md`'s `# Failure modes` section, ensure there is a bullet or sentence noting that `completeStory`'s errors (`InProgressHandEditError`, `WrongClaimantError`, `ManifestNotFoundError`) can propagate THROUGH `processReviewerTranscript` on the green branch. If the original Story 4.3c implementation has wording about prose-layer `completeStory` calls, REWRITE to reflect that the call now lives inside `processReviewerTranscript`.
   - [ ] 4.2 Substring `completeStory` MUST still appear at least once in the failure-modes section.
 
 - [ ] **Task 5 — Unit test for `processReviewerTranscript`'s new seam. (AC: 3(ii), 3(iii), 3(iv))**
-  - [ ] 5.1 Locate or create the unit test file for `processReviewerTranscript` (likely `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`).
+  - [ ] 5.1 Locate or create the unit test file for `processReviewerTranscript` (likely `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts`).
   - [ ] 5.2 Add a test case: seed a tmpdir target repo with an in-progress manifest (use the existing seed helper from Story 4.3b's test suite), call `processReviewerTranscript` with a `READY FOR MERGE` transcript, assert: (a) `result.next === "done-ready-for-merge"`; (b) `result.completed === true`; (c) the in-progress manifest no longer exists on disk; (d) the done manifest exists with `status: "done"` and preserved `claimed_by`.
   - [ ] 5.3 Add a test case: same setup, call with a `BLOCKED` transcript, assert: (a) `result.next === "done-blocked-reviewer-verdict"`; (b) `"completed" in result === false`; (c) the in-progress manifest still exists; (d) no done manifest exists.
   - [ ] 5.4 Add a test case: same setup, call with a grammar-drift transcript (no `**Verdict: …**` line), assert: (a) `result.next === "done-blocked-reviewer-grammar"`; (b) `"completed" in result === false`; (c) the in-progress manifest exists with `blocked_by: "reviewer-grammar"` stamped; (d) no done manifest exists.
   - [ ] 5.5 Add a test case: same setup, call with a `NEEDS CHANGES` transcript, assert: (a) `result.next === "rework-dev"`; (b) `"completed" in result === false`; (c) the in-progress manifest exists with `rework_count` incremented; (d) no done manifest exists.
-  - [ ] 5.6 Run `pnpm -C plugins/crew/mcp-server test process-reviewer-transcript` → must pass.
+  - [ ] 5.6 Run `pnpm -C plugins/flow/mcp-server test process-reviewer-transcript` → must pass.
 
 - [ ] **Task 6 — Update the inner-cycle integration test for the moved seam. (AC: 4)**
-  - [ ] 6.1 Open `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`.
+  - [ ] 6.1 Open `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts`.
   - [ ] 6.2 In the existing `AC4 (4.3c)` describe blocks (added by the original implementation), REMOVE any test code that calls `completeStory` directly. The test should now drive only `claimNextStory` → `processDevTranscript` → `processReviewerTranscript` and assert that the side-effect of the third call moved the manifest to `done/`.
   - [ ] 6.3 Update the green-branch assertions to include `completed: true` on the returned object.
   - [ ] 6.4 Update the synthetic-chatLog assembly: the prose-simulation now appends the `story <ref> moved to done — claiming next` line only when `completed: true` is observed (test mirrors the actual prose contract).
   - [ ] 6.5 Update the negative-coverage assertions (BLOCKED branch and grammar-drift branch): assert the returned object does NOT have a `completed` field on these branches.
-  - [ ] 6.6 Run `pnpm -C plugins/crew/mcp-server test inner-cycle.integration` → must pass.
+  - [ ] 6.6 Run `pnpm -C plugins/flow/mcp-server test inner-cycle.integration` → must pass.
 
 - [ ] **Task 7 — Update the SKILL.md content-structure test. (AC: 3(v), 3(vi), 3(vii))**
-  - [ ] 7.1 Open `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts`.
+  - [ ] 7.1 Open `plugins/flow/mcp-server/src/skills/__tests__/start-skill-content.test.ts`.
   - [ ] 7.2 Update the `allowed_tools` set-equality assertion BACK to the Story 4.3b seven-tool set: `{getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}`. If the original Story 4.3c implementation expanded this to eight, revert. AC3(vii).
   - [ ] 7.3 Keep the AC3(v) substring assertion: inner-cycle section contains the verbatim substring `story <ref> moved to done — claiming next` (em dash).
   - [ ] 7.4 Keep an AC3(vi) substring assertion: inner-cycle section contains `claimNextStory` (the loop-back step).
   - [ ] 7.5 REMOVE any assertion from the original implementation that the inner-cycle section contains `call completeStory({ targetRepoRoot, ref, sessionUlid })` — the prose no longer calls the tool directly.
   - [ ] 7.6 ADD an assertion that the inner-cycle section contains a `MUST NOT invoke completeStory` (or equivalent) substring, reflecting the new prose contract.
   - [ ] 7.7 Keep the failure-modes substring assertion on `completeStory` (AC3(viii)).
-  - [ ] 7.8 Run `pnpm -C plugins/crew/mcp-server test start-skill-content` → must pass.
+  - [ ] 7.8 Run `pnpm -C plugins/flow/mcp-server test start-skill-content` → must pass.
 
 - [ ] **Task 8 — Tool-count assertions and full suite. (AC: all)**
-  - [ ] 8.1 Confirm the tool count in `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts`, `ask-skill.test.ts`, `get-team-snapshot.test.ts` is unchanged — Story 4.3c does NOT add or remove any registered MCP tools.
-  - [ ] 8.2 Run `pnpm -C plugins/crew/mcp-server build` → must pass; commit any `dist/` changes per CLAUDE.md guidance.
-  - [ ] 8.3 Run the full vitest suite: `pnpm -C plugins/crew/mcp-server test`. All tests pass.
+  - [ ] 8.1 Confirm the tool count in `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts`, `ask-skill.test.ts`, `get-team-snapshot.test.ts` is unchanged — Story 4.3c does NOT add or remove any registered MCP tools.
+  - [ ] 8.2 Run `pnpm -C plugins/flow/mcp-server build` → must pass; commit any `dist/` changes per CLAUDE.md guidance.
+  - [ ] 8.3 Run the full vitest suite: `pnpm -C plugins/flow/mcp-server test`. All tests pass.
   - [ ] 8.4 `canonical-fs-guard.test.ts` should pass unchanged.
 
 - [ ] **Task 9 — User-surface smoke evidence for AC1 + AC5 (AC: 1, 5)**
   - [ ] 9.1 Operator-smoke procedure (executed by Jack or another live operator after Tasks 1–8):
-    - Step a: From a clean Claude Code session, run `/plugin uninstall crew@crew` then `/plugin install crew@crew` against the freshly-built plugin tree.
-    - Step b: Initialise a scratch target repo. Add `.crew/config.yaml` with `adapter: native`.
-    - Step c: Run `/crew:hire` then `/crew:skip-hiring` to instantiate personas.
-    - Step d: Seed two trivial source stories. Run `/crew:scan` to populate `to-do/`.
-    - Step e: Run `/crew:start`. Observe through to natural termination.
+    - Step a: From a clean Claude Code session, run `/plugin uninstall flow@flow` then `/plugin install flow@flow` against the freshly-built plugin tree.
+    - Step b: Initialise a scratch target repo. Add `.flow/config.yaml` with `adapter: native`.
+    - Step c: Run `/flow:hire` then `/flow:skip-hiring` to instantiate personas.
+    - Step d: Seed two trivial source stories. Run `/flow:scan` to populate `to-do/`.
+    - Step e: Run `/flow:start`. Observe through to natural termination.
     - Step f: Verify both `story <ref-A> moved to done — claiming next` and `story <ref-B> moved to done — claiming next` lines are emitted, the queue-drained line follows, and the on-disk state matches AC5(h).
   - [ ] 9.2 **Run the smoke procedure TWICE on fresh sessions.** Per `feedback_prose_mut_steps_need_seam.md`, a single-trial pass is insufficient evidence (the original prose-layer implementation passed Trial 1 and failed Trial 2 on the same code). The tool-layer seam should be deterministic — if the second trial fails, the seam is wrong and the dev agent MUST iterate.
   - [ ] 9.3 Paste verbatim chat-surface output from BOTH trials into `user_surface_verified` events in the ship-story run log, with `ac_refs: [AC1, AC5]`.
@@ -288,7 +288,7 @@ Moving the call into `processReviewerTranscript` removes the prose layer from th
 
 - The MCP `register.ts` tool surface is the boundary between the SKILL.md prose layer (the LLM-driven harness) and the deterministic tool code. Internal function calls between tools do not need to traverse this boundary — they are pure Node imports, type-checked by TypeScript, no JSON serialisation, no permission gate.
 - Since `processReviewerTranscript` is itself an MCP tool registered through `register.ts`, its callers (the SKILL.md prose) already have the necessary permission. The tool's internal use of `completeStory` is an implementation detail.
-- Crucially: this means `completeStory` does NOT need to be added to the `/crew:start` SKILL.md `allowed_tools` array. The original spec's 7 → 8 widening is reversed.
+- Crucially: this means `completeStory` does NOT need to be added to the `/flow:start` SKILL.md `allowed_tools` array. The original spec's 7 → 8 widening is reversed.
 
 ### Why the chat line stays prose-emitted
 
@@ -306,7 +306,7 @@ The `next` field carries the discriminated-union tag for the prose-layer switch.
 ### Risks and mitigations
 
 - **Risk: the existing Story 4.3b tests assumed `processReviewerTranscript` does not move the manifest on the green branch.** Mitigation: Story 4.3b's tests on the BLOCKED, grammar-drift, and NEEDS CHANGES branches are unchanged. The green-branch test will need updating; that's part of Task 6.
-- **Risk: an upstream caller of `processReviewerTranscript` (other than the SKILL.md prose) does not expect the side-effect.** Mitigation: there is only one upstream caller in the codebase — the `/crew:start` skill — and it is updated in Task 3. The MCP tool-surface contract is widened to include the new side-effect; the existing schema's `inputSchema` and `outputSchema` (if any) need a corresponding update.
+- **Risk: an upstream caller of `processReviewerTranscript` (other than the SKILL.md prose) does not expect the side-effect.** Mitigation: there is only one upstream caller in the codebase — the `/flow:start` skill — and it is updated in Task 3. The MCP tool-surface contract is widened to include the new side-effect; the existing schema's `inputSchema` and `outputSchema` (if any) need a corresponding update.
 - **Risk: the em-dash character in the chat line gets normalised.** Mitigation: AC3(v) verbatim substring assertion (unchanged from original).
 - **Risk: the second smoke trial fails like 2026-05-22.** Mitigation: that flake was a prose-determinism failure. The tool-layer seam removes the prose step entirely — the determinism risk surface is now confined to the deterministic Node code path. If the second trial fails anyway, something else is wrong (e.g. `completeStory` throwing on a precondition the test fixture didn't hit) and the dev agent must investigate.
 
@@ -317,20 +317,20 @@ The `next` field carries the discriminated-union tag for the prose-layer switch.
 ### Files this story touches
 
 **Modified files:**
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` — add `completeStory` internal call on the `READY FOR MERGE` branch; add `completed: true` to the green-branch return shape; update TSDoc and behavioural-contract citation. **This file IS being modified now (reversal from original spec).**
-- `plugins/crew/skills/start/SKILL.md` — revert front-matter `allowed_tools` to the seven-tool set; rewrite the verdict-handling prose to drive on `completed: true` and emit the informational chat line; update file-header citation; update `# Failure modes` wording.
-- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (existing or new) — unit tests for the seam (AC3(ii)–(iv)).
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` — remove direct `completeStory` calls from the test code; add `completed: true` assertions on green-branch returns; update synthetic-chatLog assembly.
-- `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts` — revert `allowed_tools` set-equality to seven-tool set; update prose-anchor assertions per Task 7.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` — add `completeStory` internal call on the `READY FOR MERGE` branch; add `completed: true` to the green-branch return shape; update TSDoc and behavioural-contract citation. **This file IS being modified now (reversal from original spec).**
+- `plugins/flow/skills/start/SKILL.md` — revert front-matter `allowed_tools` to the seven-tool set; rewrite the verdict-handling prose to drive on `completed: true` and emit the informational chat line; update file-header citation; update `# Failure modes` wording.
+- `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (existing or new) — unit tests for the seam (AC3(ii)–(iv)).
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` — remove direct `completeStory` calls from the test code; add `completed: true` assertions on green-branch returns; update synthetic-chatLog assembly.
+- `plugins/flow/mcp-server/src/skills/__tests__/start-skill-content.test.ts` — revert `allowed_tools` set-equality to seven-tool set; update prose-anchor assertions per Task 7.
 
 **Locked / untouched (must not be modified by this story):**
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` — Story 4.1 LOCKED. Byte-identical before and after.
-- `plugins/crew/mcp-server/src/tools/register.ts` — `completeStory` already registered; no signature or registration changes.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` — unchanged.
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` — unchanged.
-- `plugins/crew/mcp-server/src/skills/handoff-parser.ts` and `verdict-parser.ts` — pure parsers, unchanged.
-- `plugins/crew/catalogue/generalist-dev.md`, `generalist-reviewer.md` — persona bodies, unchanged.
-- `plugins/crew/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml` — subagent permission specs, unchanged.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` — Story 4.1 LOCKED. Byte-identical before and after.
+- `plugins/flow/mcp-server/src/tools/register.ts` — `completeStory` already registered; no signature or registration changes.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` — unchanged.
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` — unchanged.
+- `plugins/flow/mcp-server/src/skills/handoff-parser.ts` and `verdict-parser.ts` — pure parsers, unchanged.
+- `plugins/flow/catalogue/generalist-dev.md`, `generalist-reviewer.md` — persona bodies, unchanged.
+- `plugins/flow/catalogue/permissions/generalist-dev.yaml`, `generalist-reviewer.yaml` — subagent permission specs, unchanged.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — DO NOT EDIT.
 
 **New files:**
@@ -368,10 +368,10 @@ The architectural shift is small: one MCP tool gains one new internal-function c
 - `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract` — inner-cycle architectural contract.
 - `_bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract` — outer-loop architectural contract.
 - `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md § FR19` — atomic complete semantics.
-- `plugins/crew/docs/user-surface-acs.md` — rubric for `(user-surface)` AC tagging.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` — the LOCKED MCP tool.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` — the tool this story EXTENDS.
-- `plugins/crew/skills/start/SKILL.md` — the prose file this story trims.
+- `plugins/flow/docs/user-surface-acs.md` — rubric for `(user-surface)` AC tagging.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` — the LOCKED MCP tool.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` — the tool this story EXTENDS.
+- `plugins/flow/skills/start/SKILL.md` — the prose file this story trims.
 - Feedback memory `feedback_prose_mut_steps_need_seam.md` — the lesson driving the architectural reversal.
 
 ## Dev Agent Record

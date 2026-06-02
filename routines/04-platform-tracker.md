@@ -67,7 +67,7 @@ the last snapshot, and report ones that affect crew.
    (step 3). Identify added, removed, and modified items. Classify
    each:
    - **Breaking for crew** — would require a code change in
-     `plugins/crew/` to keep working.
+     `plugins/flow/` to keep working.
    - **Opportunity for crew** — new capability that could improve crew.
    - **Informational** — change that doesn't affect crew today but is
      worth knowing.
@@ -97,7 +97,7 @@ the last snapshot, and report ones that affect crew.
 ```
 ## Breaking for crew
 
-<For each: what changed, where in the docs, what file(s) in `plugins/crew/` are affected, suggested action. Include source URL if Context7 returned one.>
+<For each: what changed, where in the docs, what file(s) in `plugins/flow/` are affected, suggested action. Include source URL if Context7 returned one.>
 
 ## Opportunity for crew
 

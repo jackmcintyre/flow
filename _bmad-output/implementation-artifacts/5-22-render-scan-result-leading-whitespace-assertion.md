@@ -15,13 +15,13 @@ This story is independent — no spec or code dependencies on other in-flight Ep
 
 **AC1:**
 
-Add a test case in scan-sources test coverage that runs `scanSources` on a fixture, calls `renderScanResult` on the output, splits the rendered string by `\n`, and asserts each non-empty line passes `!/^\s/.test(line)` (no leading whitespace). Use or extend an existing fixture from `plugins/crew/mcp-server/tests/scan-sources.test.ts` so the rendered output has at least 5 non-empty lines (counts + skippedRefs + blockedRefs sections, typical).
-`vitest: plugins/crew/mcp-server/tests/scan-sources.test.ts`
+Add a test case in scan-sources test coverage that runs `scanSources` on a fixture, calls `renderScanResult` on the output, splits the rendered string by `\n`, and asserts each non-empty line passes `!/^\s/.test(line)` (no leading whitespace). Use or extend an existing fixture from `plugins/flow/mcp-server/tests/scan-sources.test.ts` so the rendered output has at least 5 non-empty lines (counts + skippedRefs + blockedRefs sections, typical).
+`vitest: plugins/flow/mcp-server/tests/scan-sources.test.ts`
 
 **AC2:**
 
 The new test MUST pass on current `dev` HEAD without modifying `renderScanResult` first — this story is a forward-looking guard, not a fix. If the test fails on current `dev`, that's signal of an existing drift; the right resolution is to fix `renderScanResult` to match (single-line entries, no indent), not weaken the assertion. Document any such finding in the PR body.
-`artifact: plugins/crew/mcp-server/src/tools/scan-sources.ts (renderScanResult — only modified if AC2 reveals current drift)`
+`artifact: plugins/flow/mcp-server/src/tools/scan-sources.ts (renderScanResult — only modified if AC2 reveals current drift)`
 
 ## Implementation Notes
 
@@ -29,15 +29,15 @@ The new test MUST pass on current `dev` HEAD without modifying `renderScanResult
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/tests/scan-sources.test.ts` — add a new `describe` block (e.g., "renderScanResult cosmetic guarantees") with one `it` that asserts the no-leading-whitespace invariant per AC1.
+- `plugins/flow/mcp-server/tests/scan-sources.test.ts` — add a new `describe` block (e.g., "renderScanResult cosmetic guarantees") with one `it` that asserts the no-leading-whitespace invariant per AC1.
 
 **LIKELY UNCHANGED:**
 
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — `renderScanResult` itself (defined at line 61, consumed by register.ts:682). Only modified if AC2 reveals current drift.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — `renderScanResult` itself (defined at line 61, consumed by register.ts:682). Only modified if AC2 reveals current drift.
 
 ### Build artefacts
 
-If only the test file changes, no `dist/` rebuild needed (vitest tests aren't shipped to `dist/`). If `renderScanResult` is modified, run `pnpm --dir plugins/crew/mcp-server build` and stage `dist/` in the same commit per project CLAUDE.md § "Plugin build output is tracked in git".
+If only the test file changes, no `dist/` rebuild needed (vitest tests aren't shipped to `dist/`). If `renderScanResult` is modified, run `pnpm --dir plugins/flow/mcp-server build` and stage `dist/` in the same commit per project CLAUDE.md § "Plugin build output is tracked in git".
 
 ### Dependencies
 
@@ -46,8 +46,8 @@ None. Leaf story.
 ### Context (for grounding, not implementation)
 
 - Carry-forward entry 2 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` is the source — surfaced from Story 5.13 review feedback as Info-level cosmetic guarantee.
-- `renderScanResult` is defined at `plugins/crew/mcp-server/src/tools/scan-sources.ts:61` and consumed by the `crew:scan` tool handler at `register.ts:682`.
-- This story doubles as canary-2 for the self-bootstrap loop (`/crew:start`), validating that the substrate fixes shipped in 5.20 + 5.21 hold under a clean cycle. Story content is intentionally tiny so any cycle defects are clearly substrate-level, not story-design.
+- `renderScanResult` is defined at `plugins/flow/mcp-server/src/tools/scan-sources.ts:61` and consumed by the `flow:scan` tool handler at `register.ts:682`.
+- This story doubles as canary-2 for the self-bootstrap loop (`/flow:start`), validating that the substrate fixes shipped in 5.20 + 5.21 hold under a clean cycle. Story content is intentionally tiny so any cycle defects are clearly substrate-level, not story-design.
 
 ### Edge cases worth surfacing in dev/review
 
@@ -58,7 +58,7 @@ None. Leaf story.
 
 - [ ] AC1 vitest case green.
 - [ ] AC2 verified — test passed on current `dev` HEAD pre-change (or current behaviour fixed if test exposed drift, with PR body documenting the finding).
-- [ ] If `renderScanResult` modified: `pnpm --dir plugins/crew/mcp-server build` + `dist/` staged.
+- [ ] If `renderScanResult` modified: `pnpm --dir plugins/flow/mcp-server build` + `dist/` staged.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean (no rubber-stamp guard fires — canary-2 substrate-validation goal).
 - [ ] `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` entry 2 marked "Folded into 5.22."

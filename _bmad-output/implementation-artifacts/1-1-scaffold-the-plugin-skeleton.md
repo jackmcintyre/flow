@@ -7,7 +7,7 @@ Status: review
 ## Story
 
 As a **plugin maintainer**,
-I want **a load-bearing-but-empty plugin skeleton committed at `plugins/crew/`**,
+I want **a load-bearing-but-empty plugin skeleton committed at `plugins/flow/`**,
 so that **every later story has a stable place to land its files, schemas, and imports**.
 
 This story is the foundation for the entire AI Engineering Team v1 plugin. It establishes every path, schema seam, and import the rest of the work depends on — but ships **zero behaviour**. No tools registered, no adapters with real logic, no skills wired up. Just the skeleton, a parseable plugin manifest, a startable (empty) MCP server, an empty `BmadAdapter`, a version-stamping helper used by later stories (2.3, 4.7, 4.9), and a vitest smoke suite that proves it all works.
@@ -16,11 +16,11 @@ This story is the foundation for the entire AI Engineering Team v1 plugin. It es
 
 **AC1 — Install & build pass cleanly:**
 **Given** the repo root,
-**When** I run `pnpm install && pnpm build` from `plugins/crew/`,
+**When** I run `pnpm install && pnpm build` from `plugins/flow/`,
 **Then** the install and build succeed with **zero TypeScript errors** and zero warnings on the build step.
 
 **AC2 — Directory skeleton present:**
-**Given** the scaffolded `plugins/crew/`,
+**Given** the scaffolded `plugins/flow/`,
 **When** I inspect the tree,
 **Then** it contains:
 - `.claude-plugin/plugin.json` (with a semver `version` field)
@@ -62,17 +62,17 @@ All four pass.
 ## Tasks / Subtasks
 
 - [x] **Task 1 — Create the plugin root and workspace plumbing** (AC: 1, 2)
-  - [x] Create directory `plugins/crew/`
-  - [x] Author `plugins/crew/package.json` (private, name `crew`, version `0.1.0`, scripts: `build`, `test`)
-  - [x] Author `plugins/crew/pnpm-workspace.yaml` declaring `mcp-server` as a workspace package
-  - [x] Author `plugins/crew/tsconfig.base.json` (strict TS, `target: ES2022`, `module: NodeNext`, `moduleResolution: NodeNext`, `esModuleInterop: true`, `skipLibCheck: true`, `declaration: true`, `noEmit: false` in inheritors, `noUncheckedIndexedAccess: true`)
+  - [x] Create directory `plugins/flow/`
+  - [x] Author `plugins/flow/package.json` (private, name `crew`, version `0.1.0`, scripts: `build`, `test`)
+  - [x] Author `plugins/flow/pnpm-workspace.yaml` declaring `mcp-server` as a workspace package
+  - [x] Author `plugins/flow/tsconfig.base.json` (strict TS, `target: ES2022`, `module: NodeNext`, `moduleResolution: NodeNext`, `esModuleInterop: true`, `skipLibCheck: true`, `declaration: true`, `noEmit: false` in inheritors, `noUncheckedIndexedAccess: true`)
   - [x] Create empty placeholder directories: `catalogue/`, `skills/`, `permissions/`, `docs/`, `example/` (each with a `.gitkeep` so the directory is tracked)
   - [x] Author a minimal `README.md` at the plugin root with one-line "scaffold — see PRD" pointer
 - [x] **Task 2 — Author `.claude-plugin/plugin.json`** (AC: 2, 3, 5)
   - [x] Create `.claude-plugin/plugin.json` with fields: `name` (`crew`), `version` (`0.1.0` — semver), `description`, `mcpServers` block pointing at the built server entrypoint, `skills: []`, `agents: []`
   - [x] Author a Zod schema for the manifest at `mcp-server/src/schemas/plugin-manifest.ts` (used by smoke test AC6c)
 - [x] **Task 3 — Stand up the MCP server package** (AC: 1, 3)
-  - [x] Create `plugins/crew/mcp-server/package.json` (private, name `@crew/mcp-server`, type `module`, scripts: `build`, `test`)
+  - [x] Create `plugins/flow/mcp-server/package.json` (private, name `@flow/mcp-server`, type `module`, scripts: `build`, `test`)
   - [x] Pin runtime deps: `@modelcontextprotocol/sdk` (latest stable), `zod` (^3 latest), `pino` (latest), `execa` (latest), `yaml` (eemeli latest), `ulid` (latest)
   - [x] Pin dev deps: `typescript` (^5 latest), `vitest` (latest), `@types/node` (matching Node LTS)
   - [x] Author `mcp-server/tsconfig.json` extending `../tsconfig.base.json`; `outDir: dist`, `rootDir: src`, `include: ["src/**/*"]`
@@ -132,7 +132,7 @@ This is the **foundation** for the entire `crew` plugin. The architecture (§Fin
 ### Directory layout — what MUST exist (from architecture §Plugin tree, lines 678–805)
 
 ```
-plugins/crew/
+plugins/flow/
 ├── .claude-plugin/
 │   └── plugin.json                # AC2, AC5
 ├── .gitignore                     # ignores node_modules, dist, *.tsbuildinfo
@@ -266,7 +266,7 @@ If `@modelcontextprotocol/sdk` doesn't expose a clean "list registered tools" in
 
 ### Project Structure Notes
 
-- **Plugin root:** `plugins/crew/` — sibling to the retired `plugins/sprint-orchestrator/`. Do not touch `sprint-orchestrator/`; it's legacy and orthogonal.
+- **Plugin root:** `plugins/flow/` — sibling to the retired `plugins/sprint-orchestrator/`. Do not touch `sprint-orchestrator/`; it's legacy and orthogonal.
 - **No content in `catalogue/`, `skills/`, `permissions/`, `docs/`, `example/`** beyond `.gitkeep` — those directories are populated by Epics 1.3, 1.4, 1.7, 2.x, 3.x, 7.x.
 - **`pnpm-workspace.yaml` is rooted at the plugin** (not the repo root). The repo root is not a pnpm workspace; the plugin is self-contained.
 - **`.gitignore`** at the plugin root must cover: `node_modules/`, `**/dist/`, `*.tsbuildinfo`, `.DS_Store`.
@@ -318,7 +318,7 @@ No previous story in this epic (this **is** story 1 of epic 1). Repo-level prior
 
 ### Git intelligence
 
-Recent commits (`c5ccde0`, `061e4eb`, `ed66ee6`) confirm the repo is in **planning-only state** — no plugin code currently exists under `plugins/crew/`. This story is a clean greenfield scaffold. Conventional commit style: `feat(<scope>): <subject>` (e.g. `feat(1-1): scaffold crew plugin skeleton`).
+Recent commits (`c5ccde0`, `061e4eb`, `ed66ee6`) confirm the repo is in **planning-only state** — no plugin code currently exists under `plugins/flow/`. This story is a clean greenfield scaffold. Conventional commit style: `feat(<scope>): <subject>` (e.g. `feat(1-1): scaffold flow plugin skeleton`).
 
 ### Project context reference
 
@@ -352,27 +352,27 @@ claude-opus-4-7 (via `bmad-dev-story` skill, executed in worktree `crew-1-1-scaf
 
 ### File List
 
-- `plugins/crew/.claude-plugin/plugin.json`
-- `plugins/crew/.gitignore`
-- `plugins/crew/README.md`
-- `plugins/crew/package.json`
-- `plugins/crew/pnpm-workspace.yaml`
-- `plugins/crew/tsconfig.base.json`
-- `plugins/crew/catalogue/.gitkeep`
-- `plugins/crew/docs/.gitkeep`
-- `plugins/crew/example/.gitkeep`
-- `plugins/crew/permissions/.gitkeep`
-- `plugins/crew/skills/.gitkeep`
-- `plugins/crew/mcp-server/package.json`
-- `plugins/crew/mcp-server/tsconfig.json`
-- `plugins/crew/mcp-server/vitest.config.ts`
-- `plugins/crew/mcp-server/src/index.ts`
-- `plugins/crew/mcp-server/src/server.ts`
-- `plugins/crew/mcp-server/src/errors.ts`
-- `plugins/crew/mcp-server/src/adapters/adapter.ts`
-- `plugins/crew/mcp-server/src/adapters/registry.ts`
-- `plugins/crew/mcp-server/src/adapters/bmad/index.ts`
-- `plugins/crew/mcp-server/src/lib/plugin-version.ts`
-- `plugins/crew/mcp-server/src/schemas/plugin-manifest.ts`
-- `plugins/crew/mcp-server/tests/smoke.test.ts`
-- `plugins/crew/pnpm-lock.yaml` (generated)
+- `plugins/flow/.claude-plugin/plugin.json`
+- `plugins/flow/.gitignore`
+- `plugins/flow/README.md`
+- `plugins/flow/package.json`
+- `plugins/flow/pnpm-workspace.yaml`
+- `plugins/flow/tsconfig.base.json`
+- `plugins/flow/catalogue/.gitkeep`
+- `plugins/flow/docs/.gitkeep`
+- `plugins/flow/example/.gitkeep`
+- `plugins/flow/permissions/.gitkeep`
+- `plugins/flow/skills/.gitkeep`
+- `plugins/flow/mcp-server/package.json`
+- `plugins/flow/mcp-server/tsconfig.json`
+- `plugins/flow/mcp-server/vitest.config.ts`
+- `plugins/flow/mcp-server/src/index.ts`
+- `plugins/flow/mcp-server/src/server.ts`
+- `plugins/flow/mcp-server/src/errors.ts`
+- `plugins/flow/mcp-server/src/adapters/adapter.ts`
+- `plugins/flow/mcp-server/src/adapters/registry.ts`
+- `plugins/flow/mcp-server/src/adapters/bmad/index.ts`
+- `plugins/flow/mcp-server/src/lib/plugin-version.ts`
+- `plugins/flow/mcp-server/src/schemas/plugin-manifest.ts`
+- `plugins/flow/mcp-server/tests/smoke.test.ts`
+- `plugins/flow/pnpm-lock.yaml` (generated)

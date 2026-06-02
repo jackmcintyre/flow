@@ -14,7 +14,7 @@ This story makes the skill side of the calibration loop **observable**. Story 6.
 ## Dependencies
 
 - **Pairs with Story 6.7** (the skill apply surface). This story measures the skills 6.7 produces; 6.7 does not depend on this.
-- **Consumes the telemetry plumbing (shipped, Epic 1):** `logTelemetryEvent` (`lib/logger.ts`), the `.strict()` discriminated `TelemetryEventSchema` (`schemas/telemetry-events.ts`), and the per-month `.crew/telemetry/<YYYY-MM>.jsonl` append path.
+- **Consumes the telemetry plumbing (shipped, Epic 1):** `logTelemetryEvent` (`lib/logger.ts`), the `.strict()` discriminated `TelemetryEventSchema` (`schemas/telemetry-events.ts`), and the per-month `.flow/telemetry/<YYYY-MM>.jsonl` append path.
 - **Consumes the verdict events (shipped, Epic 4/5):** `reviewer.verdict` (carrying the verdict enum + `pr_number`) and `reviewer.verdict.merge_action` — the join partners for "useful fire" (an invocation followed by a READY-FOR-MERGE in the same story).
 - **Mirrors `computeAgreement` (shipped):** `tools/compute-agreement.ts` is the exact precedent for a deterministic telemetry-reading helper with injected read seams — `computeSkillEffectiveness` follows its structure.
 - **Is the data feed Story 6.6's symmetric skill-retirement logic relies on:** the architecture's skill retirement criterion uses invoke counts + useful-fire ratio over a window, which this helper computes.
@@ -24,33 +24,33 @@ This story makes the skill side of the calibration loop **observable**. Story 6.
 **AC1 — a `skill.invoke` telemetry event and a `recordSkillInvoke` write-path land exactly one valid event (integration):**
 
 A `skill.invoke` variant is added to the `.strict()` discriminated `TelemetryEventSchema`, carrying `data: { skill_name, skill_path, skill_version, skill_scope: project | persona | plugin, invocation_source: user-slash-command | agent-call }` on top of the telemetry base (`ts`, `session_id`, `agent`, optional `story_id`). A `recordSkillInvoke` tool validates its input and emits exactly one such event via `logTelemetryEvent` (which stamps `ts`). A vitest calls `recordSkillInvoke` and asserts exactly one well-formed `skill.invoke` line lands in telemetry with all five `data` fields, and asserts the schema rejects an unknown `skill_scope` or `invocation_source` (closed enums, no fallback).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts
 
 **AC2 — `computeSkillEffectiveness` reports per-skill invoke/useful-fire/ratio deterministically (integration):**
 
-A pure `computeSkillEffectiveness` helper (no LLM) reads `.crew/telemetry/*.jsonl` over a configurable window, and for each skill reports `invoke_count` (count of `skill.invoke` events), `useful_fire_count` (invocations followed by a `READY FOR MERGE` `reviewer.verdict` within the same story — join on `session_id` + `story_id`), and `effectiveness_ratio` (`useful_fire_count / invoke_count`). It is fully deterministic — same telemetry yields the same numbers — and reads through injected file/dir seams like `computeAgreement`. A vitest seeds a known distribution of `skill.invoke` + `reviewer.verdict` events and asserts the per-skill `invoke_count`, `useful_fire_count`, and `effectiveness_ratio` match by hand, including a skill that fired but was never followed by a READY-FOR-MERGE (ratio 0) and a skill invoked once and followed by one (ratio 1).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts
+A pure `computeSkillEffectiveness` helper (no LLM) reads `.flow/telemetry/*.jsonl` over a configurable window, and for each skill reports `invoke_count` (count of `skill.invoke` events), `useful_fire_count` (invocations followed by a `READY FOR MERGE` `reviewer.verdict` within the same story — join on `session_id` + `story_id`), and `effectiveness_ratio` (`useful_fire_count / invoke_count`). It is fully deterministic — same telemetry yields the same numbers — and reads through injected file/dir seams like `computeAgreement`. A vitest seeds a known distribution of `skill.invoke` + `reviewer.verdict` events and asserts the per-skill `invoke_count`, `useful_fire_count`, and `effectiveness_ratio` match by hand, including a skill that fired but was never followed by a READY-FOR-MERGE (ratio 0) and a skill invoked once and followed by one (ratio 1).
+vitest: plugins/flow/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts
 
 **AC3 — `computeSkillEffectiveness` handles empty, malformed, and windowed inputs like `computeAgreement` (integration):**
 
 With no `skill.invoke` events, the helper returns a documented empty result (empty per-skill map or `null`), never an error. Malformed JSONL lines are skipped and counted (a `malformed_lines` field), not fatal. The configurable window bounds which events are considered, and the result reports the `window_size` / `sample_size` actually used. A vitest drives the helper over an empty telemetry dir, a dir with malformed lines mixed in, and a window narrower than the event set, asserting the documented empty result, the malformed-line count, and the window bound.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts
 
 **AC4 — the invocation-capture seam emits a `skill.invoke` for crew skill invocations (integration):**
 
 A capture seam is wired so that invoking a crew skill produces a `skill.invoke` event without the operator doing anything. The chosen mechanism is documented and verified (see Implementation Notes: **preferred** — a plugin invocation hook that calls `recordSkillInvoke`, matching the architecture's "skill runtime wrapper"; **fallback if the harness exposes no such hook** — instrument the crew skills' first step to call `recordSkillInvoke`, mirroring the shipped `recordYield` / `recordStoryRetro` precedent). The dev verifies hook availability before choosing, documents the mechanism and its coverage/limitation (a prose-call seam can be skipped under load — note it), and proves the seam end-to-end. A vitest (or, where a hook can't be unit-tested, an asserted integration check) exercises the seam for at least one crew skill and asserts a valid `skill.invoke` event lands with the correct `skill_name`, `skill_version` (resolved from the skill frontmatter), `skill_scope`, and `invocation_source`.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts
 
 **AC5 — `recordSkillInvoke` and `computeSkillEffectiveness` are registered with the DomainError envelope (artifact):**
 
 Both tools are registered in `register.ts` with the standard `DomainError` envelope, grouped with the other telemetry/retro-path tools. The `skill.invoke` event is part of the `.strict()` union (no silent fallback variant), and `computeSkillEffectiveness` returns a `.strict()` typed result schema mirroring `AgreementMetricResultSchema`.
-artifact: plugins/crew/mcp-server/src/tools/register.ts
+artifact: plugins/flow/mcp-server/src/tools/register.ts
 
 ## Definition of Done
 
 - [ ] All five ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the two new test files cover every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the two new test files cover every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC4 are runnable vitest, AC5 is file-presence/registration; the reviewer's runnable-AC pass should be all-green.
 - [ ] `computeSkillEffectiveness` is pure and deterministic (injected read seams, no clock-dependence beyond the window), with hand-checkable numbers — it does not call an LLM.
@@ -92,7 +92,7 @@ Add it to the `TelemetryEventSchema` discriminated union (keep `.strict()` — s
 Follow `tools/compute-agreement.ts`:
 
 - `computeSkillEffectiveness({ targetRepoRoot, window?, readTelemetryDirImpl?, readFileImpl? })`.
-- List `.crew/telemetry/*.jsonl` (deterministic lex sort), parse each line via `TelemetryEventSchema.safeParse`, skip + count malformed.
+- List `.flow/telemetry/*.jsonl` (deterministic lex sort), parse each line via `TelemetryEventSchema.safeParse`, skip + count malformed.
 - Partition `skill.invoke` and `reviewer.verdict` events; for each `skill.invoke`, a "useful fire" is a later `reviewer.verdict` of `READY FOR MERGE` sharing the same `session_id` (and `story_id` when both carry one). Per skill: `invoke_count`, `useful_fire_count`, `effectiveness_ratio`.
 - Return a `.strict()` result schema mirroring `AgreementMetricResultSchema`: a per-skill map plus `window_size`, `sample_size`, `malformed_lines`. Document the empty case (empty map or `null`).
 - Inject the read seams so AC2/AC3 are deterministic with no real filesystem clock.
@@ -100,14 +100,14 @@ Follow `tools/compute-agreement.ts`:
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/tools/record-skill-invoke.ts` — the single write-path tool.
-- `plugins/crew/mcp-server/src/tools/compute-skill-effectiveness.ts` — the pure helper.
-- `plugins/crew/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts` — AC1, AC4.
-- `plugins/crew/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts` — AC2, AC3.
+- `plugins/flow/mcp-server/src/tools/record-skill-invoke.ts` — the single write-path tool.
+- `plugins/flow/mcp-server/src/tools/compute-skill-effectiveness.ts` — the pure helper.
+- `plugins/flow/mcp-server/src/tools/__tests__/record-skill-invoke.test.ts` — AC1, AC4.
+- `plugins/flow/mcp-server/src/tools/__tests__/compute-skill-effectiveness.test.ts` — AC2, AC3.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — add `SkillInvokeEventSchema` to the union.
-- `plugins/crew/mcp-server/src/tools/register.ts` — register both tools.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — add `SkillInvokeEventSchema` to the union.
+- `plugins/flow/mcp-server/src/tools/register.ts` — register both tools.
 - The crew SKILL.md files and/or the plugin hook config — only on the fallback path (AC4), to wire the capture seam.
 
 ### Existing seams to wire into (do not reinvent)
@@ -130,8 +130,8 @@ Follow `tools/compute-agreement.ts`:
 ### Risk + build notes (drain context)
 
 - This is a `low`-to-`medium`-risk change: it adds a telemetry event + two read/write tools and (on the fallback path) edits SKILL.md first-steps. No canonical-state mutation beyond appending telemetry. The auto-merge gate may still pause if the classifier reads the SKILL.md edits as surface changes — that's acceptable.
-- Code change touching schema + tools + (maybe) skills/hooks: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/crew/mcp-server` before the PR.
-- Telemetry is append-only via the logger; do not write `.crew/telemetry` directly.
+- Code change touching schema + tools + (maybe) skills/hooks: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/flow/mcp-server` before the PR.
+- Telemetry is append-only via the logger; do not write `.flow/telemetry` directly.
 
 ### References
 

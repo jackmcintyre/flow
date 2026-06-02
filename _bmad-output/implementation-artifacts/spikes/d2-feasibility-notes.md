@@ -37,7 +37,7 @@ memo, now de-risked by this spike.
 ## Q1: Manifest support for stdio shim (AC2)
 
 **Question.** Does Claude Code's plugin manifest at
-`plugins/crew/.claude-plugin/plugin.json` support pointing
+`plugins/flow/.claude-plugin/plugin.json` support pointing
 `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash
 script that `exec`s the real server) and have the host treat the shim as the
 MCP child?
@@ -90,7 +90,7 @@ do:
 > }
 > ```
 
-The current production manifest (`plugins/crew/.claude-plugin/plugin.json`)
+The current production manifest (`plugins/flow/.claude-plugin/plugin.json`)
 already uses `command: "node"` (a wrapper over the real entry — JS files
 aren't natively executable; `node` is the wrapper):
 
@@ -369,7 +369,7 @@ This pins the framing definitively:
 - Tolerates `\r\n` on input (the `\r$` strip).
 
 The production server confirms it uses this transport unchanged. From
-`plugins/crew/mcp-server/src/index.ts`:
+`plugins/flow/mcp-server/src/index.ts`:
 
 ```ts
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -438,13 +438,13 @@ cross-reference to production daemon source.
 
 ### Pattern A: PID file + `kill(pid, 0)` check
 
-The shim writes `~/.crew/mcp-daemon.pid` on first daemon spawn. Subsequent
+The shim writes `~/.flow/mcp-daemon.pid` on first daemon spawn. Subsequent
 shims read the pidfile, call `kill(pid, 0)` to test liveness, and only
 spawn a new daemon if `ESRCH`.
 
 ### Pattern B: Optimistic socket-connect probe
 
-The shim attempts `connect(~/.crew/mcp-daemon.sock)`. If it succeeds, the
+The shim attempts `connect(~/.flow/mcp-daemon.sock)`. If it succeeds, the
 daemon is running. If it fails (ENOENT, ECONNREFUSED), the shim spawns a
 new daemon and retries the connect with backoff.
 
@@ -503,8 +503,8 @@ omits.
 Pseudocode for the shim's daemon-acquisition logic:
 
 ```
-pid_path = ~/.crew/mcp-daemon.pid
-sock_path = ~/.crew/mcp-daemon.sock
+pid_path = ~/.flow/mcp-daemon.pid
+sock_path = ~/.flow/mcp-daemon.sock
 
 # Step 1: try optimistic connect (fast path; daemon already running)
 try connect(sock_path) with 500ms timeout:
@@ -521,7 +521,7 @@ if exists(pid_path):
   # else: stale pidfile, just unlink
 
 # Step 3: spawn new daemon (with flock to avoid concurrent-spawn race)
-acquire flock(~/.crew/mcp-daemon.lock, LOCK_EX | LOCK_NB):
+acquire flock(~/.flow/mcp-daemon.lock, LOCK_EX | LOCK_NB):
   if held by another shim: wait then retry connect (someone else is spawning)
   if acquired:
     spawn(daemon, { detached: true, stdio: 'ignore' })
@@ -531,7 +531,7 @@ acquire flock(~/.crew/mcp-daemon.lock, LOCK_EX | LOCK_NB):
 retry connect(sock_path); if still fails, surface error to host
 ```
 
-The flock on `~/.crew/mcp-daemon.lock` handles the concurrent-spawn race
+The flock on `~/.flow/mcp-daemon.lock` handles the concurrent-spawn race
 (edge case 2) without relying solely on EADDRINUSE — belt-and-braces. The
 EADDRINUSE check in the daemon's own bind() (edge case 2, defensive
 backup) catches the case where flock is somehow bypassed (e.g.,
@@ -545,7 +545,7 @@ code.
 ## Q5: Auth / multi-user safety on darwin (AC6)
 
 **Question.** Does the unix socket need a per-connection token, or is
-filesystem permission (`0600` on the socket path under `~/.crew/`)
+filesystem permission (`0600` on the socket path under `~/.flow/`)
 sufficient for the darwin reference platform?
 
 **Verdict: `socket-auth: filesystem-permission-only`**
@@ -555,12 +555,12 @@ local-IPC patterns.
 
 ### Threat model
 
-The relevant adversaries for a per-user unix socket under `~/.crew/`:
+The relevant adversaries for a per-user unix socket under `~/.flow/`:
 
 1. **Cross-user adversary on the same machine.** Another unprivileged user
-   on the same darwin host attempts to connect to `~/.crew/mcp-daemon.sock`
-   and invoke MCP tools that mutate the owning user's `~/.crew/` state.
-   *Defeated by `0600` on the socket file plus `0700` on the `~/.crew/`
+   on the same darwin host attempts to connect to `~/.flow/mcp-daemon.sock`
+   and invoke MCP tools that mutate the owning user's `~/.flow/` state.
+   *Defeated by `0600` on the socket file plus `0700` on the `~/.flow/`
    parent dir.* The OS rejects the connect() with EACCES; no further
    handshake needed. macOS enforces filesystem permissions on unix-socket
    `connect()` per POSIX.
@@ -568,8 +568,8 @@ The relevant adversaries for a per-user unix socket under `~/.crew/`:
    running as the same user (e.g., a malicious shell script the user ran)
    connects to the socket and calls MCP tools. *Not defended by any
    pattern* in scope — anything the user can run can read
-   `~/.crew/mcp-daemon.sock` regardless of socket permission, and a
-   token-handshake using a token also stored in `~/.crew/` is bypassable
+   `~/.flow/mcp-daemon.sock` regardless of socket permission, and a
+   token-handshake using a token also stored in `~/.flow/` is bypassable
    by the same process. This is the standard unix model: the user trusts
    processes running as themselves. A token-handshake would only help if
    the token were stored in a separate trust domain (keychain, hardware
@@ -621,8 +621,8 @@ should add this check — it's ~5 lines and costs nothing — but it is
 
 ### Recommendation
 
-- Bind the socket at `~/.crew/mcp-daemon.sock` after `umask(0177)` (or
-  explicit `chmod 0600` post-bind), with `~/.crew/` at `0700`.
+- Bind the socket at `~/.flow/mcp-daemon.sock` after `umask(0177)` (or
+  explicit `chmod 0600` post-bind), with `~/.flow/` at `0700`.
 - Daemon optionally verifies peer EUID via `getsockopt(LOCAL_PEEREUID)`
   on each connection, rejecting any UID != own UID. Defence-in-depth, not
   the primary control.

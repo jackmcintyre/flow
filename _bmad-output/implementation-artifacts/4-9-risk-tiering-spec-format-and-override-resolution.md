@@ -9,12 +9,12 @@ Status: review
 ## Story
 
 As a **plugin maintainer**,
-I want **a parseable risk-tiering spec format with a shipped functional default at `plugins/crew/docs/risk-tiering.md` and an optional target-repo override at `<target-repo>/docs/risk-tiering.md`, plus a Zod-validated loader that resolves which file wins**,
+I want **a parseable risk-tiering spec format with a shipped functional default at `plugins/flow/docs/risk-tiering.md` and an optional target-repo override at `<target-repo>/docs/risk-tiering.md`, plus a Zod-validated loader that resolves which file wins**,
 so that **Story 4.9b's `classify-risk-tier` has a stable, typed contract to consume — the classifier code only needs to read the parsed rule set rather than carry any file-format awareness, and operators who want to customise tier rules can do so per-repo without forking the plugin**.
 
 ### What this story is, in one sentence
 
-Ship `plugins/crew/docs/risk-tiering.md` (YAML frontmatter + Markdown body), add a Zod schema (`RiskTieringSpecSchema`) + a pure validator (`parseRiskTieringSpec`) + an IO wrapper (`lookupRiskTieringSpec`) that resolves the target-repo override first and falls back to the shipped default, plus a typed `MalformedRiskTieringSpecError` — no MCP tool, no classifier code, no caller wiring yet (4.9b owns the consumer side).
+Ship `plugins/flow/docs/risk-tiering.md` (YAML frontmatter + Markdown body), add a Zod schema (`RiskTieringSpecSchema`) + a pure validator (`parseRiskTieringSpec`) + an IO wrapper (`lookupRiskTieringSpec`) that resolves the target-repo override first and falls back to the shipped default, plus a typed `MalformedRiskTieringSpecError` — no MCP tool, no classifier code, no caller wiring yet (4.9b owns the consumer side).
 
 ### What this story does (and why it needs its own story)
 
@@ -57,7 +57,7 @@ This story explicitly does NOT introduce `classify-risk-tier`, the MCP tool regi
 
 ## Acceptance Criteria
 
-> AC1, AC2, AC3 are verbatim from the epic. AC4 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal YAML parsing and a `lib/` IO function. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1, AC2, AC3 are verbatim from the epic. AC4 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal YAML parsing and a `lib/` IO function. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** the risk-tiering spec at `plugins/<plugin>/docs/risk-tiering.md`,
@@ -105,7 +105,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
   - Each rule MUST declare at least one of `path_patterns`, `change_types`, or `diff_size_thresholds`; a rule with none of the three would match nothing (or, depending on classifier interpretation, everything). Violation raises `MalformedRiskTieringSpecError` citing "rule <id> declares no signal fields".
   - **Unknown rule keys** raise the strict-schema error.
 
-- (1d) **The shipped default file's content.** `plugins/crew/docs/risk-tiering.md` is created with:
+- (1d) **The shipped default file's content.** `plugins/flow/docs/risk-tiering.md` is created with:
   ```markdown
   ---
   version: "1.0.0"
@@ -162,7 +162,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
 
 **AC3 unpacked.** Typed-error shape and the diagnostic wording contract:
 
-- (3a) **`MalformedRiskTieringSpecError` class.** New typed error in `plugins/crew/mcp-server/src/errors.ts`, extending `DomainError`. Constructor shape matches `StandardsDocMalformedError`:
+- (3a) **`MalformedRiskTieringSpecError` class.** New typed error in `plugins/flow/mcp-server/src/errors.ts`, extending `DomainError`. Constructor shape matches `StandardsDocMalformedError`:
   ```ts
   constructor(opts: { sourcePath: string; reason: string; copyTarget: string });
   ```
@@ -212,7 +212,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [x] **Task 1: Add the Zod schema for the spec format** (AC: #1)
-  - [x] 1.1 Create `plugins/crew/mcp-server/src/schemas/risk-tiering-spec.ts`. Export:
+  - [x] 1.1 Create `plugins/flow/mcp-server/src/schemas/risk-tiering-spec.ts`. Export:
     - `ChangeTypeSchema = z.enum(["revert", "migration", "schema", "dep-bump"])`.
     - `DiffSizeThresholdsSchema = z.object({ min_lines_changed: z.number().int().nonnegative().optional(), max_lines_changed: z.number().int().nonnegative().optional() }).strict().refine(v => v.min_lines_changed !== undefined || v.max_lines_changed !== undefined, { message: "diff_size_thresholds must declare at least one of min_lines_changed or max_lines_changed" })`.
     - `RuleSchema = z.object({ id: z.string().min(1), path_patterns: z.array(z.string().min(1)).min(1).optional(), change_types: z.array(ChangeTypeSchema).min(1).optional(), diff_size_thresholds: DiffSizeThresholdsSchema.optional() }).strict().refine(rule => rule.path_patterns !== undefined || rule.change_types !== undefined || rule.diff_size_thresholds !== undefined, { message: "rule declares no signal fields" })`.
@@ -223,12 +223,12 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [x] 1.2 Add a JSDoc block at the top of the file citing FR40a, this story key, and Architecture § "Risk-Tier Classification (FR40a) — Spec Format". Follow the docstring convention from `schemas/standards-doc.ts`.
 
 - [x] **Task 2: Add the typed error classes** (AC: #3)
-  - [x] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, append `MalformedRiskTieringSpecError` after the existing `ReviewerResultFileMalformedError` (line ~1091 region). Constructor shape: `{ sourcePath: string; reason: string; copyTarget: string }`. Message follows the `StandardsDocMalformedError` pattern verbatim (substitute `risk-tiering.md` and `(FR40a)`).
+  - [x] 2.1 In `plugins/flow/mcp-server/src/errors.ts`, append `MalformedRiskTieringSpecError` after the existing `ReviewerResultFileMalformedError` (line ~1091 region). Constructor shape: `{ sourcePath: string; reason: string; copyTarget: string }`. Message follows the `StandardsDocMalformedError` pattern verbatim (substitute `risk-tiering.md` and `(FR40a)`).
   - [x] 2.2 Append `ShippedRiskTieringDefaultMissingError`. Constructor shape: `{ expectedPath: string }`. Message follows the format in § AC3 unpacked (3b).
   - [x] 2.3 Both errors `extends DomainError` and export. No registration in any switch or registry — the existing `DomainError` envelope at the MCP-tool layer handles them generically (though no MCP tool calls them in this story).
 
 - [x] **Task 3: Implement the validator (pure)** (AC: #1, #3)
-  - [x] 3.1 Create `plugins/crew/mcp-server/src/validators/risk-tiering-spec.ts`. Export `parseRiskTieringSpec(raw: string, sourcePath: string, copyTarget: string): RiskTieringSpec`. Third param `copyTarget` is added to resolve the ambiguity noted in the story (pure validator needs it for error construction; IO wrapper computes and passes it).
+  - [x] 3.1 Create `plugins/flow/mcp-server/src/validators/risk-tiering-spec.ts`. Export `parseRiskTieringSpec(raw: string, sourcePath: string, copyTarget: string): RiskTieringSpec`. Third param `copyTarget` is added to resolve the ambiguity noted in the story (pure validator needs it for error construction; IO wrapper computes and passes it).
   - [x] 3.2 Frontmatter extraction step implemented. Raises `MalformedRiskTieringSpecError` for missing/malformed delimiters or empty file.
   - [x] 3.3 YAML parse step implemented using `yaml` package.
   - [x] 3.4 Zod parse step implemented with inline `formatZodIssues` helper (not extracted to shared lib — kept file-local to minimize blast radius).
@@ -236,22 +236,22 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [x] 3.6 Success path: return `{ ...parsed.data, sourcePath }`.
 
 - [x] **Task 4: Implement the IO wrapper (loader)** (AC: #2)
-  - [x] 4.1 Create `plugins/crew/mcp-server/src/state/lookup-risk-tiering-spec.ts`. Exports `lookupRiskTieringSpec(opts: { targetRepoRoot: string; pluginRoot: string }): Promise<RiskTieringSpec>`.
+  - [x] 4.1 Create `plugins/flow/mcp-server/src/state/lookup-risk-tiering-spec.ts`. Exports `lookupRiskTieringSpec(opts: { targetRepoRoot: string; pluginRoot: string }): Promise<RiskTieringSpec>`.
   - [x] 4.2 Computes `overridePath` and `defaultPath` from opts.
   - [x] 4.3 ENOENT-safe override read with fall-through.
   - [x] 4.4 ENOENT on default raises `ShippedRiskTieringDefaultMissingError`.
   - [x] 4.5 JSDoc block added citing story key, FR40a, and override-replaces-default semantics.
 
 - [x] **Task 5: Author the shipped default file** (AC: #1)
-  - [x] 5.1 Created `plugins/crew/docs/risk-tiering.md` with correct YAML frontmatter.
+  - [x] 5.1 Created `plugins/flow/docs/risk-tiering.md` with correct YAML frontmatter.
   - [x] 5.2 Markdown body authored with all required sections: `# Risk-tiering rules`, `## Tiers` (low/medium/high), `## Rules` (one per rule), `## Overriding`.
   - [x] 5.3 File is valid against schema — the round-trip test (AC4 4f) passes green.
 
 - [x] **Task 6: Integration test suite** (AC: #4)
-  - [x] 6.1 Created `plugins/crew/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts`. Uses `fs.mkdtemp` + `atomicWriteFile` (required by static fs-write guard) for fixtures; `fs.rm` in afterEach.
+  - [x] 6.1 Created `plugins/flow/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts`. Uses `fs.mkdtemp` + `atomicWriteFile` (required by static fs-write guard) for fixtures; `fs.rm` in afterEach.
   - [x] 6.2 Cases (4b) through (4f) implemented. Note: `(c2)` regex relaxed from `/change_types.*Invalid enum value/i` to `/change_types/` because Zod v4 emits "Invalid option" not "Invalid enum value".
-  - [x] 6.3 `plugins/crew/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` created covering all pure-validator edge cases.
-  - [x] 6.4 `plugins/crew/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` created covering all Zod-schema constraints.
+  - [x] 6.3 `plugins/flow/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` created covering all pure-validator edge cases.
+  - [x] 6.4 `plugins/flow/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` created covering all Zod-schema constraints.
   - [x] 6.5 No gh-error-map dependency in this story's tests; safe-listed as expected.
 
 - [x] **Task 7: Build, vitest, dist** (AC: all)
@@ -311,25 +311,25 @@ Unknown keys are how spec format drift starts. If the schema accepts unknown key
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Stories 4.6b / 4.7)
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` (Story 4.4)
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Stories 4.3b / 4.5 / 4.6)
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — no SKILL.md change in this story; the loader has no caller in v1.
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7) — no permission change; the loader is invoked by future MCP tools, not by `gh`-using tools directly.
-- `plugins/crew/mcp-server/src/tools/register.ts` — no MCP tool registered by this story; the loader is library code only.
-- `plugins/crew/mcp-server/src/state/lookup-standards.ts` (Story 1.3) — pattern reference only; do not modify.
-- `plugins/crew/mcp-server/src/validators/standards-doc.ts` (Story 1.3) — pattern reference only.
-- `plugins/crew/mcp-server/src/schemas/standards-doc.ts` (Story 1.3) — pattern reference only.
-- `plugins/crew/docs/standards-example.md` (Story 1.3) — pattern reference only.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Stories 4.6b / 4.7)
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts` (Story 4.4)
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Stories 4.3b / 4.5 / 4.6)
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — no SKILL.md change in this story; the loader has no caller in v1.
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7) — no permission change; the loader is invoked by future MCP tools, not by `gh`-using tools directly.
+- `plugins/flow/mcp-server/src/tools/register.ts` — no MCP tool registered by this story; the loader is library code only.
+- `plugins/flow/mcp-server/src/state/lookup-standards.ts` (Story 1.3) — pattern reference only; do not modify.
+- `plugins/flow/mcp-server/src/validators/standards-doc.ts` (Story 1.3) — pattern reference only.
+- `plugins/flow/mcp-server/src/schemas/standards-doc.ts` (Story 1.3) — pattern reference only.
+- `plugins/flow/docs/standards-example.md` (Story 1.3) — pattern reference only.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2 appends `MalformedRiskTieringSpecError` and `ShippedRiskTieringDefaultMissingError`. No existing error classes are modified; routine additive growth follows the established `extends DomainError` pattern.
+- **`plugins/flow/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2 appends `MalformedRiskTieringSpecError` and `ShippedRiskTieringDefaultMissingError`. No existing error classes are modified; routine additive growth follows the established `extends DomainError` pattern.
 
 ---
 
@@ -337,20 +337,20 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/docs/risk-tiering.md` (Task 5; the shipped default)
-- `plugins/crew/mcp-server/src/schemas/risk-tiering-spec.ts` (Task 1)
-- `plugins/crew/mcp-server/src/validators/risk-tiering-spec.ts` (Task 3)
-- `plugins/crew/mcp-server/src/state/lookup-risk-tiering-spec.ts` (Task 4)
-- `plugins/crew/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts` (Task 6.1–6.2)
-- `plugins/crew/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` (Task 6.3)
-- `plugins/crew/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` (Task 6.4)
-- Optional: `plugins/crew/mcp-server/src/lib/format-zod-issues.ts` (Task 3.4 — if implementer extracts the shared helper from `validators/standards-doc.ts`)
+- `plugins/flow/docs/risk-tiering.md` (Task 5; the shipped default)
+- `plugins/flow/mcp-server/src/schemas/risk-tiering-spec.ts` (Task 1)
+- `plugins/flow/mcp-server/src/validators/risk-tiering-spec.ts` (Task 3)
+- `plugins/flow/mcp-server/src/state/lookup-risk-tiering-spec.ts` (Task 4)
+- `plugins/flow/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts` (Task 6.1–6.2)
+- `plugins/flow/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` (Task 6.3)
+- `plugins/flow/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` (Task 6.4)
+- Optional: `plugins/flow/mcp-server/src/lib/format-zod-issues.ts` (Task 3.4 — if implementer extracts the shared helper from `validators/standards-doc.ts`)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/errors.ts` (Task 2; append two new error classes)
-- `plugins/crew/mcp-server/dist/` (Task 7.4; rebuild and commit)
-- Optional: `plugins/crew/mcp-server/src/validators/standards-doc.ts` (Task 3.4; only if the shared `formatZodIssues` helper is extracted — purely a refactor, no behaviour change)
+- `plugins/flow/mcp-server/src/errors.ts` (Task 2; append two new error classes)
+- `plugins/flow/mcp-server/dist/` (Task 7.4; rebuild and commit)
+- Optional: `plugins/flow/mcp-server/src/validators/standards-doc.ts` (Task 3.4; only if the shared `formatZodIssues` helper is extracted — purely a refactor, no behaviour change)
 
 ### Current-state notes on files being modified or referenced
 
@@ -385,11 +385,11 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 - [Source: `_bmad-output/planning-artifacts/architecture/core-architectural-decisions.md`] (§ Risk-Tier Classification)
 - [Source: `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md`] (§ 11 Risk-Tier Classifier Output Shape)
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md`] (FR40a)
-- [Source: `plugins/crew/mcp-server/src/state/lookup-standards.ts`] (loader pattern reference)
-- [Source: `plugins/crew/mcp-server/src/validators/standards-doc.ts`] (validator pattern reference)
-- [Source: `plugins/crew/mcp-server/src/schemas/standards-doc.ts`] (schema pattern reference)
-- [Source: `plugins/crew/mcp-server/src/errors.ts`] (`StandardsDocMalformedError` shape for Task 2)
-- [Source: `plugins/crew/docs/user-surface-acs.md`] (substrate-vs-user-surface judgement)
+- [Source: `plugins/flow/mcp-server/src/state/lookup-standards.ts`] (loader pattern reference)
+- [Source: `plugins/flow/mcp-server/src/validators/standards-doc.ts`] (validator pattern reference)
+- [Source: `plugins/flow/mcp-server/src/schemas/standards-doc.ts`] (schema pattern reference)
+- [Source: `plugins/flow/mcp-server/src/errors.ts`] (`StandardsDocMalformedError` shape for Task 2)
+- [Source: `plugins/flow/docs/user-surface-acs.md`] (substrate-vs-user-surface judgement)
 
 ---
 
@@ -442,28 +442,28 @@ claude-sonnet-4-6
 
 ### File List
 
-- `plugins/crew/docs/risk-tiering.md` — new (shipped default)
-- `plugins/crew/mcp-server/src/schemas/risk-tiering-spec.ts` — new
-- `plugins/crew/mcp-server/src/validators/risk-tiering-spec.ts` — new
-- `plugins/crew/mcp-server/src/state/lookup-risk-tiering-spec.ts` — new
-- `plugins/crew/mcp-server/src/errors.ts` — modified (two new error classes appended)
-- `plugins/crew/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` — new
-- `plugins/crew/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` — new
-- `plugins/crew/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts` — new
-- `plugins/crew/mcp-server/dist/errors.d.ts` — rebuilt
-- `plugins/crew/mcp-server/dist/errors.js` — rebuilt
-- `plugins/crew/mcp-server/dist/schemas/risk-tiering-spec.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/schemas/risk-tiering-spec.js` — new (dist)
-- `plugins/crew/mcp-server/dist/validators/risk-tiering-spec.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/validators/risk-tiering-spec.js` — new (dist)
-- `plugins/crew/mcp-server/dist/state/lookup-risk-tiering-spec.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/state/lookup-risk-tiering-spec.js` — new (dist)
-- `plugins/crew/mcp-server/dist/schemas/__tests__/risk-tiering-spec.test.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/schemas/__tests__/risk-tiering-spec.test.js` — new (dist)
-- `plugins/crew/mcp-server/dist/validators/__tests__/risk-tiering-spec.test.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/validators/__tests__/risk-tiering-spec.test.js` — new (dist)
-- `plugins/crew/mcp-server/dist/state/__tests__/lookup-risk-tiering-spec.test.d.ts` — new (dist)
-- `plugins/crew/mcp-server/dist/state/__tests__/lookup-risk-tiering-spec.test.js` — new (dist)
+- `plugins/flow/docs/risk-tiering.md` — new (shipped default)
+- `plugins/flow/mcp-server/src/schemas/risk-tiering-spec.ts` — new
+- `plugins/flow/mcp-server/src/validators/risk-tiering-spec.ts` — new
+- `plugins/flow/mcp-server/src/state/lookup-risk-tiering-spec.ts` — new
+- `plugins/flow/mcp-server/src/errors.ts` — modified (two new error classes appended)
+- `plugins/flow/mcp-server/src/schemas/__tests__/risk-tiering-spec.test.ts` — new
+- `plugins/flow/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` — new
+- `plugins/flow/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts` — new
+- `plugins/flow/mcp-server/dist/errors.d.ts` — rebuilt
+- `plugins/flow/mcp-server/dist/errors.js` — rebuilt
+- `plugins/flow/mcp-server/dist/schemas/risk-tiering-spec.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/schemas/risk-tiering-spec.js` — new (dist)
+- `plugins/flow/mcp-server/dist/validators/risk-tiering-spec.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/validators/risk-tiering-spec.js` — new (dist)
+- `plugins/flow/mcp-server/dist/state/lookup-risk-tiering-spec.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/state/lookup-risk-tiering-spec.js` — new (dist)
+- `plugins/flow/mcp-server/dist/schemas/__tests__/risk-tiering-spec.test.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/schemas/__tests__/risk-tiering-spec.test.js` — new (dist)
+- `plugins/flow/mcp-server/dist/validators/__tests__/risk-tiering-spec.test.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/validators/__tests__/risk-tiering-spec.test.js` — new (dist)
+- `plugins/flow/mcp-server/dist/state/__tests__/lookup-risk-tiering-spec.test.d.ts` — new (dist)
+- `plugins/flow/mcp-server/dist/state/__tests__/lookup-risk-tiering-spec.test.js` — new (dist)
 
 ### Change Log
 

@@ -9,7 +9,7 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **`/crew:scan` to skip a single malformed/unreadable manifest with a warning rather than abort the whole scan**,
+I want **`/flow:scan` to skip a single malformed/unreadable manifest with a warning rather than abort the whole scan**,
 So that **one bad spec file doesn't block scanning the other 59**.
 
 ### What this story is, in one sentence
@@ -27,12 +27,12 @@ The to-do branch of `scan-sources.ts` currently lets per-file `readFile` errors 
 **AC1:**
 
 The to-do branch's `readFile` call site in `scan-sources.ts` (currently around lines 579-590 per `epic-5-carry-forward.md` entry 1) wraps the read in `try/catch`. On error, push to `result.skippedRefs` with reason `"unreadable-manifest"` and detail `"<errno>: <path>"`, then `continue`. The scan completes; the other manifests are processed normally. Refusal text matches the existing `skippedRefs` convention.
-`artifact: plugins/crew/mcp-server/src/tools/scan-sources.ts`
+`artifact: plugins/flow/mcp-server/src/tools/scan-sources.ts`
 
 **AC2 (integration):**
 
 vitest seeds a fixture with 3 valid manifests + 1 deliberately-malformed-yaml manifest under `to-do/`, runs `scanSources`, asserts (a) the 3 valid manifests scan clean, (b) the bad one appears in `result.skippedRefs` with reason `"unreadable-manifest"` and a non-empty `detail` field, (c) `scanSources` returns without throwing at the boundary (the per-file error is contained).
-`vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts`
+`vitest: plugins/flow/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts`
 
 ---
 
@@ -42,12 +42,12 @@ vitest seeds a fixture with 3 valid manifests + 1 deliberately-malformed-yaml ma
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — wrap the `readFile` call site in the to-do branch (around lines 579-590) in `try/catch`. Use the same `skippedRefs` push convention used elsewhere in the file (look at other push sites for the canonical shape).
-- `plugins/crew/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts` (NEW) — vitest fixture as described in AC2.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — wrap the `readFile` call site in the to-do branch (around lines 579-590) in `try/catch`. Use the same `skippedRefs` push convention used elsewhere in the file (look at other push sites for the canonical shape).
+- `plugins/flow/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts` (NEW) — vitest fixture as described in AC2.
 
 ### Build artefacts
 
-After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
+After any change in `plugins/flow/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
 
 ### Dependencies
 

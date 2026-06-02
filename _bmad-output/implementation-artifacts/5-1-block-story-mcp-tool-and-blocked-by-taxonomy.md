@@ -18,10 +18,10 @@ Generalise Story 5.11's specialised `blockOrphanNoTranscript` into a single `blo
 
 ### Why this story exists (and how it relates to 5.13)
 
-Story 5.13 has **already shipped** the closed `blocked_by` Zod enum, the `BLOCKED_BY_HINTS` table, and the `/crew:start` blocked-recovery surface. This story does NOT greenfield those artefacts — it **reshapes** them:
+Story 5.13 has **already shipped** the closed `blocked_by` Zod enum, the `BLOCKED_BY_HINTS` table, and the `/flow:start` blocked-recovery surface. This story does NOT greenfield those artefacts — it **reshapes** them:
 
-1. The Zod enum (`plugins/crew/mcp-server/src/schemas/execution-manifest.ts:153-169`) currently has thirteen members. This story adds three (`source-drift`, `dep-not-built`, `user`) → **sixteen total**.
-2. `BLOCKED_BY_HINTS` (`plugins/crew/mcp-server/src/lib/blocked-by-hints.ts:27-66`) currently has thirteen entries. This story adds three matching hints.
+1. The Zod enum (`plugins/flow/mcp-server/src/schemas/execution-manifest.ts:153-169`) currently has thirteen members. This story adds three (`source-drift`, `dep-not-built`, `user`) → **sixteen total**.
+2. `BLOCKED_BY_HINTS` (`plugins/flow/mcp-server/src/lib/blocked-by-hints.ts:27-66`) currently has thirteen entries. This story adds three matching hints.
 3. The epic block at Story 5.1 lists nine members. The reconciled enum is the **union** of (5.13's 13) ∪ (5.1's 9 mapped) — see § 5.13 ↔ 5.1 reconciliation table below.
 4. Currently, the only "block-this-manifest" MCP tool is `blockOrphanNoTranscript` (Story 5.11) — specialised to the no-transcript orphan path. This story extracts the move-and-stamp pattern into a generalised `blockStory` tool. `blockOrphanNoTranscript` remains as a thin wrapper that calls `blockStory({ blocked_by: "orphan-no-transcript", … })` so 5.11's call sites and tests do not break.
 
@@ -74,7 +74,7 @@ The dev agent MUST NOT drop any existing member; the dev agent MUST NOT add memb
 - (b) Migrate `blockOrphanNoTranscript` callers off the specialised tool. The specialised tool is refactored to delegate to `blockStory` internally, but its public signature, name, and AC3-mandated chat line text remain identical. All Story 5.11 tests pass unchanged.
 - (c) Touch `scan-sources.ts`, `process-dev-transcript.ts`, `process-reviewer-transcript.ts`, or `process-reviewer-yield.ts`. Those tools have their own canonical block paths (Story 5.13's typed writers) and continue to write `blocked/` manifests via `writeManagedFile` directly. A v3 refactor MAY route them through `blockStory` too, but that is out of scope here — touching them risks regressing the 12-test-file migration that 5.13 just shipped.
 - (d) Change the runtime semantics of `BLOCKED_BY_HINTS[orphan-no-transcript]` or any other existing entry. Only three NEW hints are added.
-- (e) Add a `/crew:block` slash command, a planner-facing UI, or any user-observable surface. `blockStory` is internal MCP — operators invoke it indirectly (via `/crew:start`'s orphan path today, via future skills tomorrow). This is `substrate`.
+- (e) Add a `/flow:block` slash command, a planner-facing UI, or any user-observable surface. `blockStory` is internal MCP — operators invoke it indirectly (via `/flow:start`'s orphan path today, via future skills tomorrow). This is `substrate`.
 
 ---
 
@@ -89,17 +89,17 @@ Per project memory `project_ac_marker_gap`: every AC MUST carry an `artifact:` o
 **AC1:**
 **Given** a story manifest in `in-progress/<ref>.yaml` (any adapter, any prior state),
 **When** an MCP caller invokes `blockStory({ targetRepoRoot, ref, blocked_by, detail? })` with `blocked_by` set to one of the sixteen enum members from § 5.13 ↔ 5.1 reconciliation,
-**Then** (a) the manifest is atomically moved from `in-progress/` to `blocked/` via the canonical `moveBetweenStates` primitive (same primitive `blockOrphanNoTranscript` uses today at `block-orphan-no-transcript.ts:61-66`); (b) the now-blocked manifest is rewritten with `blocked_by` set to the typed value and the `claimed_by` field removed (the manifest no longer belongs to the prior session); (c) if `detail` is provided, it is appended to the rendered chat line as `: <detail>` (e.g. `[user] <ref> — manual block: schema migration pending`); (d) the tool returns `{ chatLog: string[] }` with exactly one entry — the rendered hint from `BLOCKED_BY_HINTS[blocked_by]` (with `{ref}` substituted) optionally suffixed with the `detail` text. The move and the stamp run in order; if the move succeeds but the stamp fails, the manifest lands in `blocked/` without `blocked_by` — recoverable by the operator (matches the existing `blockOrphanNoTranscript` pattern explicitly, per `block-orphan-no-transcript.ts:14-17`). `artifact: plugins/crew/mcp-server/src/tools/block-story.ts, plugins/crew/mcp-server/src/tools/register.ts, plugins/crew/mcp-server/src/tools/block-orphan-no-transcript.ts` _(FR20)_
+**Then** (a) the manifest is atomically moved from `in-progress/` to `blocked/` via the canonical `moveBetweenStates` primitive (same primitive `blockOrphanNoTranscript` uses today at `block-orphan-no-transcript.ts:61-66`); (b) the now-blocked manifest is rewritten with `blocked_by` set to the typed value and the `claimed_by` field removed (the manifest no longer belongs to the prior session); (c) if `detail` is provided, it is appended to the rendered chat line as `: <detail>` (e.g. `[user] <ref> — manual block: schema migration pending`); (d) the tool returns `{ chatLog: string[] }` with exactly one entry — the rendered hint from `BLOCKED_BY_HINTS[blocked_by]` (with `{ref}` substituted) optionally suffixed with the `detail` text. The move and the stamp run in order; if the move succeeds but the stamp fails, the manifest lands in `blocked/` without `blocked_by` — recoverable by the operator (matches the existing `blockOrphanNoTranscript` pattern explicitly, per `block-orphan-no-transcript.ts:14-17`). `artifact: plugins/flow/mcp-server/src/tools/block-story.ts, plugins/flow/mcp-server/src/tools/register.ts, plugins/flow/mcp-server/src/tools/block-orphan-no-transcript.ts` _(FR20)_
 
 **AC2:**
-**Given** the `ExecutionManifestSchema.blocked_by` field in `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` and the `BLOCKED_BY_HINTS` table in `plugins/crew/mcp-server/src/lib/blocked-by-hints.ts`,
+**Given** the `ExecutionManifestSchema.blocked_by` field in `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` and the `BLOCKED_BY_HINTS` table in `plugins/flow/mcp-server/src/lib/blocked-by-hints.ts`,
 **When** the schema and the hints table are parsed/imported,
-**Then** (a) `blocked_by` is a closed `z.enum([...])` with exactly the **sixteen** members listed in § Resulting v2 enum (the existing thirteen from Story 5.13, plus the three new members `source-drift`, `dep-not-built`, `user`); (b) any write attempting a value outside this set fails the Zod parse at the schema boundary with the canonical `invalid_enum_value` error; (c) `BLOCKED_BY_HINTS` has exactly sixteen entries — every enum member maps to a non-empty hint of the form `[<member>] {ref} — <operator action>` (matching the convention at `blocked-by-hints.ts:27-66`); (d) the schema's JSDoc comment block (currently at `execution-manifest.ts:125-150`) is updated to enumerate the sixteen members with a one-line provenance note per member (which story added it); (e) `BlockedBy` (the inferred TS union type exported from `execution-manifest.ts:241`) widens automatically — no manual type-list maintenance. `artifact: plugins/crew/mcp-server/src/schemas/execution-manifest.ts, plugins/crew/mcp-server/src/lib/blocked-by-hints.ts` _(FR20)_
+**Then** (a) `blocked_by` is a closed `z.enum([...])` with exactly the **sixteen** members listed in § Resulting v2 enum (the existing thirteen from Story 5.13, plus the three new members `source-drift`, `dep-not-built`, `user`); (b) any write attempting a value outside this set fails the Zod parse at the schema boundary with the canonical `invalid_enum_value` error; (c) `BLOCKED_BY_HINTS` has exactly sixteen entries — every enum member maps to a non-empty hint of the form `[<member>] {ref} — <operator action>` (matching the convention at `blocked-by-hints.ts:27-66`); (d) the schema's JSDoc comment block (currently at `execution-manifest.ts:125-150`) is updated to enumerate the sixteen members with a one-line provenance note per member (which story added it); (e) `BlockedBy` (the inferred TS union type exported from `execution-manifest.ts:241`) widens automatically — no manual type-list maintenance. `artifact: plugins/flow/mcp-server/src/schemas/execution-manifest.ts, plugins/flow/mcp-server/src/lib/blocked-by-hints.ts` _(FR20)_
 
 **AC3:**
 **Given** the vitest harness for the new `blockStory` tool,
 **When** the suite runs,
-**Then** vitest covers **all sixteen** `blocked_by` enum members in a table-driven test that, for each member: (a) seeds an `in-progress/<ref>.yaml` fixture; (b) invokes `blockStory({ … blocked_by: <member> })`; (c) asserts the manifest is gone from `in-progress/`; (d) asserts the manifest exists at `blocked/<ref>.yaml` with `blocked_by === <member>` and `claimed_by` absent; (e) asserts the returned `chatLog[0]` starts with `[<member>] ` and is the substituted `BLOCKED_BY_HINTS[<member>]` text. AND **separately** the suite covers the "dev keeps picking" invariant: (f) seed three `in-progress/` manifests and three `to-do/` manifests; call `blockStory` on all three in-progress refs (one with `user`, one with `dep-not-built`, one with `source-drift`); assert that a subsequent `listClaimableTodos` call returns exactly the three `to-do/` refs and that no blocked ref appears in the claimable list (the dev session keeps picking from `to-do/` without waiting). The fixture pattern follows `block-orphan-no-transcript.test.ts:48-58` (`seedInProgressManifest`). `vitest: plugins/crew/mcp-server/src/tools/__tests__/block-story.test.ts` _(FR21)_
+**Then** vitest covers **all sixteen** `blocked_by` enum members in a table-driven test that, for each member: (a) seeds an `in-progress/<ref>.yaml` fixture; (b) invokes `blockStory({ … blocked_by: <member> })`; (c) asserts the manifest is gone from `in-progress/`; (d) asserts the manifest exists at `blocked/<ref>.yaml` with `blocked_by === <member>` and `claimed_by` absent; (e) asserts the returned `chatLog[0]` starts with `[<member>] ` and is the substituted `BLOCKED_BY_HINTS[<member>]` text. AND **separately** the suite covers the "dev keeps picking" invariant: (f) seed three `in-progress/` manifests and three `to-do/` manifests; call `blockStory` on all three in-progress refs (one with `user`, one with `dep-not-built`, one with `source-drift`); assert that a subsequent `listClaimableTodos` call returns exactly the three `to-do/` refs and that no blocked ref appears in the claimable list (the dev session keeps picking from `to-do/` without waiting). The fixture pattern follows `block-orphan-no-transcript.test.ts:48-58` (`seedInProgressManifest`). `vitest: plugins/flow/mcp-server/src/tools/__tests__/block-story.test.ts` _(FR21)_
 
 ---
 
@@ -109,7 +109,7 @@ Per project memory `project_ac_marker_gap`: every AC MUST carry an `artifact:` o
 
 **NEW:**
 
-- `plugins/crew/mcp-server/src/tools/block-story.ts` — the generalised tool. Exports `blockStory(opts: BlockStoryOptions): Promise<BlockStoryResult>`. Signature:
+- `plugins/flow/mcp-server/src/tools/block-story.ts` — the generalised tool. Exports `blockStory(opts: BlockStoryOptions): Promise<BlockStoryResult>`. Signature:
   ```ts
   export interface BlockStoryOptions {
     targetRepoRoot: string;
@@ -127,15 +127,15 @@ Per project memory `project_ac_marker_gap`: every AC MUST carry an `artifact:` o
   3. Stamp `blocked_by` (typed) and **delete** `claimed_by` (the manifest no longer belongs to the prior session — this is the new bit; `blockOrphanNoTranscript` does not currently delete it because Story 5.11 did not call it out, but 5.1 makes it explicit).
   4. `writeManifest(<blocked-path>, updated)`.
   5. Render the chat line via `renderBlockedRecoveryHint(blocked_by, ref)` (from `blocked-by-hints.ts:75`) and optionally append `: ${detail}`.
-- `plugins/crew/mcp-server/src/tools/__tests__/block-story.test.ts` — table-driven over all sixteen enum members + the "dev keeps picking" invariant test.
+- `plugins/flow/mcp-server/src/tools/__tests__/block-story.test.ts` — table-driven over all sixteen enum members + the "dev keeps picking" invariant test.
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — extend the `z.enum([...])` at lines 154-168 with the three new members (`source-drift`, `dep-not-built`, `user`). Update the JSDoc block at lines 125-150 to list sixteen members with provenance.
-- `plugins/crew/mcp-server/src/lib/blocked-by-hints.ts` — add three new entries to `BLOCKED_BY_HINTS` (the inferred `Record<BlockedBy, string>` type will force this once the enum widens — TypeScript will fail to compile until all three are added; the dev agent leverages this as a guard).
-- `plugins/crew/mcp-server/src/tools/register.ts` — register the new `blockStory` MCP tool. Follow the exact pattern at lines 1485-1524 (`blockOrphanNoTranscript` registration). The `inputSchema` adds `blocked_by` and optional `detail` to the existing `{ targetRepoRoot, ref }` shape.
-- `plugins/crew/mcp-server/src/tools/block-orphan-no-transcript.ts` — refactor to call `blockStory({ targetRepoRoot, ref, blocked_by: "orphan-no-transcript", detail: \`no persisted transcript for session ${staleUlid}; manual recovery required\` })` internally. The AC3 chat line from Story 5.11 (`block-orphan-no-transcript.ts:86-88`) must remain byte-identical — the new `detail` parameter is the seam that preserves the exact string. The existing exports (`blockOrphanNoTranscript`, `BlockOrphanNoTranscriptOptions`, `BlockOrphanNoTranscriptResult`) and their signatures stay; only the body changes. **All four existing tests in `block-orphan-no-transcript.test.ts` MUST pass unchanged.**
-- `plugins/crew/mcp-server/src/schemas/__tests__/execution-manifest.test.ts` — extend the enum-member parse tests to cover the three new values (`source-drift`, `dep-not-built`, `user`); flip nothing else.
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — extend the `z.enum([...])` at lines 154-168 with the three new members (`source-drift`, `dep-not-built`, `user`). Update the JSDoc block at lines 125-150 to list sixteen members with provenance.
+- `plugins/flow/mcp-server/src/lib/blocked-by-hints.ts` — add three new entries to `BLOCKED_BY_HINTS` (the inferred `Record<BlockedBy, string>` type will force this once the enum widens — TypeScript will fail to compile until all three are added; the dev agent leverages this as a guard).
+- `plugins/flow/mcp-server/src/tools/register.ts` — register the new `blockStory` MCP tool. Follow the exact pattern at lines 1485-1524 (`blockOrphanNoTranscript` registration). The `inputSchema` adds `blocked_by` and optional `detail` to the existing `{ targetRepoRoot, ref }` shape.
+- `plugins/flow/mcp-server/src/tools/block-orphan-no-transcript.ts` — refactor to call `blockStory({ targetRepoRoot, ref, blocked_by: "orphan-no-transcript", detail: \`no persisted transcript for session ${staleUlid}; manual recovery required\` })` internally. The AC3 chat line from Story 5.11 (`block-orphan-no-transcript.ts:86-88`) must remain byte-identical — the new `detail` parameter is the seam that preserves the exact string. The existing exports (`blockOrphanNoTranscript`, `BlockOrphanNoTranscriptOptions`, `BlockOrphanNoTranscriptResult`) and their signatures stay; only the body changes. **All four existing tests in `block-orphan-no-transcript.test.ts` MUST pass unchanged.**
+- `plugins/flow/mcp-server/src/schemas/__tests__/execution-manifest.test.ts` — extend the enum-member parse tests to cover the three new values (`source-drift`, `dep-not-built`, `user`); flip nothing else.
 
 ### Sequencing
 
@@ -153,7 +153,7 @@ Per project memory `project_ac_marker_gap`: every AC MUST carry an `artifact:` o
 
 ### Edge cases
 
-- **`claimed_by` removal:** the new `blockStory` tool deletes `claimed_by` from the stamped manifest (AC1.b). This is a small behavioural change from `blockOrphanNoTranscript` (which today preserves `claimed_by`). The change is correct: once a story is blocked, the prior session's claim is no longer relevant; the next operator action (clear `blocked_by` and re-run `/crew:start`) will let a fresh session claim. The Story 5.11 test (`block-orphan-no-transcript.test.ts:80-99`) does not assert on `claimed_by` presence after the call, so it continues to pass.
+- **`claimed_by` removal:** the new `blockStory` tool deletes `claimed_by` from the stamped manifest (AC1.b). This is a small behavioural change from `blockOrphanNoTranscript` (which today preserves `claimed_by`). The change is correct: once a story is blocked, the prior session's claim is no longer relevant; the next operator action (clear `blocked_by` and re-run `/flow:start`) will let a fresh session claim. The Story 5.11 test (`block-orphan-no-transcript.test.ts:80-99`) does not assert on `claimed_by` presence after the call, so it continues to pass.
 - **`detail` parameter for hints with no operator-action variability:** every hint in `BLOCKED_BY_HINTS` has a self-contained operator action; `detail` is purely additive context (e.g. `[user] <ref> — manual block: schema migration pending`). When `detail` is omitted, the hint string is rendered verbatim.
 - **`blockStory` called on a manifest that is NOT in `in-progress/`:** `moveBetweenStates` already throws `ManifestNotFoundError` on ENOENT (`block-orphan-no-transcript.ts:51-52` documents this). The new tool inherits that contract — no extra guard needed.
 - **Idempotency / double-block:** calling `blockStory` twice on the same ref will fail on the second call because `in-progress/<ref>.yaml` no longer exists. This is correct — the caller should check `listClaimableTodos` or similar before re-blocking. NOT a new failure mode (Story 5.11's tool has the same shape).
@@ -164,12 +164,12 @@ Per project memory `project_ac_marker_gap`: every AC MUST carry an `artifact:` o
 
 - `process-dev-transcript.ts`, `process-reviewer-transcript.ts`, `process-reviewer-yield.ts`, `scan-sources.ts` — Story 5.13 just migrated these to the typed enum and their direct `writeManagedFile` paths are correct. Routing them through `blockStory` is out of scope (would re-touch the 12 test files 5.13 just stabilised).
 - The four existing tests in `block-orphan-no-transcript.test.ts` — their assertions must continue to pass byte-for-byte. The AC3 chat line is the canary.
-- `plugins/crew/skills/start/SKILL.md` — Story 5.13 already wired the blocked-recovery surface to `BLOCKED_BY_HINTS`. No skill text changes needed for 5.1 (the three new hints flow through the same render path automatically).
-- `plugins/crew/mcp-server/dist/` is the committed build output. Per project CLAUDE.md, the dev agent rebuilds and commits `dist/` in the same change.
+- `plugins/flow/skills/start/SKILL.md` — Story 5.13 already wired the blocked-recovery surface to `BLOCKED_BY_HINTS`. No skill text changes needed for 5.1 (the three new hints flow through the same render path automatically).
+- `plugins/flow/mcp-server/dist/` is the committed build output. Per project CLAUDE.md, the dev agent rebuilds and commits `dist/` in the same change.
 
 ### Build artefacts (`dist/` discipline)
 
-After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
+After any change in `plugins/flow/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
 
 ---
 
@@ -185,7 +185,7 @@ After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm
 - `tools/__tests__/block-story.test.ts` (NEW):
   - **Per-member sweep (sixteen cases):** for each enum member, seed `in-progress/<ref>.yaml`, call `blockStory({ … blocked_by: <member> })`, assert (a) `in-progress/<ref>.yaml` is gone, (b) `blocked/<ref>.yaml` exists with `blocked_by === <member>` and no `claimed_by`, (c) `chatLog[0]` starts with `[<member>] ` and equals `renderBlockedRecoveryHint(<member>, ref)`.
   - **`detail` parameter:** seed a fixture; call with `detail: "schema migration pending"` and `blocked_by: "user"`; assert `chatLog[0]` ends with `: schema migration pending`.
-  - **Dev-keeps-picking invariant (AC3 second half):** seed three `in-progress/` manifests (refs A, B, C) and three `to-do/` manifests (refs D, E, F). Call `blockStory` on A (with `user`), B (with `dep-not-built`), C (with `source-drift`). Then call `listClaimableTodos({ targetRepoRoot })` (the existing tool at `plugins/crew/mcp-server/src/tools/list-claimable-todos.ts`) and assert the returned refs are exactly `{D, E, F}` — no blocked ref leaks into the claimable list.
+  - **Dev-keeps-picking invariant (AC3 second half):** seed three `in-progress/` manifests (refs A, B, C) and three `to-do/` manifests (refs D, E, F). Call `blockStory` on A (with `user`), B (with `dep-not-built`), C (with `source-drift`). Then call `listClaimableTodos({ targetRepoRoot })` (the existing tool at `plugins/flow/mcp-server/src/tools/list-claimable-todos.ts`) and assert the returned refs are exactly `{D, E, F}` — no blocked ref leaks into the claimable list.
   - **`ManifestNotFoundError` propagation:** call `blockStory` on a ref that does not exist in `in-progress/`; assert `ManifestNotFoundError` is thrown.
 
 - `tools/__tests__/block-orphan-no-transcript.test.ts` (UNCHANGED): all four existing tests continue to pass against the refactored body.
@@ -214,7 +214,7 @@ Both entries remain parked for the next Epic 5 story that touches `scan-sources.
 ### Previous-story intelligence
 
 - **Story 5.11** (`5-11-orphan-recovery-branch-in-crew-start.md`) — added `blockOrphanNoTranscript` as the first "block-this-manifest" MCP tool. 5.1 generalises it. The AC3 chat line at `block-orphan-no-transcript.ts:86-88` is the canary string the refactor must preserve verbatim.
-- **Story 5.13** (`5-13-planner-validator-prose-vs-manifest-deps-at-scan-time.md`) — shipped the closed `blocked_by` Zod enum (13 members), `BLOCKED_BY_HINTS`, and the `/crew:start` blocked-recovery surface. 5.1 widens the enum to 16 members and adds three hints; everything else 5.13 built stays.
+- **Story 5.13** (`5-13-planner-validator-prose-vs-manifest-deps-at-scan-time.md`) — shipped the closed `blocked_by` Zod enum (13 members), `BLOCKED_BY_HINTS`, and the `/flow:start` blocked-recovery surface. 5.1 widens the enum to 16 members and adds three hints; everything else 5.13 built stays.
 - **Story 1.6** (managed-fs / atomic-write) — `atomicWriteFile` and `moveBetweenStates` are the two primitives 5.1's tool composes. No new primitive is needed.
 
 ### Project memories cited
@@ -241,7 +241,7 @@ Both entries remain parked for the next Epic 5 story that touches `scan-sources.
 - [ ] `block-orphan-no-transcript.ts` refactored to delegate to `blockStory`; all four existing tests pass unchanged (AC3 chat line preserved byte-for-byte).
 - [ ] `block-story.test.ts` covers all sixteen enum members in the per-member sweep + the `detail`-parameter case + the dev-keeps-picking invariant + the `ManifestNotFoundError` propagation.
 - [ ] `execution-manifest.test.ts` extended to assert the three new members parse and an out-of-enum value throws.
-- [ ] `pnpm -r build` clean; `plugins/crew/mcp-server/dist/` committed in the same change.
+- [ ] `pnpm -r build` clean; `plugins/flow/mcp-server/dist/` committed in the same change.
 - [ ] `pnpm -r test` passes (including the existing 5.11 and 5.13 suites).
 
 ### Completion note

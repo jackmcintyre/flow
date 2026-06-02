@@ -10,9 +10,9 @@ supersedes: none — co-exists with sprint-change-proposal-2026-05-27.md (the 5.
 
 ## 1. Issue Summary
 
-Today's first dogfood canary after the pre-Epic-5 hygiene promotion (`pre-dogfood-resumption-1` tag) surfaced a real reviewer-path defect: every `/crew:start` reviewer step halts with `Unknown JSON field: "baseRepository"` from `gh pr view`. Three tool sites query a `gh` field that does not exist on the live `gh` schema (gh 2.92.0). The unit test that should have caught this mocks a synthetic shape with the bad field name, so CI is green.
+Today's first dogfood canary after the pre-Epic-5 hygiene promotion (`pre-dogfood-resumption-1` tag) surfaced a real reviewer-path defect: every `/flow:start` reviewer step halts with `Unknown JSON field: "baseRepository"` from `gh pr view`. Three tool sites query a `gh` field that does not exist on the live `gh` schema (gh 2.92.0). The unit test that should have caught this mocks a synthetic shape with the bad field name, so CI is green.
 
-**Canary evidence:** scratch repo `jackmcintyre/scratch` PR #1 (kept open intentionally for re-run). Story manifest sits in `.crew/state/in-progress/` with the reviewer-failure block, ready to be picked up by L1b orphan-recovery once the fix ships.
+**Canary evidence:** scratch repo `jackmcintyre/scratch` PR #1 (kept open intentionally for re-run). Story manifest sits in `.flow/state/in-progress/` with the reviewer-failure block, ready to be picked up by L1b orphan-recovery once the fix ships.
 
 **Full diagnosis:** `/tmp/handoff-2026-05-27-canary-baseRepository-fix.md`.
 
@@ -22,7 +22,7 @@ Today's first dogfood canary after the pre-Epic-5 hygiene promotion (`pre-dogfoo
 - **Story impact:** new substrate story 5.15. 5.10/5.11/5.12/5.13 already done. `epic-5-retrospective` stays `optional`.
 - **Artifact conflicts:** none — purely additive.
 - **Technical impact:**
-  - 3 source files in `plugins/crew/mcp-server/src/tools/` change call sites.
+  - 3 source files in `plugins/flow/mcp-server/src/tools/` change call sites.
   - 1 existing test fixture updated (`run-auto-merge-gate.test.ts:54`).
   - 2 new tests added (1 real-gh integration, 1 grep-guard against `baseRepository` regression).
   - No schema, telemetry, or surface changes.
@@ -64,10 +64,10 @@ Substrate defect, not a scope change.
 **Next actions:**
 1. `/ship-story 5-15` — full BMad cycle. Spec author writes the spec from the epic block.
 2. Merge the resulting PR to `dev`.
-3. Re-run canary in the preserved scratch dir (path in `/tmp/crew-canary-scratch-path`); `/crew:start` should pick up the orphan and reach reviewer success.
+3. Re-run canary in the preserved scratch dir (path in `/tmp/crew-canary-scratch-path`); `/flow:start` should pick up the orphan and reach reviewer success.
 4. Tear down scratch on success (`rm -rf $SCRATCH`; delete `jackmcintyre/scratch` GH repo).
 
 **Success criteria:**
-- `/crew:start` reviewer step on scratch PR #1 no longer halts with `Unknown JSON field: "baseRepository"`.
+- `/flow:start` reviewer step on scratch PR #1 no longer halts with `Unknown JSON field: "baseRepository"`.
 - `pnpm test` green; new grep-guard test would have failed before the fix.
 - Dogfood resumption proceeds to the next gate (canary-shape, per Jack-call list).

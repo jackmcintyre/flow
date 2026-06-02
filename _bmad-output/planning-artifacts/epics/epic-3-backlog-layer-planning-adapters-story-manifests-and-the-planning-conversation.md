@@ -21,7 +21,7 @@ So that BMad and native (and future Linear / GitHub Issues / etc.) can plug in b
 ## Story 3.2: Execution-manifest schema, `scan-sources` MCP tool, and source-hash capture
 
 As a plugin operator,
-I want my source stories projected into plugin-owned execution manifests under `.crew/state/to-do/<ref>.yaml`,
+I want my source stories projected into plugin-owned execution manifests under `.flow/state/to-do/<ref>.yaml`,
 So that the dev loop has a stable, validated handle on each story without writing to the source tool's tree.
 
 **Acceptance Criteria:**
@@ -90,7 +90,7 @@ So that I can prime a backlog without adopting a separate planning tool.
 
 **Given** a target repo with `adapter: native` configured,
 **When** I run `/<plugin>:plan`,
-**Then** the planner subagent opens a conversation, interprets my intent, and produces story files at `<target-repo>/.crew/native-stories/<ref>.md` following the native-adapter body shape (`## Narrative`, `## Acceptance Criteria`, `## Implementation Notes`, `## Dependencies`). _(FR1, FR2, FR12)_
+**Then** the planner subagent opens a conversation, interprets my intent, and produces story files at `<target-repo>/.flow/native-stories/<ref>.md` following the native-adapter body shape (`## Narrative`, `## Acceptance Criteria`, `## Implementation Notes`, `## Dependencies`). _(FR1, FR2, FR12)_
 
 **Given** a target repo with `adapter: bmad` configured, **When** I run `/<plugin>:plan`, **Then** the skill points me at BMad's own authoring skills (`/bmad-create-story` etc.) and offers a `scanSources` pass to pick up newly authored stories. _(Architecture §Native adapter)_
 

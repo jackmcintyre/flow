@@ -1,4 +1,4 @@
-# Story 5.30: MCP cascade halt seam in `/crew:start` + lifecycle-log diagnostic fields
+# Story 5.30: MCP cascade halt seam in `/flow:start` + lifecycle-log diagnostic fields
 
 story_shape: substrate
 Status: ready-for-dev
@@ -6,16 +6,16 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **(a) `/crew:start` to halt cleanly with a verbatim recovery line when the parent MCP child has been killed mid-cycle by Claude Code's subagent-termination cascade, and (b) the lifecycle log to carry `ppid` + `pgid` (and optional `sessionUlid`) on every event so the next process-tree incident is observable from the log file alone**,
+I want **(a) `/flow:start` to halt cleanly with a verbatim recovery line when the parent MCP child has been killed mid-cycle by Claude Code's subagent-termination cascade, and (b) the lifecycle log to carry `ppid` + `pgid` (and optional `sessionUlid`) on every event so the next process-tree incident is observable from the log file alone**,
 So that **(i) the MCP-cascade failure mode stops manifesting as a stranded in-progress manifest with no operator-visible explanation, and (ii) future root-cause analyses on disconnect events take minutes rather than the multi-hour pid/log-correlation pass that surfaced the cascade in the first place**.
 
-This story is the v1 acceptance of an architectural Claude Code defect: when a subagent's `Task` returns, the host sends SIGTERM to BOTH MCP children — the subagent's (expected) AND the parent session's (the bug). Evidence: 8/8 SIGTERMs in `~/.crew/mcp-lifecycle.log` paired ≤1ms across 4 distinct incidents. Stories 5.10/5.11/5.12 and 5.25 addressed a different failure mode (idle-reap); they do not stop this one. The fix surface lives outside the plugin (Anthropic owns it). What we ship here is **clean halt + recovery prose + diagnostic instrumentation** so the operator loses no work and the next incident is RCA'd from the log file instead of inference.
+This story is the v1 acceptance of an architectural Claude Code defect: when a subagent's `Task` returns, the host sends SIGTERM to BOTH MCP children — the subagent's (expected) AND the parent session's (the bug). Evidence: 8/8 SIGTERMs in `~/.flow/mcp-lifecycle.log` paired ≤1ms across 4 distinct incidents. Stories 5.10/5.11/5.12 and 5.25 addressed a different failure mode (idle-reap); they do not stop this one. The fix surface lives outside the plugin (Anthropic owns it). What we ship here is **clean halt + recovery prose + diagnostic instrumentation** so the operator loses no work and the next incident is RCA'd from the log file instead of inference.
 
 ### Path-decision preamble
 
 Three credibly-different paths were considered (full memo: `~/.claude/plans/linked-knitting-stardust.md`):
 
-- **(A) Accept + document (this story).** SKILL.md gains a halt seam that fires on a deterministic MCP-disconnect signal during the inner cycle. The verbatim halt line tells the operator exactly what happened and exactly how to recover (restart Claude Code, re-run `/crew:start`, choose `reattach` on the orphan that Story 5.20 will surface). Lifecycle log gains the diagnostic fields that should have been there from day one. ~1 day. No behaviour change on the happy path.
+- **(A) Accept + document (this story).** SKILL.md gains a halt seam that fires on a deterministic MCP-disconnect signal during the inner cycle. The verbatim halt line tells the operator exactly what happened and exactly how to recover (restart Claude Code, re-run `/flow:start`, choose `reattach` on the orphan that Story 5.20 will surface). Lifecycle log gains the diagnostic fields that should have been there from day one. ~1 day. No behaviour change on the happy path.
 - **(B) HTTP MCP daemon outside host process tree.** Convert stdio → streamable-HTTP transport; run an OS-level user daemon owning the MCP server. Daemon parentless to host process tree — cascade can't reach it. 4–7 days. Largest single ergonomic regression in the install path (first-install setup, launchd/systemd, port discovery, auth token). Solves the bug fully.
 - **(D2) Detached proxy + parent-owned daemon.** Plugin manifest points at a stdio shim that `spawn(..., { detached: true, setsid: true })`s the real server and forwards JSON-RPC over a unix socket. 2–3 days. Same outcome as B for one-third the engineering. v1.1 candidate.
 
@@ -44,8 +44,8 @@ This story closes that gap with two changes:
 - (c) Convert stdio → HTTP transport. That is Path B / D2 future work.
 - (d) Detach the MCP server with `setsid` / `detached: true`. That is Path D2 future work.
 - (e) Add a heartbeat-based liveness check from the prose layer. AC1's typed-error wrapper catches MCP unavailability at call time; speculative liveness probes would add MCP traffic without changing the failure mode's resolution.
-- (f) Change any MCP tool, schema, descriptor, or permission allowlist. The `createServer()` factory, the dispatcher, and the tool registry are unchanged. The wrapper lives in `plugins/crew/skills/start/SKILL.md` (prose) and `plugins/crew/mcp-server/src/errors.ts` (new typed error class) — neither modifies tool surfaces.
-- (g) Modify any other skill prose. Only `plugins/crew/skills/start/SKILL.md` gains the halt seam — `/crew:plan`, `/crew:hire`, etc. are not in the cascade path because they do not spawn subagents.
+- (f) Change any MCP tool, schema, descriptor, or permission allowlist. The `createServer()` factory, the dispatcher, and the tool registry are unchanged. The wrapper lives in `plugins/flow/skills/start/SKILL.md` (prose) and `plugins/flow/mcp-server/src/errors.ts` (new typed error class) — neither modifies tool surfaces.
+- (g) Modify any other skill prose. Only `plugins/flow/skills/start/SKILL.md` gains the halt seam — `/flow:plan`, `/flow:hire`, etc. are not in the cascade path because they do not spawn subagents.
 - (h) Update README or the PRD `non-functional-requirements.md`. Those docs need a known-issues note but are explicitly out of scope here (per Jack's brief). A docs follow-up will land them once the substrate fix is in.
 - (i) Auto-restart Claude Code. The halt seam tells the operator to restart — it does not invoke a restart itself. v1 keeps the human in the loop for restart events.
 - (j) Add log rotation. The lifecycle log inherited from Story 5.25 is append-only with no rotation; this story does not change that.
@@ -56,9 +56,9 @@ This story closes that gap with two changes:
 - **Path D2 (detached proxy + parent-owned daemon).** Half-day spike to confirm plugin manifest will route to a stdio proxy that re-execs detached; if confirmed, build it. Becomes v1.1's headline reliability story.
 - **Path B (HTTP MCP daemon).** Larger surface; only worth doing if D2 turns out to be blocked by manifest constraints.
 - **README + PRD non-functional-requirements note.** Documented limitation entry, two-paragraph section explaining the cascade and the operator's recovery path. Authored as a docs follow-up after this story ships so the README links to the shipped halt seam.
-- **`sessionUlid` correlator field if env-var path proves brittle.** v1 of the diagnostic includes `sessionUlid` as an optional field via env var. If operators report that the value is frequently absent in production logs, a follow-up can derive it from a shared file written by `/crew:start` at session start. Not in v1 — the env-var path is the simplest fail-open seam.
+- **`sessionUlid` correlator field if env-var path proves brittle.** v1 of the diagnostic includes `sessionUlid` as an optional field via env var. If operators report that the value is frequently absent in production logs, a follow-up can derive it from a shared file written by `/flow:start` at session start. Not in v1 — the env-var path is the simplest fail-open seam.
 - **Auto-restart UX.** If the operator-restart cadence proves disruptive in practice, a follow-up can investigate whether Claude Code exposes a programmatic restart hook. Not in v1.
-- **Upstream bug report to Anthropic.** Filed separately to `/crew:*` work; tracked in the project notes.
+- **Upstream bug report to Anthropic.** Filed separately to `/flow:*` work; tracked in the project notes.
 
 ---
 
@@ -67,34 +67,34 @@ This story closes that gap with two changes:
 > ACs are reproduced from this story's epic block (`epic-5 § Story 5.29`) with per-AC implementation detail added below each one. AC markers (`artifact:` / `vitest:`) use plain unbacked-tick form per memory `project_reviewer_toolchain_gaps` (entry 1).
 
 **AC1:**
-A new typed error class `McpDisconnectedError` exists in `plugins/crew/mcp-server/src/errors.ts`, extending `DomainError`. The MCP-call wrapper used by `/crew:start`'s inner cycle (a small helper in the prose-layer's deterministic-seam set) catches the SDK's "tools no longer available" / "MCP server has disconnected" surface and re-raises as `McpDisconnectedError`. The class carries: `methodName` (which MCP call was attempted), `causeMessage` (the SDK's raw error text), and optional `ref` (the in-flight story).
-artifact: plugins/crew/mcp-server/src/errors.ts
+A new typed error class `McpDisconnectedError` exists in `plugins/flow/mcp-server/src/errors.ts`, extending `DomainError`. The MCP-call wrapper used by `/flow:start`'s inner cycle (a small helper in the prose-layer's deterministic-seam set) catches the SDK's "tools no longer available" / "MCP server has disconnected" surface and re-raises as `McpDisconnectedError`. The class carries: `methodName` (which MCP call was attempted), `causeMessage` (the SDK's raw error text), and optional `ref` (the in-flight story).
+artifact: plugins/flow/mcp-server/src/errors.ts
 
-<!-- Implementation: the typed error class is the contract. The prose-layer wrapper does NOT need to live in the MCP server — it lives wherever the SKILL.md prose calls MCP from. The cleanest placement is a small helper in `plugins/crew/mcp-server/src/lib/` exported for use by any future SKILL.md call site, but if SKILL.md prose can directly try/catch the SDK's error and throw `McpDisconnectedError`, that also satisfies AC1. Dev's choice — what matters is the typed surface, not the helper file's location. The error text should be: `MCP child unavailable mid-cycle — likely SIGTERM cascade on subagent Task return. See ~/.crew/mcp-lifecycle.log for paired-SIGTERM evidence.` -->
+<!-- Implementation: the typed error class is the contract. The prose-layer wrapper does NOT need to live in the MCP server — it lives wherever the SKILL.md prose calls MCP from. The cleanest placement is a small helper in `plugins/flow/mcp-server/src/lib/` exported for use by any future SKILL.md call site, but if SKILL.md prose can directly try/catch the SDK's error and throw `McpDisconnectedError`, that also satisfies AC1. Dev's choice — what matters is the typed surface, not the helper file's location. The error text should be: `MCP child unavailable mid-cycle — likely SIGTERM cascade on subagent Task return. See ~/.flow/mcp-lifecycle.log for paired-SIGTERM evidence.` -->
 
 **AC2:**
-`plugins/crew/skills/start/SKILL.md` gains a new "Failure modes" entry for `McpDisconnectedError`. When this error is caught at any MCP call site inside the inner cycle (steps 5, 8a, 9, 10a, 10b, 11, 12 per the SKILL.md numbering), the prose layer emits the following verbatim halt line and stops:
+`plugins/flow/skills/start/SKILL.md` gains a new "Failure modes" entry for `McpDisconnectedError`. When this error is caught at any MCP call site inside the inner cycle (steps 5, 8a, 9, 10a, 10b, 11, 12 per the SKILL.md numbering), the prose layer emits the following verbatim halt line and stops:
 
 ```
-[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /crew:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.
+[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /flow:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.
 ```
 
-The halt line is searchable in `plugins/crew/skills/start/SKILL.md` (exact string match). After emitting the line, the inner cycle MUST stop — no further MCP calls are attempted; the manifest is left in `in-progress/` for Story 5.20's orphan-recovery branch to surface on the next restart. The failure-mode entry also references memory `project_mcp_cascade_sigterm` for operator follow-up.
-artifact: plugins/crew/skills/start/SKILL.md
+The halt line is searchable in `plugins/flow/skills/start/SKILL.md` (exact string match). After emitting the line, the inner cycle MUST stop — no further MCP calls are attempted; the manifest is left in `in-progress/` for Story 5.20's orphan-recovery branch to surface on the next restart. The failure-mode entry also references memory `project_mcp_cascade_sigterm` for operator follow-up.
+artifact: plugins/flow/skills/start/SKILL.md
 
 <!-- Implementation: add the failure-mode entry in the "Failure modes" section alongside the existing entries (around line 181 of SKILL.md). The verbatim halt line must appear in the SKILL.md file as a fenced code block so the artifact check can grep for it. The MCP-call-site coverage is broad — every MCP call between step 5 (processDevTranscript) and step 12 (runAutoMergeGate) is in scope; dev may either wrap each call individually or wrap the inner-cycle body in a single try/catch as long as the halt seam is fired exactly once per cycle. Step 4.5 (Write tool — Story 5.10) is NOT in scope because Write is not an MCP call. -->
 
 **AC3 (integration):**
-A vitest test in `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (extending the existing file) asserts that every event emitted by `createLifecycleLog().log(...)` and `createLifecycleLog().logSync(...)` carries `ppid` and `pgid` fields. The test covers every event-name the server emits today: `boot`, `transport.connected`, `tool.call`, `keepalive.sent`, `keepalive.response`, `keepalive.error`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal`, `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit`. `sessionUlid` MAY be present when `CREW_SESSION_ULID` env var is set; the test covers both presence and absence cases.
-vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+A vitest test in `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (extending the existing file) asserts that every event emitted by `createLifecycleLog().log(...)` and `createLifecycleLog().logSync(...)` carries `ppid` and `pgid` fields. The test covers every event-name the server emits today: `boot`, `transport.connected`, `tool.call`, `keepalive.sent`, `keepalive.response`, `keepalive.error`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal`, `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit`. `sessionUlid` MAY be present when `FLOW_SESSION_ULID` env var is set; the test covers both presence and absence cases.
+vitest: plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
 
-<!-- Implementation: the simplest path is to modify `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` to bake `ppid` and `pgid` into the `buildLine` function so they appear on every line without per-call-site changes. `process.ppid` is available synchronously on every platform; `process.getpgrp()` is POSIX-only but `os.platform() !== 'win32'` gates the call (return undefined on Windows — the test should skip pgid assertion on Windows or set it to a sentinel). The integration test in `mcp-lifecycle-log.test.ts` can extend the existing event-sequence assertion to also assert `ppid` is a number and `pgid` is a number (or undefined on Windows). -->
+<!-- Implementation: the simplest path is to modify `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` to bake `ppid` and `pgid` into the `buildLine` function so they appear on every line without per-call-site changes. `process.ppid` is available synchronously on every platform; `process.getpgrp()` is POSIX-only but `os.platform() !== 'win32'` gates the call (return undefined on Windows — the test should skip pgid assertion on Windows or set it to a sentinel). The integration test in `mcp-lifecycle-log.test.ts` can extend the existing event-sequence assertion to also assert `ppid` is a number and `pgid` is a number (or undefined on Windows). -->
 
 **AC4 (integration):**
-A vitest test in `plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` (new file) simulates an MCP disconnect during the inner cycle and asserts that (a) the verbatim halt line is emitted, and (b) no further MCP calls are attempted after the halt. The test uses a stub MCP boundary that throws on the second call (after `claimNextStory` succeeds and `processDevTranscript` is invoked); the prose-layer wrapper must catch and re-raise as `McpDisconnectedError`; the test asserts the halt-line string is present in the captured chat output and that no third MCP call is made.
-vitest: plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts
+A vitest test in `plugins/flow/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` (new file) simulates an MCP disconnect during the inner cycle and asserts that (a) the verbatim halt line is emitted, and (b) no further MCP calls are attempted after the halt. The test uses a stub MCP boundary that throws on the second call (after `claimNextStory` succeeds and `processDevTranscript` is invoked); the prose-layer wrapper must catch and re-raise as `McpDisconnectedError`; the test asserts the halt-line string is present in the captured chat output and that no third MCP call is made.
+vitest: plugins/flow/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts
 
-<!-- Implementation: the existing test pattern in `plugins/crew/mcp-server/src/__tests__/start-skill-blocked-recovery.test.ts` is the closest precedent — it tests SKILL.md prose behaviour by invoking the wrapper helpers directly. The new test should follow that shape: import the wrapper helper (or `McpDisconnectedError` class), simulate the SDK throwing the disconnect-text error, assert the typed error is raised with the expected fields, and assert the verbatim halt-line constant matches the string in SKILL.md. If the halt line is only present in SKILL.md prose (not as an exported constant), the test reads SKILL.md, greps for the verbatim line, and asserts it exists. The "no further MCP calls" assertion is implemented by counting calls on a spy harness — exact call count = 2 (the successful first call + the throwing second call). -->
+<!-- Implementation: the existing test pattern in `plugins/flow/mcp-server/src/__tests__/start-skill-blocked-recovery.test.ts` is the closest precedent — it tests SKILL.md prose behaviour by invoking the wrapper helpers directly. The new test should follow that shape: import the wrapper helper (or `McpDisconnectedError` class), simulate the SDK throwing the disconnect-text error, assert the typed error is raised with the expected fields, and assert the verbatim halt-line constant matches the string in SKILL.md. If the halt line is only present in SKILL.md prose (not as an exported constant), the test reads SKILL.md, greps for the verbatim line, and asserts it exists. The "no further MCP calls" assertion is implemented by counting calls on a spy harness — exact call count = 2 (the successful first call + the throwing second call). -->
 
 ---
 
@@ -103,31 +103,31 @@ vitest: plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts
 Implementation order is load-bearing. Task 1 ships the diagnostic fields first (independently valuable — improves observability on any future incident, including any other disconnect class). Task 2 ships the typed error class. Task 3 wires the halt seam into SKILL.md. Task 4 ships the tests.
 
 - [ ] **Task 1: Add ppid + pgid (+ optional sessionUlid) to every lifecycle log line** (AC: #3)
-  - [ ] 1.1 Modify `plugins/crew/mcp-server/src/lib/lifecycle-log.ts`. In the `buildLine` helper, after the existing `pid` field, add `ppid: process.ppid` and `pgid: <pgid>` where `<pgid>` is `process.getpgrp()` on POSIX and `undefined` on Windows (gate via `os.platform() !== 'win32'`).
-  - [ ] 1.2 Add an optional `sessionUlid` field: if `process.env.CREW_SESSION_ULID` is set, include it; otherwise omit the key (do not write `sessionUlid: undefined`).
-  - [ ] 1.3 Extend the existing unit test at `plugins/crew/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` to assert `ppid` and `pgid` appear on every logged line, and that `sessionUlid` is honoured when `CREW_SESSION_ULID` is set.
-  - [ ] 1.4 Extend the existing integration test at `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (per AC3) to assert the new fields on each event-type the server emits. Cover both the `log` (async) and `logSync` (sync) code paths.
+  - [ ] 1.1 Modify `plugins/flow/mcp-server/src/lib/lifecycle-log.ts`. In the `buildLine` helper, after the existing `pid` field, add `ppid: process.ppid` and `pgid: <pgid>` where `<pgid>` is `process.getpgrp()` on POSIX and `undefined` on Windows (gate via `os.platform() !== 'win32'`).
+  - [ ] 1.2 Add an optional `sessionUlid` field: if `process.env.FLOW_SESSION_ULID` is set, include it; otherwise omit the key (do not write `sessionUlid: undefined`).
+  - [ ] 1.3 Extend the existing unit test at `plugins/flow/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` to assert `ppid` and `pgid` appear on every logged line, and that `sessionUlid` is honoured when `FLOW_SESSION_ULID` is set.
+  - [ ] 1.4 Extend the existing integration test at `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (per AC3) to assert the new fields on each event-type the server emits. Cover both the `log` (async) and `logSync` (sync) code paths.
 
 - [ ] **Task 2: Add `McpDisconnectedError` typed error class** (AC: #1)
-  - [ ] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, declare `export class McpDisconnectedError extends DomainError`. Constructor takes `{ methodName: string; causeMessage: string; ref?: string }`. Message template: `MCP child unavailable mid-cycle — likely SIGTERM cascade on subagent Task return. methodName=<methodName>, cause=<causeMessage><optional " ref=" + ref>. See ~/.crew/mcp-lifecycle.log for paired-SIGTERM evidence.`
-  - [ ] 2.2 Add a small detection helper in `plugins/crew/mcp-server/src/lib/` (suggested filename: `detect-mcp-disconnect.ts`): export `isMcpDisconnectError(err: unknown): boolean` that returns true if the error's message matches the SDK's disconnect surface (`tools no longer available`, `MCP server has disconnected`, `connection closed`, or similar). The helper is the contract for the prose-layer wrapper — SKILL.md uses it.
-  - [ ] 2.3 Unit-test the helper at `plugins/crew/mcp-server/src/lib/__tests__/detect-mcp-disconnect.test.ts` with at least 3 positive matches and 2 negatives (a generic Error, a domain error from `errors.ts`).
+  - [ ] 2.1 In `plugins/flow/mcp-server/src/errors.ts`, declare `export class McpDisconnectedError extends DomainError`. Constructor takes `{ methodName: string; causeMessage: string; ref?: string }`. Message template: `MCP child unavailable mid-cycle — likely SIGTERM cascade on subagent Task return. methodName=<methodName>, cause=<causeMessage><optional " ref=" + ref>. See ~/.flow/mcp-lifecycle.log for paired-SIGTERM evidence.`
+  - [ ] 2.2 Add a small detection helper in `plugins/flow/mcp-server/src/lib/` (suggested filename: `detect-mcp-disconnect.ts`): export `isMcpDisconnectError(err: unknown): boolean` that returns true if the error's message matches the SDK's disconnect surface (`tools no longer available`, `MCP server has disconnected`, `connection closed`, or similar). The helper is the contract for the prose-layer wrapper — SKILL.md uses it.
+  - [ ] 2.3 Unit-test the helper at `plugins/flow/mcp-server/src/lib/__tests__/detect-mcp-disconnect.test.ts` with at least 3 positive matches and 2 negatives (a generic Error, a domain error from `errors.ts`).
 
-- [ ] **Task 3: Wire the halt seam into `/crew:start` SKILL.md** (AC: #2)
-  - [ ] 3.1 In `plugins/crew/skills/start/SKILL.md`, add a new entry in the "Failure modes" section for `McpDisconnectedError`. Place it after the `Write` failure entry (around line 211) so the cascade entry sits with the other "MCP died mid-cycle" entries. Reference memory `project_mcp_cascade_sigterm`.
-  - [ ] 3.2 Add the verbatim halt line as a fenced code block in the failure-mode entry. The exact line: `[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /crew:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.`
+- [ ] **Task 3: Wire the halt seam into `/flow:start` SKILL.md** (AC: #2)
+  - [ ] 3.1 In `plugins/flow/skills/start/SKILL.md`, add a new entry in the "Failure modes" section for `McpDisconnectedError`. Place it after the `Write` failure entry (around line 211) so the cascade entry sits with the other "MCP died mid-cycle" entries. Reference memory `project_mcp_cascade_sigterm`.
+  - [ ] 3.2 Add the verbatim halt line as a fenced code block in the failure-mode entry. The exact line: `[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /flow:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.`
   - [ ] 3.3 In the "Inner cycle" section, add a one-paragraph invariant note above the existing invariants (around line 80) stating: every MCP call inside the inner cycle MUST be wrapped such that `isMcpDisconnectError(err)` true cases throw `McpDisconnectedError`; the catch-site surfaces the verbatim halt line and stops. Reference the deterministic-seam principle (memory `feedback_default_to_deterministic_seams`) so future prose changes do not regress to ad-hoc retry loops.
   - [ ] 3.4 Verify the verbatim halt line appears EXACTLY once in SKILL.md (grep `[mcp-cascade-halted]`). The artifact check in AC2 greps for this exact string.
 
 - [ ] **Task 4: Test suite** (AC: #3, #4)
-  - [ ] 4.1 Per AC3, extend `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` and `plugins/crew/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` to cover `ppid` + `pgid` + `sessionUlid` per Task 1.3/1.4.
-  - [ ] 4.2 Per AC4, create `plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts`. Use the spy-harness pattern from `start-skill-blocked-recovery.test.ts`. Assert: (a) `isMcpDisconnectError(err)` returns true on the SDK's disconnect-text error; (b) `McpDisconnectedError` is raised with the expected `methodName` / `causeMessage` fields; (c) the verbatim halt line appears in SKILL.md (read the file, grep the exact string); (d) the wrapper does not attempt a third MCP call after the halt fires (call-count assertion = 2).
+  - [ ] 4.1 Per AC3, extend `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` and `plugins/flow/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` to cover `ppid` + `pgid` + `sessionUlid` per Task 1.3/1.4.
+  - [ ] 4.2 Per AC4, create `plugins/flow/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts`. Use the spy-harness pattern from `start-skill-blocked-recovery.test.ts`. Assert: (a) `isMcpDisconnectError(err)` returns true on the SDK's disconnect-text error; (b) `McpDisconnectedError` is raised with the expected `methodName` / `causeMessage` fields; (c) the verbatim halt line appears in SKILL.md (read the file, grep the exact string); (d) the wrapper does not attempt a third MCP call after the halt fires (call-count assertion = 2).
   - [ ] 4.3 `pnpm vitest --run` from `mcp-server/` — full suite must pass. No new failures.
 
 - [ ] **Task 5: Build, dist, drift check** (AC: all)
   - [ ] 5.1 `pnpm build` from `mcp-server/` — produces clean dist (tsc + normalise-dist.mjs, per Story 5.28).
   - [ ] 5.2 Second `pnpm build` confirms byte-identical output (Story 5.24 determinism invariant holds).
-  - [ ] 5.3 Commit `plugins/crew/mcp-server/dist/` changes alongside src changes (CLAUDE.md § Plugin build output is tracked in git).
+  - [ ] 5.3 Commit `plugins/flow/mcp-server/dist/` changes alongside src changes (CLAUDE.md § Plugin build output is tracked in git).
 
 ---
 
@@ -139,7 +139,7 @@ Memory `feedback_default_to_deterministic_seams` and `feedback_prose_mut_steps_n
 
 ### Why the halt line is verbatim, not templated
 
-Jack's standing preference (memory `project_locked_phrase_grammar_drift`): operator-facing halt lines that downstream tooling (or operator muscle memory) keys off must be byte-stable. The line is short, scannable, and contains the operator action verbatim ("restart Claude Code and re-run `/crew:start`"). Templating it would invite "MCP server unavailable: <method>"-style drift that breaks the searchable contract.
+Jack's standing preference (memory `project_locked_phrase_grammar_drift`): operator-facing halt lines that downstream tooling (or operator muscle memory) keys off must be byte-stable. The line is short, scannable, and contains the operator action verbatim ("restart Claude Code and re-run `/flow:start`"). Templating it would invite "MCP server unavailable: <method>"-style drift that breaks the searchable contract.
 
 ### Why ppid + pgid are mandatory, not optional
 
@@ -147,7 +147,7 @@ The cascade pattern was invisible for weeks because the lifecycle log carried on
 
 ### Why `sessionUlid` is optional
 
-It's the most operator-visible field but the hardest to thread through. The MCP server is spawned by Claude Code; we cannot inject env vars at spawn time without modifying the plugin manifest (which we are not doing in this story). The env-var path (`CREW_SESSION_ULID`) is fail-open: if the operator's harness sets it, it shows up; if not, the absence is documented. v1 ships the simplest seam; if operators report the field is frequently absent, a follow-up can derive it from a shared file.
+It's the most operator-visible field but the hardest to thread through. The MCP server is spawned by Claude Code; we cannot inject env vars at spawn time without modifying the plugin manifest (which we are not doing in this story). The env-var path (`FLOW_SESSION_ULID`) is fail-open: if the operator's harness sets it, it shows up; if not, the absence is documented. v1 ships the simplest seam; if operators report the field is frequently absent, a follow-up can derive it from a shared file.
 
 ### Why we don't wrap step 4.5 (Write tool)
 
@@ -161,20 +161,20 @@ The halt line is prose, not code. Asserting it from a unit test requires either 
 
 ## Locked files
 
-- `plugins/crew/mcp-server/src/server.ts` — NOT touched. The `createServer()` factory, the dispatcher, and the tool registry are unchanged.
-- `plugins/crew/mcp-server/src/tools/**` — NOT touched.
-- `plugins/crew/mcp-server/src/schemas/**` — NOT touched.
-- `plugins/crew/permissions/**` — NOT touched. No allowlist changes (`McpDisconnectedError` does not need permission scaffolding; it is a thrown class, not an MCP tool).
-- `plugins/crew/.claude-plugin/plugin.json` — NOT touched. The manifest is the surface that would change for Path D2; this story stays on Path A.
-- `plugins/crew/mcp-server/package.json` — NOT touched. No new dependencies; everything is Node stdlib + existing exports.
-- `plugins/crew/skills/start/SKILL.md` is NOT locked for this story — it is the primary modify surface for AC2.
+- `plugins/flow/mcp-server/src/server.ts` — NOT touched. The `createServer()` factory, the dispatcher, and the tool registry are unchanged.
+- `plugins/flow/mcp-server/src/tools/**` — NOT touched.
+- `plugins/flow/mcp-server/src/schemas/**` — NOT touched.
+- `plugins/flow/permissions/**` — NOT touched. No allowlist changes (`McpDisconnectedError` does not need permission scaffolding; it is a thrown class, not an MCP tool).
+- `plugins/flow/.claude-plugin/plugin.json` — NOT touched. The manifest is the surface that would change for Path D2; this story stays on Path A.
+- `plugins/flow/mcp-server/package.json` — NOT touched. No new dependencies; everything is Node stdlib + existing exports.
+- `plugins/flow/skills/start/SKILL.md` is NOT locked for this story — it is the primary modify surface for AC2.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` (Story 5.25) — Task 1 adds `ppid` / `pgid` / `sessionUlid` to `buildLine`. No other behaviour changes; the existing fail-open semantics and disabled-on-error path are preserved.
-- `plugins/crew/mcp-server/src/errors.ts` (Story 1.4 and successors) — Task 2 adds `McpDisconnectedError`. Additive only; no existing classes modified.
-- `plugins/crew/skills/start/SKILL.md` (Story 4.2 and successors) — Task 3 adds the failure-mode entry and an inner-cycle invariant note. Additive only.
-- `plugins/crew/mcp-server/dist/**` (Story 1.9 dist-shipping contract) — Task 5 rebuilds and ships.
+- `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` (Story 5.25) — Task 1 adds `ppid` / `pgid` / `sessionUlid` to `buildLine`. No other behaviour changes; the existing fail-open semantics and disabled-on-error path are preserved.
+- `plugins/flow/mcp-server/src/errors.ts` (Story 1.4 and successors) — Task 2 adds `McpDisconnectedError`. Additive only; no existing classes modified.
+- `plugins/flow/skills/start/SKILL.md` (Story 4.2 and successors) — Task 3 adds the failure-mode entry and an inner-cycle invariant note. Additive only.
+- `plugins/flow/mcp-server/dist/**` (Story 1.9 dist-shipping contract) — Task 5 rebuilds and ships.
 
 ---
 
@@ -182,37 +182,37 @@ The halt line is prose, not code. Asserting it from a unit test requires either 
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/detect-mcp-disconnect.ts` (Task 2.2) — small helper exporting `isMcpDisconnectError(err: unknown): boolean`. ~15 lines.
-- `plugins/crew/mcp-server/src/lib/__tests__/detect-mcp-disconnect.test.ts` (Task 2.3) — unit test for the helper.
-- `plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` (Task 4.2) — integration test per AC4.
+- `plugins/flow/mcp-server/src/lib/detect-mcp-disconnect.ts` (Task 2.2) — small helper exporting `isMcpDisconnectError(err: unknown): boolean`. ~15 lines.
+- `plugins/flow/mcp-server/src/lib/__tests__/detect-mcp-disconnect.test.ts` (Task 2.3) — unit test for the helper.
+- `plugins/flow/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` (Task 4.2) — integration test per AC4.
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` (Task 1) — add `ppid` / `pgid` / optional `sessionUlid` to `buildLine`.
-- `plugins/crew/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (Task 1.3) — extend assertions.
-- `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (Task 1.4) — extend assertions.
-- `plugins/crew/mcp-server/src/errors.ts` (Task 2.1) — add `McpDisconnectedError`.
-- `plugins/crew/skills/start/SKILL.md` (Task 3) — add failure-mode entry + invariant note.
-- `plugins/crew/mcp-server/dist/**` (Task 5) — rebuilt artefacts.
+- `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` (Task 1) — add `ppid` / `pgid` / optional `sessionUlid` to `buildLine`.
+- `plugins/flow/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (Task 1.3) — extend assertions.
+- `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (Task 1.4) — extend assertions.
+- `plugins/flow/mcp-server/src/errors.ts` (Task 2.1) — add `McpDisconnectedError`.
+- `plugins/flow/skills/start/SKILL.md` (Task 3) — add failure-mode entry + invariant note.
+- `plugins/flow/mcp-server/dist/**` (Task 5) — rebuilt artefacts.
 
 ### Files this story will NOT modify
 
 - `src/server.ts`, `src/tools/`, `src/schemas/`, `src/permissions/` (see Locked files).
-- `plugins/crew/.claude-plugin/plugin.json` — Path D2 territory.
-- `plugins/crew/README.md`, PRD `non-functional-requirements.md` — docs follow-up.
-- Any other skill prose (`plugins/crew/skills/plan/`, `plugins/crew/skills/hire/`, etc.) — only `/crew:start` has the cascade exposure.
+- `plugins/flow/.claude-plugin/plugin.json` — Path D2 territory.
+- `plugins/flow/README.md`, PRD `non-functional-requirements.md` — docs follow-up.
+- Any other skill prose (`plugins/flow/skills/plan/`, `plugins/flow/skills/hire/`, etc.) — only `/flow:start` has the cascade exposure.
 
 ### Current-state notes on files being modified
 
-- `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` (post-5.25, 122 lines): `buildLine` at lines 64–72 currently writes `{ event, ts, pid, ...fields }`. Task 1 adds `ppid` and conditional `pgid`/`sessionUlid` between `pid` and `...fields`. Field order is observed by the existing log file — keep `pid` first for backwards compatibility with any external `awk` scripts. Putting `ppid`/`pgid` immediately after `pid` keeps related fields contiguous.
-- `plugins/crew/mcp-server/src/errors.ts` (post-5.27, large file): the existing pattern for typed errors is `class Foo extends DomainError`. Each class carries readonly fields and a constructor template. `McpDisconnectedError` follows the same shape.
-- `plugins/crew/skills/start/SKILL.md` (post-5.21, 245 lines): the "Failure modes" section starts at line 181 with one-line entries per error class. The new entry should be ~3 lines (one for the title, one for the body, one for the verbatim halt-line fenced block). The "Inner cycle" section starts at line 69 with bolded "**Invariant: ...**" entries — the new invariant note follows that pattern.
+- `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` (post-5.25, 122 lines): `buildLine` at lines 64–72 currently writes `{ event, ts, pid, ...fields }`. Task 1 adds `ppid` and conditional `pgid`/`sessionUlid` between `pid` and `...fields`. Field order is observed by the existing log file — keep `pid` first for backwards compatibility with any external `awk` scripts. Putting `ppid`/`pgid` immediately after `pid` keeps related fields contiguous.
+- `plugins/flow/mcp-server/src/errors.ts` (post-5.27, large file): the existing pattern for typed errors is `class Foo extends DomainError`. Each class carries readonly fields and a constructor template. `McpDisconnectedError` follows the same shape.
+- `plugins/flow/skills/start/SKILL.md` (post-5.21, 245 lines): the "Failure modes" section starts at line 181 with one-line entries per error class. The new entry should be ~3 lines (one for the title, one for the body, one for the verbatim halt-line fenced block). The "Inner cycle" section starts at line 69 with bolded "**Invariant: ...**" entries — the new invariant note follows that pattern.
 
 ### Spec citations and evidence (read-only context)
 
-- 8/8 paired SIGTERMs in `~/.crew/mcp-lifecycle.log` across 4 distinct incidents (RCA memo at `~/.claude/plans/linked-knitting-stardust.md`).
+- 8/8 paired SIGTERMs in `~/.flow/mcp-lifecycle.log` across 4 distinct incidents (RCA memo at `~/.claude/plans/linked-knitting-stardust.md`).
 - Story 5.10's transcript-persistence invariant means the dev-side work survives the cascade — the operator loses no completed work, only the in-flight reviewer cycle.
-- Story 5.20's orphan-recovery branch handles the dev-shipped+reviewer-retry case: on restart, `/crew:start` surfaces the stranded manifest as an orphan with `hasOpenPR=true` and `hasTranscript=true`; the operator chooses `reattach` and the reviewer-only spawn drives the rework. No second MCP child boots during reviewer-only spawn, so no second cascade.
+- Story 5.20's orphan-recovery branch handles the dev-shipped+reviewer-retry case: on restart, `/flow:start` surfaces the stranded manifest as an orphan with `hasOpenPR=true` and `hasTranscript=true`; the operator chooses `reattach` and the reviewer-only spawn drives the rework. No second MCP child boots during reviewer-only spawn, so no second cascade.
 - MCP-cascade RCA confirms idle-reap (Story 5.12/5.25) is a different failure mode — the keepalive code is innocent and was responding green up to the kill in every observed incident.
 
 ### Testing standards
@@ -229,9 +229,9 @@ The halt line is prose, not code. Asserting it from a unit test requires either 
 - [Source: `_bmad-output/implementation-artifacts/5-25-always-on-mcp-lifecycle-logging.md`] — Story 5.25 spec for the lifecycle log this story extends.
 - [Source: `_bmad-output/implementation-artifacts/5-10-persist-dev-transcript-to-disk-before-any-mcp-call.md`] — the transcript-persistence invariant that makes the cascade survivable.
 - [Source: `_bmad-output/implementation-artifacts/5-20-orphan-recovery-reviewer-only-respawn.md`] — the orphan-recovery branch that this story's halt seam relies on.
-- [Source: `plugins/crew/skills/start/SKILL.md`] — current `/crew:start` prose; Task 3 modifies it.
-- [Source: `plugins/crew/mcp-server/src/lib/lifecycle-log.ts`] — current lifecycle logger; Task 1 modifies it.
-- [Source: `plugins/crew/mcp-server/src/errors.ts`] — typed error hierarchy; Task 2 extends it.
+- [Source: `plugins/flow/skills/start/SKILL.md`] — current `/flow:start` prose; Task 3 modifies it.
+- [Source: `plugins/flow/mcp-server/src/lib/lifecycle-log.ts`] — current lifecycle logger; Task 1 modifies it.
+- [Source: `plugins/flow/mcp-server/src/errors.ts`] — typed error hierarchy; Task 2 extends it.
 - [Source: project memory `project_mcp_cascade_sigterm`] — the RCA distilled.
 - [Source: project memory `project_mcp_server_silent_disconnect`] — two-causes framing (idle-reap fixed; cascade pending).
 - [Source: project memory `project_diag_instrumentation_pattern`] — lifecycle instrumentation pattern.
@@ -251,7 +251,7 @@ The halt line is prose, not code. Asserting it from a unit test requires either 
 
 ### From Story 5.20 (orphan-recovery — reviewer-only respawn)
 
-- The orphan-recovery branch handles three sub-cases at `reattach`: (i) `hasTranscript=true` (replay dev transcript), (ii) `hasTranscript=false` + `hasOpenPR=true` (reviewer-only spawn), (iii) neither (block as no-transcript). This story's halt seam relies on case (ii) for the cascade-recovery flow — operator restarts, `/crew:start` surfaces the orphan, operator chooses `reattach`, reviewer-only spawn drives the rework loop. No second MCP child boots during reviewer-only spawn, so the cascade does not re-fire.
+- The orphan-recovery branch handles three sub-cases at `reattach`: (i) `hasTranscript=true` (replay dev transcript), (ii) `hasTranscript=false` + `hasOpenPR=true` (reviewer-only spawn), (iii) neither (block as no-transcript). This story's halt seam relies on case (ii) for the cascade-recovery flow — operator restarts, `/flow:start` surfaces the orphan, operator chooses `reattach`, reviewer-only spawn drives the rework loop. No second MCP child boots during reviewer-only spawn, so the cascade does not re-fire.
 
 ### From Story 5.21 (reviewer first-call deterministic seam)
 

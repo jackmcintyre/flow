@@ -63,7 +63,7 @@ development_status:
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: done
   epic-4-retrospective: done
   epic-5: backlog
-  5-1-block-story-mcp-tool-and-blocked-by-taxonomy: cancelled  # /crew:start retired (#210); blocked_by enum shipped in 5.13
+  5-1-block-story-mcp-tool-and-blocked-by-taxonomy: cancelled  # /flow:start retired (#210); blocked_by enum shipped in 5.13
   5-2-heartbeat-based-session-liveness: cancelled  # drain is one workflow, not polled long-lived sessions
   5-3-watch-skill-and-orchestration-polling-loop: cancelled  # the drain IS the orchestration; nothing to poll
   5-4-stuck-story-and-stale-claim-detection: cancelled  # crash-recovery + orphan-reattach shipped (#209)

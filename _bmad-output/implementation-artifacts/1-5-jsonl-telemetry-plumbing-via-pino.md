@@ -7,14 +7,14 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin maintainer**,
-I want **a single write path for structured JSONL telemetry events under `<target-repo>/.crew/telemetry/<YYYY-MM>.jsonl`, plus a same-shape `gh`-style wrapper for plugin-side git commits**,
+I want **a single write path for structured JSONL telemetry events under `<target-repo>/.flow/telemetry/<YYYY-MM>.jsonl`, plus a same-shape `gh`-style wrapper for plugin-side git commits**,
 so that **every later epic can emit observable events through one boundary that's parseable without an LLM, and every canonical-state mutation can be staged + committed through one auditable seam**.
 
 This story lands the **telemetry boundary** and the **git-commit boundary** — the two "single write path" primitives the rest of the product depends on:
 
-1. **Telemetry pipeline** — a `pino`-backed logger at `mcp-server/src/lib/logger.ts` that (a) resolves the current month's JSONL file under `<targetRepoRoot>/.crew/telemetry/<YYYY-MM>.jsonl`, (b) creates the directory tree, (c) writes one JSON object per line with `ts` / `type` / `session_id` / `story_id?` / `agent` / `data`, and (d) rolls over cleanly when the month changes mid-process.
+1. **Telemetry pipeline** — a `pino`-backed logger at `mcp-server/src/lib/logger.ts` that (a) resolves the current month's JSONL file under `<targetRepoRoot>/.flow/telemetry/<YYYY-MM>.jsonl`, (b) creates the directory tree, (c) writes one JSON object per line with `ts` / `type` / `session_id` / `story_id?` / `agent` / `data`, and (d) rolls over cleanly when the month changes mid-process.
 2. **Event-schema registry** — a discriminated-union Zod schema at `mcp-server/src/schemas/telemetry-events.ts` whose v1 closed set is `agent.invoke` (the only `type` the dev/reviewer paths emit in Epic 1; later epics extend the union). Every payload is validated at the logger boundary — invalid payloads throw `TelemetryEventInvalidError` AND are themselves recorded as a `tool-quirk`-shaped event so the failure is never silent (FR70 / NFR21 / NFR6).
-3. **Logger whitelist into the canonical-fs guard** — `mcp-server/src/lib/logger.ts` is added to the `FS_WRITE_WHITELIST` in `tests/canonical-fs-guard.test.ts` (alongside `lib/managed-fs.ts`). The logger is permitted to import a write-shaped `node:fs` API because it is the *only* writer for `.crew/telemetry/**` — every other code path that wants a telemetry event must call `logTelemetryEvent(...)`.
+3. **Logger whitelist into the canonical-fs guard** — `mcp-server/src/lib/logger.ts` is added to the `FS_WRITE_WHITELIST` in `tests/canonical-fs-guard.test.ts` (alongside `lib/managed-fs.ts`). The logger is permitted to import a write-shaped `node:fs` API because it is the *only* writer for `.flow/telemetry/**` — every other code path that wants a telemetry event must call `logTelemetryEvent(...)`.
 4. **Git-commit wrapper** — `mcp-server/src/lib/git.ts` exporting a single `gitCommit(opts: { targetRepoRoot, paths, message, role })` function that (a) refuses calls without a role context, (b) runs `git -C <targetRepoRoot> add <paths>` then `git -C <targetRepoRoot> commit -m <message>` via `execa`, (c) returns `{ commitSha, stdout, stderr }`, and (d) refuses any commit message that does not match the conventional `<tool-name>: <ref-or-proposal-id>` shape required by the epic's AC4.
 
 **This story does NOT** (a) register any MCP tool that *calls* the logger (those land in 1.6 atomic-rename and Epics 2–4 — this story ships the substrate ahead of the writers), (b) implement the `recoverable-error` classification (`gh-error-map.yaml`, NFR18, Epic 3), (c) wire the cycle-archive flow (FR69, Epic 5), (d) implement the agreement metric or outcome-stats helpers (FR67–FR68, Epic 6 — those *read* the JSONL this story produces but don't change its shape), (e) ship payloads for every event-type discriminator (only `agent.invoke` is pinned in v1; later epics add `reviewer.verdict`, `state.transition`, `yield.handoff`, etc. through extensions of the same `TelemetryEventSchema` union), or (f) implement asynchronous / buffered writes — v1 uses synchronous pino destinations so a crash before flush doesn't lose events.
@@ -28,7 +28,7 @@ The seam: every future MCP tool that records an observable action calls `logTele
 **AC1 — Telemetry events append as one JSON line per call (NFR21):**
 **Given** the logger at `mcp-server/src/lib/logger.ts` exporting `logTelemetryEvent(opts: { targetRepoRoot, event })` where `event` is a `TelemetryEvent` carrying a `type` discriminator,
 **When** a caller invokes `logTelemetryEvent` with a valid `agent.invoke` event,
-**Then** the event is appended as a single JSON line (terminated by `\n`, no trailing comma, no array wrapper) to `<targetRepoRoot>/.crew/telemetry/<YYYY-MM>.jsonl`,
+**Then** the event is appended as a single JSON line (terminated by `\n`, no trailing comma, no array wrapper) to `<targetRepoRoot>/.flow/telemetry/<YYYY-MM>.jsonl`,
 **And** the file is created if it does not exist (and its parent directory is created recursively),
 **And** the line is strict-JSON-parseable (`JSON.parse(line.trimEnd())` returns the same shape that was logged, with the `ts` field stamped as an ISO-8601 string with millisecond precision in UTC).
 
@@ -59,7 +59,7 @@ The seam: every future MCP tool that records an observable action calls `logTele
 **Then** the whitelist set contains exactly `lib/managed-fs.ts` AND `lib/logger.ts` — no other file imports `writeFile` / `writeFileSync` / `appendFile` / `appendFileSync` / `createWriteStream` from `node:fs` or `node:fs/promises`. (Adding the logger to the whitelist is the substantive change in this story.)
 
 **AC6 — Vitest covers telemetry + git enforcement paths (integration):**
-`pnpm test` from `plugins/crew/` adds three new test files (`mcp-server/tests/telemetry-logger.test.ts`, `mcp-server/tests/git-commit.test.ts`, and a new sub-test inside the existing `canonical-fs-guard.test.ts` for the `git` direct-spawn ban) plus extends `tests/canonical-fs-guard.test.ts` to allow `lib/logger.ts` in the whitelist. The combined suite asserts:
+`pnpm test` from `plugins/flow/` adds three new test files (`mcp-server/tests/telemetry-logger.test.ts`, `mcp-server/tests/git-commit.test.ts`, and a new sub-test inside the existing `canonical-fs-guard.test.ts` for the `git` direct-spawn ban) plus extends `tests/canonical-fs-guard.test.ts` to allow `lib/logger.ts` in the whitelist. The combined suite asserts:
 - **AC6a (happy-path JSONL):** Emit a single `agent.invoke` event to a `mkdtemp`'d target repo. Read the file back; assert it has exactly one trailing-`\n`-terminated line; assert `JSON.parse` of that line round-trips to the original event with the `ts` stamped, monotonic, UTC, millisecond-precise.
 - **AC6b (Zod failure path):** Emit an invalid `agent.invoke` event. Assert (i) `logTelemetryEvent` throws `TelemetryEventInvalidError`, (ii) the JSONL file contains exactly one line, (iii) `JSON.parse` of that line has `type: "telemetry.invalid"` with `data.attempted_type === "agent.invoke"`, `data.zod_path === "runtime_ms"` (for the example payload), and `data.zod_message` non-empty.
 - **AC6c (month rollover):** Construct the logger with a fake clock that returns `2026-04-30T23:59:59.500Z` then `2026-05-01T00:00:00.500Z`. Emit one event under each clock. Assert exactly two files exist (`2026-04.jsonl`, `2026-05.jsonl`), each with exactly one line, contents partitioned correctly.
@@ -75,7 +75,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Zod schemas for the v1 telemetry event union** (AC: 1, 2, 3, 6a, 6b)
-  - [ ] Create `plugins/crew/mcp-server/src/schemas/telemetry-events.ts`.
+  - [ ] Create `plugins/flow/mcp-server/src/schemas/telemetry-events.ts`.
   - [ ] Export `TelemetryEventBase` — `z.object({ ts: z.string().datetime({ offset: false }).refine(s => s.endsWith("Z"), "must be UTC"), session_id: z.string().min(1), agent: z.string().min(1).regex(/^[a-z0-9-]+$/), story_id: z.string().min(1).optional() }).strict()` — fields common to every event.
   - [ ] Export `AgentInvokeEventSchema` — `TelemetryEventBase.extend({ type: z.literal("agent.invoke"), data: z.object({ runtime_ms: z.number().int().nonnegative(), tokens_in: z.number().int().nonnegative().optional(), tokens_out: z.number().int().nonnegative().optional() }).strict() }).strict()`. (Matches FR65: agent type, story id, runtime, timestamp. `agent` is already on the base; `story_id` is optional on the base; `runtime_ms` on data.)
   - [ ] Export `TelemetryInvalidEventSchema` — `TelemetryEventBase.extend({ type: z.literal("telemetry.invalid"), data: z.object({ attempted_type: z.string().min(1), zod_path: z.string(), zod_message: z.string().min(1) }).strict() }).strict()`. This is the failure-recording event from AC2.
@@ -86,7 +86,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Do not** add fields not in the FR65 + Implementation-patterns §5 contract. PII / diff contents are explicitly excluded by NFR14.
 
 - [ ] **Task 2 — Typed errors** (AC: 2, 4, 6b, 6e)
-  - [ ] Extend `plugins/crew/mcp-server/src/errors.ts`. Append at the bottom of the file, after `RolePermissionsMalformedError`. Match the existing JSDoc / constructor-options-bag style. Match the existing pattern: subclass `DomainError`, no manual `this.name`.
+  - [ ] Extend `plugins/flow/mcp-server/src/errors.ts`. Append at the bottom of the file, after `RolePermissionsMalformedError`. Match the existing JSDoc / constructor-options-bag style. Match the existing pattern: subclass `DomainError`, no manual `this.name`.
   - [ ] `TelemetryEventInvalidError` — fields: `attemptedType: string`, `zodPath: string`, `zodMessage: string`. Constructor composes:
     > `Telemetry event of type '<attemptedType>' failed schema validation at '<zodPath>': <zodMessage>. The invalid event was NOT written; a 'telemetry.invalid' failure event was recorded in its place. (NFR21)`
   - [ ] `GitCommitMessageMalformedError` — fields: `message: string`, `paths: readonly string[]`, `reason: string`. Constructor composes:
@@ -95,7 +95,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] Do **not** touch any of the existing classes. Their wording is asserted by 1.1 / 1.2 / 1.2b / 1.3 / 1.4 tests.
 
 - [ ] **Task 3 — Telemetry logger `logTelemetryEvent`** (AC: 1, 2, 3, 5, 6a, 6b, 6c)
-  - [ ] Create `plugins/crew/mcp-server/src/lib/logger.ts`.
+  - [ ] Create `plugins/flow/mcp-server/src/lib/logger.ts`.
   - [ ] Export a single async function:
     `logTelemetryEvent(opts: { targetRepoRoot: string; event: Omit<TelemetryEvent, "ts"> & { ts?: string }; now?: () => Date }): Promise<void>`
     - `event.ts` is **optional from the caller's perspective** — the logger stamps it if absent. If the caller supplies `ts`, the logger validates it (must be UTC ISO-8601 with `Z` suffix, ms precision) and uses it as-is (test seam for deterministic round-trips).
@@ -110,7 +110,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     4. **On success:** write the validated event via the writer (step 5).
     5. Writer:
        a. Compute the month bucket from `stamped.ts`: `const month = stamped.ts.slice(0, 7)` (`YYYY-MM`). Do not re-parse the date — use the string we just produced. Test for `month` matching `/^\d{4}-\d{2}$/` defensively; throw if not (would indicate caller passed a `ts` we somehow accepted but is malformed — should be unreachable post-validation).
-       b. Compute the absolute file path: `path.join(targetRepoRoot, ".crew", "telemetry", `${month}.jsonl`)`.
+       b. Compute the absolute file path: `path.join(targetRepoRoot, ".flow", "telemetry", `${month}.jsonl`)`.
        c. Ensure the directory exists: `fs.mkdir(path.dirname(filePath), { recursive: true })`.
        d. **Append a single line:** `fs.appendFile(filePath, JSON.stringify(validated) + "\n", "utf8")`. (`fs.appendFile` is the banned binding everywhere else; the logger is the whitelisted file per AC5/AC6g.) `JSON.stringify` with no spacing argument produces strict single-line JSON.
   - [ ] **Why not `pino.destination()` per se?** `pino` is a declared dep (`^10.3.1` in `mcp-server/package.json`) and the architecture pins it for this story. The minimum viable pino integration in v1: import pino's `pino-pretty`-free path — concretely, use `pino.destination({ dest: filePath, sync: true, mkdir: false })` to produce a `SonicBoom` writer per-emit call. **However**, pino's main appeal is throughput; this story emits a handful of events per story, so a synchronous `fs.appendFile` keeps the code path one function long and side-steps SonicBoom's worker-thread + month-rollover semantics. **Dev decision (default unless dev finds a blocking reason to switch):** ship `fs.appendFile` in v1; keep pino as the declared dep so a later story can swap the writer without touching callers. Document this in the file's leading JSDoc so the next dev knows why a pino-named module isn't actually constructing a pino logger.
@@ -119,7 +119,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **No log levels.** Telemetry is observation, not diagnostic. The schema's `type` discriminator carries all the meaning. (If a debug channel becomes useful later, it goes through a separate file, not this one.)
 
 - [ ] **Task 4 — `gitCommit` wrapper at `mcp-server/src/lib/git.ts`** (AC: 4, 6d, 6e, 6f)
-  - [ ] Create `plugins/crew/mcp-server/src/lib/git.ts`. (Second file under `lib/`, alongside `gh.ts`. The architecture map pins this exact location.)
+  - [ ] Create `plugins/flow/mcp-server/src/lib/git.ts`. (Second file under `lib/`, alongside `gh.ts`. The architecture map pins this exact location.)
   - [ ] Export a single async function:
     `gitCommit(opts: { targetRepoRoot: string; paths: readonly string[]; message: string; role: string; execaImpl?: typeof execa }): Promise<{ commitSha: string; stdout: string; stderr: string }>`
     - `execaImpl` is a **test seam only** — production callers do not pass it. Default is the live `execa` from `"execa"` (already a runtime dep).
@@ -136,7 +136,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Do not** wire `gitCommit` into any MCP tool in this story. There are no plugin-side canonical-state-mutating tools yet (those land in Epics 2–6). Shipping the wrapper ahead of the writers is the whole point — the substrate must be impossible to bypass on day one.
 
 - [ ] **Task 5 — Update canonical-fs guard whitelist** (AC: 5, 6g)
-  - [ ] Edit `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`.
+  - [ ] Edit `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`.
   - [ ] **Existing line to modify:** the `FS_WRITE_WHITELIST` `Set<string>` currently contains `path.join(SRC_DIR, "lib", "managed-fs.ts")` and a comment placeholder for the future logger. **Add** `path.join(SRC_DIR, "lib", "logger.ts")` to the Set; **remove** the "Future" comment.
   - [ ] **No other change** to the existing tests in this file — the static-import scan logic stays as-is. Adding `lib/logger.ts` to the whitelist is the substantive shift; the assertion is then satisfied automatically when Task 3 lands.
   - [ ] **Verify** post-change: the existing static-import scan still passes (i.e. no other file accidentally picked up a write-shaped fs import during this story's work). Run `pnpm test` once before commit.
@@ -148,19 +148,19 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Pass at least one assertion** in the new block by structuring it as one `it(...)` with an `expect(offences).toEqual([])` — same shape as the `gh`-spawn ban.
 
 - [ ] **Task 7 — Authored vitest suites** (AC: 1, 2, 3, 4, 6)
-  - [ ] Create `plugins/crew/mcp-server/tests/telemetry-logger.test.ts`. Covers AC6a, AC6b, AC6c.
+  - [ ] Create `plugins/flow/mcp-server/tests/telemetry-logger.test.ts`. Covers AC6a, AC6b, AC6c.
     - Use `fs.mkdtemp(os.tmpdir() + "/telemetry-logger-")` for each test's target repo. Clean up in `afterAll`.
     - AC6a: import `logTelemetryEvent` from `../src/lib/logger.js`. Construct an `agent.invoke` event with a fixed `session_id`, `agent: "generalist-dev"`, `story_id: "bmad:1.5"`, `data: { runtime_ms: 1234 }`. Do NOT pass `ts`. Call `await logTelemetryEvent({ targetRepoRoot, event })`. Read the resulting file. Assert: exactly one line, line ends with `\n`, `JSON.parse(line.trimEnd())` returns an object whose `ts` is a UTC ISO string ending in `.<3-digit-ms>Z` and whose other fields match the input.
     - AC6b: construct an invalid `agent.invoke` event (e.g. `data: { runtime_ms: "fast" }` cast through `as unknown as ...` to bypass TS — or omit `runtime_ms` entirely). Call `await logTelemetryEvent(...)`. Assert (i) the call rejects with `TelemetryEventInvalidError`, (ii) the file contains exactly one line, (iii) `JSON.parse` of that line has `type: "telemetry.invalid"`, `data.attempted_type === "agent.invoke"`, `data.zod_path` non-empty, `data.zod_message` non-empty.
     - AC6c: clock seam — pass `now: () => new Date("2026-04-30T23:59:59.500Z")` for the first call, `now: () => new Date("2026-05-01T00:00:00.500Z")` for the second. After both, list the telemetry directory. Assert exactly two `.jsonl` files (`2026-04.jsonl`, `2026-05.jsonl`), each containing exactly one line.
-  - [ ] Create `plugins/crew/mcp-server/tests/git-commit.test.ts`. Covers AC6d, AC6e.
+  - [ ] Create `plugins/flow/mcp-server/tests/git-commit.test.ts`. Covers AC6d, AC6e.
     - AC6d: build a `vi.fn()` `execaImpl` that returns different stubs based on the argv: for `["add", ...]` return `{ stdout: "", stderr: "", exitCode: 0 }`; for `["commit", "-m", …]` return `{ stdout: "[main 0123abc] regenerateStandards: bmad:1.2.3", stderr: "", exitCode: 0 }`; for `["rev-parse", "HEAD"]` return `{ stdout: "0123abcdef...\n", stderr: "", exitCode: 0 }`. Call `gitCommit({ targetRepoRoot: "/tmp/fake", paths: ["docs/standards.md"], message: "regenerateStandards: bmad:1.2.3", role: "generalist-dev", execaImpl: spy })`. Assert: spy called three times in the expected order with the expected argv; returned `commitSha === "0123abcdef..."` (trimmed).
     - AC6e variant 1: `gitCommit(..., message: "no colon here", execaImpl: spy)` — assert throws `GitCommitMessageMalformedError`, `spy` called **zero times**.
     - AC6e variant 2: `gitCommit(..., paths: [], message: "valid: ref", execaImpl: spy)` — assert throws `GitCommitMessageMalformedError`, `spy` called **zero times**.
 
 - [ ] **Task 8 — Run the full suite** (AC: all)
-  - [ ] From `plugins/crew/`, run `pnpm test`. Expectation: all existing suites green, plus the new `telemetry-logger.test.ts` and `git-commit.test.ts`, plus the extended `canonical-fs-guard.test.ts` (with the new `git`-spawn-ban describe block, and the `lib/logger.ts` added to the whitelist). Zero skips.
-  - [ ] From `plugins/crew/`, run `pnpm build`. Expectation: zero TypeScript errors.
+  - [ ] From `plugins/flow/`, run `pnpm test`. Expectation: all existing suites green, plus the new `telemetry-logger.test.ts` and `git-commit.test.ts`, plus the extended `canonical-fs-guard.test.ts` (with the new `git`-spawn-ban describe block, and the `lib/logger.ts` added to the whitelist). Zero skips.
+  - [ ] From `plugins/flow/`, run `pnpm build`. Expectation: zero TypeScript errors.
 
 ---
 
@@ -168,29 +168,29 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 ### Files this story creates (NEW)
 
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — discriminated-union Zod schema for the v1 event set.
-- `plugins/crew/mcp-server/src/lib/logger.ts` — `logTelemetryEvent` writer. ONLY file (besides `managed-fs.ts`) permitted to import a write-shaped `node:fs` API.
-- `plugins/crew/mcp-server/src/lib/git.ts` — `gitCommit` wrapper. Only path for plugin-side commits.
-- `plugins/crew/mcp-server/tests/telemetry-logger.test.ts` — covers AC6a–c.
-- `plugins/crew/mcp-server/tests/git-commit.test.ts` — covers AC6d–e.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — discriminated-union Zod schema for the v1 event set.
+- `plugins/flow/mcp-server/src/lib/logger.ts` — `logTelemetryEvent` writer. ONLY file (besides `managed-fs.ts`) permitted to import a write-shaped `node:fs` API.
+- `plugins/flow/mcp-server/src/lib/git.ts` — `gitCommit` wrapper. Only path for plugin-side commits.
+- `plugins/flow/mcp-server/tests/telemetry-logger.test.ts` — covers AC6a–c.
+- `plugins/flow/mcp-server/tests/git-commit.test.ts` — covers AC6d–e.
 
 ### Files this story modifies (UPDATE)
 
-- `plugins/crew/mcp-server/src/errors.ts` — append `TelemetryEventInvalidError` and `GitCommitMessageMalformedError` after `RolePermissionsMalformedError`. Do not touch existing classes (their wording is asserted by 1.1–1.4 tests).
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` — (a) add `lib/logger.ts` to the `FS_WRITE_WHITELIST` `Set`; (b) append a new `describe(... static direct-git-spawn guard ...)` block at the bottom. Do not modify any existing `it(...)` body.
+- `plugins/flow/mcp-server/src/errors.ts` — append `TelemetryEventInvalidError` and `GitCommitMessageMalformedError` after `RolePermissionsMalformedError`. Do not touch existing classes (their wording is asserted by 1.1–1.4 tests).
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts` — (a) add `lib/logger.ts` to the `FS_WRITE_WHITELIST` `Set`; (b) append a new `describe(... static direct-git-spawn guard ...)` block at the bottom. Do not modify any existing `it(...)` body.
 
 ### Existing files this story reads but does NOT modify
 
-- `plugins/crew/mcp-server/src/lib/managed-fs.ts` — model for "the only writer" pattern. The logger uses the same shape: one file whitelisted, every other caller routed through a single helper.
-- `plugins/crew/mcp-server/src/lib/gh.ts` — model for "the only subprocess wrapper" pattern. `git.ts` mirrors this shape (single function export, `execaImpl` test seam, role param, typed error before spawn).
-- `plugins/crew/mcp-server/src/errors.ts` — append-only pattern. Match existing JSDoc / constructor-options-bag style.
-- `plugins/crew/mcp-server/src/server.ts` — for context only. This story does NOT register MCP tools.
+- `plugins/flow/mcp-server/src/lib/managed-fs.ts` — model for "the only writer" pattern. The logger uses the same shape: one file whitelisted, every other caller routed through a single helper.
+- `plugins/flow/mcp-server/src/lib/gh.ts` — model for "the only subprocess wrapper" pattern. `git.ts` mirrors this shape (single function export, `execaImpl` test seam, role param, typed error before spawn).
+- `plugins/flow/mcp-server/src/errors.ts` — append-only pattern. Match existing JSDoc / constructor-options-bag style.
+- `plugins/flow/mcp-server/src/server.ts` — for context only. This story does NOT register MCP tools.
 
 ### Architecture compliance (cite the source on every claim)
 
 - **JSONL one-event-per-line, no trailing comma:** `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md` §5. `JSON.stringify(event) + "\n"` is the literal implementation.
 - **`type` discriminator dotted (`domain.event`):** §5. The schema uses `z.discriminatedUnion("type", [...])` and the v1 closed set is `agent.invoke` + `telemetry.invalid`. Later epics extend the union by adding new entries.
-- **Telemetry path layout `<target-repo>/.crew/telemetry/<YYYY-MM>.jsonl`:** `architecture/project-structure-boundaries.md` lines 156, 216. The logger constructs this path; nobody else does.
+- **Telemetry path layout `<target-repo>/.flow/telemetry/<YYYY-MM>.jsonl`:** `architecture/project-structure-boundaries.md` lines 156, 216. The logger constructs this path; nobody else does.
 - **Telemetry is append-only:** `architecture/project-structure-boundaries.md` line 185 — "Events written via `logger.ts`; never edited." `fs.appendFile` is the operation; no rewrite, no truncate, no rotation-by-rename.
 - **No PII / no diff contents in telemetry (NFR14):** §5. The v1 schema deliberately has no `body` / `contents` / `diff` field. Token counts are numbers; no string payloads carry user content.
 - **Pino is the declared logger lib:** `architecture/core-architectural-decisions.md` line 52, `architecture-validation-results.md` line 5. Already in `mcp-server/package.json` at `^10.3.1`. **In v1 we use `fs.appendFile` rather than `pino.destination()`** because (a) emit rate is low, (b) month-rollover semantics are simpler in our own code path, (c) we avoid SonicBoom worker-thread + buffering complexity, (d) we keep the logger entirely synchronous so a crash before flush doesn't lose events (the architecture-validation-results.md line 5 commits to "pino" as the library; this story honours that by keeping the dep declared and the module name `logger.ts`, while implementing the v1 writer directly — a later story can swap to SonicBoom without touching callers).
@@ -200,11 +200,11 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 | Library | Version | Why | Source |
 |---|---|---|---|
-| `pino` | `^10.3.1` (already declared) | Pinned as the telemetry logger lib by the architecture (`core-architectural-decisions.md` line 52). Kept as a dep even though v1 uses `fs.appendFile` directly — see "pino is the declared logger lib" above. | `plugins/crew/mcp-server/package.json` |
-| `execa` | `^9.6.1` (already declared) | Single subprocess wrapper for the `git.ts` wrapper. Mirrors `gh.ts`'s usage. | `plugins/crew/mcp-server/package.json` |
-| `zod` | `^4.4.3` (already declared) | Event-schema validation at the logger boundary. Mirrors existing schemas in `mcp-server/src/schemas/`. | `plugins/crew/mcp-server/package.json` |
+| `pino` | `^10.3.1` (already declared) | Pinned as the telemetry logger lib by the architecture (`core-architectural-decisions.md` line 52). Kept as a dep even though v1 uses `fs.appendFile` directly — see "pino is the declared logger lib" above. | `plugins/flow/mcp-server/package.json` |
+| `execa` | `^9.6.1` (already declared) | Single subprocess wrapper for the `git.ts` wrapper. Mirrors `gh.ts`'s usage. | `plugins/flow/mcp-server/package.json` |
+| `zod` | `^4.4.3` (already declared) | Event-schema validation at the logger boundary. Mirrors existing schemas in `mcp-server/src/schemas/`. | `plugins/flow/mcp-server/package.json` |
 | `yaml` | `^2.9.0` (already declared) | NOT used in this story. | — |
-| `vitest` | `^2.1.0` (already declared, devDep) | Test framework. | `plugins/crew/mcp-server/package.json` |
+| `vitest` | `^2.1.0` (already declared, devDep) | Test framework. | `plugins/flow/mcp-server/package.json` |
 
 **Do NOT add new dependencies.** The dep set above is sufficient. In particular:
 - Do NOT add `simple-git` — the wrapper is three `execa` calls.
@@ -214,7 +214,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 ### File structure (target paths, after this story)
 
 ```
-plugins/crew/mcp-server/
+plugins/flow/mcp-server/
 ├── src/
 │   ├── errors.ts                       # UPDATE (append two classes)
 │   ├── index.ts                        # unchanged
@@ -248,7 +248,7 @@ plugins/crew/mcp-server/
 
 ### Testing requirements
 
-- **Framework:** vitest (already wired). `pnpm test` from `plugins/crew/` runs everything.
+- **Framework:** vitest (already wired). `pnpm test` from `plugins/flow/` runs everything.
 - **Fixture strategy:** Each test that touches disk uses `fs.mkdtemp(os.tmpdir() + "/<test-name>-")` and cleans up in `afterAll`. Mirrors the pattern in `canonical-fs-guard.test.ts`.
 - **No real `git` subprocesses.** Every test in `git-commit.test.ts` stubs `execaImpl`. The static-guard sub-test in `canonical-fs-guard.test.ts` does not spawn anything — it greps source.
 - **Determinism:** the clock seam (`now`) is the only path the logger has to non-determinism. Tests pass a fixed `now`; the only float in the output is the `ts` string, which the test asserts to be exactly what the fake clock returned (when explicit) or "an ISO-8601 UTC ms-precise string" (when not).
@@ -304,10 +304,10 @@ plugins/crew/mcp-server/
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md`#FR65, FR70]
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/non-functional-requirements.md`#NFR6, NFR14, NFR21]
 - [Source: `_bmad-output/implementation-artifacts/1-4-permission-allowlist-scaffolding-and-tool-layer-enforcement.md`] (pattern precedents)
-- [Source: `plugins/crew/mcp-server/src/lib/managed-fs.ts`] (writer-whitelist pattern)
-- [Source: `plugins/crew/mcp-server/src/lib/gh.ts`] (single-purpose wrapper pattern)
-- [Source: `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`] (static-guard pattern + whitelist Set to edit)
-- [Source: `plugins/crew/mcp-server/package.json`] (declared deps; do not add)
+- [Source: `plugins/flow/mcp-server/src/lib/managed-fs.ts`] (writer-whitelist pattern)
+- [Source: `plugins/flow/mcp-server/src/lib/gh.ts`] (single-purpose wrapper pattern)
+- [Source: `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`] (static-guard pattern + whitelist Set to edit)
+- [Source: `plugins/flow/mcp-server/package.json`] (declared deps; do not add)
 
 ---
 

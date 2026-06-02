@@ -72,13 +72,13 @@ vitest harness asserts:
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Publish the user-surface convention inside the crew plugin (AC: 1)**
-  - [ ] 1.1 Add `plugins/crew/docs/user-surface-acs.md` containing the canonical rules verbatim: what counts as a user-surface (the four rubric items i–iv), the `**AC<n> (user-surface):**` tag syntax, the gate's extraction regex (`^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`), examples of tagged and untagged ACs, and the gate's pass/fail semantics. This is the only checked-in copy of the rules; `bmad-create-story` is treated as a third-party dependency and is NOT edited in this story (its tree is gitignored at the repo boundary).
+- [ ] **Task 1 — Publish the user-surface convention inside the flow plugin (AC: 1)**
+  - [ ] 1.1 Add `plugins/flow/docs/user-surface-acs.md` containing the canonical rules verbatim: what counts as a user-surface (the four rubric items i–iv), the `**AC<n> (user-surface):**` tag syntax, the gate's extraction regex (`^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`), examples of tagged and untagged ACs, and the gate's pass/fail semantics. This is the only checked-in copy of the rules; `bmad-create-story` is treated as a third-party dependency and is NOT edited in this story (its tree is gitignored at the repo boundary).
   - [ ] 1.2 The doc is the spec; the ship-story orchestrator prompt is the carrier. Subagents invoked by ship-story consult this file by path.
 
 - [ ] **Task 2 — Carry the convention via the ship-story orchestrator prompts (AC: 1)**
-  - [ ] 2.1 Edit `.claude/skills/ship-story/SKILL.md` Step 4 (the prompt that spawns `bmad-create-story`) to inject the user-surface tagging instructions inline: tell the subagent to consult `plugins/crew/docs/user-surface-acs.md`, paste a summary of the rubric (i–iv) into the prompt, instruct the subagent to explicitly judge each AC and tag accordingly, and preserve all existing Step 4 instructions (the `sprint-status.yaml` MUST-NOT clause, the "no clarifying questions" clause, the spec-path output instruction).
-  - [ ] 2.2 The "reasonable default" rule (mirrored from `plugins/crew/docs/user-surface-acs.md`): an AC is `user-surface` if and only if it references at least one of — (i) a slash command literal (e.g. `/crew:status`), (ii) a CLI command the operator types verbatim (e.g. `pnpm install`, `git clone`), (iii) a file path the README/install docs instruct the user to copy or open by name, or (iv) any Claude Code UI element (TUI panel, toast, tab-complete) the user is expected to observe. ACs that name only internal functions, schemas, MCP tools, or implementation files are NOT `user-surface`.
+  - [ ] 2.1 Edit `.claude/skills/ship-story/SKILL.md` Step 4 (the prompt that spawns `bmad-create-story`) to inject the user-surface tagging instructions inline: tell the subagent to consult `plugins/flow/docs/user-surface-acs.md`, paste a summary of the rubric (i–iv) into the prompt, instruct the subagent to explicitly judge each AC and tag accordingly, and preserve all existing Step 4 instructions (the `sprint-status.yaml` MUST-NOT clause, the "no clarifying questions" clause, the spec-path output instruction).
+  - [ ] 2.2 The "reasonable default" rule (mirrored from `plugins/flow/docs/user-surface-acs.md`): an AC is `user-surface` if and only if it references at least one of — (i) a slash command literal (e.g. `/flow:status`), (ii) a CLI command the operator types verbatim (e.g. `pnpm install`, `git clone`), (iii) a file path the README/install docs instruct the user to copy or open by name, or (iv) any Claude Code UI element (TUI panel, toast, tab-complete) the user is expected to observe. ACs that name only internal functions, schemas, MCP tools, or implementation files are NOT `user-surface`.
   - [ ] 2.3 Edit `.claude/skills/ship-story/SKILL.md` Step 5 (the validate prompt) to also ask the validator to check tagging correctness — every AC that names a slash command, CLI invocation, or file the user is asked to copy by name MUST carry the tag, and ACs that name only internals MUST NOT. Validator returns `fail` if tagging is wrong.
   - [ ] 2.4 The subagent (and validator) MUST NOT modify any status/state file (per ship-story's invariant inherited from Step 4 of `SKILL.md`).
 
@@ -109,8 +109,8 @@ vitest harness asserts:
   - [ ] 5.5 **Dog-food sub-task (orchestrator-executed, NOT dev-agent-executed).** Once the dev work for Tasks 1–7 is complete and AC-table is green, the orchestrator (Step 8/8.5 of ship-story `SKILL.md`) MUST itself: (a) invoke `bmad-create-story` in a real Claude Code session against a throwaway story idea, (b) confirm the updated skill prompts for `user-surface` tagging per AC, (c) capture the verbatim Claude Code output, and (d) call `$SH record-verification <this-story-key> --type user_surface_verified --data '{"ac_refs":[1],"operator":"<id>","observations":[{"ac_ref":1,"pasted_output":"<verbatim>"}]}'`. The dev agent does NOT generate this evidence — Task 5.5 is a marker to the orchestrator that the dog-food smoke happens at Step 8/8.5, after dev sign-off and before `gh pr create`. Update the SKILL.md text in 5.1 to make this responsibility explicit.
 
 - [ ] **Task 6 — vitest harness for the gate (AC: 4)**
-  - [ ] 6.1 Add `plugins/crew/mcp-server/tests/pre-pr-gate.test.ts`. The test shells out to `python3 .claude/skills/ship-story/scripts/ship.py pre-pr-gate <story_key>` against synthetic fixtures, since the gate is implemented in Python; the vitest test acts as a driver. Use `execa` (already in `mcp-server` deps; if not, add as devDependency — confirm via `pnpm --dir plugins/crew/mcp-server view`).
-  - [ ] 6.2 Fixture layout: `plugins/crew/mcp-server/tests/fixtures/pre-pr-gate/` with subdirs per case:
+  - [ ] 6.1 Add `plugins/flow/mcp-server/tests/pre-pr-gate.test.ts`. The test shells out to `python3 .claude/skills/ship-story/scripts/ship.py pre-pr-gate <story_key>` against synthetic fixtures, since the gate is implemented in Python; the vitest test acts as a driver. Use `execa` (already in `mcp-server` deps; if not, add as devDependency — confirm via `pnpm --dir plugins/flow/mcp-server view`).
+  - [ ] 6.2 Fixture layout: `plugins/flow/mcp-server/tests/fixtures/pre-pr-gate/` with subdirs per case:
     - `case-i-missing/` — spec with one `(user-surface)` AC, empty run log → expect exit `42`, stderr names the missing AC.
     - `case-ii-passing/` — same spec, run log contains one well-formed `user_surface_verified` event covering the AC → expect exit `0`, stdout JSON `status:"passed"`.
     - `case-iii-no-surface/` — spec with no `(user-surface)` ACs, empty run log → expect exit `0`, stdout JSON `status:"skipped"`.
@@ -118,7 +118,7 @@ vitest harness asserts:
     - `case-iv-b-malformed-missing-pasted-output/` — same spec as ii but the `user_surface_verified` event's `data.observations[0]` is missing `pasted_output` → expect exit `42` AND stderr contains literal `MalformedVerificationEvent`.
     Both sub-cases are independent test cases; the suite asserts each one separately (do not collapse into a parameterised single assertion that would pass if only one branch fires).
   - [ ] 6.3 The test sets `RUNS_DIR_OVERRIDE` / `STATUS_FILE_OVERRIDE` env vars (add support in `ship.py` so tests don't pollute real run logs); if Task 3's implementation prefers a flag like `--runs-dir <path>` and `--spec-path <path>`, use that. Confirm the chosen approach with the Task 3 author.
-  - [ ] 6.4 Run with `pnpm --dir plugins/crew test` and confirm all four cases pass alongside the existing suites listed in 1.7a's AC4 epilogue.
+  - [ ] 6.4 Run with `pnpm --dir plugins/flow test` and confirm all four cases pass alongside the existing suites listed in 1.7a's AC4 epilogue.
 
 - [ ] **Task 7 — Documentation and authoring guidance**
   - [ ] 7.1 Add a short "User-surface ACs and the pre-PR smoke gate" subsection to `.claude/skills/bmad-create-story/SKILL.md` (or a sibling `user-surface-acs.md` referenced from `SKILL.md`) explaining: the four surface examples, the tag syntax, what the gate does, and how the operator-smoke path works in practice.
@@ -164,8 +164,8 @@ Both event types ride the existing JSONL run-log format used by `$SH record`. To
 ```json
 {
   "ac_refs": [1, 3],
-  "test_path": "plugins/crew/mcp-server/tests/<file>.test.ts",
-  "test_command": "pnpm --dir plugins/crew test <file>"
+  "test_path": "plugins/flow/mcp-server/tests/<file>.test.ts",
+  "test_command": "pnpm --dir plugins/flow test <file>"
 }
 ```
 - `ac_refs`: non-empty array of positive integers (AC indexes).
@@ -221,23 +221,23 @@ The gate passes only when **every** `user-surface` AC index is covered by at lea
 ### What's NEW vs UPDATE
 
 **NEW files:**
-- `plugins/crew/docs/user-surface-acs.md` — checked-in, canonical, author-facing reference for the `(user-surface)` tag and the pre-PR gate (the only on-disk home for the rules; `bmad-create-story` is a gitignored dependency and is not edited).
-- `plugins/crew/mcp-server/tests/pre-pr-gate.test.ts` — the four-case vitest harness.
-- `plugins/crew/mcp-server/tests/fixtures/pre-pr-gate/` — fixture tree (four subdirs as described in Task 6.2).
+- `plugins/flow/docs/user-surface-acs.md` — checked-in, canonical, author-facing reference for the `(user-surface)` tag and the pre-PR gate (the only on-disk home for the rules; `bmad-create-story` is a gitignored dependency and is not edited).
+- `plugins/flow/mcp-server/tests/pre-pr-gate.test.ts` — the four-case vitest harness.
+- `plugins/flow/mcp-server/tests/fixtures/pre-pr-gate/` — fixture tree (four subdirs as described in Task 6.2).
 
 **UPDATE files:**
 - `.claude/skills/ship-story/scripts/ship.py` — add `pre-pr-gate` and `record-verification` subcommands, the schema helper, the typed exception, the exit-code constant, and the env-var-driven `runs_dir()` accessor. Existing subcommands unchanged.
-- `.claude/skills/ship-story/SKILL.md` — insert the new pre-PR gate step between `verify-ac-table` and `gh pr create`; extend Step 4's `bmad-create-story` prompt to carry the user-surface tagging instructions inline (citing `plugins/crew/docs/user-surface-acs.md` and pasting a rubric summary); extend Step 5's validate prompt to also check tagging correctness.
+- `.claude/skills/ship-story/SKILL.md` — insert the new pre-PR gate step between `verify-ac-table` and `gh pr create`; extend Step 4's `bmad-create-story` prompt to carry the user-surface tagging instructions inline (citing `plugins/flow/docs/user-surface-acs.md` and pasting a rubric summary); extend Step 5's validate prompt to also check tagging correctness.
 
 **MUST NOT TOUCH:**
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`.
 - Any other story spec file under `_bmad-output/implementation-artifacts/`.
-- `plugins/crew/.claude-plugin/plugin.json`, `marketplace.json`, or any plugin manifest.
+- `plugins/flow/.claude-plugin/plugin.json`, `marketplace.json`, or any plugin manifest.
 - The existing `verify-ac-table`, `resolve`, `worktree`, `set-status`, `pr-body`, `record`, `state`, `cleanup`, `pending-cleanup`, `reviewer-issues` subcommands of `ship.py` (except the minor `RUNS_DIR` override refactor, which must remain backward-compatible).
 
 ### Testing standards
 
-- vitest, run via `pnpm --dir plugins/crew test`. Existing suites: smoke (1.1), resolver (1.2), validate-active-adapter (1.2b), standards-doc (1.3), permissions/canonical-fs (1.4), telemetry + git-commit (1.5), manifest-state-machine (1.6), get-status (1.7), install-contract (1.7a). The new `pre-pr-gate.test.ts` joins this list. All must remain green; zero skips.
+- vitest, run via `pnpm --dir plugins/flow test`. Existing suites: smoke (1.1), resolver (1.2), validate-active-adapter (1.2b), standards-doc (1.3), permissions/canonical-fs (1.4), telemetry + git-commit (1.5), manifest-state-machine (1.6), get-status (1.7), install-contract (1.7a). The new `pre-pr-gate.test.ts` joins this list. All must remain green; zero skips.
 - The Python `ship.py` is currently exercised only indirectly via the ship-story flow. This story is the first to test its internals via fixtures. If a Python unit-test framework isn't already in the repo for skills, the chosen pattern is **vitest-driven subprocess invocation** (the test shells out via `execa`) — this avoids introducing pytest just for this one piece. Document this choice in Task 6's test file header.
 - The malformed-event tests (case iv-a and iv-b) must each assert on a specific stderr substring (`MalformedVerificationEvent`) rather than the full message, to avoid brittleness on wording tweaks. Each sub-case is a discrete test so a regression in one branch (missing `ac_refs` vs missing `pasted_output`) cannot hide behind the other.
 
@@ -245,8 +245,8 @@ The gate passes only when **every** `user-surface` AC index is covered by at lea
 
 - `.claude/skills/bmad-create-story/` already exists (`template.md`, `SKILL.md`, `checklist.md`, `customize.toml`, `discover-inputs.md`).
 - `.claude/skills/ship-story/scripts/ship.py` already exists and is the canonical dispatcher.
-- `plugins/crew/mcp-server/tests/` is the canonical vitest home for all crew suites; adding a new `.test.ts` follows the established pattern from 1.1–1.7a.
-- No new pnpm dependencies expected; if `execa` is not already a devDependency of `plugins/crew/mcp-server/`, add it at the latest stable (resolve via `pnpm view execa version`).
+- `plugins/flow/mcp-server/tests/` is the canonical vitest home for all crew suites; adding a new `.test.ts` follows the established pattern from 1.1–1.7a.
+- No new pnpm dependencies expected; if `execa` is not already a devDependency of `plugins/flow/mcp-server/`, add it at the latest stable (resolve via `pnpm view execa version`).
 
 ### References
 

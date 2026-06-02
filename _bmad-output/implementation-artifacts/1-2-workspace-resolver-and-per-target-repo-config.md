@@ -7,28 +7,28 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **the plugin to recognise my target repo via a `.crew/config.yaml` file**,
+I want **the plugin to recognise my target repo via a `.flow/config.yaml` file**,
 so that **the plugin knows where to read sources and write execution state for *my* project**.
 
-This story stands up the workspace-resolution boundary every later skill, tool, and adapter depends on. It does NOT register MCP tools, run skills, write telemetry, or move state files — those land in 1.4–1.7 and Epics 2+. It produces (a) the Zod schema for `.crew/config.yaml`, (b) a pure resolver function the MCP tool layer will call on every skill invocation, (c) the auto-detect-on-first-use flow with the registry hook, and (d) the typed error surface that downstream skills will render to the user. Story 1.2b will later layer stale-config-on-every-invocation validation on top of this primitive — keep that seam clean.
+This story stands up the workspace-resolution boundary every later skill, tool, and adapter depends on. It does NOT register MCP tools, run skills, write telemetry, or move state files — those land in 1.4–1.7 and Epics 2+. It produces (a) the Zod schema for `.flow/config.yaml`, (b) a pure resolver function the MCP tool layer will call on every skill invocation, (c) the auto-detect-on-first-use flow with the registry hook, and (d) the typed error surface that downstream skills will render to the user. Story 1.2b will later layer stale-config-on-every-invocation validation on top of this primitive — keep that seam clean.
 
 ## Acceptance Criteria
 
 **AC1 — Valid config is loaded and exposed (happy path):**
-**Given** a target repo containing `.crew/config.yaml` with a valid `adapter`, `adapter_config`, and `plugin` block,
+**Given** a target repo containing `.flow/config.yaml` with a valid `adapter`, `adapter_config`, and `plugin` block,
 **When** the workspace resolver is invoked with the target-repo path,
 **Then** it returns a `Workspace` value exposing `targetRepoRoot` (absolute), `activeAdapterName` (string), `activeAdapter` (the registered `PlanningAdapter` instance), `adapterConfig` (the validated, adapter-specific block), and `pluginSettings` (the validated `plugin` block, with defaults applied for omitted keys).
 
 **AC2 — Missing config triggers `detect()` against registered adapters:**
-**Given** a target repo with **no** `.crew/config.yaml`,
+**Given** a target repo with **no** `.flow/config.yaml`,
 **When** the workspace resolver runs for the first time,
 **Then** it calls `detect(targetRepoRoot)` on each adapter in `adapters/registry.ts` registration order, collects the results, and:
-- exactly one `detect()` returned `true` → the resolver writes a freshly generated `.crew/config.yaml` (adapter name, the adapter's `defaultConfig()` block, and a `plugin:` block populated with documented defaults) and returns the resolved `Workspace`;
+- exactly one `detect()` returned `true` → the resolver writes a freshly generated `.flow/config.yaml` (adapter name, the adapter's `defaultConfig()` block, and a `plugin:` block populated with documented defaults) and returns the resolved `Workspace`;
 - zero adapters returned `true` → the resolver throws a typed `NoAdapterMatchedError` whose message names every registered adapter and points the user at the documented config-writing path;
-- two or more adapters returned `true` → the resolver throws a typed `AmbiguousAdapterError` whose message lists every matching adapter and instructs the user to author `.crew/config.yaml` manually with one of them.
+- two or more adapters returned `true` → the resolver throws a typed `AmbiguousAdapterError` whose message lists every matching adapter and instructs the user to author `.flow/config.yaml` manually with one of them.
 
 **AC3 — Invalid config halts with a precise, schema-pinned error:**
-**Given** a target repo with `.crew/config.yaml` present but failing the `WorkspaceConfigSchema` (missing `adapter`, unknown adapter name, malformed `adapter_config` for the named adapter, malformed `plugin` block, non-string types, etc.),
+**Given** a target repo with `.flow/config.yaml` present but failing the `WorkspaceConfigSchema` (missing `adapter`, unknown adapter name, malformed `adapter_config` for the named adapter, malformed `plugin` block, non-string types, etc.),
 **When** the workspace resolver is invoked,
 **Then** it throws a typed `InvalidWorkspaceConfigError` whose message:
 - names the offending YAML path (e.g. `adapter_config.stories_root`),
@@ -38,11 +38,11 @@ This story stands up the workspace-resolution boundary every later skill, tool, 
 
 **AC4 (integration) — vitest covers all three branches against fixture target repos:**
 `pnpm test` runs a `mcp-server/tests/workspace-resolver.test.ts` suite that:
-- (a) **valid config branch:** loads a fixture target repo at `mcp-server/tests/fixtures/workspace-resolver/valid-bmad/` whose `.crew/config.yaml` declares `adapter: bmad`, asserts the resolver returns a `Workspace` with the expected `targetRepoRoot`, `activeAdapterName: "bmad"`, defaulted `plugin` settings, and the parsed `adapter_config`;
-- (b) **no-config + unambiguous detect branch:** loads a fixture target repo with **no** `.crew/` directory; registers a deterministic stub adapter that returns `detect() → true`; asserts the resolver creates `.crew/config.yaml` on disk (in a tmp dir copy of the fixture so the source tree is untouched), parses cleanly on a second resolver call, and returns the same `Workspace` both times;
+- (a) **valid config branch:** loads a fixture target repo at `mcp-server/tests/fixtures/workspace-resolver/valid-bmad/` whose `.flow/config.yaml` declares `adapter: bmad`, asserts the resolver returns a `Workspace` with the expected `targetRepoRoot`, `activeAdapterName: "bmad"`, defaulted `plugin` settings, and the parsed `adapter_config`;
+- (b) **no-config + unambiguous detect branch:** loads a fixture target repo with **no** `.crew/` directory; registers a deterministic stub adapter that returns `detect() → true`; asserts the resolver creates `.flow/config.yaml` on disk (in a tmp dir copy of the fixture so the source tree is untouched), parses cleanly on a second resolver call, and returns the same `Workspace` both times;
 - (c) **invalid config branch:** loads a fixture target repo at `mcp-server/tests/fixtures/workspace-resolver/invalid/` whose YAML is structurally wrong (e.g. `adapter:` set to an unknown name); asserts an `InvalidWorkspaceConfigError` is thrown with the YAML path and schema module named in the message.
-- (d) **no-detect-match branch:** uses an in-test adapter registry with a single stub whose `detect()` returns `false`; asserts `NoAdapterMatchedError` is thrown and that **no** `.crew/config.yaml` was written.
-- (e) **ambiguous-detect branch:** uses an in-test adapter registry with two stubs both returning `detect() → true`; asserts `AmbiguousAdapterError` is thrown, its message lists both adapter names, and **no** `.crew/config.yaml` was written.
+- (d) **no-detect-match branch:** uses an in-test adapter registry with a single stub whose `detect()` returns `false`; asserts `NoAdapterMatchedError` is thrown and that **no** `.flow/config.yaml` was written.
+- (e) **ambiguous-detect branch:** uses an in-test adapter registry with two stubs both returning `detect() → true`; asserts `AmbiguousAdapterError` is thrown, its message lists both adapter names, and **no** `.flow/config.yaml` was written.
 
 All five sub-tests pass.
 
@@ -75,7 +75,7 @@ All five sub-tests pass.
     - `targetRepoRoot` is resolved via `path.resolve(opts.targetRepoRoot)` before any IO.
   - [ ] Export the `Workspace` type: `{ targetRepoRoot: string; activeAdapterName: string; activeAdapter: PlanningAdapter; adapterConfig: unknown; pluginSettings: PluginSettings; }`.
   - [ ] Algorithm:
-    1. Compute `configPath = path.join(targetRepoRoot, ".crew", "config.yaml")`.
+    1. Compute `configPath = path.join(targetRepoRoot, ".flow", "config.yaml")`.
     2. **Branch A — config file does not exist:**
        - Call `Promise.all(adapters.map(a => a.detect(targetRepoRoot)))`. Collect the indices of `true` results.
        - **0 matches:** throw `NoAdapterMatchedError`.
@@ -93,9 +93,9 @@ All five sub-tests pass.
   - [ ] Story 1.1 left `mcp-server/src/adapters/registry.ts` as an empty placeholder. **Minimally update** it: export `const adapters: PlanningAdapter[] = [BmadAdapter]`. **Do not** change the existing `getActiveAdapter()` placeholder behaviour — Story 3.1 owns that. The resolver consumes `adapters` directly (not `getActiveAdapter`).
 - [ ] **Task 6 — Author fixtures and the vitest suite** (AC: 4)
   - [ ] Create fixture trees under `mcp-server/tests/fixtures/workspace-resolver/`:
-    - `valid-bmad/.crew/config.yaml` — a hand-authored valid config (`adapter: bmad`, full `adapter_config`, partial `plugin` block).
+    - `valid-bmad/.flow/config.yaml` — a hand-authored valid config (`adapter: bmad`, full `adapter_config`, partial `plugin` block).
     - `no-config/` — empty directory (committed via `.gitkeep`).
-    - `invalid/.crew/config.yaml` — YAML with `adapter:` set to a string the registry does not know (e.g. `adapter: nonexistent`).
+    - `invalid/.flow/config.yaml` — YAML with `adapter:` set to a string the registry does not know (e.g. `adapter: nonexistent`).
   - [ ] Create `mcp-server/tests/workspace-resolver.test.ts` covering AC4a–e. Use `node:os` `tmpdir()` + `fs.cp` to copy fixtures to a writable tmp dir before each test that mutates the tree (AC4b writes a config file).
   - [ ] Stub-adapter pattern for AC4b/d/e: define a small `makeStubAdapter({ name, detectResult })` helper inside the test file. Pass an `adapters: [stub1, stub2]` override to `resolveWorkspace` for those branches — do **not** mutate the live `adapters` array.
 - [ ] **Task 7 — Verify install + build + test pipeline** (AC: 1, 3, 4)
@@ -116,18 +116,18 @@ Every later skill (`/<plugin>:status`, `/<plugin>:plan`, `/<plugin>:start`, `/<p
 ### Files this story touches
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/workspace-config.ts`
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts`
-- `plugins/crew/mcp-server/tests/workspace-resolver.test.ts`
-- `plugins/crew/mcp-server/tests/fixtures/workspace-resolver/valid-bmad/.crew/config.yaml`
-- `plugins/crew/mcp-server/tests/fixtures/workspace-resolver/no-config/.gitkeep`
-- `plugins/crew/mcp-server/tests/fixtures/workspace-resolver/invalid/.crew/config.yaml`
+- `plugins/flow/mcp-server/src/schemas/workspace-config.ts`
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts`
+- `plugins/flow/mcp-server/tests/workspace-resolver.test.ts`
+- `plugins/flow/mcp-server/tests/fixtures/workspace-resolver/valid-bmad/.flow/config.yaml`
+- `plugins/flow/mcp-server/tests/fixtures/workspace-resolver/no-config/.gitkeep`
+- `plugins/flow/mcp-server/tests/fixtures/workspace-resolver/invalid/.flow/config.yaml`
 
 **UPDATE (minimal — preserve existing surface):**
-- `plugins/crew/mcp-server/src/errors.ts` — add three typed-error subclasses. Do not change `DomainError` or `NotImplementedError`.
-- `plugins/crew/mcp-server/src/adapters/adapter.ts` — add `defaultConfig` and `adapterConfigSchema` to the `PlanningAdapter` interface. Existing exports (`SourceStory`, `AC`, `ChangeEvent`) stay verbatim.
-- `plugins/crew/mcp-server/src/adapters/bmad/index.ts` — add the two new interface members as minimal stubs (literal default + Zod schema). Do not implement `detect()` / `readSourceStory()` / `resolveSourcePath()` — Story 3.3 owns those.
-- `plugins/crew/mcp-server/src/adapters/registry.ts` — replace empty `adapters: []` with `adapters: [BmadAdapter]`. Do not touch `getActiveAdapter()`.
+- `plugins/flow/mcp-server/src/errors.ts` — add three typed-error subclasses. Do not change `DomainError` or `NotImplementedError`.
+- `plugins/flow/mcp-server/src/adapters/adapter.ts` — add `defaultConfig` and `adapterConfigSchema` to the `PlanningAdapter` interface. Existing exports (`SourceStory`, `AC`, `ChangeEvent`) stay verbatim.
+- `plugins/flow/mcp-server/src/adapters/bmad/index.ts` — add the two new interface members as minimal stubs (literal default + Zod schema). Do not implement `detect()` / `readSourceStory()` / `resolveSourcePath()` — Story 3.3 owns those.
+- `plugins/flow/mcp-server/src/adapters/registry.ts` — replace empty `adapters: []` with `adapters: [BmadAdapter]`. Do not touch `getActiveAdapter()`.
 
 **MUST NOT touch:**
 - `mcp-server/src/server.ts`, `mcp-server/src/index.ts` — no tool registration in this story; the resolver is consumed by tools that don't exist yet.
@@ -142,7 +142,7 @@ Every later skill (`/<plugin>:status`, `/<plugin>:plan`, `/<plugin>:start`, `/<p
 |---|---|---|
 | Resolver location | `mcp-server/src/state/workspace-resolver.ts` | architecture §Plugin tree (line 766) |
 | Schema location | `mcp-server/src/schemas/workspace-config.ts` | architecture §Plugin tree (line 761) |
-| Config path | `<target-repo>/.crew/config.yaml` | architecture §Workspace Resolution (line 212), §Configuration (line 634) |
+| Config path | `<target-repo>/.flow/config.yaml` | architecture §Workspace Resolution (line 212), §Configuration (line 634) |
 | Config shape | `adapter`, `adapter_config`, `plugin` (with `agreement_threshold: 0.8`, `orchestration_interval_seconds: 120` defaults) | architecture §Configuration (lines 636–644) |
 | First-run auto-detect | Run `detect()` against registered adapters in order; unique match writes config; ambiguity prompts user | architecture §Configuration (line 646), §Risks (line 665) |
 | Same-repo / split-repo | Same code path for both. Resolver does not assume plugin-root ≠ target-root | architecture §Workspace Resolution (line 212), §Target-repo tree (line 674), PRD FR74 |
@@ -187,13 +187,13 @@ export interface Workspace {
 The user sees these errors verbatim through `/status` and every other skill. Aim for one line, no jargon. Examples:
 
 - `InvalidWorkspaceConfigError`:
-  `.crew/config.yaml is invalid at 'adapter_config.stories_root': expected string, received number. See mcp-server/src/schemas/workspace-config.ts and the canonical example in plugins/crew/example/.crew/config.yaml.`
+  `.flow/config.yaml is invalid at 'adapter_config.stories_root': expected string, received number. See mcp-server/src/schemas/workspace-config.ts and the canonical example in plugins/flow/example/.flow/config.yaml.`
 
 - `NoAdapterMatchedError`:
-  `No registered adapter recognises <targetRepoRoot>. Registered adapters: [bmad]. Author .crew/config.yaml manually following plugins/crew/example/.crew/config.yaml.`
+  `No registered adapter recognises <targetRepoRoot>. Registered adapters: [bmad]. Author .flow/config.yaml manually following plugins/flow/example/.flow/config.yaml.`
 
 - `AmbiguousAdapterError`:
-  `Multiple adapters recognise <targetRepoRoot>: [bmad, native]. Author .crew/config.yaml manually to pick one.`
+  `Multiple adapters recognise <targetRepoRoot>: [bmad, native]. Author .flow/config.yaml manually to pick one.`
 
 The README install path (Story 1.7) will reference these exact phrasings, so commit to them.
 
@@ -233,7 +233,7 @@ Do **not** introduce `js-yaml` or any other YAML lib. `yaml` (eemeli) is the pro
 ### File structure requirements
 
 ```
-plugins/crew/
+plugins/flow/
 └── mcp-server/
     ├── src/
     │   ├── adapters/
@@ -249,9 +249,9 @@ plugins/crew/
         ├── workspace-resolver.test.ts           # NEW
         └── fixtures/
             └── workspace-resolver/
-                ├── valid-bmad/.crew/config.yaml   # NEW
+                ├── valid-bmad/.flow/config.yaml   # NEW
                 ├── no-config/.gitkeep                          # NEW
-                └── invalid/.crew/config.yaml       # NEW
+                └── invalid/.flow/config.yaml       # NEW
 ```
 
 Stay within this list. Anything else is scope creep.
@@ -259,7 +259,7 @@ Stay within this list. Anything else is scope creep.
 ### Testing requirements
 
 - All five sub-tests are unit-level vitest, in-process, no subprocess transport. Branch B writes to a tmp dir copy of the fixture, never to the source fixture (or it'll dirty git on every run).
-- `pnpm test` from `plugins/crew/` must continue to run the smoke suite (Story 1.1, 3 tests) **plus** this story's suite (5 tests), with zero failures and zero skips.
+- `pnpm test` from `plugins/flow/` must continue to run the smoke suite (Story 1.1, 3 tests) **plus** this story's suite (5 tests), with zero failures and zero skips.
 - The test file must import `resolveWorkspace` from the source path (`../src/state/workspace-resolver.js` — note `.js` extension because of `module: NodeNext`).
 
 ### Anti-patterns to avoid (high-cost LLM mistakes)
@@ -267,7 +267,7 @@ Stay within this list. Anything else is scope creep.
 1. **Do not** register an MCP tool for workspace resolution. The resolver is a plain TS module. Tools that call it land in Story 1.4+ (permission allowlist work) and Story 1.7 (`/status`).
 2. **Do not** add stale-config detection (calling `activeAdapter.detect(targetRepoRoot)` on every invocation). That is **Story 1.2b**'s entire purpose. Adding it here will collide with 1.2b's ACs and force a rewrite. The resolver in this story trusts the configured adapter name.
 3. **Do not** cache the resolved `Workspace` inside the resolver module (no module-level `Map`). The MCP tool layer or skill harness handles caching strategy.
-4. **Do not** auto-create `.crew/state/`, `.crew/telemetry/`, `.crew/sessions/` — those directories are created lazily by their owning stories (1.5, 1.6, etc.). Only `.crew/config.yaml` is written by this story, and only in the Branch A unique-detect-match path.
+4. **Do not** auto-create `.flow/state/`, `.flow/telemetry/`, `.crew/sessions/` — those directories are created lazily by their owning stories (1.5, 1.6, etc.). Only `.flow/config.yaml` is written by this story, and only in the Branch A unique-detect-match path.
 5. **Do not** read `process.cwd()` to determine the target repo. The resolver takes `targetRepoRoot` as an argument. The skill harness / MCP layer decides what path to pass. Sprint-orchestrator's "resolve projectRoot from shell cwd" bug (see project memory `feedback_pre_tool_use_hook_cwd_drift`) is exactly what we're avoiding.
 6. **Do not** write a generic `WorkspaceError` superclass and three `kind:` discriminator strings. Three distinct subclasses of `DomainError` give callers `instanceof` ergonomics and let the README install path map error → fix-it message cleanly.
 7. **Do not** call into the `BmadAdapter`'s `detect()` (it throws `NotImplementedError`). The auto-detect branch (AC2) is tested with stub adapters injected via the `opts.adapters` override. The real BmadAdapter.`detect()` lands in Story 3.3.
@@ -291,8 +291,8 @@ Stay within this list. Anything else is scope creep.
 
 - Recent commits (`d970559`, `6a93977`, `6d14fc5`, `c5ccde0`) show: ship-story is the conventional flow; commits are scope-prefixed (`feat(1-1): …`); CI watch loop runs on PR creation.
 - Conventional commit for this story: `feat(1-2): workspace resolver + per-target-repo config schema` (subject line ≤72 chars).
-- The plugin tree under `plugins/crew/` is the only mutation surface. The repo root has no relevant config drift.
-- A `pnpm-lock.yaml` already exists at `plugins/crew/pnpm-lock.yaml` from Story 1.1. This story should not modify it (no new deps).
+- The plugin tree under `plugins/flow/` is the only mutation surface. The repo root has no relevant config drift.
+- A `pnpm-lock.yaml` already exists at `plugins/flow/pnpm-lock.yaml` from Story 1.1. This story should not modify it (no new deps).
 
 ### Latest tech information
 

@@ -69,7 +69,7 @@ The footer marker `<!-- crew:verdict:<plugin-version>:<ref> -->` is an HTML comm
 
 ## Acceptance Criteria
 
-> AC1 and AC2 are verbatim from the epic. AC3 is the integration suite. AC4 is the user-surface contract — the operator-observable promise that the version stamp is visible and reruns are idempotent. Per `plugins/crew/docs/user-surface-acs.md`, AC4 is tagged `(user-surface)`; the others describe internal behaviour and stay untagged.
+> AC1 and AC2 are verbatim from the epic. AC3 is the integration suite. AC4 is the user-surface contract — the operator-observable promise that the version stamp is visible and reruns are idempotent. Per `plugins/flow/docs/user-surface-acs.md`, AC4 is tagged `(user-surface)`; the others describe internal behaviour and stay untagged.
 
 **AC1:**
 **Given** the reviewer's summary comment (composed and posted by `postReviewerComments`),
@@ -91,14 +91,14 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
 **AC4 (user-surface):**
-**Given** a target repo where `/crew:start` has already completed one review pass for a story (a first verdict comment with the footer marker exists on the PR),
-**When** the operator runs `/crew:start` again for the same story and the inner cycle invokes `postReviewerComments`,
+**Given** a target repo where `/flow:start` has already completed one review pass for a story (a first verdict comment with the footer marker exists on the PR),
+**When** the operator runs `/flow:start` again for the same story and the inner cycle invokes `postReviewerComments`,
 **Then** the operator observes:
 - (a) **Exactly one verdict comment** on the PR after the second run — the prior comment was edited in place, not duplicated. Running `gh pr view <prNumber> --comments` shows one reviewer comment, not two.
 - (b) **Version information visible** in the comment body: the literal tokens `standards_version:` and `plugin_version:` appear in the body (e.g. `` `standards_version: 1.2.3` · `plugin_version: 0.1.0` ``).
 - (c) **The footer marker** `<!-- crew:verdict:` appears at the end of the comment body (inspectable via raw GitHub view or `gh api`).
 
-<!-- User-surface: AC4 references `/crew:start` (slash command) and the PR surface observable via `gh pr view --comments`. -->
+<!-- User-surface: AC4 references `/flow:start` (slash command) and the PR surface observable via `gh pr view --comments`. -->
 
 ### Expanded acceptance specifics
 
@@ -106,7 +106,7 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 
 - (1a) **`standardsVersion` on the persisted file (declared locked-file change on Story 4.6):** `runReviewerSession` adds `standardsVersion: string` to the `reviewer-result.json` projection, populated from `standards.version` (the `StandardsDoc.version` field already read by `lookupStandards` inside the composite tool). The `ReviewerResultFileShape` interface and its Zod schema gain `standardsVersion: string`. The in-memory `ReviewerSessionResult` type is NOT changed. The `readReviewerResultFile` helper (extracted by Story 4.6b) Zod schema is extended with `standardsVersion: z.string().optional().default("")` for backward compatibility when reading files produced by a pre-4.7 plugin build.
 
-- (1b) **`plugin_version` source:** use the existing `getPluginVersion()` from `plugins/crew/mcp-server/src/lib/plugin-version.ts`. It is sync, load-once cached, reads from `.claude-plugin/plugin.json`. No new helper is needed. Call it inside `postReviewerComments` with no arguments (it resolves the plugin root itself via `fileURLToPath`).
+- (1b) **`plugin_version` source:** use the existing `getPluginVersion()` from `plugins/flow/mcp-server/src/lib/plugin-version.ts`. It is sync, load-once cached, reads from `.claude-plugin/plugin.json`. No new helper is needed. Call it inside `postReviewerComments` with no arguments (it resolves the plugin root itself via `fileURLToPath`).
 
 - (1c) **Version block placement in the summary body:** `composeSummaryBody` is extended to accept `{ standardsVersion: string, pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). The version block is appended to the body AFTER the verdict line. The body format embeds the literal tokens `standards_version` and `plugin_version` (verbatim from AC1, which is verbatim from epic):
   ```
@@ -150,7 +150,7 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 
 **AC3 unpacked.** Two-run integration test:
 
-- (3a) **Fixture base:** tmpdir with `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` populated with `{ sessionUlid, ref: "native:01HZ-fixture-story", recommendedVerdict: "READY FOR MERGE", acResults: {}, standardsByCriterionId: {}, sourceStoryRef: "native:01HZ-fixture-story", prNumber: 42, standardsVersion: "1.2.3" }`. The `pluginVersionOverride: "1.0.0-test"` seam is used. NOTE: `standardsVersion` in the projection file is just a `string` (no validation), but production values come from `lookupStandards` which enforces strict semver via `StandardsDocSchema.version: /^\d+\.\d+\.\d+$/` — fixtures that round-trip through `lookupStandards` (e.g. by writing a real `docs/standards.md`) MUST use semver values like `1.2.3`, not date-style.
+- (3a) **Fixture base:** tmpdir with `<tmp>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` populated with `{ sessionUlid, ref: "native:01HZ-fixture-story", recommendedVerdict: "READY FOR MERGE", acResults: {}, standardsByCriterionId: {}, sourceStoryRef: "native:01HZ-fixture-story", prNumber: 42, standardsVersion: "1.2.3" }`. The `pluginVersionOverride: "1.0.0-test"` seam is used. NOTE: `standardsVersion` in the projection file is just a `string` (no validation), but production values come from `lookupStandards` which enforces strict semver via `StandardsDocSchema.version: /^\d+\.\d+\.\d+$/` — fixtures that round-trip through `lookupStandards` (e.g. by writing a real `docs/standards.md`) MUST use semver values like `1.2.3`, not date-style.
 
 - (3b) **Discriminating stub routing:**
   - `gh pr diff 42` → fixture unified diff (same as Story 4.6b's stub).
@@ -178,7 +178,7 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
   - The body in both POST and PATCH payloads contains both literal tokens `standards_version:` and `plugin_version:` (exact-string `.includes` checks) and the footer marker (`<!-- crew:verdict:`).
   - The SKILL.md prose's chat log for the second pass includes `wasEdit: true` context (the chat-line variant from Task 5).
 
-- (4c) **Smoke-gate tag:** tagged per `plugins/crew/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence per § Pre-PR gate.
+- (4c) **Smoke-gate tag:** tagged per `plugins/flow/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence per § Pre-PR gate.
 
 ---
 
@@ -187,18 +187,18 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 Implementation order is load-bearing.
 
 - [x] **Task 1: Extend `ReviewerResultFileShape` to carry `standardsVersion`** (AC: #1)
-  - [x] 1.1 Open `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`. Add `standardsVersion: string` to the `ReviewerResultFileShape` interface. In the projection-write step (where `fileProjection` is assembled before `atomicWriteFile`), populate `standardsVersion: standards.version` (the `standards` local variable already holds the `StandardsDoc` return from `lookupStandards`). The in-memory `ReviewerSessionResult` type is NOT changed.
-  - [x] 1.2 Open `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (extracted by Story 4.6b). Widen the Zod schema to include `standardsVersion: z.string().optional().default("")` for backward compatibility when reading pre-4.7 projection files. Update the return-type annotation to match.
+  - [x] 1.1 Open `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`. Add `standardsVersion: string` to the `ReviewerResultFileShape` interface. In the projection-write step (where `fileProjection` is assembled before `atomicWriteFile`), populate `standardsVersion: standards.version` (the `standards` local variable already holds the `StandardsDoc` return from `lookupStandards`). The in-memory `ReviewerSessionResult` type is NOT changed.
+  - [x] 1.2 Open `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` (extracted by Story 4.6b). Widen the Zod schema to include `standardsVersion: z.string().optional().default("")` for backward compatibility when reading pre-4.7 projection files. Update the return-type annotation to match.
   - [x] 1.3 Audit all test files that hand-craft `reviewer-result.json` content (grep for `ReviewerResultFileShape` and `recommendedVerdict` in the test tree to find every site — at minimum `process-reviewer-transcript.test.ts`, `run-reviewer-session.test.ts`, and any inner-cycle integration tests). Add `standardsVersion: "1.2.3"` (or any semver-shaped string) to each fixture. Tests relying on `.optional().default("")` do not need this but it is good practice. Verify `pnpm build` passes — TypeScript will surface any fixture site you missed once `standardsVersion: string` is non-optional on the interface.
 
 - [x] **Task 2: Extend `composeSummaryBody` with version block and footer marker** (AC: #1, #3)
-  - [x] 2.1 Open `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`. Extend `composeSummaryBody` to accept `{ standardsVersion: string; pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). Add them as a second argument object or merge into a unified options shape — match the existing function's style.
+  - [x] 2.1 Open `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts`. Extend `composeSummaryBody` to accept `{ standardsVersion: string; pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). Add them as a second argument object or merge into a unified options shape — match the existing function's style.
   - [x] 2.2 After the verdict line, append version block and footer marker. The footer marker is the absolute last character sequence in the returned string (no trailing newline).
   - [x] 2.3 `composeVerdictLine` is unchanged — do not modify it.
-  - [x] 2.4 Extend `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` with all required assertions.
+  - [x] 2.4 Extend `plugins/flow/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` with all required assertions.
 
 - [x] **Task 3: Add prior-verdict search and PATCH to `postReviewerComments`** (AC: #2, #3)
-  - [x] 3.1 Open `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam.
+  - [x] 3.1 Open `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam.
   - [x] 3.2 Import `getPluginVersion` from `../lib/plugin-version.js`. In `postReviewerComments`, call `const pluginVersion = pluginVersionOverride ?? getPluginVersion()`.
   - [x] 3.3 After Step 4 (PR-context resolution) and before Step 5 (inline-comment generation), insert Step 4a: GET existing reviews, search for prior verdict, store `priorReviewId`.
   - [x] 3.4 Pass `{ standardsVersion: result.standardsVersion, pluginVersion }` to `composeSummaryBody`.
@@ -208,7 +208,7 @@ Implementation order is load-bearing.
   - [x] 3.8 Implement `escapeRegex` — inline one-liner in `post-reviewer-comments.ts`.
 
 - [x] **Task 4: Update the SKILL.md chat-log step** (AC: #4)
-  - [x] 4.1 Open `plugins/crew/skills/start/SKILL.md`. Add `wasEdit` handling: `wasEdit === true` → `reviewer-comments updated in place on PR #<prNumber>`.
+  - [x] 4.1 Open `plugins/flow/skills/start/SKILL.md`. Add `wasEdit` handling: `wasEdit === true` → `reviewer-comments updated in place on PR #<prNumber>`.
   - [x] 4.2 The `allowed_tools` array is NOT widened — no new MCP tools are registered by this story.
 
 - [x] **Task 5: Integration test suite extension** (AC: #3, #4)
@@ -284,23 +284,23 @@ The footer marker format `<!-- crew:verdict:<plugin-version>:<ref> -->` is desig
 
 Files off-limits to this story. If a change appears necessary, STOP and surface the conflict.
 
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
-- `plugins/crew/catalogue/generalist-reviewer.md` (Story 4.6)
-- `plugins/crew/permissions/gh-error-map.yaml` (Story 4.5)
-- `plugins/crew/mcp-server/src/lib/find-hunk-line.ts` (Story 4.6b)
-- `plugins/crew/mcp-server/src/lib/plugin-version.ts` (Story 1.9; already cites Story 4.7 as a caller — use as-is, do NOT modify)
-- `plugins/crew/mcp-server/src/skills/verdict-parser.ts` (Story 4.3/4.6 — `@deprecated`, no callers)
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2)
+- `plugins/flow/catalogue/generalist-reviewer.md` (Story 4.6)
+- `plugins/flow/permissions/gh-error-map.yaml` (Story 4.5)
+- `plugins/flow/mcp-server/src/lib/find-hunk-line.ts` (Story 4.6b)
+- `plugins/flow/mcp-server/src/lib/plugin-version.ts` (Story 1.9; already cites Story 4.7 as a caller — use as-is, do NOT modify)
+- `plugins/flow/mcp-server/src/skills/verdict-parser.ts` (Story 4.3/4.6 — `@deprecated`, no callers)
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6) — Task 1 adds `standardsVersion: string` to `ReviewerResultFileShape` and populates it from `standards.version` in the projection-write step. Bounded: one new field on the projection object; the in-memory `ReviewerSessionResult` type is unchanged; existing tests remain green (additive field, no behaviour change to existing paths).
-- **`plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`** (Story 4.6b) — Task 1.2 extends the Zod schema with `standardsVersion: z.string().optional().default("")`. Purely additive and backward-compatible; existing `processReviewerTranscript` tests pass unchanged.
-- **`plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`** (Story 4.6b) — Task 2 adds the version block and footer marker. `composeVerdictLine` is unchanged. The `composeSummaryBody` signature gains two new required parameters; callers are updated in Task 3.
-- **`plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b) — Task 3 inserts the GET prior-verdict search step and conditional PATCH/POST logic. The existing inline-comment generator, `skipped-no-session-result` return path, and Step 5–8 structure (inline comments, POST) are preserved; GET + conditional PATCH are inserted between Steps 4 and 5.
-- **`plugins/crew/skills/start/SKILL.md`** (Stories 4.2/4.3b/4.3c/4.6/4.6b) — Task 4 adds the `wasEdit`-conditional chat line to the `postReviewerComments` result handler. `allowed_tools` is NOT widened.
+- **`plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6) — Task 1 adds `standardsVersion: string` to `ReviewerResultFileShape` and populates it from `standards.version` in the projection-write step. Bounded: one new field on the projection object; the in-memory `ReviewerSessionResult` type is unchanged; existing tests remain green (additive field, no behaviour change to existing paths).
+- **`plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`** (Story 4.6b) — Task 1.2 extends the Zod schema with `standardsVersion: z.string().optional().default("")`. Purely additive and backward-compatible; existing `processReviewerTranscript` tests pass unchanged.
+- **`plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts`** (Story 4.6b) — Task 2 adds the version block and footer marker. `composeVerdictLine` is unchanged. The `composeSummaryBody` signature gains two new required parameters; callers are updated in Task 3.
+- **`plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b) — Task 3 inserts the GET prior-verdict search step and conditional PATCH/POST logic. The existing inline-comment generator, `skipped-no-session-result` return path, and Step 5–8 structure (inline comments, POST) are preserved; GET + conditional PATCH are inserted between Steps 4 and 5.
+- **`plugins/flow/skills/start/SKILL.md`** (Stories 4.2/4.3b/4.3c/4.6/4.6b) — Task 4 adds the `wasEdit`-conditional chat line to the `postReviewerComments` result handler. `allowed_tools` is NOT widened.
 
 ---
 
@@ -309,19 +309,19 @@ Files off-limits to this story. If a change appears necessary, STOP and surface 
 ### Files this story will create
 
 - None required — all changes are to existing files.
-- Optional: `plugins/crew/mcp-server/src/lib/escape-regex.ts` (if not inlined — implementer's choice).
+- Optional: `plugins/flow/mcp-server/src/lib/escape-regex.ts` (if not inlined — implementer's choice).
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Task 1; `standardsVersion` projection field)
-- `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1.2; Zod schema widening)
-- `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 2; version block + footer marker)
-- `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 2.4)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Task 3; GET search + PATCH path)
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 5)
-- `plugins/crew/skills/start/SKILL.md` (Task 4; wasEdit chat line)
-- Operator-smoke harness under `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 6)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Task 1; `standardsVersion` projection field)
+- `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1.2; Zod schema widening)
+- `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 2; version block + footer marker)
+- `plugins/flow/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 2.4)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Task 3; GET search + PATCH path)
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 5)
+- `plugins/flow/skills/start/SKILL.md` (Task 4; wasEdit chat line)
+- Operator-smoke harness under `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 6)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 ### Current-state notes on files being modified
 
@@ -346,11 +346,11 @@ Files off-limits to this story. If a change appears necessary, STOP and surface 
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md#Story 4.7`]
-- [Source: `plugins/crew/docs/user-surface-acs.md`] (user-surface tag conventions)
+- [Source: `plugins/flow/docs/user-surface-acs.md`] (user-surface tag conventions)
 - [Source: `_bmad-output/implementation-artifacts/4-6b-reviewer-posts-inline-comments-and-summary-verdict.md`] (the story this extends)
 - [Source: `_bmad-output/implementation-artifacts/4-6-reviewer-subagent-read-sources-and-run-acs.md`] (projection file shape; `standards.version` note)
-- [Source: `plugins/crew/mcp-server/src/lib/plugin-version.ts`] (existing `getPluginVersion()` — cites Story 4.7)
-- [Source: `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`] (current `ReviewerResultFileShape` definition)
+- [Source: `plugins/flow/mcp-server/src/lib/plugin-version.ts`] (existing `getPluginVersion()` — cites Story 4.7)
+- [Source: `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`] (current `ReviewerResultFileShape` definition)
 
 ---
 
@@ -403,16 +403,16 @@ None — clean run, all ACs satisfied without debug iterations.
 
 ### File List
 
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Task 1: `standardsVersion` field + projection)
-- `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1.2: backward-compat backfill)
-- `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 2: version block + footer marker)
-- `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 2.4: extended tests)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Task 3: GET/PATCH/escapeRegex/seam)
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 5: migrated + new tests)
-- `plugins/crew/mcp-server/src/tools/__tests__/ac3-grammar-drift-impossibility.test.ts` (Task 5.0: migrated)
-- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (Task 1.3: fixture)
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` (Task 1.3: fixture)
-- `plugins/crew/mcp-server/src/__tests__/test-helpers/gh-execa-stub.ts` (Task 5.2: apiRoutes routing)
-- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (Task 6: smoke extension)
-- `plugins/crew/skills/start/SKILL.md` (Task 4: wasEdit chat line)
-- `plugins/crew/mcp-server/dist/` (Task 7: rebuilt dist)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Task 1: `standardsVersion` field + projection)
+- `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1.2: backward-compat backfill)
+- `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 2: version block + footer marker)
+- `plugins/flow/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 2.4: extended tests)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Task 3: GET/PATCH/escapeRegex/seam)
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 5: migrated + new tests)
+- `plugins/flow/mcp-server/src/tools/__tests__/ac3-grammar-drift-impossibility.test.ts` (Task 5.0: migrated)
+- `plugins/flow/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (Task 1.3: fixture)
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` (Task 1.3: fixture)
+- `plugins/flow/mcp-server/src/__tests__/test-helpers/gh-execa-stub.ts` (Task 5.2: apiRoutes routing)
+- `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (Task 6: smoke extension)
+- `plugins/flow/skills/start/SKILL.md` (Task 4: wasEdit chat line)
+- `plugins/flow/mcp-server/dist/` (Task 7: rebuilt dist)

@@ -39,7 +39,7 @@ This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns i
 - (e) Add additional `ChangeType` literals beyond Story 4.9's `revert | migration | schema | dep-bump`. The detector ships exactly these four. An additive future story (e.g. `lockfile` as a distinct type, or `infrastructure-as-code` for terraform) extends both the spec schema enum and the detector heuristics in one coordinated edit.
 - (f) Modify `start/SKILL.md`. The SKILL.md wiring is unchanged — `runReviewerSession` is already called by the reviewer subagent (under `runReviewerSession` permission in `generalist-reviewer.yaml`); the classifier runs inside `runReviewerSession` and is invisible to the SKILL.md prose.
 - (g) Modify `permissions/generalist-reviewer.yaml` or `permissions/generalist-dev.yaml`. `classifyRiskTier` is exposed as an MCP tool for future direct callers (e.g. a stats CLI in Epic 6), but in v1 the only production caller is `runReviewerSession` via a plain function import — no subagent ever needs the tool surface directly.
-- (h) Add picomatch as a regular dependency in any other package — only `plugins/crew/mcp-server/package.json`.
+- (h) Add picomatch as a regular dependency in any other package — only `plugins/flow/mcp-server/package.json`.
 - (i) Implement caching of the parsed spec across reviewer passes. `lookupRiskTieringSpec` reads from disk on every classifier invocation (the file is small; the read happens at most once per reviewer pass). A future perf story can add caching if profiling shows it matters.
 - (j) Stamp `risk_tier` on manifests in any state OTHER than `in-progress`. The stamp happens after the POST/PATCH succeeds in `postReviewerComments`, which only runs when a story is being reviewed (i.e. `in-progress`). Stamping on `done/` or `blocked/` manifests is out of scope.
 - (k) Render the evidence block in any reviewer comment OTHER than the summary body composed by `composeSummaryBody`. Inline comments (the line-level "AC FAIL" markers in `postReviewerComments`) do not carry the evidence block.
@@ -62,7 +62,7 @@ This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns i
 
 ## Acceptance Criteria
 
-> AC1, AC2, AC3 are verbatim from the epic. AC4 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool, internal Pattern §11 output shape, a manifest schema field, and a deterministic Markdown block embedded in the verdict comment by `composeSummaryBody`. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1, AC2, AC3 are verbatim from the epic. AC4 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool, internal Pattern §11 output shape, a manifest schema field, and a deterministic Markdown block embedded in the verdict comment by `composeSummaryBody`. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** a story's diff and the loaded spec from Story 4.9,
@@ -212,7 +212,7 @@ vitest covers four classification branches (path match, change-type match, size 
   ```
   When `resultFile.riskTier` is undefined (legacy or test fixture without classification), the block is omitted entirely — no header, no placeholder. This preserves backward compatibility with the existing `composeSummaryBody` test suite.
 
-- (3g) **Manifest stamp inside `postReviewerComments`.** After the POST/PATCH succeeds AND the `reviewer.verdict` telemetry emission (Story 4.12 Task 3) — i.e. as the next step inside the same success path — read the in-progress manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml`, set:
+- (3g) **Manifest stamp inside `postReviewerComments`.** After the POST/PATCH succeeds AND the `reviewer.verdict` telemetry emission (Story 4.12 Task 3) — i.e. as the next step inside the same success path — read the in-progress manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml`, set:
   - `risk_tier = resultFile.riskTier.tier`
   - `risk_tier_evidence = { matched_rule, paths, change_types, diff_size }` (verbatim from the result file)
 
@@ -229,7 +229,7 @@ vitest covers four classification branches (path match, change-type match, size 
 **AC4 unpacked.** Integration suite scope:
 
 - (4a) **Fixture base.** vitest tests use `await fs.mkdtemp(path.join(os.tmpdir(), "classify-risk-tier-"))` per `beforeEach` to create a clean `targetRepoRoot`. `afterEach` cleans via `fs.rm(..., { recursive: true, force: true })`. The fixture seeds:
-  - `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` — a minimal valid in-progress manifest.
+  - `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` — a minimal valid in-progress manifest.
   - `<tmpPluginRoot>/docs/risk-tiering.md` — the spec under test (per test, varies).
 
   No mocking of `lookupRiskTieringSpec`, `picomatch`, or `logTelemetryEvent`. The classifier runs against the real spec parser and the real glob matcher.
@@ -287,12 +287,12 @@ vitest covers four classification branches (path match, change-type match, size 
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [ ] **Task 1: Add `picomatch` dependency** (AC: #1, #2)
-  - [ ] 1.1 In `plugins/crew/mcp-server/`, run `pnpm add picomatch` to add it as a regular dependency. Pin the resolved version (do NOT pre-pick a version; let pnpm resolve to the latest stable, then commit `package.json` + `pnpm-lock.yaml` with the resolved version).
+  - [ ] 1.1 In `plugins/flow/mcp-server/`, run `pnpm add picomatch` to add it as a regular dependency. Pin the resolved version (do NOT pre-pick a version; let pnpm resolve to the latest stable, then commit `package.json` + `pnpm-lock.yaml` with the resolved version).
   - [ ] 1.2 Also `pnpm add -D @types/picomatch` for the TypeScript types.
   - [ ] 1.3 Verify the import works: `import picomatch from "picomatch";` in a scratch file before continuing.
 
 - [ ] **Task 2: `detectChangeTypes` helper** (AC: #1)
-  - [ ] 2.1 Create `plugins/crew/mcp-server/src/lib/detect-change-types.ts`.
+  - [ ] 2.1 Create `plugins/flow/mcp-server/src/lib/detect-change-types.ts`.
   - [ ] 2.2 Export `detectChangeTypes(changedPaths: string[], commitMessages: string[]): ChangeType[]`.
   - [ ] 2.3 Algorithm:
     - `migration` if any path matches `**/migrations/**` OR `**/migration/**` (via `picomatch`).
@@ -301,18 +301,18 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
     - `revert` if any commit message starts with the literal `Revert "` (case-sensitive).
   - [ ] 2.4 Return value: sorted lexicographically, deduplicated.
   - [ ] 2.5 JSDoc citing this story key, FR40a, the v1 heuristic taxonomy, and a note that additive change types require a coordinated spec-schema edit.
-  - [ ] 2.6 Create `plugins/crew/mcp-server/src/lib/__tests__/detect-change-types.test.ts` covering AC4 sub-case (4j).
+  - [ ] 2.6 Create `plugins/flow/mcp-server/src/lib/__tests__/detect-change-types.test.ts` covering AC4 sub-case (4j).
 
 - [ ] **Task 3: `matchRules` helper** (AC: #1)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/match-rules.ts`.
+  - [ ] 3.1 Create `plugins/flow/mcp-server/src/lib/match-rules.ts`.
   - [ ] 3.2 Export `matchRule(rule: Rule, ctx: { changedPaths: string[]; detectedChangeTypes: ChangeType[]; diffSize: number }): { matched: boolean; matchedPaths: string[] }`.
   - [ ] 3.3 Implement the three-signal AND-combination per AC1 unpacked (1d). When `path_patterns` matches, `matchedPaths` is the subset of `changedPaths` that hit ANY pattern; otherwise `matchedPaths` is `[]` (the caller fills paths from change-type detection on a `change_types`-only match — see Task 4.4).
   - [ ] 3.4 Use `picomatch` with default options (`dot: false`). Reuse a per-rule compiled matcher (compile once per `path_patterns` array, reuse for the matcher's lifetime) — not cached across rules.
   - [ ] 3.5 JSDoc citing this story key, Pattern §11, AND-combination semantics.
-  - [ ] 3.6 Create `plugins/crew/mcp-server/src/lib/__tests__/match-rules.test.ts` covering AC4 sub-case (4k).
+  - [ ] 3.6 Create `plugins/flow/mcp-server/src/lib/__tests__/match-rules.test.ts` covering AC4 sub-case (4k).
 
 - [ ] **Task 4: `classifyRiskTier` MCP tool** (AC: #1, #2)
-  - [ ] 4.1 Create `plugins/crew/mcp-server/src/tools/classify-risk-tier.ts`.
+  - [ ] 4.1 Create `plugins/flow/mcp-server/src/tools/classify-risk-tier.ts`.
   - [ ] 4.2 Export a Zod schema `RiskTierClassifierResultSchema` matching the Pattern §11 output (1b). `.strict()` on every level. Also export `RiskTierBlockSchema = RiskTierClassifierResultSchema.omit({ story_id: true })` — the on-disk shape used inside `reviewer-result.json` (where `ref` is the canonical story id at the file's top level). `read-reviewer-result-file.ts` (Task 6) consumes `RiskTierBlockSchema`; the tool's own return value uses `RiskTierClassifierResultSchema`.
   - [ ] 4.3 Implement the algorithm:
     1. Call `lookupRiskTieringSpec({ targetRepoRoot, pluginRoot })`.
@@ -325,10 +325,10 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
     4. If no rule matches across all tiers, return `{ story_id, tier: spec.fallback_tier, matched_rule: "fallback", evidence: { paths: [], change_types: <detected, sorted>, diff_size } }`.
   - [ ] 4.4 Add a small helper `pathsContributingToChangeTypes(changedPaths, changeTypes): string[]` (also exported, internal) that for a given subset of detected change types returns the changed paths that triggered those types. Used for the `change_types`-only match's `evidence.paths`. The implementation reuses the same path-classification logic from `detectChangeTypes` (refactor `detectChangeTypes` to expose a per-path classifier internally, or duplicate the predicates — choose whichever keeps the file under ~150 lines).
   - [ ] 4.5 JSDoc citing this story key, FR40a, FR40a fallback, Pattern §11, the highest-tier-wins contract, and the no-typed-errors-of-its-own clause (propagates `lookupRiskTieringSpec`'s errors verbatim).
-  - [ ] 4.6 Create `plugins/crew/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts` covering AC4 sub-cases (4b)–(4f), (4l), (4m).
+  - [ ] 4.6 Create `plugins/flow/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts` covering AC4 sub-cases (4b)–(4f), (4l), (4m).
 
 - [ ] **Task 5: Extend `ExecutionManifestSchema`** (AC: #3)
-  - [ ] 5.1 In `plugins/crew/mcp-server/src/schemas/execution-manifest.ts`, append two optional fields after `rework_count`:
+  - [ ] 5.1 In `plugins/flow/mcp-server/src/schemas/execution-manifest.ts`, append two optional fields after `rework_count`:
     - `risk_tier: z.enum(["low", "medium", "high"]).optional()` — the classifier's tier verdict.
     - `risk_tier_evidence: z.object({ matched_rule: z.string().min(1), paths: z.array(z.string()).default([]), change_types: z.array(ChangeTypeSchema).default([]), diff_size: z.number().int().nonnegative() }).strict().optional()` — the evidence block.
   - [ ] 5.2 Import `ChangeTypeSchema` from `./risk-tiering-spec.js` (Story 4.9). Single source of truth for the four literals.
@@ -336,12 +336,12 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 5.4 No new typed error; the existing `MalformedExecutionManifestError` covers schema-parse failures.
 
 - [ ] **Task 6: Extend `reviewer-result.json` parser** (AC: #3)
-  - [ ] 6.1 In `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`, extend the parsed shape with an optional `riskTier` block matching Pattern §11.
+  - [ ] 6.1 In `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`, extend the parsed shape with an optional `riskTier` block matching Pattern §11.
   - [ ] 6.2 Use `RiskTierBlockSchema` (exported from `tools/classify-risk-tier.ts` per Task 4.2 — the `.omit({ story_id: true })` derivation of `RiskTierClassifierResultSchema`) for the validation; on `riskTier` present, parse via `.safeParse`; on failure raise the existing `ReviewerResultFileMalformedError` with an explanatory message.
   - [ ] 6.3 Backward-compat: absent `riskTier` block is allowed (legacy fixtures and pre-this-story session results).
 
 - [ ] **Task 7: Wire `classifyRiskTier` into `runReviewerSession`** (AC: #3, declared-exception edit to a locked file)
-  - [ ] 7.1 In `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`, after the existing AC-walk and standards-walk and BEFORE writing `reviewer-result.json`:
+  - [ ] 7.1 In `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`, after the existing AC-walk and standards-walk and BEFORE writing `reviewer-result.json`:
     - Collect `changedPaths` from the existing `gh pr diff --name-only` output (or parse the `gh pr diff` output's `+++ b/<path>` lines if `--name-only` isn't already available).
     - Collect `commitMessages` from `gh pr view --json commits --jq '[.commits[].messageHeadline]'`.
     - Compute `diffSize` from the unified diff: sum of lines starting with `+` or `-` (excluding `+++` and `---` headers). Use the existing `prDiff` string already in scope.
@@ -352,13 +352,13 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 7.5 No SKILL.md changes — `runReviewerSession` is already the reviewer subagent's gate.
 
 - [ ] **Task 8: Render evidence block in `composeSummaryBody`** (AC: #3, declared-exception edit)
-  - [ ] 8.1 In `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`, locate the `composeSummaryBody` function.
+  - [ ] 8.1 In `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`, locate the `composeSummaryBody` function.
   - [ ] 8.2 After the version block and BEFORE the footer marker, append the evidence block per AC3 unpacked (3f) — verbatim format. Implementation: helper function `composeRiskTierEvidenceBlock(riskTier: RiskTierClassifierResult | undefined): string` that returns `""` when undefined, else the formatted block.
   - [ ] 8.3 Update `composeSummaryBody`'s callers (currently a single call site inside `postReviewerComments`) to pass `resultFile.riskTier`.
   - [ ] 8.4 Preserve the existing `<!-- crew:verdict:<plugin-version>:<story-id> -->` footer marker location — the block appears BEFORE the marker, not after.
 
 - [ ] **Task 9: Stamp manifest in `postReviewerComments`** (AC: #3, declared-exception edit)
-  - [ ] 9.1 In `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`, after the POST/PATCH success path AND after the `emitVerdictTelemetry` call (Story 4.12 seam), call a new internal helper `stampRiskTierOnManifest(targetRepoRoot, ref, resultFile.riskTier)`.
+  - [ ] 9.1 In `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`, after the POST/PATCH success path AND after the `emitVerdictTelemetry` call (Story 4.12 seam), call a new internal helper `stampRiskTierOnManifest(targetRepoRoot, ref, resultFile.riskTier)`.
   - [ ] 9.2 The helper:
     - If `riskTier` is undefined, return immediately (no-op).
     - Else read the in-progress manifest, set `risk_tier` and `risk_tier_evidence`, write back via `writeManifest`.
@@ -366,20 +366,20 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 9.3 The helper lives in the same file (`post-reviewer-comments.ts`) as a local function — keeps the stamping logic at the same seam as the body composition.
 
 - [ ] **Task 10: Register `classifyRiskTier`** (AC: all)
-  - [ ] 10.1 Register `classifyRiskTier` in `plugins/crew/mcp-server/src/tools/register.ts`. Bump tool-count assertion (per Story 4.11 left it at 28; this story moves it to 29).
+  - [ ] 10.1 Register `classifyRiskTier` in `plugins/flow/mcp-server/src/tools/register.ts`. Bump tool-count assertion (per Story 4.11 left it at 28; this story moves it to 29).
   - [ ] 10.2 Do NOT add `classifyRiskTier` to any `permissions/*.yaml`. The reviewer subagent never calls it directly; `runReviewerSession` (already in `permissions/generalist-reviewer.yaml`) calls it via internal import.
 
 - [ ] **Task 11: Integration test suite** (AC: #4)
-  - [ ] 11.1 Create or extend `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (or a sibling file) with AC4 sub-cases (4g), (4h), (4i).
+  - [ ] 11.1 Create or extend `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (or a sibling file) with AC4 sub-cases (4g), (4h), (4i).
   - [ ] 11.2 All tmpdir fixtures MUST use `await fs.mkdtemp(path.join(os.tmpdir(), "classify-risk-tier-"))` — never bare string concat, never `${os.tmpdir()}/foo` interpolation. (Pre-empt Story 4-9 / 4-12 validator catch.)
   - [ ] 11.3 Zod-error-message assertions, if any, MUST use Zod 4.x output format (`"Invalid option"` not v3's `"Invalid enum value"`); literal custom errors use `{ message: "..." }` form not v3's `errorMap`. (Pre-empt Story 4-9 / 4-12 validator catch.)
   - [ ] 11.4 The byte-stability assertion (4l) is critical for verdict-marker idempotency — do not skip.
 
 - [ ] **Task 12: Build, vitest, dist** (AC: all)
-  - [ ] 12.1 `pnpm --dir plugins/crew/mcp-server install` (must succeed with the new picomatch dep).
-  - [ ] 12.2 `pnpm --dir plugins/crew/mcp-server build` passes with no TypeScript errors.
-  - [ ] 12.3 `pnpm --dir plugins/crew/mcp-server test` passes — existing tests from prior stories + new tests added here.
-  - [ ] 12.4 Commit `plugins/crew/mcp-server/dist/` with rebuilt output.
+  - [ ] 12.1 `pnpm --dir plugins/flow/mcp-server install` (must succeed with the new picomatch dep).
+  - [ ] 12.2 `pnpm --dir plugins/flow/mcp-server build` passes with no TypeScript errors.
+  - [ ] 12.3 `pnpm --dir plugins/flow/mcp-server test` passes — existing tests from prior stories + new tests added here.
+  - [ ] 12.4 Commit `plugins/flow/mcp-server/dist/` with rebuilt output.
   - [ ] 12.5 No leftover `TODO(4.9b)` / `TODO(4-9b)` comments in any touched source file.
 
 ---
@@ -434,31 +434,31 @@ A rule declaring `path_patterns: ["package.json"]` matches ONLY the literal `pac
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The classifier runs inside `runReviewerSession`, which is already wired into the reviewer subagent's spawn path; no SKILL.md edit is required.
-- `plugins/crew/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify.
-- `plugins/crew/mcp-server/src/schemas/risk-tiering-spec.ts` (Story 4.9) — DO NOT modify. The spec format is pinned by 4.9; this story is a pure consumer. Import `ChangeTypeSchema` and `RiskTieringSpec` from it.
-- `plugins/crew/mcp-server/src/state/lookup-risk-tiering-spec.ts` (Story 4.9) — DO NOT modify. Consumed as-is.
-- `plugins/crew/mcp-server/src/validators/risk-tiering-spec.ts` (Story 4.9) — DO NOT modify.
-- `plugins/crew/docs/risk-tiering.md` (Story 4.9) — DO NOT modify. The shipped default rule set is intentionally minimal; rule expansion is a separate content-drafting pass.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — DO NOT modify. The reviewer-transcript routing path is unrelated to risk classification.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/skills/yield-parser.ts` (Story 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. Label routing is 4.8's job; risk tier is 4.10b's consumer.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11) — DO NOT modify. The classifier is not a subagent-callable tool surface in v1.
-- `plugins/crew/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. No new telemetry event in this story.
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The classifier runs inside `runReviewerSession`, which is already wired into the reviewer subagent's spawn path; no SKILL.md edit is required.
+- `plugins/flow/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify.
+- `plugins/flow/mcp-server/src/schemas/risk-tiering-spec.ts` (Story 4.9) — DO NOT modify. The spec format is pinned by 4.9; this story is a pure consumer. Import `ChangeTypeSchema` and `RiskTieringSpec` from it.
+- `plugins/flow/mcp-server/src/state/lookup-risk-tiering-spec.ts` (Story 4.9) — DO NOT modify. Consumed as-is.
+- `plugins/flow/mcp-server/src/validators/risk-tiering-spec.ts` (Story 4.9) — DO NOT modify.
+- `plugins/flow/docs/risk-tiering.md` (Story 4.9) — DO NOT modify. The shipped default rule set is intentionally minimal; rule expansion is a separate content-drafting pass.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2) — DO NOT modify. The reviewer-transcript routing path is unrelated to risk classification.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/skills/yield-parser.ts` (Story 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. Label routing is 4.8's job; risk tier is 4.10b's consumer.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11) — DO NOT modify. The classifier is not a subagent-callable tool surface in v1.
+- `plugins/flow/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. No new telemetry event in this story.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/schemas/execution-manifest.ts`** (Story 3.2 / 3.5 / 4.1; locked-by-default because the manifest schema is contract surface) — Task 5 appends two optional fields (`risk_tier`, `risk_tier_evidence`) at the end of the schema. Additive-extension pattern: existing manifests continue to parse; new fields are optional; field placement at the end preserves existing on-disk YAML field order for un-classified manifests. No existing field is touched.
-- **`plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6; locked due to deterministic-verdict-transport contract) — Task 7 adds a classifier call inside the existing reviewer pass and attaches `riskTier` to the persisted `reviewer-result.json`. The verdict-transport contract (`recommendedVerdict` remains the binding verdict surface) is unchanged; `riskTier` is an additive sibling field that downstream consumers may or may not read. The classifier call is wrapped in try/catch so a malformed spec does not break the reviewer pass.
-- **`plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b / 4.7 / 4.12; locked due to verdict-marker idempotency contract) — Tasks 8 + 9 extend `composeSummaryBody` with the evidence block (rendered between version block and footer marker; the locked marker placement is preserved) and add an in-tool helper to stamp the manifest after POST/PATCH success. Both edits are additive; the verdict-marker idempotency behaviour is unchanged because the evidence block is byte-stable (AC1i sorting) so a re-run renders identically and the find-and-edit path treats it as a no-op edit.
-- **`plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`** (Story 4.6 / 4.6b / 4.7; locked because it defines the reviewer-result file contract) — Task 6 adds an optional `riskTier` block to the parsed shape with backward-compat (absent block allowed). Existing readers see no behavioural change.
-- **`plugins/crew/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 10 registers `classifyRiskTier`. Bump tool-count assertion 28 → 29 in any test that pins it.
-- **`plugins/crew/mcp-server/package.json`** and **`plugins/crew/mcp-server/pnpm-lock.yaml`** — Task 1 adds `picomatch` + `@types/picomatch`. Routine dependency addition; resolve via `pnpm add`, do NOT hand-pick the version.
+- **`plugins/flow/mcp-server/src/schemas/execution-manifest.ts`** (Story 3.2 / 3.5 / 4.1; locked-by-default because the manifest schema is contract surface) — Task 5 appends two optional fields (`risk_tier`, `risk_tier_evidence`) at the end of the schema. Additive-extension pattern: existing manifests continue to parse; new fields are optional; field placement at the end preserves existing on-disk YAML field order for un-classified manifests. No existing field is touched.
+- **`plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6; locked due to deterministic-verdict-transport contract) — Task 7 adds a classifier call inside the existing reviewer pass and attaches `riskTier` to the persisted `reviewer-result.json`. The verdict-transport contract (`recommendedVerdict` remains the binding verdict surface) is unchanged; `riskTier` is an additive sibling field that downstream consumers may or may not read. The classifier call is wrapped in try/catch so a malformed spec does not break the reviewer pass.
+- **`plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b / 4.7 / 4.12; locked due to verdict-marker idempotency contract) — Tasks 8 + 9 extend `composeSummaryBody` with the evidence block (rendered between version block and footer marker; the locked marker placement is preserved) and add an in-tool helper to stamp the manifest after POST/PATCH success. Both edits are additive; the verdict-marker idempotency behaviour is unchanged because the evidence block is byte-stable (AC1i sorting) so a re-run renders identically and the find-and-edit path treats it as a no-op edit.
+- **`plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`** (Story 4.6 / 4.6b / 4.7; locked because it defines the reviewer-result file contract) — Task 6 adds an optional `riskTier` block to the parsed shape with backward-compat (absent block allowed). Existing readers see no behavioural change.
+- **`plugins/flow/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 10 registers `classifyRiskTier`. Bump tool-count assertion 28 → 29 in any test that pins it.
+- **`plugins/flow/mcp-server/package.json`** and **`plugins/flow/mcp-server/pnpm-lock.yaml`** — Task 1 adds `picomatch` + `@types/picomatch`. Routine dependency addition; resolve via `pnpm add`, do NOT hand-pick the version.
 
 ---
 
@@ -466,25 +466,25 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/detect-change-types.ts` (Task 2)
-- `plugins/crew/mcp-server/src/lib/__tests__/detect-change-types.test.ts` (Task 2.6)
-- `plugins/crew/mcp-server/src/lib/match-rules.ts` (Task 3)
-- `plugins/crew/mcp-server/src/lib/__tests__/match-rules.test.ts` (Task 3.6)
-- `plugins/crew/mcp-server/src/tools/classify-risk-tier.ts` (Task 4)
-- `plugins/crew/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts` (Task 4.6)
+- `plugins/flow/mcp-server/src/lib/detect-change-types.ts` (Task 2)
+- `plugins/flow/mcp-server/src/lib/__tests__/detect-change-types.test.ts` (Task 2.6)
+- `plugins/flow/mcp-server/src/lib/match-rules.ts` (Task 3)
+- `plugins/flow/mcp-server/src/lib/__tests__/match-rules.test.ts` (Task 3.6)
+- `plugins/flow/mcp-server/src/tools/classify-risk-tier.ts` (Task 4)
+- `plugins/flow/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts` (Task 4.6)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/package.json` — Task 1.1 (add picomatch).
-- `plugins/crew/mcp-server/pnpm-lock.yaml` — Task 1.1 (resolved lockfile).
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — Task 5.
-- `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` — Task 6.
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` — Task 7.
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` — Tasks 8 + 9.
-- `plugins/crew/mcp-server/src/tools/register.ts` — Task 10.
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (or sibling) — Task 11 sub-cases (4g)–(4i).
+- `plugins/flow/mcp-server/package.json` — Task 1.1 (add picomatch).
+- `plugins/flow/mcp-server/pnpm-lock.yaml` — Task 1.1 (resolved lockfile).
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — Task 5.
+- `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` — Task 6.
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` — Task 7.
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` — Tasks 8 + 9.
+- `plugins/flow/mcp-server/src/tools/register.ts` — Task 10.
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (or sibling) — Task 11 sub-cases (4g)–(4i).
 - Any existing test files pinning the tool-count assertion (search for `\.toHaveLength\(28\)` / `\.toBe\(28\)` in `__tests__/`) — Task 10.1.
-- `plugins/crew/mcp-server/dist/` — Task 12.4 (rebuilt output committed).
+- `plugins/flow/mcp-server/dist/` — Task 12.4 (rebuilt output committed).
 
 ### Conventions to pre-empt validator catches
 

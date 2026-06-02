@@ -7,7 +7,7 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin maintainer**,
-I want **a same-filesystem `fs.rename` helper that guarantees never-two-states-at-once for any file under `<targetRepoRoot>/.crew/state/{to-do,in-progress,blocked,done}/`**,
+I want **a same-filesystem `fs.rename` helper that guarantees never-two-states-at-once for any file under `<targetRepoRoot>/.flow/state/{to-do,in-progress,blocked,done}/`**,
 so that **the dev/orchestration epics can build on a single trusted state-transition primitive that satisfies NFR8 (atomic state transitions) and NFR9 (no state corruption from agent failure) by construction, not by convention**.
 
 This story lands the **third "single write path" primitive** of Epic 1 — alongside `writeManagedFile` (1.4 — canonical-content writes) and `logTelemetryEvent` / `gitCommit` (1.5 — telemetry + plugin-side commits). The shape mirrors the previous two:
@@ -26,9 +26,9 @@ The seam: every future MCP tool that transitions a manifest between states calls
 ## Acceptance Criteria
 
 **AC1 — A move between two canonical state directories is a single `fs.rename` syscall (NFR8):**
-**Given** a target-repo tree with `<targetRepoRoot>/.crew/state/to-do/bmad:1.2.3.yaml` present,
+**Given** a target-repo tree with `<targetRepoRoot>/.flow/state/to-do/bmad:1.2.3.yaml` present,
 **When** `moveBetweenStates({ targetRepoRoot, ref: "bmad:1.2.3", from: "to-do", to: "in-progress" })` is called,
-**Then** the implementation performs exactly **one** `fs.rename` (or `fs.promises.rename`) syscall against the absolute source path `<targetRepoRoot>/.crew/state/to-do/bmad:1.2.3.yaml` and absolute destination path `<targetRepoRoot>/.crew/state/in-progress/bmad:1.2.3.yaml`,
+**Then** the implementation performs exactly **one** `fs.rename` (or `fs.promises.rename`) syscall against the absolute source path `<targetRepoRoot>/.flow/state/to-do/bmad:1.2.3.yaml` and absolute destination path `<targetRepoRoot>/.flow/state/in-progress/bmad:1.2.3.yaml`,
 **And** no `copyFile` / `readFile` / `writeFile` / `unlink` / `cp` / `link` is invoked as part of the move (verified by an `fsImpl` spy seam — see AC6a),
 **And** the destination directory is ensured to exist via `fs.mkdir(destDir, { recursive: true })` BEFORE the rename (NOT after; `fs.rename` requires the destination's parent to exist),
 **And** the function returns `{ from, to, ref, absFromPath, absToPath }` for caller observability.
@@ -50,23 +50,23 @@ The seam: every future MCP tool that transitions a manifest between states calls
 **And** the test deterministically seeds its PRNG (e.g. `mulberry32(0xCAFEBABE)`) so the same sequence runs in CI every time — chaos in distribution, deterministic in trace (NFR9 measurement style mirrors this).
 
 **AC4 — `moveBetweenStates` refuses paths outside the canonical state tree:**
-**Given** the canonical state-directory whitelist `{"to-do", "in-progress", "blocked", "done"}` and the canonical parent `<targetRepoRoot>/.crew/state/`,
+**Given** the canonical state-directory whitelist `{"to-do", "in-progress", "blocked", "done"}` and the canonical parent `<targetRepoRoot>/.flow/state/`,
 **When** a caller passes `from` or `to` that is not one of the four whitelisted states (e.g. `"archive"` or `"to-do/../../etc"`),
 **Then** the function throws `InvalidStateNameError` carrying `{ attemptedFrom, attemptedTo, allowedStates }` **before any filesystem operation**,
-**And** when the resolved absolute path of either side escapes `<targetRepoRoot>/.crew/state/` (caught via `path.relative(stateRoot, absPath).startsWith("..")`), the function throws `InvalidStateNameError` with `reason: "path escapes state root"` — also before any filesystem operation.
+**And** when the resolved absolute path of either side escapes `<targetRepoRoot>/.flow/state/` (caught via `path.relative(stateRoot, absPath).startsWith("..")`), the function throws `InvalidStateNameError` with `reason: "path escapes state root"` — also before any filesystem operation.
 
 **AC5 — `ENOENT` on the source resolves to a typed `ManifestNotFoundError` (not a generic Node error):**
-**Given** a target-repo tree where `<targetRepoRoot>/.crew/state/to-do/missing-ref.yaml` does NOT exist,
+**Given** a target-repo tree where `<targetRepoRoot>/.flow/state/to-do/missing-ref.yaml` does NOT exist,
 **When** `moveBetweenStates({ targetRepoRoot, ref: "missing-ref", from: "to-do", to: "in-progress" })` is called,
 **Then** the function throws `ManifestNotFoundError` carrying `{ ref, expectedAbsPath, fromState }`,
 **And** the underlying `ENOENT` error code is the **only** mapped Node errno that produces this typed error (any other `fs.rename` rejection bubbles up unchanged, so genuinely unexpected failures are not masked).
 
 **AC6 — Vitest covers the enforcement paths (epic AC3, integration):**
-`pnpm test` from `plugins/crew/` adds one new test file (`mcp-server/tests/manifest-state-machine.test.ts`) and extends `tests/canonical-fs-guard.test.ts` with a new `describe("static direct-rename guard (Story 1.6)", () => { … })` block. The combined suite asserts:
-- **AC6a (happy-path single syscall):** Pre-seed `<root>/.crew/state/to-do/bmad:1.0.0.yaml` with body `"# manifest body\n"`. Call `moveBetweenStates({ targetRepoRoot: root, ref: "bmad:1.0.0", from: "to-do", to: "in-progress", fsImpl: spy })`. Assert: (i) `spy.rename` (or equivalent) called exactly once with the expected absolute source/destination, (ii) no `copyFile` / `readFile` / `writeFile` / `unlink` on the `spy`, (iii) `<root>/.crew/state/in-progress/bmad:1.0.0.yaml` now exists with body `"# manifest body\n"`, (iv) `<root>/.crew/state/to-do/bmad:1.0.0.yaml` no longer exists, (v) the return value matches `{ from: "to-do", to: "in-progress", ref: "bmad:1.0.0", absFromPath, absToPath }`.
-- **AC6b (destination parent dir created if missing):** Pre-seed `<root>/.crew/state/to-do/bmad:1.0.1.yaml` only — the `in-progress/` directory does NOT exist. Call `moveBetweenStates({ … from: "to-do", to: "in-progress" })`. Assert: (i) the call resolves successfully, (ii) `<root>/.crew/state/in-progress/` exists as a directory after the call, (iii) the file lives at `<root>/.crew/state/in-progress/bmad:1.0.1.yaml`.
+`pnpm test` from `plugins/flow/` adds one new test file (`mcp-server/tests/manifest-state-machine.test.ts`) and extends `tests/canonical-fs-guard.test.ts` with a new `describe("static direct-rename guard (Story 1.6)", () => { … })` block. The combined suite asserts:
+- **AC6a (happy-path single syscall):** Pre-seed `<root>/.flow/state/to-do/bmad:1.0.0.yaml` with body `"# manifest body\n"`. Call `moveBetweenStates({ targetRepoRoot: root, ref: "bmad:1.0.0", from: "to-do", to: "in-progress", fsImpl: spy })`. Assert: (i) `spy.rename` (or equivalent) called exactly once with the expected absolute source/destination, (ii) no `copyFile` / `readFile` / `writeFile` / `unlink` on the `spy`, (iii) `<root>/.flow/state/in-progress/bmad:1.0.0.yaml` now exists with body `"# manifest body\n"`, (iv) `<root>/.flow/state/to-do/bmad:1.0.0.yaml` no longer exists, (v) the return value matches `{ from: "to-do", to: "in-progress", ref: "bmad:1.0.0", absFromPath, absToPath }`.
+- **AC6b (destination parent dir created if missing):** Pre-seed `<root>/.flow/state/to-do/bmad:1.0.1.yaml` only — the `in-progress/` directory does NOT exist. Call `moveBetweenStates({ … from: "to-do", to: "in-progress" })`. Assert: (i) the call resolves successfully, (ii) `<root>/.flow/state/in-progress/` exists as a directory after the call, (iii) the file lives at `<root>/.flow/state/in-progress/bmad:1.0.1.yaml`.
 - **AC6c (`EXDEV` cross-filesystem):** Inject an `fsImpl` whose `rename` rejects with `Object.assign(new Error("EXDEV"), { code: "EXDEV" })`. Pre-seed the source on the real fs. Call `moveBetweenStates(...)`. Assert: (i) the call rejects with `CrossFilesystemMoveError`, (ii) `spy.copyFile` / `spy.readFile` / `spy.writeFile` / `spy.unlink` were called **zero times**, (iii) the source file is still present at its original location, (iv) the destination file does not exist.
-- **AC6d (`ENOENT` source missing):** No seed. Call `moveBetweenStates({ … ref: "ghost", from: "to-do", to: "in-progress" })`. Assert: (i) the call rejects with `ManifestNotFoundError`, (ii) the `.expectedAbsPath` field on the error matches `<root>/.crew/state/to-do/ghost.yaml`, (iii) no destination file exists.
+- **AC6d (`ENOENT` source missing):** No seed. Call `moveBetweenStates({ … ref: "ghost", from: "to-do", to: "in-progress" })`. Assert: (i) the call rejects with `ManifestNotFoundError`, (ii) the `.expectedAbsPath` field on the error matches `<root>/.flow/state/to-do/ghost.yaml`, (iii) no destination file exists.
 - **AC6e (invalid state name — before any IO):** Call `moveBetweenStates({ … from: "to-do", to: "archive" as any })` with an `fsImpl` spy. Assert: (i) the call rejects with `InvalidStateNameError`, (ii) every `spy.*` method called **zero times** (no `mkdir`, no `rename`, no `stat`). Repeat with `from: "to-do/../../etc" as any` — same expectation, with `reason: "path escapes state root"`.
 - **AC6f (chaos — 1,000 random valid moves, no two-states-at-once):** Pre-seed 16 manifests across the four state directories with the deterministic PRNG above. Drive 1,000 random `(ref, fromState→toState)` transitions where `fromState` is the ref's currently-observed state. Use `Promise.allSettled` batches of 8 to introduce concurrency. After each batch, walk all four state directories and assert: (a) `count(allRefs) === 16`, (b) `forall ref in refs: countAcrossDirs(ref) === 1`. After all 1,000 moves, assert the same invariants once more. Deterministic seed: any 32-bit constant chosen by the dev (document it in the test). Expected runtime: <2s on a modern machine; if it exceeds 10s, reduce iteration count to 500 and document — the structural assertion is what matters, not the magic 1,000 number (the epic line cites 1,000 as a target, not a contractual minimum).
 - **AC6g (static direct-rename guard):** In `canonical-fs-guard.test.ts`, append a third `describe(...)` block that walks `mcp-server/src/**/*.ts`, skips `state/manifest-state-machine.ts`, and asserts no other file matches `\brename(Sync)?\s*\(` against a state-machine path. Pattern: scan for `fs.rename` / `fs.renameSync` / `fs.promises.rename` / `await rename(` / `renameSync(` invocations, OR named/namespace imports of `rename` / `renameSync` from `node:fs` / `node:fs/promises`. Re-use the existing `walkTs`, `BANNED_WRITE_BINDINGS`-style approach. Pass with `expect(offences).toEqual([])` — same shape as the existing `gh`-spawn and `git`-spawn guards.
@@ -78,9 +78,9 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Typed errors** (AC: 2, 4, 5, 6c, 6d, 6e)
-  - [ ] Edit `plugins/crew/mcp-server/src/errors.ts`. Append at the bottom of the file, after `GitCommitMessageMalformedError`. Match the existing JSDoc / constructor-options-bag style. Subclass `DomainError`. Do NOT manually set `this.name` (the base class handles it).
+  - [ ] Edit `plugins/flow/mcp-server/src/errors.ts`. Append at the bottom of the file, after `GitCommitMessageMalformedError`. Match the existing JSDoc / constructor-options-bag style. Subclass `DomainError`. Do NOT manually set `this.name` (the base class handles it).
   - [ ] `CrossFilesystemMoveError` — fields: `absFromPath: string`, `absToPath: string`, `ref: string`, `originalCode: string`. Constructor composes:
-    > `Cross-filesystem move refused for manifest '<ref>': fs.rename returned <originalCode>. from='<absFromPath>', to='<absToPath>'. v1 explicitly does not support cross-filesystem moves (NFR8 — single-syscall atomicity). Place the target repo on a single filesystem, or align the .crew/state/ tree with the repo root. (Story 1.6 AC2)`
+    > `Cross-filesystem move refused for manifest '<ref>': fs.rename returned <originalCode>. from='<absFromPath>', to='<absToPath>'. v1 explicitly does not support cross-filesystem moves (NFR8 — single-syscall atomicity). Place the target repo on a single filesystem, or align the .flow/state/ tree with the repo root. (Story 1.6 AC2)`
   - [ ] `ManifestNotFoundError` — fields: `ref: string`, `expectedAbsPath: string`, `fromState: string`. Constructor composes:
     > `Manifest '<ref>' not found at '<expectedAbsPath>' (expected in state '<fromState>'). A move was requested but the source file does not exist. This typically means the manifest was already transitioned by another session, or the ref was never claimed. (Story 1.6 AC5)`
   - [ ] `InvalidStateNameError` — fields: `attemptedFrom: string`, `attemptedTo: string`, `allowedStates: readonly string[]`, `reason: string`. Constructor composes:
@@ -89,7 +89,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] Do **not** touch any of the existing classes. Their wording is asserted by 1.1–1.5 tests.
 
 - [ ] **Task 2 — The primitive: `moveBetweenStates`** (AC: 1, 2, 4, 5, 6a, 6b, 6c, 6d, 6e)
-  - [ ] Create `plugins/crew/mcp-server/src/state/manifest-state-machine.ts`. (This is the exact path pinned by `architecture/project-structure-boundaries.md` line 97.)
+  - [ ] Create `plugins/flow/mcp-server/src/state/manifest-state-machine.ts`. (This is the exact path pinned by `architecture/project-structure-boundaries.md` line 97.)
   - [ ] Export a single async function:
     `moveBetweenStates(opts: { targetRepoRoot: string; ref: string; from: StateName; to: StateName; fsImpl?: FsImpl }): Promise<MoveResult>`
     - `StateName = "to-do" | "in-progress" | "blocked" | "done"`
@@ -99,7 +99,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] Export the `STATE_NAMES` constant: `export const STATE_NAMES = ["to-do", "in-progress", "blocked", "done"] as const` and `export type StateName = (typeof STATE_NAMES)[number]`. Re-used by tests and (in later epics) by MCP tool argument schemas.
   - [ ] Algorithm (do NOT deviate from this order — the order is itself a correctness invariant):
     1. **Validate state names.** If `from` or `to` is not in `STATE_NAMES`, throw `InvalidStateNameError({ attemptedFrom: from, attemptedTo: to, allowedStates: STATE_NAMES, reason: "unknown state name" })`. **Do not** touch the filesystem.
-    2. **Compute paths.** `stateRoot = path.join(targetRepoRoot, ".crew", "state")`. `absFromPath = path.join(stateRoot, from, ref + ".yaml")`. `absToPath = path.join(stateRoot, to, ref + ".yaml")`. **Do not** touch the filesystem yet.
+    2. **Compute paths.** `stateRoot = path.join(targetRepoRoot, ".flow", "state")`. `absFromPath = path.join(stateRoot, from, ref + ".yaml")`. `absToPath = path.join(stateRoot, to, ref + ".yaml")`. **Do not** touch the filesystem yet.
     3. **Path-escape check.** For each of `absFromPath` and `absToPath`, compute `rel = path.relative(stateRoot, absPath)` and assert `!rel.startsWith("..") && !path.isAbsolute(rel)`. If either fails, throw `InvalidStateNameError({ ..., reason: "path escapes state root" })`. (Defends against `ref` values like `../../etc/passwd` — though MCP tool boundaries will also validate `ref` shape in later epics, this primitive is the last line of defense.)
     4. **Ensure destination directory exists.** `await fsImpl.mkdir(path.dirname(absToPath), { recursive: true })`. Required because `fs.rename` itself does not create parent directories — and AC6b explicitly tests the create-on-demand path.
     5. **Single rename syscall.** `try { await fsImpl.rename(absFromPath, absToPath); } catch (err) { … }`.
@@ -116,7 +116,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Do not** import a write-shaped `fs` binding (`writeFile`, `appendFile`, etc.). This file is NOT on the `FS_WRITE_WHITELIST` from 1.4/1.5. Only `rename` / `mkdir` / `stat` from `node:fs/promises`.
 
 - [ ] **Task 3 — Extend canonical-fs guard with direct-`rename` ban** (AC: 6g)
-  - [ ] Edit `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`. Append a new `describe("static direct-rename guard (Story 1.6 AC6g)", () => { … })` block at the bottom of the file (after the `git`-spawn guard added in 1.5).
+  - [ ] Edit `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`. Append a new `describe("static direct-rename guard (Story 1.6 AC6g)", () => { … })` block at the bottom of the file (after the `git`-spawn guard added in 1.5).
   - [ ] Define `RENAME_WRAPPER = path.join(SRC_DIR, "state", "manifest-state-machine.ts")`.
   - [ ] Walk `mcp-server/src/**/*.ts` via the existing `walkTs(SRC_DIR)` helper. Skip `RENAME_WRAPPER`.
   - [ ] For each remaining file, parse imports using the same regex shape already in the file. Flag as offences any:
@@ -129,32 +129,32 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
   - [ ] **Verify** post-change: the existing AC5c and AC5b (and 1.5's git-spawn) static-guard blocks all still pass. Run `pnpm test` once before commit.
 
 - [ ] **Task 4 — Authored vitest suite** (AC: 1–6 except 6g, which lives in canonical-fs-guard.test.ts)
-  - [ ] Create `plugins/crew/mcp-server/tests/manifest-state-machine.test.ts`. Use `fs.mkdtemp(path.join(os.tmpdir(), "manifest-state-"))` for each test's target repo. Clean up in `afterAll` (mirror the canonical-fs-guard.test.ts pattern).
+  - [ ] Create `plugins/flow/mcp-server/tests/manifest-state-machine.test.ts`. Use `fs.mkdtemp(path.join(os.tmpdir(), "manifest-state-"))` for each test's target repo. Clean up in `afterAll` (mirror the canonical-fs-guard.test.ts pattern).
   - [ ] **AC6a — happy path:**
-    - Set up: pre-seed `<root>/.crew/state/to-do/bmad:1.0.0.yaml` with body `"# manifest body\n"` (use `fs.mkdir({ recursive: true })` + `fs.writeFile` from the test — the test code is allowed to write; only `mcp-server/src/**` is guarded).
+    - Set up: pre-seed `<root>/.flow/state/to-do/bmad:1.0.0.yaml` with body `"# manifest body\n"` (use `fs.mkdir({ recursive: true })` + `fs.writeFile` from the test — the test code is allowed to write; only `mcp-server/src/**` is guarded).
     - Build a `vi.fn()` triple for `fsImpl`: `{ rename: vi.fn(realFs.rename), mkdir: vi.fn(realFs.mkdir), stat: vi.fn(realFs.stat) }` — proxy through to the real implementations so the move actually happens, but you can assert on call counts.
     - Call `moveBetweenStates({ targetRepoRoot: root, ref: "bmad:1.0.0", from: "to-do", to: "in-progress", fsImpl: spy })`.
     - Assert: `spy.rename` called exactly once with `[expectedAbsFrom, expectedAbsTo]`. `spy.mkdir` called at least once with `expectedDestDir`. No `copyFile` / `readFile` / `writeFile` / `unlink` exposed on `spy` at all (the `FsImpl` interface deliberately does not expose them — this is a structural invariant). Real-fs assertions: dest file exists with the seeded body, source file does not. Return value matches `{ from, to, ref, absFromPath, absToPath }`.
   - [ ] **AC6b — destination dir auto-created:**
-    - Pre-seed only `<root>/.crew/state/to-do/bmad:1.0.1.yaml`. Do NOT pre-create `in-progress/`.
+    - Pre-seed only `<root>/.flow/state/to-do/bmad:1.0.1.yaml`. Do NOT pre-create `in-progress/`.
     - Call `moveBetweenStates({ … from: "to-do", to: "in-progress" })` with no `fsImpl` (real fs).
-    - Assert: call resolves. `<root>/.crew/state/in-progress/` is now a directory. File lives at `<root>/.crew/state/in-progress/bmad:1.0.1.yaml`.
+    - Assert: call resolves. `<root>/.flow/state/in-progress/` is now a directory. File lives at `<root>/.flow/state/in-progress/bmad:1.0.1.yaml`.
   - [ ] **AC6c — EXDEV cross-filesystem:**
     - Build `fsImpl` where `rename` rejects with `Object.assign(new Error("cross-fs"), { code: "EXDEV" })`. `mkdir` and `stat` proxy to real fs.
-    - Pre-seed `<root>/.crew/state/to-do/bmad:1.0.2.yaml`.
+    - Pre-seed `<root>/.flow/state/to-do/bmad:1.0.2.yaml`.
     - Call `moveBetweenStates(...)`.
     - Assert: rejects with `CrossFilesystemMoveError`. The error has `.originalCode === "EXDEV"` and `.absFromPath` / `.absToPath` matching the expected. Source file is still present. Destination file does not exist. **No copy / read / write attempted** (the `FsImpl` interface doesn't expose those — structural assertion).
   - [ ] **AC6d — ENOENT source missing:**
     - No seed.
     - Call `moveBetweenStates({ … ref: "ghost", from: "to-do", to: "in-progress" })`.
-    - Assert: rejects with `ManifestNotFoundError`. `.ref === "ghost"`. `.expectedAbsPath` matches `<root>/.crew/state/to-do/ghost.yaml`. `.fromState === "to-do"`. Destination dir may or may not exist (mkdir-recursive ran before the rename) — assert nothing about it; assert only that no destination file exists.
+    - Assert: rejects with `ManifestNotFoundError`. `.ref === "ghost"`. `.expectedAbsPath` matches `<root>/.flow/state/to-do/ghost.yaml`. `.fromState === "to-do"`. Destination dir may or may not exist (mkdir-recursive ran before the rename) — assert nothing about it; assert only that no destination file exists.
   - [ ] **AC6e — invalid state name (and path escape) — no IO:**
     - Build `fsImpl` triple where every method is `vi.fn(() => { throw new Error("should not be called"); })`.
     - Variant 1: `moveBetweenStates({ … from: "to-do", to: "archive" as any, fsImpl: spy })`. Assert: rejects with `InvalidStateNameError`. `.reason === "unknown state name"`. Every method on `spy` has `.toHaveBeenCalledTimes(0)`.
     - Variant 2: `moveBetweenStates({ … ref: "../../etc/passwd", from: "to-do", to: "in-progress", fsImpl: spy })`. Assert: rejects with `InvalidStateNameError`. `.reason === "path escapes state root"`. Every method on `spy` has `.toHaveBeenCalledTimes(0)`.
   - [ ] **AC6f — chaos (1,000 random moves):**
     - Helper `mulberry32(seed)` PRNG inlined at the top of the test file (no new dep — copy the 6-line implementation from the well-known MIT-licensed snippet; document the source as a comment).
-    - Seed: 16 refs `chaos:0001` … `chaos:0016`. For each, pick a random starting state from `STATE_NAMES`. Pre-seed the manifest at `<root>/.crew/state/<state>/<ref>.yaml` with body `<ref>\n`.
+    - Seed: 16 refs `chaos:0001` … `chaos:0016`. For each, pick a random starting state from `STATE_NAMES`. Pre-seed the manifest at `<root>/.flow/state/<state>/<ref>.yaml` with body `<ref>\n`.
     - Maintain an in-memory `currentState: Map<ref, StateName>` initialised from the seeding step.
     - Driver loop: for `i = 0..999`, pick a random ref, pick a random target state ≠ `currentState.get(ref)`, push the `moveBetweenStates(...)` promise into a batch array. Every 8 iterations, `await Promise.allSettled(batch)`, then for each `Settled`: if `status === "fulfilled"`, update `currentState.set(ref, to)`; if `status === "rejected"`, leave `currentState` unchanged (a rejection means another concurrent batch member moved the same ref first — that's the race we're testing; the file simply isn't where this concurrent call expected). After the batch, walk all four directories and assert: total file count === 16; for every ref, count across the four dirs === 1.
     - **Final pass:** after all 1,000 iterations, walk once more and assert the same invariants. Optionally cross-check `currentState` matches the observed directory placement (it should, with the caveat that rejected-then-re-driven cases are allowed to lag).
@@ -162,8 +162,8 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     - **Performance budget:** the test should complete in <2s on a modern dev machine. If it routinely exceeds 5s in CI, reduce the iteration count to 500 — the structural invariant (no two-states-at-once) is what AC3 contracts, not the literal 1,000. Document the reduction in a code comment if you make it.
 
 - [ ] **Task 5 — Run the full suite** (AC: all)
-  - [ ] From `plugins/crew/`, run `pnpm test`. Expectation: all existing suites green (smoke, resolver, validate-active-adapter, standards-doc, permissions, canonical-fs, telemetry-logger, git-commit), plus the new `manifest-state-machine.test.ts`, plus the extended `canonical-fs-guard.test.ts` (with the new `static direct-rename guard` block). Zero skips, no `.only`, no `.todo`.
-  - [ ] From `plugins/crew/`, run `pnpm build`. Expectation: zero TypeScript errors. The `StateName` union and `MoveResult` exports must be typed end-to-end (no `any` in the public signature).
+  - [ ] From `plugins/flow/`, run `pnpm test`. Expectation: all existing suites green (smoke, resolver, validate-active-adapter, standards-doc, permissions, canonical-fs, telemetry-logger, git-commit), plus the new `manifest-state-machine.test.ts`, plus the extended `canonical-fs-guard.test.ts` (with the new `static direct-rename guard` block). Zero skips, no `.only`, no `.todo`.
+  - [ ] From `plugins/flow/`, run `pnpm build`. Expectation: zero TypeScript errors. The `StateName` union and `MoveResult` exports must be typed end-to-end (no `any` in the public signature).
 
 ---
 
@@ -171,23 +171,23 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 ### Files this story creates (NEW)
 
-- `plugins/crew/mcp-server/src/state/manifest-state-machine.ts` — exports `moveBetweenStates`, `STATE_NAMES`, `StateName`, `MoveResult`. The ONLY file under `mcp-server/src/**` permitted to invoke `rename` against a state-machine path (enforced by AC6g static guard).
-- `plugins/crew/mcp-server/tests/manifest-state-machine.test.ts` — covers AC6a–AC6f.
+- `plugins/flow/mcp-server/src/state/manifest-state-machine.ts` — exports `moveBetweenStates`, `STATE_NAMES`, `StateName`, `MoveResult`. The ONLY file under `mcp-server/src/**` permitted to invoke `rename` against a state-machine path (enforced by AC6g static guard).
+- `plugins/flow/mcp-server/tests/manifest-state-machine.test.ts` — covers AC6a–AC6f.
 
 ### Files this story modifies (UPDATE)
 
-- `plugins/crew/mcp-server/src/errors.ts` — append `CrossFilesystemMoveError`, `ManifestNotFoundError`, and `InvalidStateNameError` after `GitCommitMessageMalformedError`. Do NOT touch existing classes (their wording is asserted by 1.1–1.5 tests).
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` — append a new `describe("static direct-rename guard (Story 1.6 AC6g)", …)` block at the bottom. Do NOT modify any existing `it(...)` body or the `FS_WRITE_WHITELIST` Set. The new block uses a separate local constant (`BANNED_RENAME_BINDINGS`) and a separate skip-target (`state/manifest-state-machine.ts`).
+- `plugins/flow/mcp-server/src/errors.ts` — append `CrossFilesystemMoveError`, `ManifestNotFoundError`, and `InvalidStateNameError` after `GitCommitMessageMalformedError`. Do NOT touch existing classes (their wording is asserted by 1.1–1.5 tests).
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts` — append a new `describe("static direct-rename guard (Story 1.6 AC6g)", …)` block at the bottom. Do NOT modify any existing `it(...)` body or the `FS_WRITE_WHITELIST` Set. The new block uses a separate local constant (`BANNED_RENAME_BINDINGS`) and a separate skip-target (`state/manifest-state-machine.ts`).
 
 ### Existing files this story reads but does NOT modify
 
-- `plugins/crew/mcp-server/src/lib/managed-fs.ts` — pattern reference for "the only writer" + path-escape guard via `path.relative` + `startsWith("..")`. **Read once** before authoring `manifest-state-machine.ts`; mirror the path-escape style verbatim. (Current state: exports `writeManagedFile`, `isCanonicalPath`, `CANONICAL_PATH_GLOBS`. Preserves NFR16 by requiring an MCP-tool context for canonical writes. The new primitive uses the *same* path-escape technique but for the narrower `state/` sub-tree.)
-- `plugins/crew/mcp-server/src/lib/logger.ts` (Story 1.5) — pattern reference for "ship the substrate ahead of writers." Read once: confirms the file has no module-level state, has a clock seam (`now?`), and is whitelisted in the static guard. Our `fsImpl?` seam mirrors `logger.ts`'s `now?` shape exactly.
-- `plugins/crew/mcp-server/src/lib/git.ts` (Story 1.5) — pattern reference for "the only subprocess wrapper" with an `execaImpl?` test seam. Our `fsImpl?` seam mirrors `git.ts`'s `execaImpl?` shape exactly.
-- `plugins/crew/mcp-server/src/lib/gh.ts` — pattern reference for typed-error-before-spawn (`GhSubcommandDeniedError` is thrown before any `execa` call; our `InvalidStateNameError` is thrown before any `fs.*` call).
-- `plugins/crew/mcp-server/src/errors.ts` — append-only pattern. Match existing JSDoc / constructor-options-bag style. Read the file fully before appending to confirm the most recent additions and not collide.
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` — pattern reference. Re-use `walkTs`, the import regex, and the `promisesAliasRegex` shape; do not duplicate the helper.
-- `plugins/crew/mcp-server/src/server.ts` — for context only. This story does NOT register MCP tools. The seam exists for Epic 3 to compose.
+- `plugins/flow/mcp-server/src/lib/managed-fs.ts` — pattern reference for "the only writer" + path-escape guard via `path.relative` + `startsWith("..")`. **Read once** before authoring `manifest-state-machine.ts`; mirror the path-escape style verbatim. (Current state: exports `writeManagedFile`, `isCanonicalPath`, `CANONICAL_PATH_GLOBS`. Preserves NFR16 by requiring an MCP-tool context for canonical writes. The new primitive uses the *same* path-escape technique but for the narrower `state/` sub-tree.)
+- `plugins/flow/mcp-server/src/lib/logger.ts` (Story 1.5) — pattern reference for "ship the substrate ahead of writers." Read once: confirms the file has no module-level state, has a clock seam (`now?`), and is whitelisted in the static guard. Our `fsImpl?` seam mirrors `logger.ts`'s `now?` shape exactly.
+- `plugins/flow/mcp-server/src/lib/git.ts` (Story 1.5) — pattern reference for "the only subprocess wrapper" with an `execaImpl?` test seam. Our `fsImpl?` seam mirrors `git.ts`'s `execaImpl?` shape exactly.
+- `plugins/flow/mcp-server/src/lib/gh.ts` — pattern reference for typed-error-before-spawn (`GhSubcommandDeniedError` is thrown before any `execa` call; our `InvalidStateNameError` is thrown before any `fs.*` call).
+- `plugins/flow/mcp-server/src/errors.ts` — append-only pattern. Match existing JSDoc / constructor-options-bag style. Read the file fully before appending to confirm the most recent additions and not collide.
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts` — pattern reference. Re-use `walkTs`, the import regex, and the `promisesAliasRegex` shape; do not duplicate the helper.
+- `plugins/flow/mcp-server/src/server.ts` — for context only. This story does NOT register MCP tools. The seam exists for Epic 3 to compose.
 
 ### What this story changes about the existing system
 
@@ -197,7 +197,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 ### Architecture compliance (cite the source on every claim)
 
-- **State machine is the directory the manifest lives in:** `core-architectural-decisions.md` line 29 — "the state machine now moves *plugin-owned manifest files* in `<target-repo>/.crew/state/{to-do,in-progress,blocked,done}/<ref>.yaml`". The primitive's path layout uses these four state names exactly.
+- **State machine is the directory the manifest lives in:** `core-architectural-decisions.md` line 29 — "the state machine now moves *plugin-owned manifest files* in `<target-repo>/.flow/state/{to-do,in-progress,blocked,done}/<ref>.yaml`". The primitive's path layout uses these four state names exactly.
 - **`fs.rename` is the state-transition primitive, same-filesystem only:** `core-architectural-decisions.md` line 33 — "`fs.rename` (Node), same-filesystem only … NFR8 single-syscall atomicity; cross-filesystem moves out of scope". `EXDEV` → `CrossFilesystemMoveError` is the literal implementation of "out of scope" — fail loud, no fallback.
 - **Manifest file naming `<ref>.yaml`:** `project-structure-boundaries.md` lines 151–154 — the four state directories each hold `<ref>.yaml` files. The primitive computes `absFromPath = path.join(stateRoot, from, ref + ".yaml")`.
 - **`state/manifest-state-machine.ts` is the pinned file path:** `project-structure-boundaries.md` line 97 — "`manifest-state-machine.ts` # NFR8, NFR9 — atomic mv on manifests". This story creates that file at that exact path.
@@ -212,9 +212,9 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 
 | Library | Version | Why | Source |
 |---|---|---|---|
-| `node:fs/promises` | (Node ≥ 20, runtime stdlib) | `rename`, `mkdir`, `stat`. No userspace dep. | `plugins/crew/mcp-server/package.json` engines |
+| `node:fs/promises` | (Node ≥ 20, runtime stdlib) | `rename`, `mkdir`, `stat`. No userspace dep. | `plugins/flow/mcp-server/package.json` engines |
 | `node:path` | (Node ≥ 20, runtime stdlib) | Path joining, `relative` for escape guard. | (stdlib) |
-| `vitest` | `^2.1.0` (already declared, devDep) | Test framework. | `plugins/crew/mcp-server/package.json` |
+| `vitest` | `^2.1.0` (already declared, devDep) | Test framework. | `plugins/flow/mcp-server/package.json` |
 
 **Do NOT add new dependencies.** The primitive is ~50 lines of TypeScript and three Node stdlib calls. In particular:
 - Do NOT add `move-file` / `mv` / `fs-extra` — they pull in copy+delete fallbacks that VIOLATE NFR8.
@@ -224,7 +224,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
 ### File structure (target paths, after this story)
 
 ```
-plugins/crew/mcp-server/
+plugins/flow/mcp-server/
 ├── src/
 │   ├── errors.ts                          # UPDATE (append three classes)
 │   ├── index.ts                           # unchanged
@@ -255,7 +255,7 @@ plugins/crew/mcp-server/
 
 ### Testing requirements
 
-- **Framework:** vitest (already wired). `pnpm test` from `plugins/crew/` runs everything.
+- **Framework:** vitest (already wired). `pnpm test` from `plugins/flow/` runs everything.
 - **Fixture strategy:** Each test that touches disk uses `fs.mkdtemp(path.join(os.tmpdir(), "manifest-state-"))` and cleans up in `afterAll`. Mirrors `canonical-fs-guard.test.ts` and `telemetry-logger.test.ts`.
 - **No real cross-filesystem mounts.** The EXDEV path is exercised by injecting an `fsImpl` whose `rename` rejects with a synthetic `EXDEV` error — never by actually mounting a tmpfs / loop device. This keeps CI portable across Linux / macOS runners.
 - **Determinism in chaos.** The 1,000-iteration test uses an inlined `mulberry32` PRNG with a fixed seed. No `Math.random()` anywhere in the test. The test asserts on structural invariants (count, no duplicates) — never on a specific move sequence.
@@ -313,12 +313,12 @@ plugins/crew/mcp-server/
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md`#FR17, #FR19, #FR20]
 - [Source: `_bmad-output/implementation-artifacts/1-5-jsonl-telemetry-plumbing-via-pino.md`] (pattern precedents: `execaImpl?` / `now?` test seam, single-purpose wrapper, substrate-ahead-of-writers, append-only `errors.ts`)
 - [Source: `_bmad-output/implementation-artifacts/1-4-permission-allowlist-scaffolding-and-tool-layer-enforcement.md`] (canonical-fs static-guard pattern, path-escape via `path.relative`)
-- [Source: `plugins/crew/mcp-server/src/lib/managed-fs.ts`] (path-escape guard idiom — lines 79–90)
-- [Source: `plugins/crew/mcp-server/src/lib/git.ts`] (`execaImpl?` seam pattern — model for `fsImpl?`)
-- [Source: `plugins/crew/mcp-server/src/lib/logger.ts`] (`now?` seam pattern, no module-level state, substrate-ahead-of-writers)
-- [Source: `plugins/crew/mcp-server/src/errors.ts`] (append-only style — read fully before appending)
-- [Source: `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`] (static-guard pattern — `walkTs`, `importRegex`, `promisesAliasRegex`; new block mirrors AC5c)
-- [Source: `plugins/crew/mcp-server/package.json`] (declared deps; do not add)
+- [Source: `plugins/flow/mcp-server/src/lib/managed-fs.ts`] (path-escape guard idiom — lines 79–90)
+- [Source: `plugins/flow/mcp-server/src/lib/git.ts`] (`execaImpl?` seam pattern — model for `fsImpl?`)
+- [Source: `plugins/flow/mcp-server/src/lib/logger.ts`] (`now?` seam pattern, no module-level state, substrate-ahead-of-writers)
+- [Source: `plugins/flow/mcp-server/src/errors.ts`] (append-only style — read fully before appending)
+- [Source: `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`] (static-guard pattern — `walkTs`, `importRegex`, `promisesAliasRegex`; new block mirrors AC5c)
+- [Source: `plugins/flow/mcp-server/package.json`] (declared deps; do not add)
 
 ---
 

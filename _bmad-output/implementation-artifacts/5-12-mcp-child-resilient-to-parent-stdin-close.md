@@ -9,7 +9,7 @@ Status: review
 ## Story
 
 As a **plugin maintainer**,
-I want **the crew MCP server child process to survive Claude Code's parent stdin-close so that the child stays alive and answers tool calls after the parent host closes the child's stdin (the ~10 min idle-reap observed on 2026-05-25)**,
+I want **the flow MCP server child process to survive Claude Code's parent stdin-close so that the child stays alive and answers tool calls after the parent host closes the child's stdin (the ~10 min idle-reap observed on 2026-05-25)**,
 so that **long-running subagent runs (>10 min `Task` invocations) do not produce orphans, do not require `/reload-plugins`, and do not silently lose mid-cycle work to a parent-side reap that the SDK is innocent of**.
 
 ### What this story is, in one sentence
@@ -21,7 +21,7 @@ Decouple the MCP child's process lifetime from its stdin lifecycle: when the par
 The epic block (`epic-5 § Story 5.12`) offered three credibly-different paths:
 
 - **(a) client-side keep-alive fix.** The MCP child handles stdin EOF without exiting; the process survives on the event loop alone and continues to respond on stdout if the transport is re-attached.
-- **(b) host-side knob doc.** Confirm Claude Code exposes a configurable idle threshold via `~/.claude/settings.json` and publish a recommended value under `plugins/crew/docs/`.
+- **(b) host-side knob doc.** Confirm Claude Code exposes a configurable idle threshold via `~/.claude/settings.json` and publish a recommended value under `plugins/flow/docs/`.
 - **(c) escalation artefact.** A written request to Anthropic with the diag log from 2026-05-25 + a minimal SDK repro, deferring the fix to a host change.
 
 **Path chosen: (a) — client-side keep-alive fix.**
@@ -30,7 +30,7 @@ Trade-offs considered:
 - The epic explicitly states "(a) is preferred for durability." It is the only path that removes the failure mode rather than working around it.
 - Project memory `project_mcp_server_silent_disconnect` (the 2026-05-25 RCA) confirms: "the parent host closes the MCP child's stdin after ~10 min idle. The MCP SDK is innocent — the child process exits because it interprets stdin EOF as shutdown. No host-side knob currently exposed in `~/.claude/settings.json` based on prior investigation." This rules out (b) as a v1 fix — there is no knob to document.
 - Path (c) is a deferral, not a fix; dogfooding remains paused until L1 defects are resolved per CLAUDE.md § "Dogfood paused until L1 defects fixed". An escalation artefact does not reopen dogfood.
-- The diag instrumentation referenced in the postmortem (`§ L7 follow-up #5` and project memory `project_diag_instrumentation_pattern`) already pinpoints the exit site: the SDK's `StdioServerTransport` (via `process.stdin.on("end", …)`) hands stdin EOF up the chain, and the default Node behaviour when `process.stdin` ends with no other refs holding the event loop is process exit code 0. The fix lives entirely inside `plugins/crew/mcp-server/src/index.ts` (the stdio entrypoint), making it small, contained, and testable.
+- The diag instrumentation referenced in the postmortem (`§ L7 follow-up #5` and project memory `project_diag_instrumentation_pattern`) already pinpoints the exit site: the SDK's `StdioServerTransport` (via `process.stdin.on("end", …)`) hands stdin EOF up the chain, and the default Node behaviour when `process.stdin` ends with no other refs holding the event loop is process exit code 0. The fix lives entirely inside `plugins/flow/mcp-server/src/index.ts` (the stdio entrypoint), making it small, contained, and testable.
 
 Cost of (a): a tiny amount of plumbing in `index.ts` — refcount the event loop, swallow stdin's `end`/`close`, and ensure the SDK's transport doesn't propagate shutdown semantics from the stdin stream. Approximate diff: ~20–40 lines.
 
@@ -42,7 +42,7 @@ The 2026-05-25 dogfood postmortem (`§ L1, defect #1`) names this defect:
 >
 > **Why it bit today:** the orchestrator's inner cycle assumes MCP availability from claim through `runAutoMergeGate`. A 10-min subagent run is exactly long enough to cross the reap threshold while the parent makes zero MCP calls.
 
-Today's `plugins/crew/mcp-server/src/index.ts` does the conventional thing:
+Today's `plugins/flow/mcp-server/src/index.ts` does the conventional thing:
 
 ```ts
 const transport = new StdioServerTransport();
@@ -68,7 +68,7 @@ This is the substrate twin of Stories 5.10 and 5.11. 5.10 ensures the dev transc
 
 - If 5.12 ships and works perfectly, 5.10 and 5.11 are unused for the stdin-close case. But they remain load-bearing for every other reap cause (parent crash, OS kill, etc.) — so they ship anyway.
 - If 5.12 ships and the parent later changes its reap policy (a new Claude Code version closes stdin AND kills the child via SIGTERM), 5.10/5.11 still cover the new shape.
-- If 5.12 is later reverted (e.g., a regression in the keep-alive logic), 5.10/5.11 keep the user-visible cost of a reap small (transcript preserved, orphan recoverable on next `/crew:start`).
+- If 5.12 is later reverted (e.g., a regression in the keep-alive logic), 5.10/5.11 keep the user-visible cost of a reap small (transcript preserved, orphan recoverable on next `/flow:start`).
 
 Each story can be shipped, smoke-tested, and reverted independently. 5.12's smoke test is a 15-minute manual run (or an automated test that closes stdin and asserts the child still answers a follow-up call) and does not depend on 5.10's transcript file or 5.11's recovery branch existing.
 
@@ -80,18 +80,18 @@ Each story can be shipped, smoke-tested, and reverted independently. 5.12's smok
 - (d) Change the SDK (`@modelcontextprotocol/sdk`). v1 wraps the SDK's `StdioServerTransport` in the plugin's entrypoint, not by forking the package. If the SDK ever exposes a config knob for stdin-end behaviour, v2 of this story can switch to it.
 - (e) Change any MCP tool, schema, or descriptor. The `Server` instance, `registerTool` calls, and every tool under `mcp-server/src/tools/` are untouched. The fix is entirely in `index.ts` (and possibly a thin sibling module for the keep-alive guard).
 - (f) Add a heartbeat / keepalive over the wire. No ping protocol is introduced; the keep-alive is purely process-level (event loop ref). MCP-protocol-level keepalive is a host-side feature; we are not building it.
-- (g) Persist the diag instrumentation from the postmortem in production. The 15-line lifecycle logger from `project_diag_instrumentation_pattern` is an RCA tool, not a runtime feature. AC4's automated test re-uses the same idea in-test, but production `index.ts` ships without it (or behind a `CREW_MCP_DIAG=1` env opt-in if useful for future RCA — see § Deferred work).
+- (g) Persist the diag instrumentation from the postmortem in production. The 15-line lifecycle logger from `project_diag_instrumentation_pattern` is an RCA tool, not a runtime feature. AC4's automated test re-uses the same idea in-test, but production `index.ts` ships without it (or behind a `FLOW_MCP_DIAG=1` env opt-in if useful for future RCA — see § Deferred work).
 - (h) Address the parent's behaviour. The parent will continue to close stdin after ~10 min idle. The fix accepts this as a fact and ensures the child survives it.
 - (i) Cover non-stdin reap causes. Process death (SIGTERM from OS), OOM, or manual kill still terminates the child. 5.10/5.11 cover those cases at the artefact/orphan-recovery layer.
-- (j) Change `plugins/crew/skills/start/SKILL.md`. The inner cycle is not modified; the fix is invisible to the prose layer. If the child survives the reap, `processDevTranscript` simply succeeds — no SKILL.md change required.
-- (k) Touch `plugins/crew/mcp-server/src/server.ts`. The `createServer()` factory and its tool dispatcher are unchanged. The fix lives in the transport-wiring layer (`index.ts`), preserving the smoke-test invariant that `createServer()` remains transport-free and headless-runnable.
+- (j) Change `plugins/flow/skills/start/SKILL.md`. The inner cycle is not modified; the fix is invisible to the prose layer. If the child survives the reap, `processDevTranscript` simply succeeds — no SKILL.md change required.
+- (k) Touch `plugins/flow/mcp-server/src/server.ts`. The `createServer()` factory and its tool dispatcher are unchanged. The fix lives in the transport-wiring layer (`index.ts`), preserving the smoke-test invariant that `createServer()` remains transport-free and headless-runnable.
 - (l) Modify any existing test. New tests are additive (one new `*.test.ts` under `mcp-server/src/__tests__/`).
 - (m) Modify the plugin's `package.json`, `tsconfig.json`, or build configuration. The fix uses only `process`, `setInterval`, and stdlib types already available.
 - (n) Introduce a graceful-shutdown signal. The child must still exit on SIGTERM / SIGINT for normal Claude Code shutdown. The fix swallows ONLY stdin's `end`/`close`; OS signals continue to terminate the process. (`process.on('SIGTERM', …)` and `SIGINT` are not added in this story — Node's defaults already terminate on those signals.)
 - (o) Add operator-visible telemetry. The diag log from the postmortem is not promoted to a production log; no new chat lines, no JSONL events. Telemetry for MCP lifecycle is owned by Story 4.12 (per-invocation telemetry) and Story 5.8 (no-silent-failures); 5.12 is silent at runtime.
 - (p) Cover the case where stdin is re-opened. When the parent later resumes communication, the existing `StdioServerTransport` should ideally re-attach. v1's scope is "survive the close"; reattach-on-reopen is observed empirically (the parent re-opens on its own when it next sends a request) but not formally tested. If reattach fails in practice, a follow-up story can wrap the transport for re-attach explicitly.
 - (q) Build a unit test that mocks the SDK's transport. The fix's contract is at the process level — close stdin, observe child still alive. The integration test uses real `child_process.spawn` of the built `dist/index.js`, closes the spawn's stdin, and asserts the child still responds. This is closer to the real defect than an SDK-mock.
-- (r) Implement reap detection in `/crew:start`. The whole point is that the reap no longer happens. If 5.12 works, `/crew:start` never observes "MCP server has disconnected" from this cause.
+- (r) Implement reap detection in `/flow:start`. The whole point is that the reap no longer happens. If 5.12 works, `/flow:start` never observes "MCP server has disconnected" from this cause.
 - (s) Change the canonical-fs guard or the test infrastructure. No new canonical-state writes; no new file paths.
 - (t) Add an MCP tool to query MCP liveness. There is no `pingMcp` tool. Liveness is observed by the parent making any tool call and getting an answer — no in-band probe is needed for v1.
 - (u) Re-introduce the diag instrumentation in production `src/index.ts`. The postmortem reverted it (`§ What worked` / `§ Open follow-ups #5`). 5.12 keeps it reverted but reuses the same pattern internally inside the new test.
@@ -99,7 +99,7 @@ Each story can be shipped, smoke-tested, and reverted independently. 5.12's smok
 ### Deferred work
 
 - **Reattach-on-reopen.** v1 ships "survive the close." If the parent later re-opens stdin and the existing transport can't re-attach (because the SDK's transport closed its end of the pipe), a follow-up story can wrap the transport to detect a fresh stdin and stand up a new transport. Not seen in 2026-05-25 evidence as a failure mode — the parent typically spawns a fresh child for the next session — but worth a follow-up if it does surface.
-- **Opt-in production diag logger.** A `CREW_MCP_DIAG=1` env var that re-enables the 15-line lifecycle logger from `project_diag_instrumentation_pattern` would make future RCA a one-flag operation. Not required for v1 — the test harness already exercises the events.
+- **Opt-in production diag logger.** A `FLOW_MCP_DIAG=1` env var that re-enables the 15-line lifecycle logger from `project_diag_instrumentation_pattern` would make future RCA a one-flag operation. Not required for v1 — the test harness already exercises the events.
 - **Host-side knob doc (path (b)).** If a future Claude Code version exposes a configurable idle threshold, a doc-only follow-up can publish a recommended setting. Not actionable today.
 - **Escalation artefact (path (c)).** If 5.12's client-side fix proves insufficient in production (e.g., the parent escalates from stdin-close to SIGTERM), the postmortem is the ready-to-file escalation. Not opened in v1.
 - **Cross-version SDK compatibility test.** The fix relies on the SDK's `StdioServerTransport` behaving the way the 2026-05-25 diag log captured it. A future SDK release could change the chain (e.g., the transport itself calls `process.exit()` on stdin end). A pinned-version smoke would catch a regression on SDK bump. v1 pins the current SDK version and trusts the test in AC4 to fail loudly on regression.
@@ -109,21 +109,21 @@ Each story can be shipped, smoke-tested, and reverted independently. 5.12's smok
 
 ## Acceptance Criteria
 
-> AC1–AC3 describe process-level resilience of `dist/index.js`. AC4 is the integration test. Per `plugins/crew/docs/user-surface-acs.md`, this story is `substrate`; no `(user-surface)` tags apply. AC2 references `/crew:start` only as the trigger scenario, not as a modified surface — see HTML comment on AC2.
+> AC1–AC3 describe process-level resilience of `dist/index.js`. AC4 is the integration test. Per `plugins/flow/docs/user-surface-acs.md`, this story is `substrate`; no `(user-surface)` tags apply. AC2 references `/flow:start` only as the trigger scenario, not as a modified surface — see HTML comment on AC2.
 
 **AC1 (child survives stdin close):**
-**Given** a running `crew` MCP server child spawned exactly as Claude Code spawns it (`node plugins/crew/mcp-server/dist/index.js`, stdio pipes attached, no extra args),
+**Given** a running `crew` MCP server child spawned exactly as Claude Code spawns it (`node plugins/flow/mcp-server/dist/index.js`, stdio pipes attached, no extra args),
 **When** the parent closes the child's stdin (the spawn's `stdin` stream is `.end()`-ed and `.destroy()`-ed, simulating Claude Code's reap behaviour from the 2026-05-25 diag log),
 **Then** the child process remains alive (the spawn's `'exit'` event does NOT fire within a 30-second observation window after stdin close) and its event loop continues to tick. _(durability guarantee — the entire L1-defect motivation)_
 
 <!-- Not user-surface: AC1 names process-level behaviour observed in a test harness, not anything the operator sees or types. -->
 
 **AC2 (long subagent runs no longer trigger reap):**
-**Given** the chosen path-(a) client-side fix has shipped to `plugins/crew/mcp-server/dist/`,
-**When** an operator runs `/crew:start` against a backlog where the next claimable story has a dev `Task` invocation lasting 15+ minutes,
+**Given** the chosen path-(a) client-side fix has shipped to `plugins/flow/mcp-server/dist/`,
+**When** an operator runs `/flow:start` against a backlog where the next claimable story has a dev `Task` invocation lasting 15+ minutes,
 **Then** on subagent return the MCP server is still responsive and `processDevTranscript` succeeds in-band without requiring `/reload-plugins`, and no `MCP server has disconnected` error surfaces in the parent's chat. _(behavioural guarantee — the user-visible payoff)_
 
-<!-- Not user-surface: AC2 mentions /crew:start only as the trigger scenario. The verification mechanism is "no error surfaces" — a negative assertion on existing operator-visible behaviour. The AC's success criterion is observable in the AC4 automated test (close stdin, then call a tool, expect success) without requiring real-Claude-Code observation. Per user-surface-acs.md § "Don't tag user-surface if the chat surface depends on a deferred caller," the slash-command literal here is the trigger scenario, not a surface this story modifies. No new slash-command output is added; no SKILL.md prose changes; the entire fix is invisible to /crew:start. Tagged substrate. -->
+<!-- Not user-surface: AC2 mentions /flow:start only as the trigger scenario. The verification mechanism is "no error surfaces" — a negative assertion on existing operator-visible behaviour. The AC's success criterion is observable in the AC4 automated test (close stdin, then call a tool, expect success) without requiring real-Claude-Code observation. Per user-surface-acs.md § "Don't tag user-surface if the chat surface depends on a deferred caller," the slash-command literal here is the trigger scenario, not a surface this story modifies. No new slash-command output is added; no SKILL.md prose changes; the entire fix is invisible to /flow:start. Tagged substrate. -->
 
 **AC3 (OS-signal termination still works):**
 **Given** the child has survived a stdin close per AC1,
@@ -140,7 +140,7 @@ vitest covers:
 - (4c) **SIGTERM still kills the child:** after AC4a's survival assertion holds, the test sends `SIGTERM` to the child. The test asserts the `'exit'` event fires within 5 seconds with a code of 0, 143 (`128 + SIGTERM`), or `signal === 'SIGTERM'` — any conventional termination indicator. _(safety against zombie processes)_
 - (4d) **No stdin close on startup:** the test asserts that under normal stdio attachment (no premature close), the child runs steady-state for 5 seconds without firing `beforeExit` or `exit`. _(guards against an over-eager keep-alive that prevents normal shutdown after a SIGTERM was sent but before AC4c's assertion — sanity check.)_
 - (4e) **No regression in tool dispatch:** before any stdin manipulation, the test sends a `CallTool` for `getStatus` (a no-side-effect tool from Story 1.7) and receives a valid response. This guards against the fix accidentally suppressing the dispatcher.
-- (4f) **Build artefact under test:** the test runs against `plugins/crew/mcp-server/dist/index.js` (NOT `src/index.ts` via `tsx` or `ts-node`), so the assertion is on the shipped artefact that Claude Code actually loads. The test fixture builds dist via `pnpm build` in `beforeAll` if dist is stale, or assumes a built dist if CI ran the build step.
+- (4f) **Build artefact under test:** the test runs against `plugins/flow/mcp-server/dist/index.js` (NOT `src/index.ts` via `tsx` or `ts-node`), so the assertion is on the shipped artefact that Claude Code actually loads. The test fixture builds dist via `pnpm build` in `beforeAll` if dist is stale, or assumes a built dist if CI ran the build step.
 
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
@@ -156,8 +156,8 @@ Implementation order is load-bearing. Task 1 confirms the failure mode against t
   - [x] 1.3 Discard the scratch script. The reproduction is captured in the AC4 integration test under `__tests__/`; the scratch file's sole purpose was to confirm the defect lives in current `dist/` before authoring the fix.
 
 - [x] **Task 2: Add client-side keep-alive to `mcp-server/src/index.ts`** (AC: #1, #3)
-  - [x] 2.1 Modify `plugins/crew/mcp-server/src/index.ts` to install a process-level keep-alive *before* connecting the transport. Mechanism: a no-op `setInterval(() => {}, 1 << 30)` that holds a ref on the event loop, OR equivalently a long-lived TCP `unref()`/`ref()`-controlled handle. The interval handle is kept in a module-level constant so the GC cannot collect it. Comment block documents *why* (the 2026-05-25 reap RCA; link to the postmortem).
-  - [x] 2.2 Attach swallowing handlers to `process.stdin` for `'end'` and `'close'` events *before* `server.connect(transport)` runs. The handler bodies do nothing (or, if useful, write a single JSONL diag line behind `if (process.env.CREW_MCP_DIAG)` — see § Deferred work). The point is to prevent the *default* Node behaviour of treating stdin's end as a shutdown signal — and to take the listener slot before the SDK's transport attaches its own, so our handler runs first.
+  - [x] 2.1 Modify `plugins/flow/mcp-server/src/index.ts` to install a process-level keep-alive *before* connecting the transport. Mechanism: a no-op `setInterval(() => {}, 1 << 30)` that holds a ref on the event loop, OR equivalently a long-lived TCP `unref()`/`ref()`-controlled handle. The interval handle is kept in a module-level constant so the GC cannot collect it. Comment block documents *why* (the 2026-05-25 reap RCA; link to the postmortem).
+  - [x] 2.2 Attach swallowing handlers to `process.stdin` for `'end'` and `'close'` events *before* `server.connect(transport)` runs. The handler bodies do nothing (or, if useful, write a single JSONL diag line behind `if (process.env.FLOW_MCP_DIAG)` — see § Deferred work). The point is to prevent the *default* Node behaviour of treating stdin's end as a shutdown signal — and to take the listener slot before the SDK's transport attaches its own, so our handler runs first.
 
     > Implementation note: in Node, default behaviour for `process.stdin` is that it does NOT keep the event loop alive (`stdin` is `unref()`-ed by default once it's read from). The reason the child exits after stdin close is that the SDK's `StdioServerTransport`, on stdin end, removes its own ref to the event loop — leaving no live refs and triggering `beforeExit` → `exit`. The keep-alive interval from 2.1 holds an independent ref. If the SDK additionally calls `process.exit()` directly on stdin end (an extreme case not seen in the 2026-05-25 diag), the interval will NOT save us — in that case, fall back to monkey-patching `process.exit` in this entrypoint to log-and-noop ONLY when the call originates from the SDK's stdin-end path. That fallback is documented in § Implementation strategy but is NOT shipped by default; the diag log shows `beforeExit` firing before `exit`, which means there is no explicit `process.exit()` call — the keep-alive interval is sufficient.
   - [x] 2.3 Keep `server.connect(transport)` exactly as today. Do NOT modify `createServer()` or `registerAllTools()`. The fix is a wrapper layer in `index.ts`, not a change to the server factory.
@@ -168,7 +168,7 @@ Implementation order is load-bearing. Task 1 confirms the failure mode against t
   - [x] 3.2 If a future maintainer is tempted to add custom signal handling for "graceful shutdown of in-flight tool calls," that's a separate story — out of scope here.
 
 - [x] **Task 4: Add the integration test suite** (AC: #4)
-  - [x] 4.1 Create `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts`. The test uses `node:child_process` to `spawn('node', ['dist/index.js'], { stdio: ['pipe', 'pipe', 'pipe'] })`. It does NOT use the SDK client; raw line-delimited JSON-RPC over stdio is sufficient.
+  - [x] 4.1 Create `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts`. The test uses `node:child_process` to `spawn('node', ['dist/index.js'], { stdio: ['pipe', 'pipe', 'pipe'] })`. It does NOT use the SDK client; raw line-delimited JSON-RPC over stdio is sufficient.
   - [x] 4.2 Test fixture per `describe` block: spawn child in `beforeEach`; tear down via `child.kill('SIGKILL')` in `afterEach` (defensive — if the test failed, we still want the child gone).
   - [x] 4.3 Helper: `sendRequest(child, method, params)` writes a JSON-RPC request to `child.stdin` and resolves with the next response line from `child.stdout`. Standard line-delimited framing.
   - [x] 4.4 Implement AC4a (spawn-and-survive), AC4b (stdout still open after stdin close), AC4c (SIGTERM still kills), AC4d (no premature exit on healthy steady-state), AC4e (no dispatcher regression).
@@ -178,7 +178,7 @@ Implementation order is load-bearing. Task 1 confirms the failure mode against t
 - [x] **Task 5: Build, vitest, dist** (AC: all)
   - [x] 5.1 `pnpm build` passes from `mcp-server/`.
   - [x] 5.2 All vitest tests pass.
-  - [x] 5.3 Commit `plugins/crew/mcp-server/dist/` per `CLAUDE.md § Plugin build output is tracked in git`. This story DOES change `src/index.ts`, so the dist must rebuild and ship in the same PR.
+  - [x] 5.3 Commit `plugins/flow/mcp-server/dist/` per `CLAUDE.md § Plugin build output is tracked in git`. This story DOES change `src/index.ts`, so the dist must rebuild and ship in the same PR.
   - [x] 5.4 Verify by `git diff --stat dist/` that the rebuild touched only the expected files (`dist/index.js` and any tightly-coupled output). Drift outside that scope means the build is non-deterministic and should be investigated before shipping.
 
 ---
@@ -205,7 +205,7 @@ If a future SDK release adds an explicit `process.exit()` on stdin end (an extre
 
 ### Why no operator-visible chat surface
 
-The whole win is invisibility: `/crew:start` runs longer, the reap doesn't happen, `processDevTranscript` succeeds in-band. No new chat lines, no JSONL events, no settings file. Story 5.8 (no-silent-failures CI) and Story 4.12 (per-invocation telemetry) already cover the cases where MCP availability matters; 5.12 just makes MCP available more often.
+The whole win is invisibility: `/flow:start` runs longer, the reap doesn't happen, `processDevTranscript` succeeds in-band. No new chat lines, no JSONL events, no settings file. Story 5.8 (no-silent-failures CI) and Story 4.12 (per-invocation telemetry) already cover the cases where MCP availability matters; 5.12 just makes MCP available more often.
 
 ### Why the test spawns real `dist/index.js`
 
@@ -221,17 +221,17 @@ AC1 promises 30-second survival in production; AC4a tests with a 10-second windo
 
 ## Locked files
 
-- `plugins/crew/mcp-server/src/server.ts` (Stories 1.1 / 1.4 / 2.x) — NOT touched. The dispatcher and tool registry are unchanged.
-- `plugins/crew/mcp-server/src/tools/**` — NOT touched. No tool added, removed, or modified.
-- `plugins/crew/mcp-server/src/schemas/**` — NOT touched.
-- `plugins/crew/skills/start/SKILL.md` — NOT touched. The inner cycle prose is unchanged; the fix is invisible to SKILL.md.
-- `plugins/crew/mcp-server/src/lib/managed-fs.ts` (Story 1.6) — NOT touched. The canonical-fs guard is unaffected.
-- `plugins/crew/.claude-plugin/plugin.json` — NOT touched. The MCP server entrypoint reference is unchanged.
+- `plugins/flow/mcp-server/src/server.ts` (Stories 1.1 / 1.4 / 2.x) — NOT touched. The dispatcher and tool registry are unchanged.
+- `plugins/flow/mcp-server/src/tools/**` — NOT touched. No tool added, removed, or modified.
+- `plugins/flow/mcp-server/src/schemas/**` — NOT touched.
+- `plugins/flow/skills/start/SKILL.md` — NOT touched. The inner cycle prose is unchanged; the fix is invisible to SKILL.md.
+- `plugins/flow/mcp-server/src/lib/managed-fs.ts` (Story 1.6) — NOT touched. The canonical-fs guard is unaffected.
+- `plugins/flow/.claude-plugin/plugin.json` — NOT touched. The MCP server entrypoint reference is unchanged.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/index.ts`** (Story 1.1) — Task 2 adds a keep-alive interval and stdin `'end'`/`'close'` swallowing handlers before the transport connect. The existing `createServer()` / `registerAllTools()` / `server.connect(transport)` lines are preserved verbatim. New code is additive and clearly demarcated by a header comment.
-- **`plugins/crew/mcp-server/dist/index.js`** (Story 1.9 dist-shipping contract) — Task 5.3 rebuilds and ships the updated JS. Drift outside this file means non-determinism; investigate before merging.
+- **`plugins/flow/mcp-server/src/index.ts`** (Story 1.1) — Task 2 adds a keep-alive interval and stdin `'end'`/`'close'` swallowing handlers before the transport connect. The existing `createServer()` / `registerAllTools()` / `server.connect(transport)` lines are preserved verbatim. New code is additive and clearly demarcated by a header comment.
+- **`plugins/flow/mcp-server/dist/index.js`** (Story 1.9 dist-shipping contract) — Task 5.3 rebuilds and ships the updated JS. Drift outside this file means non-determinism; investigate before merging.
 
 ---
 
@@ -239,23 +239,23 @@ AC1 promises 30-second survival in production; AC4a tests with a 10-second windo
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (Task 4) — vitest integration suite spawning the real `dist/index.js` and exercising AC1/AC3 via raw stdio + child_process.
+- `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (Task 4) — vitest integration suite spawning the real `dist/index.js` and exercising AC1/AC3 via raw stdio + child_process.
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/index.ts` (Task 2)
-- `plugins/crew/mcp-server/dist/index.js` (Task 5.3 — rebuilt artefact)
-- Possibly `plugins/crew/mcp-server/dist/index.js.map` and other dist outputs as a side-effect of `pnpm build` — these are tracked-but-generated; verify the diff scope per Task 5.4.
+- `plugins/flow/mcp-server/src/index.ts` (Task 2)
+- `plugins/flow/mcp-server/dist/index.js` (Task 5.3 — rebuilt artefact)
+- Possibly `plugins/flow/mcp-server/dist/index.js.map` and other dist outputs as a side-effect of `pnpm build` — these are tracked-but-generated; verify the diff scope per Task 5.4.
 
 ### Files this story will NOT modify
 
-- Any TS file under `plugins/crew/mcp-server/src/` other than `index.ts` and the new test file.
-- Any prose file under `plugins/crew/skills/`, `plugins/crew/docs/`, or `_bmad-output/`.
+- Any TS file under `plugins/flow/mcp-server/src/` other than `index.ts` and the new test file.
+- Any prose file under `plugins/flow/skills/`, `plugins/flow/docs/`, or `_bmad-output/`.
 - Any catalogue, persona, or permissions YAML.
 
 ### Current-state notes on files being modified
 
-- **`plugins/crew/mcp-server/src/index.ts`** (current state — 24 lines):
+- **`plugins/flow/mcp-server/src/index.ts`** (current state — 24 lines):
   - Imports: `StdioServerTransport` from the SDK, `createServer` from `./server.js`, `registerAllTools` from `./tools/register.js`.
   - `async function main()`: instantiates `createServer()`, calls `registerAllTools(server)`, instantiates `StdioServerTransport`, awaits `server.connect(transport)`.
   - `main().catch(err => { console.error(err); process.exit(1); })`.
@@ -286,15 +286,15 @@ AC1 promises 30-second survival in production; AC4a tests with a 10-second windo
 - [Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1 "Parent stdin-close idle-reap"`] — root motivation for this story; diag log evidence; SDK-is-innocent finding.
 - [Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L7 follow-up #5 "diag instrumentation"`] — the 15-line lifecycle logger pattern reused inside the AC4 test.
 - [Source: `_bmad-output/planning-artifacts/epics/epic-5-orchestration-recovery-visibility-and-resilience.md § Story 5.12`] — story stub; explicit "(a) preferred for durability" preamble.
-- [Source: `plugins/crew/mcp-server/src/index.ts`] — current entrypoint; the file Task 2 modifies.
-- [Source: `plugins/crew/mcp-server/src/server.ts`] — `createServer()` factory; NOT touched (Story 1.1 headless-runnable invariant).
-- [Source: `plugins/crew/mcp-server/src/__tests__/dist-shipping-drift.test.ts` (Story 1.9)] — pattern for `pnpm build` in `beforeAll`; pattern for asserting against real `dist/` artefacts.
+- [Source: `plugins/flow/mcp-server/src/index.ts`] — current entrypoint; the file Task 2 modifies.
+- [Source: `plugins/flow/mcp-server/src/server.ts`] — `createServer()` factory; NOT touched (Story 1.1 headless-runnable invariant).
+- [Source: `plugins/flow/mcp-server/src/__tests__/dist-shipping-drift.test.ts` (Story 1.9)] — pattern for `pnpm build` in `beforeAll`; pattern for asserting against real `dist/` artefacts.
 - [Source: project memory `project_mcp_server_silent_disconnect`] — known defect that motivated this story; rules out path (b).
 - [Source: project memory `project_diag_instrumentation_pattern`] — 15-line lifecycle logger reference; reused in test, not in production.
 - [Source: project memory `feedback_stop_dont_fix_forward`] — the rule that halted dogfood until L1 is fixed; this story is one of the three blockers.
 - [Source: project memory `project_dogfood_paused_until_l1`] — dogfood resumption gate; 5.12 is one of the three L1 fixes (alongside 5.10 and 5.11).
 - [Source: project memory `project_dev_loop_plugin_dir`] — dev loop runs `pnpm build:watch`; relevant when iterating on `index.ts`.
-- [Source: `plugins/crew/mcp-server/package.json`] — SDK version pin; future bumps must re-run AC4 to confirm the fix still works against the new SDK.
+- [Source: `plugins/flow/mcp-server/package.json`] — SDK version pin; future bumps must re-run AC4 to confirm the fix still works against the new SDK.
 
 ---
 
@@ -312,7 +312,7 @@ AC1 promises 30-second survival in production; AC4a tests with a 10-second windo
 
 ### From Story 5.11 (in flight or recently shipped)
 
-- Adds orphan-recovery to `/crew:start`. If 5.12 works, 5.11's recovery branch is dead code for the stdin-close case — but it remains load-bearing for every other reap cause. 5.12 reduces the *frequency* of 5.11's invocation; it does not obsolete 5.11.
+- Adds orphan-recovery to `/flow:start`. If 5.12 works, 5.11's recovery branch is dead code for the stdin-close case — but it remains load-bearing for every other reap cause. 5.12 reduces the *frequency* of 5.11's invocation; it does not obsolete 5.11.
 
 ### From Story 1.1 (the original entrypoint scaffold)
 
@@ -339,7 +339,7 @@ claude-sonnet-4-6
 ### Completion Notes List
 
 - Added module-level `_keepAliveHandle` (setInterval, period 2^30 ms) in `index.ts` to hold an independent event-loop ref that the SDK cannot unref — prevents the natural event-loop drain that led to the 2026-05-25 child exit.
-- Added `swallowStdinEnd` / `swallowStdinClose` handlers on `process.stdin` registered before `server.connect(transport)`, with opt-in CREW_MCP_DIAG logging.
+- Added `swallowStdinEnd` / `swallowStdinClose` handlers on `process.stdin` registered before `server.connect(transport)`, with opt-in FLOW_MCP_DIAG logging.
 - Added `process.stdin.resume()` to ensure the paused stdin enters flowing mode so EOF events actually fire.
 - No changes to `createServer()`, `registerAllTools()`, or any tool under `src/tools/`.
 - Integration test (`mcp-stdin-close-resilience.test.ts`) spawns real `dist/index.js` via `child_process.spawn`, performs MCP initialize handshake, then exercises AC1/AC2/AC3/AC4d/AC4e with explicit 20-30s timeouts.
@@ -347,9 +347,9 @@ claude-sonnet-4-6
 
 ### File List
 
-- `plugins/crew/mcp-server/src/index.ts` (modified — keep-alive fix)
-- `plugins/crew/mcp-server/dist/index.js` (rebuilt artefact)
-- `plugins/crew/mcp-server/dist/index.d.ts` (rebuilt — type declaration)
-- `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (new — integration test suite)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.js` (rebuilt — compiled test)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.d.ts` (rebuilt — type declaration)
+- `plugins/flow/mcp-server/src/index.ts` (modified — keep-alive fix)
+- `plugins/flow/mcp-server/dist/index.js` (rebuilt artefact)
+- `plugins/flow/mcp-server/dist/index.d.ts` (rebuilt — type declaration)
+- `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (new — integration test suite)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.js` (rebuilt — compiled test)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.d.ts` (rebuilt — type declaration)

@@ -20,7 +20,7 @@ entry — identical to how `completeStory`, `claimNextStory`, `reapStaleWorktree
 are already wired), add a CLI-shim round-trip test, rebuild + commit `dist/`.
 
 **Effort:** ~30 min. **Risk:** trivial, mechanical. **Value:** bless becomes a
-first-class seam; `/crew:ready` and the drain runbook stop needing a node fallback.
+first-class seam; `/flow:ready` and the drain runbook stop needing a node fallback.
 
 ---
 

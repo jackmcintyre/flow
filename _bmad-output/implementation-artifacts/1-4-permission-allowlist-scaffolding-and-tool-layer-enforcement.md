@@ -10,17 +10,17 @@ As a **plugin maintainer**,
 I want **every agent's tool authority and `gh`-subcommand authority enforced at the runtime/tool layer rather than via prompt, plus a hard ban on raw `fs.write` to canonical-state paths**,
 so that **no later story can accidentally grant an agent capability it shouldn't have, and the MCP tool boundary becomes the only path that mutates canonical state**.
 
-This story lands the **permission boundary**: (a) a versioned per-role permission spec shape at `plugins/crew/permissions/<role>.yaml` declaring `tools_allow` and `gh_allow` (with optional `gh_allow_args`), validated by a Zod schema; (b) a loader (`loadRolePermissions`) that reads + parses + caches one role's spec from disk; (c) a permission-checking middleware threaded into the MCP server so that every tool invocation carries a role context and is refused at the dispatcher layer when the tool name is not in the role's `tools_allow`; (d) an `execa`-based `gh` wrapper at `mcp-server/src/lib/gh.ts` that requires a role context and refuses any subcommand not in `gh_allow`; (e) a canonical-state write guard (`writeManagedFile`) plus an automated guardrail (lint rule or unit test) that forbids any direct `fs.writeFile` / `fs.writeFileSync` / `fs.appendFile` / `fs.createWriteStream` to canonical paths from any code other than `writeManagedFile` and the future logger; (f) typed errors (`PermissionDeniedError`, `GhSubcommandDeniedError`, `CanonicalFsWriteError`) for each refusal; (g) the **two ship-required role specs** for `generalist-dev` and `generalist-reviewer` so the bare minimum is enforceable today; (h) vitest coverage of the four enforcement paths plus the lint/test guardrail.
+This story lands the **permission boundary**: (a) a versioned per-role permission spec shape at `plugins/flow/permissions/<role>.yaml` declaring `tools_allow` and `gh_allow` (with optional `gh_allow_args`), validated by a Zod schema; (b) a loader (`loadRolePermissions`) that reads + parses + caches one role's spec from disk; (c) a permission-checking middleware threaded into the MCP server so that every tool invocation carries a role context and is refused at the dispatcher layer when the tool name is not in the role's `tools_allow`; (d) an `execa`-based `gh` wrapper at `mcp-server/src/lib/gh.ts` that requires a role context and refuses any subcommand not in `gh_allow`; (e) a canonical-state write guard (`writeManagedFile`) plus an automated guardrail (lint rule or unit test) that forbids any direct `fs.writeFile` / `fs.writeFileSync` / `fs.appendFile` / `fs.createWriteStream` to canonical paths from any code other than `writeManagedFile` and the future logger; (f) typed errors (`PermissionDeniedError`, `GhSubcommandDeniedError`, `CanonicalFsWriteError`) for each refusal; (g) the **two ship-required role specs** for `generalist-dev` and `generalist-reviewer` so the bare minimum is enforceable today; (h) vitest coverage of the four enforcement paths plus the lint/test guardrail.
 
 **This story does not** wire a real MCP tool that mutates canonical state (those land in Stories 1.5 telemetry / 1.6 atomic-rename / and Epics 2–4), does not spawn a subagent, does not implement the full catalogue of roles (Story 2.x – Hiring epic), does not produce the `gh-error-map.yaml` recoverable-error classification (Story 2.x or Epic 3, owned by NFR18), and does not register the `lookupStandards` MCP tool wrapper despite the architecture map naming `tools/lookup-standards.ts` — that tool registration moves to Story 1.5 once the telemetry write path is in place. The seam this story delivers is the **enforcement substrate** every future tool registration is required to consume.
 
 ## Acceptance Criteria
 
 **AC1 — Unlisted tool denied at the MCP tool layer (FR79, FR80, NFR12):**
-**Given** a per-role permission spec at `plugins/crew/permissions/<role>.yaml` declaring `tools_allow: [...]`,
+**Given** a per-role permission spec at `plugins/flow/permissions/<role>.yaml` declaring `tools_allow: [...]`,
 **When** an agent operating under that role invokes an MCP tool whose name is **not** in `tools_allow`,
 **Then** the server returns an MCP-shaped error response (`isError: true`, structured `content[0].text`) carrying the typed `PermissionDeniedError`'s one-line message, and **the tool's handler is never invoked** (verified by a `vi.fn()` spy on the descriptor's `handler`).
-The error message names the role, the attempted tool, the spec path (`plugins/crew/permissions/<role>.yaml`), and the closing `(FR79/FR80/NFR12)` marker.
+The error message names the role, the attempted tool, the spec path (`plugins/flow/permissions/<role>.yaml`), and the closing `(FR79/FR80/NFR12)` marker.
 
 **AC2 — Unlisted `gh` subcommand denied at the wrapper layer (NFR17, NFR12, NFR16):**
 **Given** the `execa`-based `gh` wrapper at `mcp-server/src/lib/gh.ts` exporting `gh({ role, subcommand, args })`,
@@ -29,7 +29,7 @@ The error message names the role, the attempted tool, the spec path (`plugins/cr
 **And** direct child-process spawning of `gh` elsewhere in `mcp-server/src/**` is forbidden by an automated guard (see AC5b). The error message names the role, the attempted subcommand, the role's allowlist, the spec path, and the closing `(NFR17)` marker.
 
 **AC3 — Raw `fs.write*` to canonical-state paths denied / forbidden (FR81, NFR16):**
-**Given** the MCP server, the canonical-state path set (`<target-repo>/.crew/state/**`, `<target-repo>/.crew/telemetry/**`, `<target-repo>/.crew/retro-proposals/**`, `<target-repo>/.crew/sprint-history/**`, `<target-repo>/team/**`, `<target-repo>/docs/standards.md`, `<target-repo>/docs/risk-tiering.md`, `<target-repo>/docs/discipline-rules.yaml`),
+**Given** the MCP server, the canonical-state path set (`<target-repo>/.flow/state/**`, `<target-repo>/.flow/telemetry/**`, `<target-repo>/.flow/retro-proposals/**`, `<target-repo>/.flow/sprint-history/**`, `<target-repo>/team/**`, `<target-repo>/docs/standards.md`, `<target-repo>/docs/risk-tiering.md`, `<target-repo>/docs/discipline-rules.yaml`),
 **When** any code path attempts a runtime write to a canonical-state path via the supplied write boundary (`writeManagedFile`) without an MCP tool context,
 **Then** the call fails with a typed `CanonicalFsWriteError` (runtime check), **and** the static guard (AC5c) fails CI if any file under `mcp-server/src/**` (excluding `mcp-server/src/lib/managed-fs.ts` and `mcp-server/src/lib/logger.ts` once it exists) imports a write-shaped API from `node:fs` / `node:fs/promises` (`writeFile`, `writeFileSync`, `appendFile`, `appendFileSync`, `createWriteStream`, `cp` with a canonical destination), regardless of path. The message names the offending path, the canonical-path glob it matched, the required entrypoint (`writeManagedFile` via an MCP tool), and the closing `(FR81/NFR16)` marker.
 
@@ -40,12 +40,12 @@ The error message names the role, the attempted tool, the spec path (`plugins/cr
 The positive-control branch exists so that the negative branches above cannot accidentally fail open (i.e. denying *everything* would still satisfy AC1–AC3 in isolation).
 
 **AC5 — Vitest covers the four enforcement paths (integration):**
-`pnpm test` from `plugins/crew/` adds two new test files (`mcp-server/tests/permissions-enforcement.test.ts` and `mcp-server/tests/canonical-fs-guard.test.ts`) plus one fixture role (`plugins/crew/mcp-server/tests/fixtures/permissions/test-role.yaml`). The combined suite asserts:
+`pnpm test` from `plugins/flow/` adds two new test files (`mcp-server/tests/permissions-enforcement.test.ts` and `mcp-server/tests/canonical-fs-guard.test.ts`) plus one fixture role (`plugins/flow/mcp-server/tests/fixtures/permissions/test-role.yaml`). The combined suite asserts:
 - **AC5a (tool-layer denial):** AC1's behaviour — handler never invoked, error response shape matches.
 - **AC5b (`gh` subcommand denial + direct-spawn ban):** AC2's behaviour — `execa` never called for an unlisted subcommand. A second sub-test greps `mcp-server/src/**/*.ts` (excluding `mcp-server/src/lib/gh.ts`) for `execa(` / `child_process` / `spawn(`/`exec(` calls referencing `"gh"` or `'gh'` and asserts zero matches.
 - **AC5c (canonical-fs guard):** AC3's behaviour at runtime (`writeManagedFile` refuses without MCP-tool context) plus a static greppy sub-test that walks `mcp-server/src/**/*.ts` (excluding the two whitelisted files), parses each file's import statements for `node:fs` / `node:fs/promises` / `fs`, and asserts none import the banned write surface (`writeFile`, `writeFileSync`, `appendFile`, `appendFileSync`, `createWriteStream`). Imports of read-only surface (`readFile`, `readFileSync`, `mkdir`, `mkdtemp`, `stat`, `access`, `cp` to non-canonical, `rm` for test-tmp) are permitted.
 - **AC5d (positive control):** AC4's behaviour.
-- **AC5e (spec round-trip):** loading `plugins/crew/permissions/generalist-dev.yaml` and `plugins/crew/permissions/generalist-reviewer.yaml` through `loadRolePermissions` returns a typed `RolePermissions` for each, with `role`, non-empty `tools_allow`, non-empty `gh_allow`. The shipped reviewer spec **must not** include any of `pr-merge`, `pr-close`, `pr-review` (negative-capability assertion mandated by NFR16).
+- **AC5e (spec round-trip):** loading `plugins/flow/permissions/generalist-dev.yaml` and `plugins/flow/permissions/generalist-reviewer.yaml` through `loadRolePermissions` returns a typed `RolePermissions` for each, with `role`, non-empty `tools_allow`, non-empty `gh_allow`. The shipped reviewer spec **must not** include any of `pr-merge`, `pr-close`, `pr-review` (negative-capability assertion mandated by NFR16).
 
 All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, validate-active-adapter 1.2b, standards-doc 1.3). Total expected test count: existing baseline + the new file(s)' tests; all green, zero skips.
 
@@ -54,7 +54,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
 ## Tasks / Subtasks
 
 - [x] **Task 1 — Zod schema and types for `RolePermissions`** (AC: 1, 2, 5e)
-  - [x] Create `plugins/crew/mcp-server/src/schemas/role-permissions.ts`.
+  - [x] Create `plugins/flow/mcp-server/src/schemas/role-permissions.ts`.
   - [x] Export:
     - `RolePermissionsSchema` — `z.object({ role: z.string().min(1).regex(/^[a-z0-9-]+$/), tools_allow: z.array(z.string().min(1)).min(1), gh_allow: z.array(z.string().min(1)).default([]), gh_allow_args: z.record(z.string(), z.array(z.string().min(1))).default({}) }).strict()`.
     - `type RolePermissions = z.infer<typeof RolePermissionsSchema> & { sourcePath: string };` — `sourcePath` is appended by the loader after parse, **not** part of the on-disk shape.
@@ -65,7 +65,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] No defaults on `role` or `tools_allow`. Every field is explicit. Defaults would mask malformed input.
 
 - [x] **Task 2 — Typed errors `PermissionDeniedError`, `GhSubcommandDeniedError`, `CanonicalFsWriteError`** (AC: 1, 2, 3)
-  - [x] Extend `plugins/crew/mcp-server/src/errors.ts` with three new subclasses of `DomainError`. Append at the bottom of the file, after `StandardsDocMalformedError`. Match the existing JSDoc and constructor-options-bag style.
+  - [x] Extend `plugins/flow/mcp-server/src/errors.ts` with three new subclasses of `DomainError`. Append at the bottom of the file, after `StandardsDocMalformedError`. Match the existing JSDoc and constructor-options-bag style.
   - [x] `PermissionDeniedError` — fields: `role: string`, `attemptedTool: string`, `allowedTools: readonly string[]`, `specPath: string`. Constructor composes:
     > `Role '<role>' is not allowed to invoke tool '<attemptedTool>'. Allowed tools for this role: [<allowedTools join ", ">]. Edit <specPath> to grant this capability through PR review (NFR13). (FR79/FR80/NFR12)`
   - [x] `GhSubcommandDeniedError` — fields: `role: string`, `attemptedSubcommand: string`, `allowedSubcommands: readonly string[]`, `specPath: string`. Constructor composes:
@@ -76,14 +76,14 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] Do **not** touch any of the existing classes. Their wording is asserted by 1.1/1.2/1.2b/1.3 tests.
 
 - [x] **Task 3 — Pure permission loader `loadRolePermissions`** (AC: 1, 5e)
-  - [x] Create `plugins/crew/mcp-server/src/state/load-role-permissions.ts`. (Sits alongside `workspace-resolver.ts`, `validate-active-adapter.ts`, `lookup-standards.ts` in `state/` — same convention as 1.2/1.2b/1.3: workspace-IO boundary lives in `state/`.)
+  - [x] Create `plugins/flow/mcp-server/src/state/load-role-permissions.ts`. (Sits alongside `workspace-resolver.ts`, `validate-active-adapter.ts`, `lookup-standards.ts` in `state/` — same convention as 1.2/1.2b/1.3: workspace-IO boundary lives in `state/`.)
   - [x] Export a single async function:
     `loadRolePermissions(opts: { role: string; pluginRoot: string }): Promise<RolePermissions>`
     - `role` — the kebab-case role id.
-    - `pluginRoot` — absolute path to `plugins/crew/`. Caller resolves; the loader does **not** derive from `process.cwd()` (memory `feedback_pre_tool_use_hook_cwd_drift`).
+    - `pluginRoot` — absolute path to `plugins/flow/`. Caller resolves; the loader does **not** derive from `process.cwd()` (memory `feedback_pre_tool_use_hook_cwd_drift`).
   - [x] Algorithm:
     1. Compute `specPath = path.join(pluginRoot, "permissions", role + ".yaml")`.
-    2. Read with `fs.readFile(specPath, "utf8")`. On `ENOENT`, throw a clear `DomainError` subclass `RolePermissionsMissingError` (also added in Task 2's batch — append after `CanonicalFsWriteError`) naming `role`, `specPath`, and the canonical example (`plugins/crew/permissions/generalist-dev.yaml`).
+    2. Read with `fs.readFile(specPath, "utf8")`. On `ENOENT`, throw a clear `DomainError` subclass `RolePermissionsMissingError` (also added in Task 2's batch — append after `CanonicalFsWriteError`) naming `role`, `specPath`, and the canonical example (`plugins/flow/permissions/generalist-dev.yaml`).
     3. Parse with `yamlParse` from `"yaml"` (same import as `workspace-resolver.ts`). On YAML syntax error, throw `RolePermissionsMalformedError` with the YAML error message.
     4. Pass through `RolePermissionsSchema.safeParse(...)`. On failure, throw `RolePermissionsMalformedError` with the formatted Zod issue (same `formatZodIssues` helper pattern from `validators/standards-doc.ts` — duplicate the helper here or extract to a shared `lib/format-zod-issues.ts` at the dev's discretion; if extracting, **do not** edit `validators/standards-doc.ts` to consume the shared helper, that's a scope-creep refactor for a later story).
     5. Return `{ ...result.data, sourcePath: specPath }`.
@@ -91,7 +91,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] **No module-level caching.** A future story (catalogue/hiring) may add a per-pluginRoot LRU cache; this story re-reads on every call. Caching here is a premature optimisation that would mask a stale-spec class of bugs.
 
 - [x] **Task 4 — Permission-aware MCP tool registration and dispatch** (AC: 1, 4, 5a, 5d)
-  - [x] Update `plugins/crew/mcp-server/src/server.ts`:
+  - [x] Update `plugins/flow/mcp-server/src/server.ts`:
     - Extend `ToolDescriptor` with an optional `allowedRoles: readonly string[]` field. Tools that opt into role-scoped permission must declare this; tools that don't are treated as **plugin-internal** (callable only via the registry's internal seams, never exposed via `CallToolRequestSchema` if the request carries a role context).
     - Add a `RoleContext` interface: `{ role: string; permissions: RolePermissions }`. The MCP request gateway (the `CallToolRequestSchema` handler) reads the role context from the request's `_meta` field on incoming MCP requests — i.e. clients pass `{ params: { name, arguments, _meta: { role: "generalist-dev" } } }`. If `_meta.role` is absent, treat the call as **role-less** (used by the smoke test and the test-side fixture, never by a real agent — see Task 6 anti-pattern #1).
     - In the `CallToolRequestSchema` handler, if `_meta.role` is present:
@@ -103,7 +103,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] **Do not** introduce a global singleton permissions cache here. The loader's contract is "re-read on every call" (Task 3); the server's contract is "ask the loader once per CallToolRequest". If perf is ever an issue, a future story can add a per-process LRU at the loader layer, not the server layer.
 
 - [x] **Task 5 — `execa`-based `gh` wrapper at `mcp-server/src/lib/gh.ts`** (AC: 2, 4, 5b, 5d)
-  - [x] Create `plugins/crew/mcp-server/src/lib/gh.ts`. (This is the first file under `lib/` other than `plugin-version.ts`. The architecture map pins this exact location for NFR17 enforcement.)
+  - [x] Create `plugins/flow/mcp-server/src/lib/gh.ts`. (This is the first file under `lib/` other than `plugin-version.ts`. The architecture map pins this exact location for NFR17 enforcement.)
   - [x] Export a single async function (do not introduce a class):
     `gh(opts: { role: string; permissions: RolePermissions; subcommand: string; args?: readonly string[]; execaImpl?: typeof execa }): Promise<{ stdout: string; stderr: string; exitCode: number }>`
     - `execaImpl` is a **test seam only** — production callers do not pass it. The default is the live `execa` from `"execa"` (already a declared runtime dep in `mcp-server/package.json`).
@@ -115,12 +115,12 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] Use the existing `execa` dep (`^9.6.1` per `mcp-server/package.json`). Do **not** add a new dep.
 
 - [x] **Task 6 — Canonical-state write guard `writeManagedFile`** (AC: 3, 5c)
-  - [x] Create `plugins/crew/mcp-server/src/lib/managed-fs.ts`.
+  - [x] Create `plugins/flow/mcp-server/src/lib/managed-fs.ts`.
   - [x] Export:
     - `CANONICAL_PATH_GLOBS: readonly string[]` — exported for the static guard test to consume. Initial set (relative to `targetRepoRoot`):
-      - `.crew/state/**`
-      - `.crew/telemetry/**`
-      - `.crew/retro-proposals/**`
+      - `.flow/state/**`
+      - `.flow/telemetry/**`
+      - `.flow/retro-proposals/**`
       - `.crew/sprint-history/**`
       - `.crew/sessions/**`
       - `team/**`
@@ -136,7 +136,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] **Do not** wire `writeManagedFile` into any MCP tool in this story. There are no canonical-state-mutating tools yet (those land in 1.5+). Shipping the guard ahead of the writers is the whole point — the substrate must be impossible to bypass on day one.
 
 - [x] **Task 7 — Ship the v1-minimum role specs** (AC: 5e)
-  - [x] Create `plugins/crew/permissions/generalist-dev.yaml`:
+  - [x] Create `plugins/flow/permissions/generalist-dev.yaml`:
     ```yaml
     role: generalist-dev
     tools_allow:
@@ -157,7 +157,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
     gh_allow_args: {}
     ```
     The `tools_allow` list names tools that **do not yet exist as MCP registrations** — that is intentional: this story ships the allowlist substrate, future stories register the named tools. A typo in the list cannot cause a runtime failure now because the dispatcher only refuses **negatively** (deny what's not listed); it never asserts that everything listed exists. (A later story can add a CI lint that cross-references `tools_allow` against `getRegisteredToolNames()`; out of v1 scope.)
-  - [x] Create `plugins/crew/permissions/generalist-reviewer.yaml`:
+  - [x] Create `plugins/flow/permissions/generalist-reviewer.yaml`:
     ```yaml
     role: generalist-reviewer
     tools_allow:
@@ -176,7 +176,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
     gh_allow_args: {}
     ```
     **Negative-capability assertion (NFR16):** this list explicitly excludes `pr-merge`, `pr-close`, `pr-review` (the "approve/request-changes" verb) — reviewer can post comments but cannot apply verdicts at the GitHub layer. AC5e tests this.
-  - [x] Create `plugins/crew/mcp-server/tests/fixtures/permissions/test-role.yaml`:
+  - [x] Create `plugins/flow/mcp-server/tests/fixtures/permissions/test-role.yaml`:
     ```yaml
     role: test-role
     tools_allow:
@@ -189,7 +189,7 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] **Do not** create permission specs for any other role in this story. The catalogue (hiring-manager, planner, orchestrator, retro-analyst, specialists) lands in Epic 2. Adding speculative specs now is scope creep and risks shipping authority a later story will then have to claw back.
 
 - [x] **Task 8 — Authored vitest suite and static guards** (AC: 5)
-  - [x] Create `plugins/crew/mcp-server/tests/permissions-enforcement.test.ts`. Covers AC5a, AC5b runtime, AC5d, AC5e.
+  - [x] Create `plugins/flow/mcp-server/tests/permissions-enforcement.test.ts`. Covers AC5a, AC5b runtime, AC5d, AC5e.
     - **AC5a (tool-layer denial):** Construct a server via `createServer({ permissionsLoader: async (role) => loadRolePermissions({ role, pluginRoot: /* tests/fixtures dir */ }) })`. Register two descriptors:
       - `noop` — `handler` is a `vi.fn(async () => ({ content: [{ type: "text", text: "ok" }] }))`.
       - `forbidden` — same shape, different `vi.fn()`.
@@ -204,11 +204,11 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
     - **AC5d (positive control — tool):** With the same server, dispatch `params: { name: "noop", arguments: {}, _meta: { role: "test-role" } }`. Assert the `noop` handler's `vi.fn()` was called exactly once and the response has `isError !== true`.
     - **AC5d (positive control — gh):** Call `gh({ ..., subcommand: "pr-view", args: ["--help"], execaImpl })` where `execaImpl` resolves to `{ stdout: "ok", stderr: "", exitCode: 0 }`. Assert the returned value matches the stub and `execaImpl` was called exactly once with `("gh", ["pr-view", "--help"])`.
     - **AC5e (shipped specs):** `loadRolePermissions({ role: "generalist-dev", pluginRoot })` and `... reviewer ...` both resolve to a `RolePermissions` whose `tools_allow.length > 0` and `gh_allow.length > 0`. Reviewer assertion: `expect(perms.gh_allow).not.toContain("pr-merge")` and likewise for `pr-close`, `pr-review`. Dev assertion: `tools_allow` includes `claimStory` and `completeStory`.
-  - [x] Create `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`. Covers AC5c runtime + static.
+  - [x] Create `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`. Covers AC5c runtime + static.
     - **AC5c (runtime):** Use `os.tmpdir()` to build a fake `targetRepoRoot`. Call:
-      - `writeManagedFile({ absPath: path.join(root, ".crew", "state", "to-do", "bmad:1.yaml"), contents: "x", targetRepoRoot: root })` — no `mcpToolContext`. Assert: rejects with `CanonicalFsWriteError`, message contains the path and `.crew/state/**` and `(FR81/NFR16)`.
+      - `writeManagedFile({ absPath: path.join(root, ".flow", "state", "to-do", "bmad:1.yaml"), contents: "x", targetRepoRoot: root })` — no `mcpToolContext`. Assert: rejects with `CanonicalFsWriteError`, message contains the path and `.flow/state/**` and `(FR81/NFR16)`.
       - `writeManagedFile({ absPath: path.join(root, "scratch.txt"), contents: "x", targetRepoRoot: root })` — non-canonical path, no `mcpToolContext`. Assert: succeeds, file exists with the contents.
-      - `writeManagedFile({ ..., absPath: path.join(root, ".crew", "state", "to-do", "bmad:2.yaml"), ..., mcpToolContext: { toolName: "claimStory", role: "generalist-dev" } })` — canonical path, with tool context. Assert: succeeds.
+      - `writeManagedFile({ ..., absPath: path.join(root, ".flow", "state", "to-do", "bmad:2.yaml"), ..., mcpToolContext: { toolName: "claimStory", role: "generalist-dev" } })` — canonical path, with tool context. Assert: succeeds.
     - **AC5c (static, fs writes):** Walk `mcp-server/src/**/*.ts` (use `fast-glob` if already declared, else implement a tiny recursive `readdir` walker — do **not** add a new dep). For each file other than `mcp-server/src/lib/managed-fs.ts`:
       - Parse import statements with a regex (`/^\s*import[^;]*from\s+["']([^"']+)["']/gm`) or `node:fs` substring checks against the import-clause text.
       - For any import from `node:fs`, `node:fs/promises`, `fs`, or `fs/promises`, assert the imported binding list does **not** include any of `writeFile`, `writeFileSync`, `appendFile`, `appendFileSync`, `createWriteStream`. Also forbid `import * as fs` followed by `fs.writeFile` etc. (substring check on the file body is sufficient for v1).
@@ -221,11 +221,11 @@ All sub-tests pass alongside the existing suites (smoke 1.1, resolver 1.2, valid
   - [x] Use `vi.fn()` and `vi.spyOn` — no `vi.mock` for fs (use real tmpdir fixtures, same precedent as 1.3).
 
 - [x] **Task 9 — Verify install + build + test pipeline** (AC: 1, 2, 3, 4, 5)
-  - [x] `pnpm install` from `plugins/crew/` succeeds (no new runtime deps; `execa` and `zod` and `yaml` already declared).
-  - [x] `pnpm build` from `plugins/crew/` produces zero TS errors.
-  - [x] `pnpm test` from `plugins/crew/` runs the full suite: existing baseline (1.1 smoke + acceptance, 1.2 resolver, 1.2b validate-active-adapter, 1.3 standards-doc) **unchanged**, plus the two new test files. All green, zero skips.
+  - [x] `pnpm install` from `plugins/flow/` succeeds (no new runtime deps; `execa` and `zod` and `yaml` already declared).
+  - [x] `pnpm build` from `plugins/flow/` produces zero TS errors.
+  - [x] `pnpm test` from `plugins/flow/` runs the full suite: existing baseline (1.1 smoke + acceptance, 1.2 resolver, 1.2b validate-active-adapter, 1.3 standards-doc) **unchanged**, plus the two new test files. All green, zero skips.
   - [x] `pnpm-lock.yaml` is unchanged (no new deps).
-  - [x] Manual sanity-check: `grep -rE "from \"node:fs(/promises)?\"" plugins/crew/mcp-server/src/` returns matches only in files that need them, and no occurrence pairs a write-shape import with a non-whitelisted file. (If the dev wants this baked into CI later, fine — but for v1, AC5c's vitest sub-test is sufficient.)
+  - [x] Manual sanity-check: `grep -rE "from \"node:fs(/promises)?\"" plugins/flow/mcp-server/src/` returns matches only in files that need them, and no occurrence pairs a write-shape import with a non-whitelisted file. (If the dev wants this baked into CI later, fine — but for v1, AC5c's vitest sub-test is sufficient.)
 
 ---
 
@@ -238,33 +238,33 @@ This story stops being a code change at the moment it ships — from then on, it
 **Three enforcement surfaces, three failure modes, three typed errors:**
 1. **Tool-layer allowlist** (`PermissionDeniedError`) — the MCP dispatcher refuses to call a handler whose name is not in the calling role's `tools_allow`. Per FR79/FR80/NFR12.
 2. **`gh` subcommand allowlist** (`GhSubcommandDeniedError`) — the `execa` wrapper refuses to spawn a subprocess for a subcommand not in the calling role's `gh_allow`. Per NFR17/NFR12/NFR16.
-3. **Canonical-fs write guard** (`CanonicalFsWriteError` plus a static guard against importing write-shaped fs APIs) — no code outside `writeManagedFile` and (future) `lib/logger.ts` can write to `<target-repo>/.crew/**`, `<target-repo>/team/**`, or the three canonical files under `<target-repo>/docs/`. Per FR81/NFR16.
+3. **Canonical-fs write guard** (`CanonicalFsWriteError` plus a static guard against importing write-shaped fs APIs) — no code outside `writeManagedFile` and (future) `lib/logger.ts` can write to `<target-repo>/.flow/**`, `<target-repo>/team/**`, or the three canonical files under `<target-repo>/docs/`. Per FR81/NFR16.
 
 **Boundary discipline:** this story ships substrate only. **No** MCP tool is wired through the substrate yet; **no** real `gh` call is invoked from a real role; **no** canonical file is written. The story exists to make it impossible for Stories 1.5+ to forget the boundary. The positive-control AC (AC4) and the `noop` test-fixture tool exist exclusively to guarantee the negative branches aren't fail-open.
 
 ### Files this story touches
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/role-permissions.ts` — Zod schema and types.
-- `plugins/crew/mcp-server/src/state/load-role-permissions.ts` — pure-ish loader (re-reads on every call).
-- `plugins/crew/mcp-server/src/lib/gh.ts` — `execa`-based `gh` wrapper with role-scoped enforcement.
-- `plugins/crew/mcp-server/src/lib/managed-fs.ts` — `CANONICAL_PATH_GLOBS`, `isCanonicalPath`, `writeManagedFile`.
-- `plugins/crew/permissions/generalist-dev.yaml` — shipped role spec.
-- `plugins/crew/permissions/generalist-reviewer.yaml` — shipped role spec.
-- `plugins/crew/mcp-server/tests/permissions-enforcement.test.ts` — vitest covering AC5a/b/d/e.
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` — vitest covering AC5c.
-- `plugins/crew/mcp-server/tests/fixtures/permissions/test-role.yaml` — test-only fixture role.
+- `plugins/flow/mcp-server/src/schemas/role-permissions.ts` — Zod schema and types.
+- `plugins/flow/mcp-server/src/state/load-role-permissions.ts` — pure-ish loader (re-reads on every call).
+- `plugins/flow/mcp-server/src/lib/gh.ts` — `execa`-based `gh` wrapper with role-scoped enforcement.
+- `plugins/flow/mcp-server/src/lib/managed-fs.ts` — `CANONICAL_PATH_GLOBS`, `isCanonicalPath`, `writeManagedFile`.
+- `plugins/flow/permissions/generalist-dev.yaml` — shipped role spec.
+- `plugins/flow/permissions/generalist-reviewer.yaml` — shipped role spec.
+- `plugins/flow/mcp-server/tests/permissions-enforcement.test.ts` — vitest covering AC5a/b/d/e.
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts` — vitest covering AC5c.
+- `plugins/flow/mcp-server/tests/fixtures/permissions/test-role.yaml` — test-only fixture role.
 
 **UPDATE (minimal — preserve existing surface):**
-- `plugins/crew/mcp-server/src/errors.ts` — append `PermissionDeniedError`, `GhSubcommandDeniedError`, `CanonicalFsWriteError`, `RolePermissionsMissingError`, `RolePermissionsMalformedError`. Do not touch the eight existing classes.
-- `plugins/crew/mcp-server/src/server.ts` — extend `ToolHandler` signature with an optional `ctx` arg, add optional `allowedRoles` field on `ToolDescriptor`, change `createServer` signature to accept `{ permissionsLoader }`, add `_meta.role` reading + permission-check branch in the `CallToolRequestSchema` handler. **Preserve** the existing role-less branch (the 1.1 smoke test depends on it).
+- `plugins/flow/mcp-server/src/errors.ts` — append `PermissionDeniedError`, `GhSubcommandDeniedError`, `CanonicalFsWriteError`, `RolePermissionsMissingError`, `RolePermissionsMalformedError`. Do not touch the eight existing classes.
+- `plugins/flow/mcp-server/src/server.ts` — extend `ToolHandler` signature with an optional `ctx` arg, add optional `allowedRoles` field on `ToolDescriptor`, change `createServer` signature to accept `{ permissionsLoader }`, add `_meta.role` reading + permission-check branch in the `CallToolRequestSchema` handler. **Preserve** the existing role-less branch (the 1.1 smoke test depends on it).
 
 **MUST NOT touch:**
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts`, `validate-active-adapter.ts`, `lookup-standards.ts` — their contracts are fixed by 1.2 / 1.2b / 1.3.
-- `plugins/crew/mcp-server/src/schemas/workspace-config.ts`, `plugin-manifest.ts`, `standards-doc.ts` — settled.
-- `plugins/crew/mcp-server/src/validators/standards-doc.ts` — settled. If extracting `formatZodIssues` into `lib/format-zod-issues.ts`, do **not** update this file to consume the shared helper (scope creep).
-- `plugins/crew/mcp-server/src/adapters/*` — no adapter-contract change.
-- `plugins/crew/mcp-server/src/index.ts` — stdio entrypoint untouched; production wiring of `permissionsLoader` lands in Story 1.7 (`/status` skill is the first caller that needs a real workspace + permissions loader together). If a stub default is needed today, the default `permissionsLoader` throws `NotImplementedError` as Task 4 specifies.
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts`, `validate-active-adapter.ts`, `lookup-standards.ts` — their contracts are fixed by 1.2 / 1.2b / 1.3.
+- `plugins/flow/mcp-server/src/schemas/workspace-config.ts`, `plugin-manifest.ts`, `standards-doc.ts` — settled.
+- `plugins/flow/mcp-server/src/validators/standards-doc.ts` — settled. If extracting `formatZodIssues` into `lib/format-zod-issues.ts`, do **not** update this file to consume the shared helper (scope creep).
+- `plugins/flow/mcp-server/src/adapters/*` — no adapter-contract change.
+- `plugins/flow/mcp-server/src/index.ts` — stdio entrypoint untouched; production wiring of `permissionsLoader` lands in Story 1.7 (`/status` skill is the first caller that needs a real workspace + permissions loader together). If a stub default is needed today, the default `permissionsLoader` throws `NotImplementedError` as Task 4 specifies.
 - Existing tests: `smoke.test.ts`, `acceptance.test.ts`, `workspace-resolver.test.ts`, `validate-active-adapter.test.ts`, `standards-doc.test.ts` — must still pass unchanged.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other status/state file — orchestrator owns status transitions.
 - Anything under `plugins/sprint-orchestrator/` — retired.
@@ -274,7 +274,7 @@ This story stops being a code change at the moment it ships — from then on, it
 
 | Concern | Pin | Source |
 |---|---|---|
-| Permission spec location | `plugins/crew/permissions/<role>.yaml` | project-structure-boundaries.md lines 41–45 |
+| Permission spec location | `plugins/flow/permissions/<role>.yaml` | project-structure-boundaries.md lines 41–45 |
 | Permission spec shape (`role`, `tools_allow`, `gh_allow`, `gh_allow_args`) | YAML, kebab-case role id, snake_case keys, `.strict()` Zod | implementation-patterns-consistency-rules.md §10 (`gh` allowlist format), §3 (catalogue/persona frontmatter) |
 | Tool-layer enforcement (not prompt-layer) | MCP dispatcher refuses unlisted tools; handler never invoked | FR80, NFR12; PRD functional-requirements.md line 121 |
 | `gh` is the only GitHub surface | `mcp-server/src/lib/gh.ts` is the only file permitted to spawn `gh`; static guard enforces this | NFR17; project-structure-boundaries.md line 102, 184; core-architectural-decisions.md lines 87–89 |
@@ -387,7 +387,7 @@ export class RolePermissionsMissingError extends DomainError {
   constructor(opts: { role: string; specPath: string }) {
     super(
       `Permission spec for role '${opts.role}' not found at ${opts.specPath}. ` +
-        `See the canonical example in plugins/crew/permissions/generalist-dev.yaml.`,
+        `See the canonical example in plugins/flow/permissions/generalist-dev.yaml.`,
     );
     this.role = opts.role;
     this.specPath = opts.specPath;
@@ -405,7 +405,7 @@ export class RolePermissionsMalformedError extends DomainError {
   constructor(opts: { specPath: string; zodMessage: string }) {
     super(
       `Permission spec at ${opts.specPath} is malformed: ${opts.zodMessage}. ` +
-        `See the canonical example in plugins/crew/permissions/generalist-dev.yaml.`,
+        `See the canonical example in plugins/flow/permissions/generalist-dev.yaml.`,
     );
     this.specPath = opts.specPath;
     this.zodMessage = opts.zodMessage;
@@ -490,9 +490,9 @@ import * as path from "node:path";
 import { CanonicalFsWriteError } from "../errors.js";
 
 export const CANONICAL_PATH_GLOBS: readonly string[] = [
-  ".crew/state/**",
-  ".crew/telemetry/**",
-  ".crew/retro-proposals/**",
+  ".flow/state/**",
+  ".flow/telemetry/**",
+  ".flow/retro-proposals/**",
   ".crew/sprint-history/**",
   ".crew/sessions/**",
   "team/**",
@@ -599,7 +599,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 ### File structure requirements
 
 ```
-plugins/crew/
+plugins/flow/
 ├── permissions/
 │   ├── .gitkeep                                  # UNCHANGED
 │   ├── generalist-dev.yaml                       # NEW
@@ -632,7 +632,7 @@ Stay within this list. Anything else is scope creep.
 ### Testing requirements
 
 - All new tests are unit/integration-level vitest, in-process, no subprocess transport. The `gh` wrapper test stubs `execa` via the `execaImpl` injection seam — **do not** spawn real `gh` in tests.
-- `pnpm test` from `plugins/crew/` must continue to run the existing baseline suites unchanged.
+- `pnpm test` from `plugins/flow/` must continue to run the existing baseline suites unchanged.
 - Test file imports use `.js` extensions (NodeNext).
 - Use real tmpdir fixtures (no `vi.mock` for `fs`).
 - The static guards in AC5c are themselves vitest assertions, not a separate lint pass. This keeps the dev loop one-command (`pnpm test`).
@@ -781,24 +781,24 @@ claude-opus-4-7
 - The MCP server now reads `_meta.role` on `CallToolRequestSchema` and consults the injected `permissionsLoader`. The 1.1 role-less smoke test path is preserved.
 - The `gh` wrapper translates kebab-cased subcommands (`pr-view`) into space-separated segments (`["pr", "view"]`) before spawning, matching the real `gh` CLI shape.
 - `writeManagedFile` is the only file outside `lib/managed-fs.ts` permitted to import write-shaped `node:fs` APIs. The static guard in `canonical-fs-guard.test.ts` enforces this and also forbids any non-wrapper file from spawning `gh` directly.
-- Minor: `state/workspace-resolver.ts` previously called `fs.writeFile` directly to synthesise the workspace config. It was routed through `writeManagedFile` so the static guard passes; behaviour is unchanged because `.crew/config.yaml` is non-canonical and the wrapper passes such writes through.
-- `pnpm install && pnpm build && pnpm test` from `plugins/crew/`: 48 tests pass (existing 1.1/1.2/1.2b/1.3 baseline plus 11 new tests across the two new files). `pnpm-lock.yaml` unchanged (no new deps).
+- Minor: `state/workspace-resolver.ts` previously called `fs.writeFile` directly to synthesise the workspace config. It was routed through `writeManagedFile` so the static guard passes; behaviour is unchanged because `.flow/config.yaml` is non-canonical and the wrapper passes such writes through.
+- `pnpm install && pnpm build && pnpm test` from `plugins/flow/`: 48 tests pass (existing 1.1/1.2/1.2b/1.3 baseline plus 11 new tests across the two new files). `pnpm-lock.yaml` unchanged (no new deps).
 
 ### File List
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/role-permissions.ts`
-- `plugins/crew/mcp-server/src/state/load-role-permissions.ts`
-- `plugins/crew/mcp-server/src/lib/gh.ts`
-- `plugins/crew/mcp-server/src/lib/managed-fs.ts`
-- `plugins/crew/mcp-server/tests/permissions-enforcement.test.ts`
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`
-- `plugins/crew/mcp-server/tests/fixtures/permissions/test-role.yaml`
-- `plugins/crew/permissions/generalist-dev.yaml`
-- `plugins/crew/permissions/generalist-reviewer.yaml`
+- `plugins/flow/mcp-server/src/schemas/role-permissions.ts`
+- `plugins/flow/mcp-server/src/state/load-role-permissions.ts`
+- `plugins/flow/mcp-server/src/lib/gh.ts`
+- `plugins/flow/mcp-server/src/lib/managed-fs.ts`
+- `plugins/flow/mcp-server/tests/permissions-enforcement.test.ts`
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts`
+- `plugins/flow/mcp-server/tests/fixtures/permissions/test-role.yaml`
+- `plugins/flow/permissions/generalist-dev.yaml`
+- `plugins/flow/permissions/generalist-reviewer.yaml`
 
 **UPDATED:**
-- `plugins/crew/mcp-server/src/errors.ts` (appended 5 error classes)
-- `plugins/crew/mcp-server/src/server.ts` (CreateServerOptions, dispatcher gate, ctx threading)
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts` (routed config write through `writeManagedFile`)
+- `plugins/flow/mcp-server/src/errors.ts` (appended 5 error classes)
+- `plugins/flow/mcp-server/src/server.ts` (CreateServerOptions, dispatcher gate, ctx threading)
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts` (routed config write through `writeManagedFile`)
 

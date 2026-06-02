@@ -9,7 +9,7 @@ These items were captured during the Epic 3 retrospective. When authoring Epic 4
 - **[High] `detectInProgressHandEdit` wiring** — already added to Story 4.1 below (closes Story 3.7 AC3 / FR14a).
 - **[Medium] Spec amendment tracking.** Story 3.5 needed a mid-flight spec amendment that landed only on local disk because `_bmad-output/implementation-artifacts/` is gitignored. Either un-ignore that directory (with implications for run-state / scratch artefacts), or move spec amendments to a tracked path. Likely needs its own story. May fit better in Epic 6 (calibration / standards evolution) than Epic 4 — revisit at planning time.
 - **[Low] Surface I/O warnings in `validatePlannerBacklog`.** Add an `io_warnings?: string[]` field to the structured return. Today when `listSourceStories` throws and the pending batch already contains a ship-gate, the tool returns `{ok: true}` and the I/O error reaches `console.error` only. Real product-correctness gap on a rare path.
-- **[Low] Native-source-only dedup in planner inventory display.** When a `.crew/native-stories/<ULID>.md` already has a manifest, the planner lists it twice. Cosmetic but visible during planning.
+- **[Low] Native-source-only dedup in planner inventory display.** When a `.flow/native-stories/<ULID>.md` already has a manifest, the planner lists it twice. Cosmetic but visible during planning.
 - **[Low] Move ref-format validation upstream into the planning-discipline gate.** Today malformed `depends_on` refs fail at the writer layer (Story 3.4) rather than at planning-discipline (Story 3.5). Layering improvement.
 - **[Low] Friendlier `git rev-parse failed` message on no-HEAD scratch repos.** When operator-smoke uses a fresh `git init` scratch repo, the planner emits a scary-looking error. Doesn't break anything; polish for smoke sessions.
 
@@ -74,12 +74,12 @@ So that the verdict comes from a subagent whose context contains no implementati
 ## Story 4.3b: Harness-side `Task`-spawn seam for `runDevSession`
 
 As a plugin maintainer,
-I want the `/crew:start` SKILL.md prose layer to drive the `Task` tool directly and feed the captured transcript into `runDevSession`, rather than the MCP tool spawning subagents itself,
-So that `/crew:start` actually runs the inner dev↔reviewer cycle in production — today the MCP tool's `taskSpawnWithTranscript` parameter can't accept a closure over the wire, so the default empty-transcript stub fires for every claimed story and stamps `blocked_by: handoff-grammar` end-to-end. Without this seam, the user-surface ACs that Stories 4.2 and 4.3 verified through dependency injection are inert in a real session.
+I want the `/flow:start` SKILL.md prose layer to drive the `Task` tool directly and feed the captured transcript into `runDevSession`, rather than the MCP tool spawning subagents itself,
+So that `/flow:start` actually runs the inner dev↔reviewer cycle in production — today the MCP tool's `taskSpawnWithTranscript` parameter can't accept a closure over the wire, so the default empty-transcript stub fires for every claimed story and stamps `blocked_by: handoff-grammar` end-to-end. Without this seam, the user-surface ACs that Stories 4.2 and 4.3 verified through dependency injection are inert in a real session.
 
 **Acceptance Criteria:**
 
-**Given** a claimed story in `in-progress/`, **When** the operator runs `/crew:start` in a real Claude Code session, **Then** the SKILL.md prose invokes the `Task` tool to spawn the per-story dev subagent (using the prompt computed by `buildPersonaSpawnPrompt`), captures the dev's final transcript, and passes that transcript into `runDevSession` (or its successor) — no MCP tool attempts to spawn subagents on its own. _(FR-new)_
+**Given** a claimed story in `in-progress/`, **When** the operator runs `/flow:start` in a real Claude Code session, **Then** the SKILL.md prose invokes the `Task` tool to spawn the per-story dev subagent (using the prompt computed by `buildPersonaSpawnPrompt`), captures the dev's final transcript, and passes that transcript into `runDevSession` (or its successor) — no MCP tool attempts to spawn subagents on its own. _(FR-new)_
 
 **Given** the dev subagent emits the locked handoff phrase, **When** the SKILL.md prose detects it, **Then** the prose layer spawns the reviewer subagent via `Task` (clean context, reviewer persona prompt), captures the reviewer transcript, and feeds it back into the MCP layer for verdict parsing and manifest update — the dev↔reviewer cycle's transitions are observable in the operator's chat surface (AC1/AC2/AC3 lines from Story 4.3 emit verbatim during a live run). _(FR26, FR27, FR28)_
 
@@ -87,12 +87,12 @@ So that `/crew:start` actually runs the inner dev↔reviewer cycle in production
 
 **AC4 (integration):** vitest's existing AC4 branches (happy / rework / grammar-drift) still pass against the refactored API, and a new content-structure test asserts that SKILL.md prose contains the `Task` tool invocation sites for both dev and reviewer.
 
-**AC5 (user-surface):** an operator running `/crew:start` against a scratch repo with at least one ready story observes the AC1/AC2/AC3 chat-surface lines from Story 4.3 (handoff received / re-spawning / grammar drift) in the live session, not just in unit-test fixtures.
+**AC5 (user-surface):** an operator running `/flow:start` against a scratch repo with at least one ready story observes the AC1/AC2/AC3 chat-surface lines from Story 4.3 (handoff received / re-spawning / grammar drift) in the live session, not just in unit-test fixtures.
 
 ## Story 4.3c: Call `completeStory` after `READY FOR MERGE` so the queue drains
 
 As a plugin operator,
-I want `/crew:start` to mark a story `done` once the reviewer returns `READY FOR MERGE` (and equivalently for the `done-blocked-*` branches — those stamp `blocked_by` and stop advancing on that story),
+I want `/flow:start` to mark a story `done` once the reviewer returns `READY FOR MERGE` (and equivalently for the `done-blocked-*` branches — those stamp `blocked_by` and stop advancing on that story),
 So that the backlog actually drains across multiple stories — today the manifest stays in `in-progress/` after a green verdict, so the next pass returns `waiting on in-progress work` forever and no second story is ever claimed without manual intervention.
 
 Surfaced during 4.3b operator smoke (PR #105 retro): two seeded stories ran the full dev↔reviewer cycle and both reached `READY FOR MERGE`, but neither moved to `done/` — the queue stalled at the third pass. This story is a temporary bridge until Story 4.10b's auto-merge gate lands; for v1 dogfooding, completion is "reviewer said ready" rather than "PR merged on GitHub".
@@ -107,7 +107,7 @@ Surfaced during 4.3b operator smoke (PR #105 retro): two seeded stories ran the 
 
 **AC4 (integration):** vitest covers the full claim → dev → reviewer-ready → complete → claim-next loop end-to-end against a tmpdir fixture with two ready stories; final disk state has both manifests in `done/` and `to-do/` / `in-progress/` empty.
 
-**AC5 (user-surface):** an operator running `/crew:start` against a scratch repo with two ready stories observes both manifests reach `done/` and the operator sees `story <ref> moved to done — claiming next` after each.
+**AC5 (user-surface):** an operator running `/flow:start` against a scratch repo with two ready stories observes both manifests reach `done/` and the operator sees `story <ref> moved to done — claiming next` after each.
 
 ## Story 4.4: Dev subagent `git push` and `gh pr create` terminal action
 
@@ -217,7 +217,7 @@ So that the seam survives prose drift in the dev agent's narration.
 
 **Acceptance Criteria:**
 
-**Given** `runDevTerminalAction` completes a successful `gh pr create`, **When** the tool returns, **Then** it atomically writes `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` containing `{ prUrl, prNumber, branch, commitSha }`. _(seam reliability; replaces LLM-text extraction)_
+**Given** `runDevTerminalAction` completes a successful `gh pr create`, **When** the tool returns, **Then** it atomically writes `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/dev-outcome.json` containing `{ prUrl, prNumber, branch, commitSha }`. _(seam reliability; replaces LLM-text extraction)_
 
 **Given** `processDevTranscript` runs after a successful handoff parse, **When** `dev-outcome.json` exists and validates, **Then** the tool reads `prNumber` from the file and skips the `PR_URL_RE` regex scan; on ENOENT it falls back to the existing transcript regex unchanged; on malformed/invalid JSON it throws `DevOutcomeFileMalformedError` with NO transcript fallback. _(robust primary path + back-compat fallback + fail-loud on write-seam bugs)_
 
@@ -295,7 +295,7 @@ And to always retain the ability to merge manually regardless of verdict.
 
 **Acceptance Criteria:**
 
-**Given** a PR with `verdict: READY FOR MERGE`, `risk_tier: low`, and `agreement_metric ≥ threshold` (default 0.8, configurable via `plugin.agreement_threshold` in `.crew/config.yaml`),
+**Given** a PR with `verdict: READY FOR MERGE`, `risk_tier: low`, and `agreement_metric ≥ threshold` (default 0.8, configurable via `plugin.agreement_threshold` in `.flow/config.yaml`),
 **When** the auto-merge gate runs,
 **Then** the plugin calls `gh pr merge` on the PR. _(FR40)_
 

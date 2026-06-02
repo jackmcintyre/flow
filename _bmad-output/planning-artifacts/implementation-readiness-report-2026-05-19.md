@@ -425,7 +425,7 @@ Scanned each story for forward references. Findings:
 #### A. Starter Template (Greenfield Scaffold Story)
 
 The architecture deliberately calls Story 1.1 the "scaffold story" (epic 1 description, epics.md:418). It covers:
-- `plugins/crew/.claude-plugin/plugin.json` with semver `version`
+- `plugins/flow/.claude-plugin/plugin.json` with semver `version`
 - `pnpm-workspace.yaml`, `tsconfig.base.json`
 - `mcp-server/`, `catalogue/`, `skills/`, `permissions/`, `docs/`, `example/` skeleton
 - Empty MCP server entrypoint

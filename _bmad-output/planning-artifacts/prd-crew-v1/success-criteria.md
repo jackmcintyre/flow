@@ -4,7 +4,7 @@
 
 ## The single test of success (scenario, not metric)
 
-**Crew builds itself: one clean autonomous `/crew:start` cycle completes end-to-end on the crew repo — claim → dev → review → merge — without Jack manually intervening in any step.**
+**Crew builds itself: one clean autonomous `/flow:start` cycle completes end-to-end on the crew repo — claim → dev → review → merge — without Jack manually intervening in any step.**
 
 If this happens once cleanly, the product works as a self-bootstrapping engineering team. The substrate is autonomous, the calibration mechanism works on its own work-product, and the proof-point for the eventual writeup is in hand.
 
@@ -21,7 +21,7 @@ User success looks like:
 
 ## Technical Success
 
-- **End-to-end run on Jack's machine** without manual intervention beyond the initial `/crew:start` command.
+- **End-to-end run on Jack's machine** without manual intervention beyond the initial `/flow:start` command.
 - **No silent failure modes.** Every agent failure produces a visible artifact (blocker story, `needs-human` label, retro entry, orchestration surface). Nothing fails into a state the user only notices days later.
 - **State is recoverable.** Filesystem state (`to-do/` / `in-progress/` / `blocked/` / `done/`) is enough to resume after session death. No daemon dependency.
 - **Reviewer trusted enough to auto-merge low-risk.** Verdict-vs-action agreement crosses the auto-merge threshold without producing a regression that ships.
@@ -38,7 +38,7 @@ A failed external-user attempt at this stretch stage is still a valuable signal 
 
 | Outcome | Target | When measured |
 |---|---|---|
-| Self-bootstrap cycle succeeds (full gate) | ≥1 clean autonomous `/crew:start` cycle, no manual intervention | Within Epic 6a ship |
+| Self-bootstrap cycle succeeds (full gate) | ≥1 clean autonomous `/flow:start` cycle, no manual intervention | Within Epic 6a ship |
 | Manual-intervention count per cycle | Decreasing across Epic 5; 0 by Epic 6a complete | Per cycle |
 | Calibration loop closing | ≥1 accepted rule/skill proposal per cycle | Continuous (after 6b) |
 | Silent failures (agent fails without visible artifact) | 0 | Continuous; trip-wire |

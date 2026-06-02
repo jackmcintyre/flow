@@ -25,38 +25,38 @@ The panel does **not** decide `ready`. It produces the verdict set; Story 9.4 (t
 **AC1 — each lens judge emits a machine-checkable verdict to a file, not prose (integration):**
 
 A single lens judge grades a draft against its assigned rubric lens and writes a verdict `{lens, pass, missed}` to a deterministic result file (the same per-session result-file layout the reviewer uses); a reader returns the parsed verdict. The panel consumes the file, never the judge's transcript. A vitest drives one injected judge, asserts a well-formed verdict file is written with the lens, the boolean, and a non-empty `missed` string on a fail, and asserts the reader round-trips it.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC2 — the panel runs the full set of diverse lenses, one role per lens (integration):**
 
 The panel spawns one judge per Tier-1 lens (structure, verifiability, discipline, domain, considered), each from a distinct role, and collects all lens verdicts into a single panel verdict keyed by lens. No lens is skipped; no two lenses share one judge. A vitest runs the panel with injected judges over a draft and asserts all five lens verdicts are present, each keyed to its lens and tagged with a distinct judging role.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC3 — a draft that fails a lens is recorded as failing, with the specific miss (integration):**
 
 A draft whose acceptance criterion only asserts that a string appears in a file fails the Verifiability lens, and the panel verdict records that lens as failed with a `missed` string naming the gap (asserts presence, not behaviour). A passing draft records that lens as passed. A vitest feeds a string-presence-only draft and asserts the verifiability lens verdict is fail with a populated `missed`, and feeds a behaviour-asserting draft and asserts it passes.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC4 — the Considered-lens bar scales with the draft's risk tier (integration):**
 
 The panel classifies the draft's risk tier through the existing classifier and applies the rubric's tiered Considered bar: a low-risk draft passes on "names what could break + pins the top failure"; a higher-risk draft that lacks cold-dev sufficiency (an open question with no defaulted answer) fails the Considered lens. A vitest drives a high-tier draft with an unresolved open decision (asserts Considered fails) and a low-tier draft meeting the lighter bar (asserts Considered passes).
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC5 — the panel emits a schema-shaped verdict and does not decide ready (integration):**
 
 The panel produces a verdict object — Tier-0 status plus the five lens verdicts — validated against a schema, and writes nothing to the readiness flag (that is Story 9.4's call). A vitest runs the panel and asserts the returned verdict validates against the schema, carries exactly the five lens entries, and that no manifest readiness field was touched by the run.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC6 — a skill drives the panel over a named draft and surfaces the verdict (artifact):**
 
 A skill runs the panel for a named draft and reports the per-lens verdict to the operator. Its frontmatter lists the panel tool in `allowed_tools`; its body never writes the readiness flag or a manifest directly. The file exists at the skill path and is shaped like the other crew skills.
-artifact: plugins/crew/skills/judge/SKILL.md
+artifact: plugins/flow/skills/judge/SKILL.md
 
 ## Definition of Done
 
 - [ ] All six ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new test file covers every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new test file covers every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC5 runnable vitest, AC6 file-presence.
 - [ ] Lens diversity is enforced structurally (one role per lens), not by convention.
@@ -66,7 +66,7 @@ artifact: plugins/crew/skills/judge/SKILL.md
 
 ### Scope discipline — what this story does and does NOT build
 
-**Builds:** the panel orchestration (spawn one judge per lens), the per-lens verdict schema + its deterministic result file, the panel-verdict aggregation, the Considered-lens risk-tier coupling, and the `/crew:judge` skill.
+**Builds:** the panel orchestration (spawn one judge per lens), the per-lens verdict schema + its deterministic result file, the panel-verdict aggregation, the Considered-lens risk-tier coupling, and the `/flow:judge` skill.
 
 **Does NOT build:** the adjudication / ready-or-escalate decision and the Quality Lead role (Story 9.4); the rubric itself (merged — reuse it); Tier 0 (Story 9.2 enforces it at authoring; the panel may re-assert Tier-0 status but does not re-implement the checks).
 
@@ -86,20 +86,20 @@ artifact: plugins/crew/skills/judge/SKILL.md
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/tools/judge-panel.ts` — the panel orchestration + aggregation.
-- `plugins/crew/mcp-server/src/schemas/lens-verdict.ts` — `LensVerdict` + `PanelVerdict` schemas.
-- `plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts` — AC1–AC5.
-- `plugins/crew/skills/judge/SKILL.md` — the operator skill (AC6).
+- `plugins/flow/mcp-server/src/tools/judge-panel.ts` — the panel orchestration + aggregation.
+- `plugins/flow/mcp-server/src/schemas/lens-verdict.ts` — `LensVerdict` + `PanelVerdict` schemas.
+- `plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts` — AC1–AC5.
+- `plugins/flow/skills/judge/SKILL.md` — the operator skill (AC6).
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/register.ts` — register the panel tool with the `DomainError` envelope.
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — optionally add a `panel.graded` event (additive).
+- `plugins/flow/mcp-server/src/tools/register.ts` — register the panel tool with the `DomainError` envelope.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — optionally add a `panel.graded` event (additive).
 
 ### Existing seams to wire into (do not reinvent)
 
-- **Reviewer verdict file:** `runReviewerSession` (verdict derivation + atomic result-file write) and `readReviewerResultFile` / `reviewerResultFilePath` in `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` — the layout to mirror for per-lens files.
-- **Risk classifier:** `classifyRiskTier` in `plugins/crew/mcp-server/src/tools/classify-risk-tier.ts`.
-- **Spawn:** `buildPersonaSpawnPrompt` in `plugins/crew/mcp-server/src/tools/build-persona-spawn-prompt.ts`.
+- **Reviewer verdict file:** `runReviewerSession` (verdict derivation + atomic result-file write) and `readReviewerResultFile` / `reviewerResultFilePath` in `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` — the layout to mirror for per-lens files.
+- **Risk classifier:** `classifyRiskTier` in `plugins/flow/mcp-server/src/tools/classify-risk-tier.ts`.
+- **Spawn:** `buildPersonaSpawnPrompt` in `plugins/flow/mcp-server/src/tools/build-persona-spawn-prompt.ts`.
 - **Rubric:** `_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md` (the lens checks + tiered Considered bar).
 
 ### Edge cases worth surfacing in dev/review

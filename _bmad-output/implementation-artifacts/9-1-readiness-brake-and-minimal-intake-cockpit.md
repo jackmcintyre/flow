@@ -24,43 +24,43 @@ The change has a near-exact precedent in the codebase: the existing **`withdrawn
 **AC1 — the drain claims only blessed items (integration):**
 
 The claim path's eligibility predicate requires both dependency-readiness **and** the new operator `ready` flag. A backlog item whose dependencies are all satisfied but which has not been marked ready is never returned by the next-story claim entry point; once it is marked ready it becomes eligible and is claimed. A vitest seeds two dependency-satisfied backlog manifests — one not-ready, one ready — and asserts the claim entry point returns the ready one and never the not-ready one; it then marks the not-ready item ready and asserts the claim entry point now selects it.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/claim-next-story.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/claim-next-story.test.ts
 
 **AC2 — `ready` is an additive, default-closed manifest field (integration):**
 
 The execution-manifest schema gains a `ready` boolean defaulting to `false`, orthogonal to both `status` and `withdrawn` (it is not a status value and triggers no state-directory move). A manifest authored before this field existed still parses cleanly, reading as not-ready; the schema's strict posture is preserved and no existing field is weakened. A vitest parses a manifest lacking the field (asserts it reads false), parses one carrying it true (asserts true), and asserts the strict schema still rejects unknown keys.
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/execution-manifest.test.ts
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/execution-manifest.test.ts
 
 **AC3 — a mark-ready tool toggles the flag on a backlog item without moving it, idempotently (integration):**
 
 A new MCP tool sets the `ready` flag true or false on a named backlog item, writing the manifest back through the same managed write path the withdraw tool uses, leaving `status` and the item's state directory untouched. Setting the flag to the value it already holds is a no-op (no write, no event). A reference that is not an un-claimed backlog item raises a typed domain error rather than mutating anything. A vitest marks a backlog item ready (asserts the manifest flag flips and the item stays in the backlog state), re-marks it ready (asserts a no-op), marks it not-ready (asserts it flips back), and asserts an unknown reference raises the typed error.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/mark-story-ready.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/mark-story-ready.test.ts
 
 **AC4 — a real toggle emits exactly one readiness telemetry event (integration):**
 
 A new closed-enum telemetry event records a readiness change, carrying the item reference and the new flag value. Exactly one event is emitted per real toggle and none on an idempotent no-op or on the typed-error path. The event variant is added additively to the telemetry discriminated union, preserving its strict posture. A vitest drives one real toggle and asserts a single readiness event lands with the right reference and value, and asserts no event is emitted for a no-op re-toggle.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/mark-story-ready.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/mark-story-ready.test.ts
 
 **AC5 — freshly scanned items default to not-ready (integration):**
 
 The scan step writes new backlog manifests with `ready` defaulting to `false`, so a just-scanned item is in the backlog but not claimable until the operator blesses it. A vitest scans a source story into a fresh backlog manifest, asserts the written manifest reads not-ready, and asserts the claim entry point does not return it.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/scan-sources.test.ts
 
-**AC6 — a `/crew:ready` operator skill lists the backlog and drives the toggle (artifact):**
+**AC6 — a `/flow:ready` operator skill lists the backlog and drives the toggle (artifact):**
 
 A skill file defines the operator command that lists backlog items with their readiness and dependency state and calls the mark-ready tool to toggle a chosen item. Its frontmatter lists the mark-ready tool in `allowed_tools`; its body never instructs a direct manifest write or git call — every mutation flows through the tool. The file exists at the skill path and is shaped like the other crew skills.
-artifact: plugins/crew/skills/ready/SKILL.md
+artifact: plugins/flow/skills/ready/SKILL.md
 
 **AC7 — the tool is registered with the DomainError envelope and a typed error (artifact):**
 
 The mark-ready MCP tool is registered in the tool registry with the standard `DomainError` envelope, and its new typed error (the not-an-eligible-item error) is defined in the errors module extending `DomainError`. The optional `ready` field and the new telemetry variant are both additive — existing manifests and the existing event union are unweakened.
-artifact: plugins/crew/mcp-server/src/tools/register.ts
+artifact: plugins/flow/mcp-server/src/tools/register.ts
 
 ## Definition of Done
 
 - [ ] All seven ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new/updated test files cover every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new/updated test files cover every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC5 are runnable vitest, AC6–AC7 are file-presence; the reviewer's runnable-AC pass should be all-green.
 - [ ] The claim-filter change is additive and default-closed: an un-blessed backlog yields nothing to claim rather than misbehaving. No change to status transitions or state-directory moves.
@@ -70,7 +70,7 @@ artifact: plugins/crew/mcp-server/src/tools/register.ts
 
 ### Scope discipline — what this story does and does NOT build
 
-**Builds (the brake):** the `ready` manifest field (default false), the claim-path eligibility filter on it, the mark-ready tool, the new telemetry event, the typed error, the scan default, and the `/crew:ready` operator skill (list + toggle).
+**Builds (the brake):** the `ready` manifest field (default false), the claim-path eligibility filter on it, the mark-ready tool, the new telemetry event, the typed error, the scan default, and the `/flow:ready` operator skill (list + toggle).
 
 **Does NOT build (deferred):** proposing/creating new backlog items from a plain-language feature (Story 9.2 — the author seam); ordering/sequencing the backlog (Story 9.5 — the dashboard renders order); any automated blessing — the judge panel (9.3) and Quality Lead (9.4) are what will eventually *set* `ready` instead of the operator. In this story the only thing that sets `ready` is the operator via the tool. Keep the surface to list + toggle; do not add create/reorder here.
 
@@ -93,23 +93,23 @@ artifact: plugins/crew/mcp-server/src/tools/register.ts
 **The tool + the skill (the operator half):**
 - New tool: read the named backlog manifest, set `ready`, write it back through the managed write path, leave `status` and the state directory untouched; no-op if the flag already holds the requested value; typed error if the reference is not an un-claimed backlog item.
 - New telemetry variant for the toggle; emit exactly once per real change.
-- New skill `/crew:ready`: list backlog items with readiness + dependency state, and call the tool to flip a chosen one. UX in the skill; the gate is the tool.
+- New skill `/flow:ready`: list backlog items with readiness + dependency state, and call the tool to flip a chosen one. UX in the skill; the gate is the tool.
 
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/tools/mark-story-ready.ts` — the toggle tool (mirror `mark-withdrawn.ts`).
-- `plugins/crew/mcp-server/src/tools/__tests__/mark-story-ready.test.ts` — AC3, AC4.
-- `plugins/crew/skills/ready/SKILL.md` — the operator skill (AC6).
+- `plugins/flow/mcp-server/src/tools/mark-story-ready.ts` — the toggle tool (mirror `mark-withdrawn.ts`).
+- `plugins/flow/mcp-server/src/tools/__tests__/mark-story-ready.test.ts` — AC3, AC4.
+- `plugins/flow/skills/ready/SKILL.md` — the operator skill (AC6).
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — add the `ready` field beside `withdrawn` (AC2).
-- `plugins/crew/mcp-server/src/tools/list-claimable-todos.ts` — add `ready` to the claimable-candidate interface and populate it from the parsed manifest.
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` — extend the eligibility filter to require `ready` (AC1).
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — ensure the scan compose default writes `ready: false` (AC5).
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` — add the readiness event variant additively (AC4).
-- `plugins/crew/mcp-server/src/tools/register.ts` — register the new tool with the `DomainError` envelope (AC7).
-- `plugins/crew/mcp-server/src/errors.ts` — add the typed not-an-eligible-item error (mirror the withdraw tool's error).
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — add the `ready` field beside `withdrawn` (AC2).
+- `plugins/flow/mcp-server/src/tools/list-claimable-todos.ts` — add `ready` to the claimable-candidate interface and populate it from the parsed manifest.
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` — extend the eligibility filter to require `ready` (AC1).
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — ensure the scan compose default writes `ready: false` (AC5).
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` — add the readiness event variant additively (AC4).
+- `plugins/flow/mcp-server/src/tools/register.ts` — register the new tool with the `DomainError` envelope (AC7).
+- `plugins/flow/mcp-server/src/errors.ts` — add the typed not-an-eligible-item error (mirror the withdraw tool's error).
 
 ### Existing seams to wire into (do not reinvent)
 
@@ -130,7 +130,7 @@ artifact: plugins/crew/mcp-server/src/tools/register.ts
 ### Risk + build notes (drain context)
 
 - This is a **medium**-risk change: it edits the live drain's claim filter. The change is additive and default-closed, but because it gates real orchestration, expect the auto-merge gate to **pause for a human merge** — that is the intended outcome for this story, not a failure. Until this lands and the operator blesses items, a drain on a freshly scanned backlog will correctly report nothing to claim.
-- Code change touching tool + schema + claim + telemetry seams: rebuild and commit `dist/` in the same change; run the full `pnpm build` and `pnpm test` from `plugins/crew/mcp-server` green before opening the PR. Keep the diff scoped to the files above.
+- Code change touching tool + schema + claim + telemetry seams: rebuild and commit `dist/` in the same change; run the full `pnpm build` and `pnpm test` from `plugins/flow/mcp-server` green before opening the PR. Keep the diff scoped to the files above.
 - Do not write or edit the backlog ledger or any state file outside the managed tool path — the tools own that surface. The only manifest this story's code writes is the one the operator toggles, through the managed write path.
 
 ### References

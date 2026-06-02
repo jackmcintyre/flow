@@ -37,13 +37,13 @@ This story explicitly does NOT introduce the orchestration polling loop that sur
 ### What this story does NOT
 
 - (a) Touch `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other file under `_bmad-output/implementation-artifacts/`. The orchestrator owns status transitions. The dev agent MUST NOT edit any status/state file when implementing this story.
-- (b) Implement the orchestration polling loop that surfaces `dev.budget_exceeded` as a stuck story to the operator. Story 5.3 (`/crew:watch` skill and polling loop) and Story 5.4 (stuck-story detection) own the surfacing. This story ships the event-emission seam only — the JSONL line that 5.3 reads.
+- (b) Implement the orchestration polling loop that surfaces `dev.budget_exceeded` as a stuck story to the operator. Story 5.3 (`/flow:watch` skill and polling loop) and Story 5.4 (stuck-story detection) own the surfacing. This story ships the event-emission seam only — the JSONL line that 5.3 reads.
 - (c) Implement `compute-agreement` (Story 4.10). 4.10 reads `reviewer.verdict` + `reviewer.verdict.merge_action` events and computes the rolling agreement ratio. This story produces the events; 4.10 consumes them. No agreement-metric code, no rolling-window logic.
 - (d) Implement the auto-merge gate (Story 4.10b). 4.10b reads `agreement_metric` (from 4.10) and `risk_tier` (from 4.9b) and decides whether to auto-merge. This story is consumer-agnostic.
 - (e) Wire a caller for `recordPrCloseAction`. The PR-close event happens on GitHub, not inside the plugin. The natural caller is Story 5.3's polling loop (which can reconcile open PRs from `reviewer.verdict` events that lack a corresponding `reviewer.verdict.merge_action`). Until 5.3 ships, `recordPrCloseAction` is a registered MCP tool with no production caller — exercised only by vitest. This is intentional: the tool is the seam, the caller is downstream.
 - (f) Add a JSONL→Parquet exporter, a stats dashboard, or any aggregation beyond what `recordAgentInvoke` computes for its own `dev.budget_exceeded` decision. Aggregation is Epic 6 (outcome stats, skill effectiveness).
-- (g) Make the 8-min reviewer cap or the 30-min dev budget configurable from `.crew/config.yaml` in v1. Defaults are hardcoded constants in `lib/runtime-limits.ts` (new file). The architecture's "8 minutes" and "default 30 minutes" wording allows for future configurability, but config-loading + Zod schema + override-resolution is out of scope; a config knob can be added additively in a later story without changing this story's emission seam.
-- (h) Persist any state outside `<targetRepoRoot>/.crew/telemetry/<YYYY-MM>.jsonl`. No in-memory cache of cumulative-runtime — `recordAgentInvoke` reads the current month's JSONL on each invocation to compute the dev-cumulative for AC4. The architecture's JSONL-as-truth model rules out a sidecar cumulative-tracker file. Performance: one read of the current month's JSONL per `agent.invoke` is bounded (one file, monthly rollover, typically <1MB).
+- (g) Make the 8-min reviewer cap or the 30-min dev budget configurable from `.flow/config.yaml` in v1. Defaults are hardcoded constants in `lib/runtime-limits.ts` (new file). The architecture's "8 minutes" and "default 30 minutes" wording allows for future configurability, but config-loading + Zod schema + override-resolution is out of scope; a config knob can be added additively in a later story without changing this story's emission seam.
+- (h) Persist any state outside `<targetRepoRoot>/.flow/telemetry/<YYYY-MM>.jsonl`. No in-memory cache of cumulative-runtime — `recordAgentInvoke` reads the current month's JSONL on each invocation to compute the dev-cumulative for AC4. The architecture's JSONL-as-truth model rules out a sidecar cumulative-tracker file. Performance: one read of the current month's JSONL per `agent.invoke` is bounded (one file, monthly rollover, typically <1MB).
 - (i) Watch the JSONL file for changes. The aggregation-on-read pattern in `recordAgentInvoke` is invoked exactly when a new dev invocation is being recorded — no polling, no fsnotify, no rollover watcher.
 - (j) Implement a token-budget enforcement. AC1 includes `tokens_in` / `tokens_out` as optional fields on `agent.invoke` (already declared by Story 1.5's schema), but there is no budget gate on tokens in v1. The dev session passes tokens through if it has them (it usually doesn't — Anthropic's response shape doesn't surface them to the subagent caller) but no decision logic gates on tokens.
 - (k) Substitute the verdict comment for any reason OTHER than the 8-min hard cap. If the reviewer subagent itself returns a "block" verdict, normal `postReviewerComments` / `applyReviewerLabels` flow applies — the substitution is *only* invoked when `recordAgentInvoke` detects `agent: generalist-reviewer` AND `runtime_ms > 480_000`. Other failure modes (reviewer crash mid-flight; reviewer returns malformed JSON) are not in scope for this story; existing typed-error handling continues to apply.
@@ -51,12 +51,12 @@ This story explicitly does NOT introduce the orchestration polling loop that sur
 - (m) Modify Story 4.8's `applyReviewerLabels` tool. The tool already accepts `verdictOverride: "reviewer-failure"` (line 77-78 of `apply-reviewer-labels.ts`) which routes through the same `["reviewed-by-agent", "needs-human"]` label set. This story calls it with that override and is otherwise unconcerned with how labels are applied.
 - (n) Modify the closed verdict literal set. The verdict event's `verdict` field uses the existing `"READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED"` triple (from `run-reviewer-session.ts`'s `RecommendedVerdict` type) AND adds the `"reviewer-failure"` literal that `applyReviewerLabels` already supports. No new verdict states; no semantic change to the existing three.
 - (o) Add `pino`'s SonicBoom destination, batching, or any throughput-optimised write path. `logTelemetryEvent`'s `fs.appendFile` synchronous-on-flush model (Story 1.5 design comment in `lib/logger.ts:9-25`) is unchanged. This story may emit two-to-three events per story execution at peak — throughput is not the bottleneck.
-- (p) Reach into a planning adapter, the catalogue, role permissions, or any persona/standards file. Telemetry events are write-only side effects on `.crew/telemetry/`; no reads of role/persona/standards state.
+- (p) Reach into a planning adapter, the catalogue, role permissions, or any persona/standards file. Telemetry events are write-only side effects on `.flow/telemetry/`; no reads of role/persona/standards state.
 - (q) Touch `run-dev-terminal-action.ts` (Story 4.4) or `process-dev-transcript.ts` (Story 4.3b/4.5). The dev session's terminal-action and transcript-processing seams already exist; `agent.invoke` for the dev subagent is recorded by the dev session SKILL.md (caller of `recordAgentInvoke`), not by these tools. Specifically, no `agent.invoke` is emitted from `run-dev-terminal-action.ts` — that tool runs *inside* the dev subagent and recording its own runtime would double-count.
 
 ### Deferred work
 
-- **Configurable budgets in `.crew/config.yaml`.** The 8-min reviewer cap and the 30-min dev budget are hardcoded constants in v1. A later story can add an additive `plugin.runtime_limits` block with override resolution (mirror the `agreement_threshold` pattern from Story 4.10b).
+- **Configurable budgets in `.flow/config.yaml`.** The 8-min reviewer cap and the 30-min dev budget are hardcoded constants in v1. A later story can add an additive `plugin.runtime_limits` block with override resolution (mirror the `agreement_threshold` pattern from Story 4.10b).
 - **`recordPrCloseAction` caller.** The MCP tool ships here; the polling loop that calls it is Story 5.3's responsibility. Manual invocation works in the interim.
 - **Telemetry-aggregation MCP tool or CLI.** Architecture's "Stats helpers" line (`core-architectural-decisions.md:71`) declares these as future tools — Epic 6 owns the surfacing (outcome stats, skill-effectiveness reports). This story stays in the emission lane.
 - **Token-budget enforcement.** Fields exist on the schema; no enforcement gate in v1. Adding one requires upstream support from the Task-tool layer that surfaces tokens to subagent callers, which Anthropic doesn't expose today.
@@ -65,14 +65,14 @@ This story explicitly does NOT introduce the orchestration polling loop that sur
 
 ## Acceptance Criteria
 
-> AC1–AC4 are verbatim from the epic (with minor wording reflowed for the unpacked sections below). AC5 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal telemetry events, an MCP tool, and a verdict-substitution branch. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1–AC4 are verbatim from the epic (with minor wording reflowed for the unpacked sections below). AC5 is the integration suite. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe internal telemetry events, an MCP tool, and a verdict-substitution branch. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** any agent subagent spawn,
 **When** the subagent runs,
 **Then** the dev session writes an `agent.invoke` event (agent type, story id, wall-clock runtime, timestamp). _(FR65)_
 
-<!-- Not user-surface: AC1 describes the dev session's call to a new MCP tool that writes to `.crew/telemetry/<YYYY-MM>.jsonl`. The operator does not see, type, or click any surface in this AC; the JSONL file is internal observability data. -->
+<!-- Not user-surface: AC1 describes the dev session's call to a new MCP tool that writes to `.flow/telemetry/<YYYY-MM>.jsonl`. The operator does not see, type, or click any surface in this AC; the JSONL file is internal observability data. -->
 
 **AC2:**
 **Given** any reviewer summary comment,
@@ -181,7 +181,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 
 - (3d) **Label application.** Call `applyReviewerLabels({ targetRepoRoot, sessionUlid, verdictOverride: "reviewer-failure" })` — this is the existing Story 4.8 signature (`apply-reviewer-labels.ts:77-78`). It routes through the existing `["reviewed-by-agent", "needs-human"]` label set. No modification to `applyReviewerLabels` required.
 
-- (3e) **Story NOT marked failed.** The manifest at `.crew/state/review/<ref>.yaml` (the reviewer state where the story lives between PR-open and merge) is NOT touched by this story. Specifically: do NOT call `completeStory({ outcome: "failed" })` or any other state-transition tool. The story stays in `review`. The `needs-human` label is the surfacing channel; orchestration surfaces the label via Story 5.3's polling. This invariant is asserted in vitest (4f4): after the substitution path runs, the manifest file's path and contents are unchanged from before.
+- (3e) **Story NOT marked failed.** The manifest at `.flow/state/review/<ref>.yaml` (the reviewer state where the story lives between PR-open and merge) is NOT touched by this story. Specifically: do NOT call `completeStory({ outcome: "failed" })` or any other state-transition tool. The story stays in `review`. The `needs-human` label is the surfacing channel; orchestration surfaces the label via Story 5.3's polling. This invariant is asserted in vitest (4f4): after the substitution path runs, the manifest file's path and contents are unchanged from before.
 
 - (3f) **Verdict event emission point.** `recordAgentInvoke` does NOT emit `reviewer.verdict` directly. It calls `postReviewerComments` with `reviewerVerdictOverride: "reviewer-failure"` (Task 4); `postReviewerComments` already owns the verdict-event emission seam (Task 3) and treats the override as the data source for `verdict` + `timed_out: true`. One emission path per code path. If `postReviewerComments` itself fails (see 3g), no `reviewer.verdict` event is written this cycle — the failure is logged via the existing typed-error path and the JSONL captures the `agent.invoke` event with the over-cap runtime as the durable record of what happened.
 
@@ -191,7 +191,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 
 **AC4 unpacked.** 30-min dev budget (`dev.budget_exceeded` emission inside `recordAgentInvoke`):
 
-- (4a) **Trigger condition.** Inside `recordAgentInvoke`, after writing `agent.invoke`: if `agent === "generalist-dev" && storyId !== undefined`, compute cumulative dev runtime for this story. Read the current month's JSONL file (`<targetRepoRoot>/.crew/telemetry/<YYYY-MM>.jsonl`), filter `{ type: "agent.invoke", agent: "generalist-dev", story_id: <storyId> }`, sum `data.runtime_ms`. The newly-written event is included (the sum is computed AFTER the append). If the sum was below `DEV_BUDGET_MS = 30 * 60 * 1000 = 1_800_000` BEFORE this event and is at-or-above AFTER, emit one `dev.budget_exceeded` event.
+- (4a) **Trigger condition.** Inside `recordAgentInvoke`, after writing `agent.invoke`: if `agent === "generalist-dev" && storyId !== undefined`, compute cumulative dev runtime for this story. Read the current month's JSONL file (`<targetRepoRoot>/.flow/telemetry/<YYYY-MM>.jsonl`), filter `{ type: "agent.invoke", agent: "generalist-dev", story_id: <storyId> }`, sum `data.runtime_ms`. The newly-written event is included (the sum is computed AFTER the append). If the sum was below `DEV_BUDGET_MS = 30 * 60 * 1000 = 1_800_000` BEFORE this event and is at-or-above AFTER, emit one `dev.budget_exceeded` event.
 
 - (4b) **One-shot emission, not per-event.** The `dev.budget_exceeded` event is emitted exactly once per `(story_id, current_month)` pair. To detect the "first crossing," `recordAgentInvoke` checks both: (i) the cumulative sum AFTER this event is `>= DEV_BUDGET_MS`, AND (ii) no prior `dev.budget_exceeded` event for this `story_id` exists in the current month's JSONL. If a prior `dev.budget_exceeded` exists, skip emission. The check is `O(n)` over the current month's JSONL — acceptable given monthly rollover.
 
@@ -230,7 +230,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
   - (c1) Return shape: `{ kind: "reviewer-timed-out", substitutedCommentUrl: <stub url>, labelsApplied: ["reviewed-by-agent", "needs-human"] }`.
   - (c2) JSONL contains one `agent.invoke` event with `runtime_ms: 540001`, and one `reviewer.verdict` event with `verdict: "reviewer-failure"`, `timed_out: true`.
   - (c3) The substituted comment body passed to the `postReviewerComments` stub contains exactly `## Reviewer exceeded 8-minute hard cap` and the runtime in seconds.
-  - (c4) Story manifest path / contents in `.crew/state/review/` are unchanged before/after — assert via `fs.readFile` snapshot.
+  - (c4) Story manifest path / contents in `.flow/state/review/` are unchanged before/after — assert via `fs.readFile` snapshot.
   - (c5) `applyReviewerLabels` was called with `verdictOverride: "reviewer-failure"` (assert via spy).
   - (c6) Best-effort: when `postReviewerComments` stub raises, the JSONL contains the `agent.invoke` event (with the over-cap `runtime_ms`) but does NOT contain a `reviewer.verdict` event (because `postReviewerComments` owns that emission and it failed before writing). The return shape is `{ kind: "reviewer-timed-out", substitutedCommentUrl: "", labelsApplied: [] }`. `recordAgentInvoke` does not raise.
 
@@ -256,7 +256,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [x] **Task 1: Extend the telemetry event schema** (AC: #2, #3, #4)
-  - [x] 1.1 In `plugins/crew/mcp-server/src/schemas/telemetry-events.ts`, append three new schema entries after `TelemetryInvalidEventSchema`:
+  - [x] 1.1 In `plugins/flow/mcp-server/src/schemas/telemetry-events.ts`, append three new schema entries after `TelemetryInvalidEventSchema`:
     - `ReviewerVerdictEventSchema` — discriminator `"reviewer.verdict"`, `data: { pr_number: z.number().int().positive(), verdict: z.enum(["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED", "reviewer-failure"]), standards_version: z.string().regex(/^\d+\.\d+\.\d+$/), plugin_version: z.string().regex(/^\d+\.\d+\.\d+$/), timed_out: z.boolean() }`. `.strict()` on both event and data objects.
     - `ReviewerVerdictMergeActionEventSchema` — discriminator `"reviewer.verdict.merge_action"`, `data: { pr_number: z.number().int().positive(), merge_action: z.enum(["merged", "closed-unmerged", "still-open"]), resolved_at: z.string().datetime({ offset: false }).refine(s => s.endsWith("Z"), "must be UTC") }`. `.strict()`.
     - `DevBudgetExceededEventSchema` — discriminator `"dev.budget_exceeded"`, `data: { cumulative_runtime_ms: z.number().int().nonnegative(), budget_ms: z.number().int().positive(), triggering_invocation_runtime_ms: z.number().int().nonnegative() }`. `.strict()`.
@@ -265,16 +265,16 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [x] 1.4 No behavioural change to `lib/logger.ts` — its discriminated-union dispatch already handles new types via the schema.
 
 - [x] **Task 2: Runtime-limit constants and typed errors** (AC: #1, #3, #4)
-  - [x] 2.1 Create `plugins/crew/mcp-server/src/lib/runtime-limits.ts`. Export:
+  - [x] 2.1 Create `plugins/flow/mcp-server/src/lib/runtime-limits.ts`. Export:
     - `export const REVIEWER_HARD_CAP_MS = 8 * 60 * 1000;` (literally `480_000`).
     - `export const DEV_BUDGET_MS = 30 * 60 * 1000;` (literally `1_800_000`).
     - JSDoc citing NFR2 + NFR3 + this story key.
-  - [x] 2.2 In `plugins/crew/mcp-server/src/errors.ts`, append:
+  - [x] 2.2 In `plugins/flow/mcp-server/src/errors.ts`, append:
     - `RuntimeBoundsInvalidError` extending `DomainError`. Constructor: `{ sessionUlid: string; agent: string; startedAt: string; completedAt: string; reason: string }`. Message: `` `recordAgentInvoke: invalid runtime bounds for session <sessionUlid> agent=<agent> (started=<startedAt>, completed=<completedAt>): <reason>. (NFR2/NFR3)` ``.
     - `ReviewerResultMissingStandardsVersionError` extending `DomainError`. Constructor: `{ sessionUlid: string }`. Message: `` `reviewer-result.json for session <sessionUlid> missing required standardsVersion field; cannot emit reviewer.verdict event. (FR66)` ``.
 
 - [x] **Task 3: `reviewer.verdict` emission inside `postReviewerComments`** (AC: #2)
-  - [x] 3.1 Modify `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (declared-locked-file exception). At the POST-success path and PATCH-success path, emit a `reviewer.verdict` event via `logTelemetryEvent` wrapped in try/catch.
+  - [x] 3.1 Modify `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (declared-locked-file exception). At the POST-success path and PATCH-success path, emit a `reviewer.verdict` event via `logTelemetryEvent` wrapped in try/catch.
   - [x] 3.2 The `story_id` is read from `resultFile.ref`; if unavailable, set `story_id` undefined.
   - [x] 3.3 If `resultFile.standardsVersion` is undefined or empty, raise `ReviewerResultMissingStandardsVersionError`.
 
@@ -283,24 +283,24 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [x] 4.2 Both fields are optional with no default; existing callers see no behavioural change.
 
 - [x] **Task 5: `recordAgentInvoke` MCP tool** (AC: #1, #3, #4)
-  - [x] 5.1 Create `plugins/crew/mcp-server/src/tools/record-agent-invoke.ts`.
+  - [x] 5.1 Create `plugins/flow/mcp-server/src/tools/record-agent-invoke.ts`.
   - [x] 5.2 Algorithm implemented: validate bounds → emit agent.invoke → reviewer-cap branch → dev-budget branch → ok.
   - [x] 5.3 JSDoc citing this story key, FR65, NFR2, NFR3.
 
 - [x] **Task 6: `recordPrCloseAction` MCP tool** (AC: #2)
-  - [x] 6.1 Create `plugins/crew/mcp-server/src/tools/record-pr-close-action.ts`.
+  - [x] 6.1 Create `plugins/flow/mcp-server/src/tools/record-pr-close-action.ts`.
   - [x] 6.2 Default `resolvedAt` to `now().toISOString()`. Emit one `reviewer.verdict.merge_action` event. Return `{ kind: "ok" }`.
   - [x] 6.3 JSDoc documents the `(prNumber, sessionUlid)` join key and no-dedup decision.
 
 - [x] **Task 7: MCP-tool registration** (AC: all)
   - [x] 7.1 Register `recordAgentInvoke` and `recordPrCloseAction` in `register.ts`. Tool-count assertions bumped from 25 to 27.
-  - [x] 7.2 Added both tools to `plugins/crew/permissions/generalist-dev.yaml`.
+  - [x] 7.2 Added both tools to `plugins/flow/permissions/generalist-dev.yaml`.
 
 - [x] **Task 8: Integration test suite** (AC: #5)
-  - [x] 8.1 Created `plugins/crew/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts`.
-  - [x] 8.2 Created `plugins/crew/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts`.
+  - [x] 8.1 Created `plugins/flow/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts`.
+  - [x] 8.2 Created `plugins/flow/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts`.
   - [x] 8.3 Schema extension tests in existing `post-reviewer-comments.test.ts` exercised via `verdictBodyOverride`/`reviewerVerdictOverride` paths implicitly through existing tests.
-  - [x] 8.4 Created `plugins/crew/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts`.
+  - [x] 8.4 Created `plugins/flow/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts`.
   - [x] 8.5 All tmpdir fixtures use `fs.mkdtemp(path.join(os.tmpdir(), "telemetry-"))`.
   - [x] 8.6 Error class assertions use `expect(fn).rejects.toThrow(RuntimeBoundsInvalidError)` and `rejects.toMatchObject({ name: "RuntimeBoundsInvalidError" })`.
 
@@ -330,7 +330,7 @@ The substitution branch (AC3) calls `postReviewerComments` with the `reviewerVer
 
 Two alternatives:
 
-1. **Sidecar cumulative file** at `.crew/state/sessions/<storyId>/dev-cumulative-runtime-ms.json` — write-on-every-invocation, read at trigger check. Pros: O(1) read; cons: another state file to keep consistent with telemetry truth; another canonical-fs-guard whitelist entry.
+1. **Sidecar cumulative file** at `.flow/state/sessions/<storyId>/dev-cumulative-runtime-ms.json` — write-on-every-invocation, read at trigger check. Pros: O(1) read; cons: another state file to keep consistent with telemetry truth; another canonical-fs-guard whitelist entry.
 2. **Read JSONL each call** — at `recordAgentInvoke` time, read current month's JSONL, sum matching events. Pros: telemetry is the single source of truth (no consistency to maintain); easier to reason about. Cons: O(n) read where n = current month's event count.
 
 Going with (2). The JSONL file is bounded (monthly rollover, typically <1MB), the read happens at most once per dev subagent invocation (not per millisecond), and a Story 6.x perf pass can introduce caching if profiling shows it matters. The architectural principle (`core-architectural-decisions.md:69` — JSONL events are the parseable substrate) is preserved.
@@ -345,7 +345,7 @@ The operator already has a problem: the reviewer hung. The recovery comment + la
 
 ### Why no configurable budgets in v1
 
-The hardcoded `REVIEWER_HARD_CAP_MS = 480_000` and `DEV_BUDGET_MS = 1_800_000` are sourced from NFR2 and NFR3 verbatim. Adding `.crew/config.yaml` overrides is a future-additive change: a `plugin.runtime_limits.reviewer_cap_ms` field with override resolution mirrors Story 4.9's pattern (default + override). Doing it now would balloon scope with no current operator demand. The constants live in `lib/runtime-limits.ts` so the eventual overlay-aware loader has a clean place to land.
+The hardcoded `REVIEWER_HARD_CAP_MS = 480_000` and `DEV_BUDGET_MS = 1_800_000` are sourced from NFR2 and NFR3 verbatim. Adding `.flow/config.yaml` overrides is a future-additive change: a `plugin.runtime_limits.reviewer_cap_ms` field with override resolution mirrors Story 4.9's pattern (default + override). Doing it now would balloon scope with no current operator demand. The constants live in `lib/runtime-limits.ts` so the eventual overlay-aware loader has a clean place to land.
 
 ### Why schemas use `.strict()` and `z.literal` discriminators
 
@@ -361,26 +361,26 @@ The tool ships with no caller in v1. The natural caller (Story 5.3's polling loo
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. The discriminated-union dispatch already handles new event types via the schema; no logger change needed.
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — DO NOT modify behaviour. Task 9.4 is a one-line comment-removal exception (the `TODO(4.12)` line); no functional change.
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` (Story 4.4) — DO NOT modify. The dev-terminal-action tool runs *inside* the dev subagent; emitting `agent.invoke` from inside would double-count.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6) — DO NOT modify. The transcript processor is downstream of `runReviewerSession`; its existing verdict-routing logic is unchanged by this story.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5 / 4.6) — DO NOT modify. The dev transcript processor reads `dev-outcome.json` (Story 4.8b) and is not in the telemetry emission path.
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. The tool already supports `verdictOverride: "reviewer-failure"` (line 77-78); this story calls it with that value and is otherwise unconcerned.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify. AC3's invariant is that the story is NOT moved to failed; that means NOT calling this tool with `outcome: "failed"` from any new code path.
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The SKILL.md wiring for `recordAgentInvoke` lands in a sibling story; v1 ships the tool only.
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7) — DO NOT modify. Only `generalist-dev.yaml` is touched (Task 7.2).
-- `plugins/crew/mcp-server/src/lib/plugin-version.ts` (Story 1.5) — pattern reference only; do not modify.
+- `plugins/flow/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. The discriminated-union dispatch already handles new event types via the schema; no logger change needed.
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6) — DO NOT modify behaviour. Task 9.4 is a one-line comment-removal exception (the `TODO(4.12)` line); no functional change.
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts` (Story 4.4) — DO NOT modify. The dev-terminal-action tool runs *inside* the dev subagent; emitting `agent.invoke` from inside would double-count.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6) — DO NOT modify. The transcript processor is downstream of `runReviewerSession`; its existing verdict-routing logic is unchanged by this story.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5 / 4.6) — DO NOT modify. The dev transcript processor reads `dev-outcome.json` (Story 4.8b) and is not in the telemetry emission path.
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. The tool already supports `verdictOverride: "reviewer-failure"` (line 77-78); this story calls it with that value and is otherwise unconcerned.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1) — DO NOT modify. AC3's invariant is that the story is NOT moved to failed; that means NOT calling this tool with `outcome: "failed"` from any new code path.
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7) — DO NOT modify. The SKILL.md wiring for `recordAgentInvoke` lands in a sibling story; v1 ships the tool only.
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Stories 2.2 / 4.6 / 4.7) — DO NOT modify. Only `generalist-dev.yaml` is touched (Task 7.2).
+- `plugins/flow/mcp-server/src/lib/plugin-version.ts` (Story 1.5) — pattern reference only; do not modify.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/schemas/telemetry-events.ts`** (Story 1.5; locked-by-default because the closed discriminated union is contract surface) — Task 1 appends three new schemas to the closed union. This is the additive-extension pattern explicitly anticipated by the file's "Closed set in v1" docstring. No existing schemas are modified; three new entries plus union-list update.
-- **`plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b / 4.7; locked due to verdict-marker idempotency contract) — Task 3 adds the `reviewer.verdict` emission inside the POST-success path and Task 4 adds the `verdictBodyOverride` + `reviewerVerdictOverride` input fields. The locked verdict-marker grep-and-edit behaviour is preserved verbatim; the new fields are optional and additive.
-- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2.2 appends `RuntimeBoundsInvalidError` and `ReviewerResultMissingStandardsVersionError`. Routine additive growth following the established `extends DomainError` pattern.
-- **`plugins/crew/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 7.1 registers two new tools. Bump the tool-count assertion in the existing `__tests__/tool-registration.test.ts` if present.
-- **`plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6; locked due to deterministic-verdict-transport contract) — Task 9.4 removes the `TODO(4.12)` comment on line 29. No behavioural change; comment-only edit.
-- **`plugins/crew/permissions/generalist-dev.yaml`** (Story 2.2) — Task 7.2 adds the two new tool names to the allow-list. Routine additive growth.
+- **`plugins/flow/mcp-server/src/schemas/telemetry-events.ts`** (Story 1.5; locked-by-default because the closed discriminated union is contract surface) — Task 1 appends three new schemas to the closed union. This is the additive-extension pattern explicitly anticipated by the file's "Closed set in v1" docstring. No existing schemas are modified; three new entries plus union-list update.
+- **`plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`** (Story 4.6b / 4.7; locked due to verdict-marker idempotency contract) — Task 3 adds the `reviewer.verdict` emission inside the POST-success path and Task 4 adds the `verdictBodyOverride` + `reviewerVerdictOverride` input fields. The locked verdict-marker grep-and-edit behaviour is preserved verbatim; the new fields are optional and additive.
+- **`plugins/flow/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2.2 appends `RuntimeBoundsInvalidError` and `ReviewerResultMissingStandardsVersionError`. Routine additive growth following the established `extends DomainError` pattern.
+- **`plugins/flow/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 7.1 registers two new tools. Bump the tool-count assertion in the existing `__tests__/tool-registration.test.ts` if present.
+- **`plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`** (Story 4.6; locked due to deterministic-verdict-transport contract) — Task 9.4 removes the `TODO(4.12)` comment on line 29. No behavioural change; comment-only edit.
+- **`plugins/flow/permissions/generalist-dev.yaml`** (Story 2.2) — Task 7.2 adds the two new tool names to the allow-list. Routine additive growth.
 
 ---
 
@@ -388,23 +388,23 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/runtime-limits.ts` (Task 2.1)
-- `plugins/crew/mcp-server/src/tools/record-agent-invoke.ts` (Task 5)
-- `plugins/crew/mcp-server/src/tools/record-pr-close-action.ts` (Task 6)
-- `plugins/crew/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts` (Task 8.1)
-- `plugins/crew/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts` (Task 8.2)
-- `plugins/crew/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (Task 8.4 — or add to existing telemetry-events test file if present)
+- `plugins/flow/mcp-server/src/lib/runtime-limits.ts` (Task 2.1)
+- `plugins/flow/mcp-server/src/tools/record-agent-invoke.ts` (Task 5)
+- `plugins/flow/mcp-server/src/tools/record-pr-close-action.ts` (Task 6)
+- `plugins/flow/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts` (Task 8.1)
+- `plugins/flow/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts` (Task 8.2)
+- `plugins/flow/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (Task 8.4 — or add to existing telemetry-events test file if present)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (Task 1; append three schemas + update union list)
-- `plugins/crew/mcp-server/src/errors.ts` (Task 2.2; append two error classes)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Tasks 3, 4; emit event, add override fields)
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 8.3; add new tests if file exists, else create)
-- `plugins/crew/mcp-server/src/tools/register.ts` (Task 7.1; register two new tools)
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Task 9.4; remove TODO comment — comment-only)
-- `plugins/crew/permissions/generalist-dev.yaml` (Task 7.2; add two tool entries)
-- `plugins/crew/mcp-server/dist/` (Task 9.3; rebuild and commit)
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (Task 1; append three schemas + update union list)
+- `plugins/flow/mcp-server/src/errors.ts` (Task 2.2; append two error classes)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Tasks 3, 4; emit event, add override fields)
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 8.3; add new tests if file exists, else create)
+- `plugins/flow/mcp-server/src/tools/register.ts` (Task 7.1; register two new tools)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Task 9.4; remove TODO comment — comment-only)
+- `plugins/flow/permissions/generalist-dev.yaml` (Task 7.2; add two tool entries)
+- `plugins/flow/mcp-server/dist/` (Task 9.3; rebuild and commit)
 
 ### Current-state notes on files being modified or referenced
 
@@ -416,7 +416,7 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Testing standards
 
-- vitest with `pnpm vitest --run` from `plugins/crew/mcp-server/`.
+- vitest with `pnpm vitest --run` from `plugins/flow/mcp-server/`.
 - `fs.mkdtemp(path.join(os.tmpdir(), "telemetry-"))` for tmpdir fixtures; `fs.rm(..., { recursive: true })` in `afterEach`.
 - No global mocks. No `import.meta.url` mocking.
 - Class-level error assertions via `expect(fn).rejects.toThrow(RuntimeBoundsInvalidError)`; property assertions via `expect(...).rejects.toMatchObject({ name: "RuntimeBoundsInvalidError" })`.
@@ -447,12 +447,12 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 - [Source: `_bmad-output/planning-artifacts/architecture/core-architectural-decisions.md`] (§ Telemetry & Observability)
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md`] (FR65, FR66)
 - [Source: `_bmad-output/planning-artifacts/prd-crew-v1/non-functional-requirements.md`] (NFR2, NFR3)
-- [Source: `plugins/crew/mcp-server/src/lib/logger.ts`] (write-path pattern reference)
-- [Source: `plugins/crew/mcp-server/src/schemas/telemetry-events.ts`] (schema pattern + closed-set rule)
-- [Source: `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`] (POST-success emission seam)
-- [Source: `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts`] (existing `verdictOverride: "reviewer-failure"` support)
-- [Source: `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts:29`] (`TODO(4.12)` to remove)
-- [Source: `plugins/crew/docs/user-surface-acs.md`] (substrate-vs-user-surface judgement)
+- [Source: `plugins/flow/mcp-server/src/lib/logger.ts`] (write-path pattern reference)
+- [Source: `plugins/flow/mcp-server/src/schemas/telemetry-events.ts`] (schema pattern + closed-set rule)
+- [Source: `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`] (POST-success emission seam)
+- [Source: `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts`] (existing `verdictOverride: "reviewer-failure"` support)
+- [Source: `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts:29`] (`TODO(4.12)` to remove)
+- [Source: `plugins/flow/docs/user-surface-acs.md`] (substrate-vs-user-surface judgement)
 
 ---
 
@@ -515,23 +515,23 @@ None — implementation proceeded without debug loops.
 
 ### File List
 
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (modified — Task 1)
-- `plugins/crew/mcp-server/src/lib/runtime-limits.ts` (created — Task 2.1)
-- `plugins/crew/mcp-server/src/errors.ts` (modified — Task 2.2)
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (modified — Tasks 3, 4)
-- `plugins/crew/mcp-server/src/tools/record-agent-invoke.ts` (created — Task 5)
-- `plugins/crew/mcp-server/src/tools/record-pr-close-action.ts` (created — Task 6)
-- `plugins/crew/mcp-server/src/tools/register.ts` (modified — Task 7.1)
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (modified — Task 9.4, comment-only)
-- `plugins/crew/permissions/generalist-dev.yaml` (modified — Task 7.2)
-- `plugins/crew/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts` (created — Task 8.1)
-- `plugins/crew/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts` (created — Task 8.2)
-- `plugins/crew/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (created — Task 8.4)
-- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` (modified — Task 7.1, tool count)
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` (modified — Task 7.1, tool count)
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` (modified — Task 7.1, tool count)
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` (modified — Task 7.1, tool count)
-- `plugins/crew/mcp-server/dist/` (rebuilt — Task 9.3)
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (modified — Task 1)
+- `plugins/flow/mcp-server/src/lib/runtime-limits.ts` (created — Task 2.1)
+- `plugins/flow/mcp-server/src/errors.ts` (modified — Task 2.2)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (modified — Tasks 3, 4)
+- `plugins/flow/mcp-server/src/tools/record-agent-invoke.ts` (created — Task 5)
+- `plugins/flow/mcp-server/src/tools/record-pr-close-action.ts` (created — Task 6)
+- `plugins/flow/mcp-server/src/tools/register.ts` (modified — Task 7.1)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (modified — Task 9.4, comment-only)
+- `plugins/flow/permissions/generalist-dev.yaml` (modified — Task 7.2)
+- `plugins/flow/mcp-server/src/tools/__tests__/record-agent-invoke.test.ts` (created — Task 8.1)
+- `plugins/flow/mcp-server/src/tools/__tests__/record-pr-close-action.test.ts` (created — Task 8.2)
+- `plugins/flow/mcp-server/src/schemas/__tests__/telemetry-events-extension.test.ts` (created — Task 8.4)
+- `plugins/flow/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` (modified — Task 7.1, tool count)
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` (modified — Task 7.1, tool count)
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` (modified — Task 7.1, tool count)
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` (modified — Task 7.1, tool count)
+- `plugins/flow/mcp-server/dist/` (rebuilt — Task 9.3)
 
 ## Change Log
 

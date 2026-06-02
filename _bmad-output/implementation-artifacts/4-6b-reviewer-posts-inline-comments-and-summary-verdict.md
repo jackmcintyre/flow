@@ -14,7 +14,7 @@ so that **I can open any PR the agent team produced and immediately see (i) whic
 
 ### What this story is, in one sentence
 
-Introduce a new MCP tool `postReviewerComments` that the `/crew:start` inner cycle invokes AFTER `runReviewerSession` returns (between the reviewer spawn and `processReviewerTranscript`): it reads `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`, composes a summary comment body plus zero-or-more inline comments (one per failing `runnable-artifact-check` whose `artifactPath` resolves to a hunk in the PR diff), and posts them as a single PR review via `gh api /repos/{owner}/{repo}/pulls/{prNumber}/reviews` with `event: COMMENT` — closing the operator-readability loop that Story 4.6 left open (the verdict file exists on disk but nothing in the PR surface shows it to a human reading the review).
+Introduce a new MCP tool `postReviewerComments` that the `/flow:start` inner cycle invokes AFTER `runReviewerSession` returns (between the reviewer spawn and `processReviewerTranscript`): it reads `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`, composes a summary comment body plus zero-or-more inline comments (one per failing `runnable-artifact-check` whose `artifactPath` resolves to a hunk in the PR diff), and posts them as a single PR review via `gh api /repos/{owner}/{repo}/pulls/{prNumber}/reviews` with `event: COMMENT` — closing the operator-readability loop that Story 4.6 left open (the verdict file exists on disk but nothing in the PR surface shows it to a human reading the review).
 
 ### What this story fixes (and why it needs its own story)
 
@@ -35,7 +35,7 @@ This story applies that same principle to the comment-posting surface. The new t
 - (e) Implement risk-tier classification in the summary. Story 4.9 / 4.9b own the risk-tier surface. v1's summary body does not mention risk tier (it's effectively the no-op stub from 4.6 (e)).
 - (f) Re-architect what counts as "inline". v1's inline-comment generator only handles `runnable-artifact-check` failures — and only when the failing artifact's `artifactPath` literal can be found in a `+++ b/<path>` line of the PR diff (a file the PR adds or modifies). Failing vitest ACs, manual-check-required ACs, and standards-criterion findings all fold into the summary body. Rationale: artifact-existence failures are the rubber-stamp shape from 4.3c — the highest-value inline anchor; other shapes lack a deterministic line-of-code anchor.
 - (g) Compose anything from the reviewer LLM's chat output. The LLM's chat text is ignored entirely by `postReviewerComments`. The persona prose may still summarise for the operator's Claude Code transcript window, but nothing it says is read by this tool.
-- (h) Modify the reviewer persona (`plugins/crew/catalogue/generalist-reviewer.md`). The persona's only mandatory action is still `runReviewerSession` (Story 4.6 Task 8.2). Adding a second mandatory tool call would reintroduce a prose-flake surface (two MUST-call-X steps instead of one). The SKILL.md prose owns the `postReviewerComments` invocation, not the persona.
+- (h) Modify the reviewer persona (`plugins/flow/catalogue/generalist-reviewer.md`). The persona's only mandatory action is still `runReviewerSession` (Story 4.6 Task 8.2). Adding a second mandatory tool call would reintroduce a prose-flake surface (two MUST-call-X steps instead of one). The SKILL.md prose owns the `postReviewerComments` invocation, not the persona.
 - (i) Wire up real PR-comment editing. Posting always creates a new review. Editing/replacing a prior verdict comment is 4.7's idempotent-rerun job.
 - (j) Add `pr-review-comment` or any new `gh` subcommand path. v1 uses `gh api` (already kebab-cased as `api` in the subcommand spec) for the single POST that creates a review with inline comments in one call. `pr-comment` and `pr-review` already in `gh_allow` are NOT used by v1 — `gh api` is sufficient and gives the inline-comments-in-the-review-payload shape we need.
 - (k) Truncate or summarise the PR diff for comment composition. The diff was already read by `runReviewerSession` but NOT persisted (per Story 4.6 (3g) — only the verdict-relevant projection lives on disk). `postReviewerComments` re-calls `gh pr diff <prNumber>` to get a fresh copy. v1 accepts the duplicated network call; it's bounded (one extra `gh pr diff` per reviewer cycle) and avoids persisting heavy raw-diff data on disk.
@@ -47,10 +47,10 @@ This story applies that same principle to the comment-posting surface. The new t
 
 ## Acceptance Criteria
 
-> AC1, AC2, AC3, AC4 derive from the epic spec for Story 4.6b. AC5 is the user-surface contract this story makes — the operator-observable promise that the verdict is now visible on the PR itself, not just in the Claude Code transcript. Per `plugins/crew/docs/user-surface-acs.md`, AC5 is tagged `(user-surface)`; the others describe internal posting behaviour and stay untagged. AC4 retains its `(integration)` tag.
+> AC1, AC2, AC3, AC4 derive from the epic spec for Story 4.6b. AC5 is the user-surface contract this story makes — the operator-observable promise that the verdict is now visible on the PR itself, not just in the Claude Code transcript. Per `plugins/flow/docs/user-surface-acs.md`, AC5 is tagged `(user-surface)`; the others describe internal posting behaviour and stay untagged. AC4 retains its `(integration)` tag.
 
 **AC1:**
-**Given** the in-memory pass/fail results persisted by Story 4.6 (`<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`),
+**Given** the in-memory pass/fail results persisted by Story 4.6 (`<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json`),
 **When** the reviewer posts (via the new `postReviewerComments` MCP tool, invoked from the SKILL.md prose AFTER the reviewer spawn returns and BEFORE `processReviewerTranscript` runs),
 **Then** inline review comments are posted on the diff lines they reference — one inline comment per failing `runnable-artifact-check` whose `artifactPath` is found as a `+++ b/<path>` (or `+++ a/<path>` rename) target in the unified diff returned by `gh pr diff <prNumber>`. _(FR33)_
 
@@ -82,20 +82,20 @@ vitest drives `postReviewerComments` against fixture `reviewer-result.json` file
 
 **AC5 (user-surface):**
 **Given** a target repo with the Story 4.6 rubber-stamp reproducer (one ready story with `artifact: target-file.txt`; dev persona stubbed to handoff without creating the artifact),
-**When** the operator runs `/crew:start` against the scratch repo end-to-end and the inner cycle reaches the post-reviewer step,
+**When** the operator runs `/flow:start` against the scratch repo end-to-end and the inner cycle reaches the post-reviewer step,
 **Then** the operator can open the PR in GitHub (or run `gh pr view <prNumber> --comments`) and observe:
 - (a) **A new PR review of type `COMMENTED`** posted by the gh-authenticated user, with a body whose final line is `**Verdict: NEEDS CHANGES** [1 issues, 0 questions]`.
 - (b) **At least one inline review comment** anchored to the PR's diff that names the missing artifact `target-file.txt` and includes the literal string `ENOENT` in the body.
 - (c) **The summary body** lists each AC under a "## Acceptance criteria" heading with a pass/fail emoji and the AC's `reason` field verbatim — including `target-file.txt` for the failing AC. _(FR33, FR34 — operator-observable promise)_
 
-<!-- User-surface: AC5 names `/crew:start` (operator surface) AND the PR review surface (GitHub UI / `gh pr view`). Smoke-gate via operator-smoke before merging. -->
+<!-- User-surface: AC5 names `/flow:start` (operator surface) AND the PR review surface (GitHub UI / `gh pr view`). Smoke-gate via operator-smoke before merging. -->
 
 ### Expanded acceptance specifics (folded into AC1–AC5 above)
 
 **AC1 unpacked.** Inline-comment generation mechanics:
 
 - (1a) **Composite tool entrypoint:** a new MCP tool `postReviewerComments` is registered (added to `register.ts`'s tool list and to the SKILL.md `allowed_tools` array). Signature: `postReviewerComments({ targetRepoRoot: string, sessionUlid: string, role?: string, execaImpl?: typeof execa, pluginRootOverride?: string }) → Promise<PostReviewerCommentsResult>`. The `role` default is `"generalist-reviewer"`; `execaImpl` and `pluginRootOverride` are the test seams matching `runReviewerSession`'s pattern.
-- (1b) **Input contract:** the tool reads `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` using the SAME helper as `processReviewerTranscript` (extract `readReviewerResultFile` from `process-reviewer-transcript.ts` into a shared module `lib/read-reviewer-result-file.ts` so both tools call the same parser). On `ENOENT`, the tool returns a new typed `PostReviewerCommentsResult` variant `{ next: "skipped-no-session-result", postedReviewId: null }` rather than throwing — rationale: the missing-file case is already handled loudly by `processReviewerTranscript` downstream; `postReviewerComments` skipping silently here is appropriate (no review to post if there's no verdict to render). On malformed JSON, the tool raises `ReviewerResultFileMalformedError` (re-thrown from the shared helper).
+- (1b) **Input contract:** the tool reads `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` using the SAME helper as `processReviewerTranscript` (extract `readReviewerResultFile` from `process-reviewer-transcript.ts` into a shared module `lib/read-reviewer-result-file.ts` so both tools call the same parser). On `ENOENT`, the tool returns a new typed `PostReviewerCommentsResult` variant `{ next: "skipped-no-session-result", postedReviewId: null }` rather than throwing — rationale: the missing-file case is already handled loudly by `processReviewerTranscript` downstream; `postReviewerComments` skipping silently here is appropriate (no review to post if there's no verdict to render). On malformed JSON, the tool raises `ReviewerResultFileMalformedError` (re-thrown from the shared helper).
 - (1c) **PR-diff re-read:** the tool calls `gh({ role, permissions, subcommand: "pr-diff", args: [String(prNumber)] })` exactly the same way `runReviewerSession` did. `prNumber` is read from the persisted file (it was carried on the projection per Story 4.6 (3g)). The recoverable-error path (`GhRecoverableError`) propagates uncaught — same surface as Story 4.6.
 - (1d) **PR-context resolution:** the tool needs `{owner}`, `{repo}` for the `gh api` URL. Resolve via `gh pr view <prNumber> --json baseRepository` (add `pr-view` to the `gh_allow` for reviewer if not already present — it IS already present, per the current `generalist-reviewer.yaml`). The parsed JSON returns `{ baseRepository: { name, owner: { login } } }`. v1 does NOT shell `git config` or guess the remote; the GitHub-authoritative shape lives in `gh pr view`.
 - (1e) **Inline-comment generator (failing-artifact-check only):** for each `AcResult` where `applicability === "runnable-artifact-check"` AND `status === "fail"`:
@@ -166,9 +166,9 @@ vitest drives `postReviewerComments` against fixture `reviewer-result.json` file
 
 **AC4 unpacked.** Integration-suite fixtures and stub shape:
 
-- (4a) **Fixture base:** a tmpdir created by `mkdtempSync(path.join(os.tmpdir(), "crew-4-6b-"))` containing:
-  - `<tmp>/.crew/config.yaml` declaring `active_adapter: native` (needed so `loadRolePermissions` / `getPluginRoot` paths resolve; the reviewer's `runReviewerSession` was already cached, so v1's tool can short-circuit some workspace reads — but DOES still need `loadRolePermissions` for the `gh()` call).
-  - `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` written verbatim per the variant under test (six variants — see (4c)).
+- (4a) **Fixture base:** a tmpdir created by `mkdtempSync(path.join(os.tmpdir(), "flow-4-6b-"))` containing:
+  - `<tmp>/.flow/config.yaml` declaring `active_adapter: native` (needed so `loadRolePermissions` / `getPluginRoot` paths resolve; the reviewer's `runReviewerSession` was already cached, so v1's tool can short-circuit some workspace reads — but DOES still need `loadRolePermissions` for the `gh()` call).
+  - `<tmp>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` written verbatim per the variant under test (six variants — see (4c)).
 - (4b) **Stub seam for `gh`:** the same `execaImpl?: typeof execa` test seam as `run-reviewer-session.test.ts`. Use `makeDiscriminatingStub` (introduced in Story 4.6 Issue 2; extract to a shared test helper `__tests__/test-helpers/gh-execa-stub.ts` if not already extracted) routing by `cmd` and `args[0..1]`:
   - `cmd === "gh" && args[0] === "pr" && args[1] === "diff"` → return the fixture diff.
   - `cmd === "gh" && args[0] === "pr" && args[1] === "view"` → return `{"baseRepository":{"name":"crew","owner":{"login":"jackmcintyre"}}}` (the JSON payload `gh pr view --json baseRepository` would emit).
@@ -187,10 +187,10 @@ vitest drives `postReviewerComments` against fixture `reviewer-result.json` file
 
 **AC5 unpacked.** The operator-surface contract and the smoke-gate evidence:
 
-- (5a) **Reproducer:** extend the Story 4.6 operator-smoke fixture (under `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/`) with the post-reviewer step. The same scratch repo, same stubbed dev that handoffs without creating `target-file.txt`, same `runReviewerSession` returning `recommendedVerdict: "NEEDS CHANGES"`. The new step: after the reviewer Task returns and before `processReviewerTranscript`, the SKILL.md prose invokes `postReviewerComments`. The smoke stubs `gh api` (mirroring (4b)) and captures the body payload.
+- (5a) **Reproducer:** extend the Story 4.6 operator-smoke fixture (under `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/`) with the post-reviewer step. The same scratch repo, same stubbed dev that handoffs without creating `target-file.txt`, same `runReviewerSession` returning `recommendedVerdict: "NEEDS CHANGES"`. The new step: after the reviewer Task returns and before `processReviewerTranscript`, the SKILL.md prose invokes `postReviewerComments`. The smoke stubs `gh api` (mirroring (4b)) and captures the body payload.
 - (5b) **Operator-observable assertion:** the captured `gh api` body's `body` field, when split on `\n`, has a final non-empty line of exactly `**Verdict: NEEDS CHANGES** [1 issues, 0 questions]`. The `comments` array has length 1 (the failing artifact-check's path appears in the fixture diff). The inline comment's `body` contains both `target-file.txt` and `ENOENT`.
 - (5c) **Manifest-state non-regression:** the smoke also asserts the Story 4.6 invariants still hold — the in-progress manifest is stamped `blocked_by: "reviewer-verdict-needs-changes"`, NOT moved to `done/`. Story 4.6b adds posting on top; it must not regress the verdict-transport contract.
-- (5d) **Manual-paste alternative:** per `plugins/crew/docs/user-surface-acs.md` § Pre-PR gate, the operator may substitute manual-paste evidence (verbatim Claude Code transcript output) showing the captured `gh api` invocation in place of the automated smoke. The structured-body assertion (5b) is mechanically guaranteed by the deterministic composer; the operator-paste path is for verifying the integration glue (SKILL.md prose actually invokes `postReviewerComments`).
+- (5d) **Manual-paste alternative:** per `plugins/flow/docs/user-surface-acs.md` § Pre-PR gate, the operator may substitute manual-paste evidence (verbatim Claude Code transcript output) showing the captured `gh api` invocation in place of the automated smoke. The structured-body assertion (5b) is mechanically guaranteed by the deterministic composer; the operator-paste path is for verifying the integration glue (SKILL.md prose actually invokes `postReviewerComments`).
 - (5e) **Smoke-gate tag:** the new operator-smoke step file is tagged so it runs in the pre-PR smoke gate.
 
 ---
@@ -200,25 +200,25 @@ vitest drives `postReviewerComments` against fixture `reviewer-result.json` file
 The implementation order is load-bearing. Follow it.
 
 - [ ] **Task 1: Extract `readReviewerResultFile` into a shared module** (AC: #1, #3)
-  - [ ] 1.1 Create `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts`. Move the helper from `tools/process-reviewer-transcript.ts` (lines ~110–158) into it verbatim. Export `readReviewerResultFile(targetRepoRoot: string, sessionUlid: string): Promise<ReviewerResultFileShape | null>` and the `ReviewerResultFileShape` type re-export. The helper retains its behaviour: `null` on ENOENT, `ReviewerResultFileMalformedError` on parse/shape failure.
+  - [ ] 1.1 Create `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts`. Move the helper from `tools/process-reviewer-transcript.ts` (lines ~110–158) into it verbatim. Export `readReviewerResultFile(targetRepoRoot: string, sessionUlid: string): Promise<ReviewerResultFileShape | null>` and the `ReviewerResultFileShape` type re-export. The helper retains its behaviour: `null` on ENOENT, `ReviewerResultFileMalformedError` on parse/shape failure.
   - [ ] 1.2 Update `tools/process-reviewer-transcript.ts` to import the helper from the new module. Delete the inline implementation. Run the existing `process-reviewer-transcript.test.ts` to confirm no behavioural change.
   - [ ] 1.3 (No unit test added — the shared helper's behaviour is covered by the existing `process-reviewer-transcript.test.ts` ENOENT/malformed cases. AC4 (4f) exercises it from the new tool's path.)
 
 - [ ] **Task 2: Add `api` to reviewer `gh_allow`** (AC: #1)
-  - [ ] 2.1 Edit `plugins/crew/permissions/generalist-reviewer.yaml`. Add `- api` to the `gh_allow` list. Preserve `pr-view`, `pr-comment`, `pr-review`, `pr-diff`.
-  - [ ] 2.2 No schema change (the spec accepts any string subcommand). If a permissions test suite exists under `plugins/crew/permissions/__tests__/`, add a fixture-load assertion confirming `api` is present.
+  - [ ] 2.1 Edit `plugins/flow/permissions/generalist-reviewer.yaml`. Add `- api` to the `gh_allow` list. Preserve `pr-view`, `pr-comment`, `pr-review`, `pr-diff`.
+  - [ ] 2.2 No schema change (the spec accepts any string subcommand). If a permissions test suite exists under `plugins/flow/permissions/__tests__/`, add a fixture-load assertion confirming `api` is present.
 
 - [ ] **Task 3: Create `composeReviewerSummary` and `composeVerdictLine` pure helpers** (AC: #2, #3)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`. Export:
+  - [ ] 3.1 Create `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts`. Export:
     - `composeVerdictLine(result: ReviewerResultFileShape): string` — per (2e) closed table.
     - `composeSummaryBody(result: ReviewerResultFileShape): string` — per (2a) skeleton, (2b) per-AC, (2c) standards, (2d) manual-checks, ending with the verdict line from `composeVerdictLine`.
   - [ ] 3.2 Both helpers are pure: no I/O, no `Date.now()`, no env reads. Inputs are the parsed file shape only.
-  - [ ] 3.3 Add unit tests in `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts`:
+  - [ ] 3.3 Add unit tests in `plugins/flow/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts`:
     - `composeVerdictLine`: one case per closed-table row from (2e), plus the defensive `"unknown"` BLOCKED variant.
     - `composeSummaryBody`: one case per (variant × manual-check presence) combination — at minimum {READY FOR MERGE, NEEDS CHANGES, BLOCKED} × {has manual ACs, no manual ACs} × {has standards, no standards}. Exact-string assertions on the final line; structural assertions on section headings.
 
 - [ ] **Task 4: Implement `postReviewerComments` MCP tool** (AC: #1, #2, #3)
-  - [ ] 4.1 Create `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Export `postReviewerComments(opts) → Promise<PostReviewerCommentsResult>` per (1a) signature. Add the `execaImpl?: typeof execa` and `pluginRootOverride?: string` test seams (matching `runReviewerSession`'s pattern).
+  - [ ] 4.1 Create `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts`. Export `postReviewerComments(opts) → Promise<PostReviewerCommentsResult>` per (1a) signature. Add the `execaImpl?: typeof execa` and `pluginRootOverride?: string` test seams (matching `runReviewerSession`'s pattern).
   - [ ] 4.2 Step 1 — read the persisted file via `readReviewerResultFile`. On `null`, return `{ next: "skipped-no-session-result", postedReviewId: null }` immediately (no further `gh` calls).
   - [ ] 4.3 Step 2 — call `gh({ role, permissions, subcommand: "pr-diff", args: [String(result.prNumber)] })` to fetch the unified diff. Permissions loaded via `loadRolePermissions(role, pluginRootOverride ?? getPluginRoot())` (same pattern as `runReviewerSession`).
   - [ ] 4.4 Step 3 — call `gh({ role, permissions, subcommand: "pr-view", args: [String(result.prNumber), "--json", "baseRepository"] })`. Parse stdout as JSON; extract `{ name, owner: { login } }`. If parsing fails, raise `GhApiResponseShapeError({ subcommand: "pr-view", cause })`.
@@ -233,34 +233,34 @@ The implementation order is load-bearing. Follow it.
   - [ ] 4.10 Add top-of-file JSDoc citing this story spec.
 
 - [ ] **Task 4a: Extend `gh()` to pipe a stdin body** (AC: #1)
-  - [ ] 4a.1 Open `plugins/crew/mcp-server/src/lib/gh.ts`. Add an optional `input?: string` field to the `gh()` opts shape. When provided, forward as `{ input }` to the `execaImpl` call (line ~91). The `execa` library natively supports this — string is piped to the subprocess's stdin.
+  - [ ] 4a.1 Open `plugins/flow/mcp-server/src/lib/gh.ts`. Add an optional `input?: string` field to the `gh()` opts shape. When provided, forward as `{ input }` to the `execaImpl` call (line ~91). The `execa` library natively supports this — string is piped to the subprocess's stdin.
   - [ ] 4a.2 Update the existing tests in `lib/__tests__/gh.test.ts` to confirm passing `input` does not break any existing path (the field is optional; default behaviour unchanged).
   - [ ] 4a.3 Add one new test asserting that `input` is forwarded to the stub's `execaImpl` call options.
 
 - [ ] **Task 5: Register `postReviewerComments` as an MCP tool** (AC: #1)
-  - [ ] 5.1 Open `plugins/crew/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"postReviewerComments"` with a Zod input schema mirroring the options.
+  - [ ] 5.1 Open `plugins/flow/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"postReviewerComments"` with a Zod input schema mirroring the options.
   - [ ] 5.2 Wrap the handler in the existing `DomainError → { isError: true, content: [...] }` envelope.
   - [ ] 5.3 Verify via the existing register-suite tests that the tool is enumerated and callable.
 
 - [ ] **Task 6: Add `GhApiResponseShapeError` to errors.ts** (AC: #1)
-  - [ ] 6.1 Open `plugins/crew/mcp-server/src/errors.ts`. Add `GhApiResponseShapeError extends DomainError`; constructor `{ subcommand: string; url?: string; cause: unknown }`; message: `"gh ${subcommand} returned an unexpected response shape${url ? \" at \" + url : \"\"}. Cause: ${cause}. This is either a gh CLI change or a stub mismatch in tests."`.
+  - [ ] 6.1 Open `plugins/flow/mcp-server/src/errors.ts`. Add `GhApiResponseShapeError extends DomainError`; constructor `{ subcommand: string; url?: string; cause: unknown }`; message: `"gh ${subcommand} returned an unexpected response shape${url ? \" at \" + url : \"\"}. Cause: ${cause}. This is either a gh CLI change or a stub mismatch in tests."`.
 
 - [ ] **Task 7: Update the SKILL.md inner cycle to invoke `postReviewerComments`** (AC: #1, #5)
-  - [ ] 7.1 Open `plugins/crew/skills/start/SKILL.md`. In the `allowed_tools` array (line 4), add `postReviewerComments`. (Set-equality widens from the current eight-tool set to nine.)
+  - [ ] 7.1 Open `plugins/flow/skills/start/SKILL.md`. In the `allowed_tools` array (line 4), add `postReviewerComments`. (Set-equality widens from the current eight-tool set to nine.)
   - [ ] 7.2 In the reviewer-handling step (the step that calls `processReviewerTranscript` after the reviewer Task returns), insert a NEW step BEFORE the `processReviewerTranscript` call: `postReviewerComments({ targetRepoRoot, sessionUlid })`. The tool runs first; its return value is informational (logged to the operator's chat surface via the existing chatLog pattern, if applicable); the cycle then proceeds to `processReviewerTranscript` regardless of the post-comments outcome.
   - [ ] 7.3 Specifically handle the `next: "skipped-no-session-result"` return: log a chat line "post-reviewer-comments skipped — no reviewer-result.json (the missing-file case will be handled by processReviewerTranscript next)" and proceed.
   - [ ] 7.4 On uncaught throws from `postReviewerComments` (e.g. `GhRecoverableError`, `GhApiResponseShapeError`, `ReviewerResultFileMalformedError`): surface verbatim, halt the inner cycle (same pattern as Story 4.6's uncaught-error surface). Do NOT proceed to `processReviewerTranscript` — the verdict transport is still on disk, but a posting failure indicates an environmental problem worth pausing for.
   - [ ] 7.5 Do NOT add prose telling the reviewer persona to compose comment text. The persona's mandatory tool call (Story 4.6 Task 8.2) is still `runReviewerSession`; `postReviewerComments` is invoked from SKILL.md prose, not from inside the reviewer subagent.
 
 - [ ] **Task 8: Implement the integration test suite** (AC: #4)
-  - [ ] 8.1 Create `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts`. Build the fixture per (4a) in `beforeEach`; tear down with `rmSync`.
+  - [ ] 8.1 Create `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts`. Build the fixture per (4a) in `beforeEach`; tear down with `rmSync`.
   - [ ] 8.2 Extract `makeDiscriminatingStub` from `run-reviewer-session.test.ts` into `__tests__/test-helpers/gh-execa-stub.ts` if not already extracted. Extend the routing to cover `gh pr view --json baseRepository` and `gh api`.
   - [ ] 8.3 Implement each variant from (4c-i) through (4c-vi) as a separate `it()` case. Use the captured `input` field on the stub to JSON-parse and assert the `gh api` body shape.
   - [ ] 8.4 Implement the negative paths (4e), (4f), (4g) as separate `it()` cases.
   - [ ] 8.5 Use `__resetGhErrorMapCacheForTests` in `beforeEach` to keep the gh-error-map cache deterministic (same pattern as Story 4.5 / 4.6 tests).
 
 - [ ] **Task 9: Add unit tests for the inline-hunk-line helper** (AC: #1)
-  - [ ] 9.1 Create `plugins/crew/mcp-server/src/lib/__tests__/find-hunk-line.test.ts`. Cases:
+  - [ ] 9.1 Create `plugins/flow/mcp-server/src/lib/__tests__/find-hunk-line.test.ts`. Cases:
     - Diff contains the path in a `+++ b/<path>` line; hunk line returned matches `@@ +<newStart>` parse.
     - Diff contains the path with `+++ a/<path>` (rename source); same return.
     - Diff does NOT contain the path; returns `null`.
@@ -269,11 +269,11 @@ The implementation order is load-bearing. Follow it.
 - [ ] **Task 10: Operator-smoke extension for AC5** (AC: #5)
   - [ ] 10.1 Extend the Story 4.6 operator-smoke harness with the post-reviewer step per (5a). Add a `gh api` stub mirroring (4b).
   - [ ] 10.2 Capture the body payload passed to `gh api` (via the `input` field on the discriminating stub). Assert per (5b): final line of body matches `**Verdict: NEEDS CHANGES** [1 issues, 0 questions]` exactly; `comments` array length 1; inline comment's body contains both `target-file.txt` and `ENOENT`.
-  - [ ] 10.3 Assert per (5c): the in-progress manifest is at `.crew/state/in-progress/<ref>.yaml` AND NOT at `.crew/state/done/<ref>.yaml`; `blocked_by === "reviewer-verdict-needs-changes"`.
-  - [ ] 10.4 Tag the test file so it runs in the pre-PR smoke gate per `plugins/crew/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence per (5d).
+  - [ ] 10.3 Assert per (5c): the in-progress manifest is at `.flow/state/in-progress/<ref>.yaml` AND NOT at `.flow/state/done/<ref>.yaml`; `blocked_by === "reviewer-verdict-needs-changes"`.
+  - [ ] 10.4 Tag the test file so it runs in the pre-PR smoke gate per `plugins/flow/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence per (5d).
 
 - [ ] **Task 11: Update docs (if affected)** (no AC; housekeeping)
-  - [ ] 11.1 Skim `plugins/crew/docs/` for any reviewer-flow doc that describes verdict surface or PR-comment posting. Update to mention `postReviewerComments` as the deterministic composer + poster. Do NOT create new docs.
+  - [ ] 11.1 Skim `plugins/flow/docs/` for any reviewer-flow doc that describes verdict surface or PR-comment posting. Update to mention `postReviewerComments` as the deterministic composer + poster. Do NOT create new docs.
 
 ---
 
@@ -330,7 +330,7 @@ GitHub's reviews API treats inline comments as a sub-array of a single review PO
 
 ### Why this story is `user-surface`
 
-The reviewer's verdict is now visible on the PR — to anyone reading the PR list, not just to the operator watching the `/crew:start` session live. That changes the operator's mental model from "Claude Code told me what happened" to "the PR carries an inspectable verdict." That's a user-surface promise; AC5 makes it gateable.
+The reviewer's verdict is now visible on the PR — to anyone reading the PR list, not just to the operator watching the `/flow:start` session live. That changes the operator's mental model from "Claude Code told me what happened" to "the PR carries an inspectable verdict." That's a user-surface promise; AC5 makes it gateable.
 
 ---
 
@@ -338,22 +338,22 @@ The reviewer's verdict is now visible on the PR — to anyone reading the PR lis
 
 The following files are off-limits to this story's implementation. If a change to any of these appears necessary, STOP and surface the conflict — do not edit.
 
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` (Story 4.1)
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 — this story is a sibling consumer of the persisted file; runReviewerSession is unchanged)
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2 — verdict transport contract unchanged. Task 1 EXTRACTS a helper out of this file; it does not modify the public behaviour.)
-- `plugins/crew/catalogue/generalist-reviewer.md` (Story 4.6 — persona prose unchanged; `postReviewerComments` is NOT a persona tool)
-- `plugins/crew/permissions/gh-error-map.yaml` (Story 4.5)
-- `plugins/crew/skills/handoff-parser.js` and `plugins/crew/mcp-server/src/skills/handoff-parser.ts` (Story 4.3)
-- `plugins/crew/mcp-server/src/skills/verdict-parser.ts` (Story 4.3 / 4.6 — `@deprecated`, no callers; do not undelete)
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/claim-next-story.ts` (Story 4.1 / 4.2)
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` (Story 4.1)
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 — this story is a sibling consumer of the persisted file; runReviewerSession is unchanged)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 revision 2 — verdict transport contract unchanged. Task 1 EXTRACTS a helper out of this file; it does not modify the public behaviour.)
+- `plugins/flow/catalogue/generalist-reviewer.md` (Story 4.6 — persona prose unchanged; `postReviewerComments` is NOT a persona tool)
+- `plugins/flow/permissions/gh-error-map.yaml` (Story 4.5)
+- `plugins/flow/skills/handoff-parser.js` and `plugins/flow/mcp-server/src/skills/handoff-parser.ts` (Story 4.3)
+- `plugins/flow/mcp-server/src/skills/verdict-parser.ts` (Story 4.3 / 4.6 — `@deprecated`, no callers; do not undelete)
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`** (Story 4.6 revision 2) — Task 1 extracts the `readReviewerResultFile` helper into `lib/read-reviewer-result-file.ts`. The public behaviour, return-union, and `recommendedVerdict`-switching path are byte-identical after the extraction. Only the location of the helper changes; the existing test suite covers behaviour preservation.
-- **`plugins/crew/mcp-server/src/lib/gh.ts`** (Story 4.4 / 4.5) — Task 4a adds an optional `input?: string` field that forwards to `execa`'s `input` option. Existing callers do not pass it; default behaviour is unchanged. The change is additive and the `execa` library natively supports `input`.
-- **`plugins/crew/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c / 4.6) — Task 7 adds one entry to `allowed_tools` (`postReviewerComments`) and inserts one new step in the reviewer-handling block BEFORE the existing `processReviewerTranscript` call. The completion seam (4.3c) and the file-based verdict transport (4.6) are UNTOUCHED. The new step's failure modes are surfaced verbatim per the existing pattern.
-- **`plugins/crew/permissions/generalist-reviewer.yaml`** (Stories 2.2 / 4.6) — Task 2 adds `- api` to `gh_allow`. Existing entries are preserved.
+- **`plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`** (Story 4.6 revision 2) — Task 1 extracts the `readReviewerResultFile` helper into `lib/read-reviewer-result-file.ts`. The public behaviour, return-union, and `recommendedVerdict`-switching path are byte-identical after the extraction. Only the location of the helper changes; the existing test suite covers behaviour preservation.
+- **`plugins/flow/mcp-server/src/lib/gh.ts`** (Story 4.4 / 4.5) — Task 4a adds an optional `input?: string` field that forwards to `execa`'s `input` option. Existing callers do not pass it; default behaviour is unchanged. The change is additive and the `execa` library natively supports `input`.
+- **`plugins/flow/skills/start/SKILL.md`** (Stories 4.2 / 4.3b / 4.3c / 4.6) — Task 7 adds one entry to `allowed_tools` (`postReviewerComments`) and inserts one new step in the reviewer-handling block BEFORE the existing `processReviewerTranscript` call. The completion seam (4.3c) and the file-based verdict transport (4.6) are UNTOUCHED. The new step's failure modes are surfaced verbatim per the existing pattern.
+- **`plugins/flow/permissions/generalist-reviewer.yaml`** (Stories 2.2 / 4.6) — Task 2 adds `- api` to `gh_allow`. Existing entries are preserved.
 
 ---
 
@@ -361,24 +361,24 @@ The following files are off-limits to this story's implementation. If a change t
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Task 4)
-- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 8)
-- `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1; extracted)
-- `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 3)
-- `plugins/crew/mcp-server/src/lib/find-hunk-line.ts` (Task 4.5 helper)
-- `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 3.3)
-- `plugins/crew/mcp-server/src/lib/__tests__/find-hunk-line.test.ts` (Task 9)
-- `plugins/crew/mcp-server/src/__tests__/test-helpers/gh-execa-stub.ts` (Task 8.2; extract if not already)
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Task 4)
+- `plugins/flow/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 8)
+- `plugins/flow/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1; extracted)
+- `plugins/flow/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 3)
+- `plugins/flow/mcp-server/src/lib/find-hunk-line.ts` (Task 4.5 helper)
+- `plugins/flow/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 3.3)
+- `plugins/flow/mcp-server/src/lib/__tests__/find-hunk-line.test.ts` (Task 9)
+- `plugins/flow/mcp-server/src/__tests__/test-helpers/gh-execa-stub.ts` (Task 8.2; extract if not already)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Task 1.2; helper extraction — no behavioural change)
-- `plugins/crew/mcp-server/src/lib/gh.ts` (Task 4a; additive `input` field)
-- `plugins/crew/mcp-server/src/tools/register.ts` (Task 5)
-- `plugins/crew/mcp-server/src/errors.ts` (Task 6; one new error class)
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Task 2)
-- `plugins/crew/skills/start/SKILL.md` (Task 7; allowed_tools + new step)
-- Operator-smoke harness under `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 10)
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Task 1.2; helper extraction — no behavioural change)
+- `plugins/flow/mcp-server/src/lib/gh.ts` (Task 4a; additive `input` field)
+- `plugins/flow/mcp-server/src/tools/register.ts` (Task 5)
+- `plugins/flow/mcp-server/src/errors.ts` (Task 6; one new error class)
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Task 2)
+- `plugins/flow/skills/start/SKILL.md` (Task 7; allowed_tools + new step)
+- Operator-smoke harness under `plugins/flow/mcp-server/src/__tests__/operator-smoke-helpers/` (Task 10)
 
 ### Current-state notes on files being modified
 
@@ -400,13 +400,13 @@ The following files are off-limits to this story's implementation. If a change t
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-4-dev-review-loop-the-engineering-heart.md#Story 4.6b`]
-- [Source: `plugins/crew/docs/user-surface-acs.md`] (user-surface tag conventions)
+- [Source: `plugins/flow/docs/user-surface-acs.md`] (user-surface tag conventions)
 - [Source: `_bmad-output/implementation-artifacts/4-6-reviewer-subagent-read-sources-and-run-acs.md`] (verdict-transport contract this story consumes; revision-2 file shape)
-- [Source: `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`] (`ReviewerResultFileShape` export and persistence path)
-- [Source: `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`] (current location of `readReviewerResultFile`; Task 1 extracts)
-- [Source: `plugins/crew/mcp-server/src/lib/gh.ts`] (gh wrapper; Task 4a additive change)
-- [Source: `plugins/crew/permissions/generalist-reviewer.yaml`] (Task 2 adds `api`)
-- [Source: `plugins/crew/skills/start/SKILL.md`] (Task 7 inserts the new step)
+- [Source: `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`] (`ReviewerResultFileShape` export and persistence path)
+- [Source: `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts`] (current location of `readReviewerResultFile`; Task 1 extracts)
+- [Source: `plugins/flow/mcp-server/src/lib/gh.ts`] (gh wrapper; Task 4a additive change)
+- [Source: `plugins/flow/permissions/generalist-reviewer.yaml`] (Task 2 adds `api`)
+- [Source: `plugins/flow/skills/start/SKILL.md`] (Task 7 inserts the new step)
 - [Source: `_bmad-output/implementation-artifacts/4-5-gh-error-map-yaml-and-recoverable-error-classification.md`] (recoverable-error contract; uncaught propagation)
 - [Source: `_bmad-output/implementation-artifacts/4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action.md`] (`gh` wrapper invocation pattern)
 - Project memory: `project_reviewer_rubber_stamps.md`
@@ -420,7 +420,7 @@ The following files are off-limits to this story's implementation. If a change t
 
 ### From Story 4.6 (just shipped)
 
-- The verdict transport is `reviewer-result.json` at `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/`. Shape exported as `ReviewerResultFileShape` from `run-reviewer-session.ts`. v1 of `postReviewerComments` consumes this file as its sole input (plus a re-read of the diff).
+- The verdict transport is `reviewer-result.json` at `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/`. Shape exported as `ReviewerResultFileShape` from `run-reviewer-session.ts`. v1 of `postReviewerComments` consumes this file as its sole input (plus a re-read of the diff).
 - The `readReviewerResultFile` helper lives inline in `process-reviewer-transcript.ts`. Two tools need it (`processReviewerTranscript` and the new `postReviewerComments`); Task 1 extracts it cleanly into `lib/`.
 - The reviewer persona's mandatory tool call is `runReviewerSession`. Do NOT add a second mandatory tool call inside the persona — that resurrects the prose-flake surface 4.6 worked to eliminate. The new tool is a SKILL.md-prose-invoked sibling.
 - The Story 4.6 (3g) decision to persist only the verdict-relevant projection (no `prDiff`, no `sourceStory`) means `postReviewerComments` re-calls `gh pr diff`. That's intentional — keep the persisted file small; pay one extra `gh` round-trip per cycle.

@@ -20,24 +20,24 @@ This was surfaced by the adversarial review of Story 8.18 (2026-05-31). The prog
 **AC1 — an observability seam that hard-fails does not propagate; the story proceeds (integration):**
 
 When a progress-heartbeat call's underlying courier hard-fails (throws / rejects, not merely returns a garbled line), the wrapper catches it, emits no progress line, and returns control so the story continues exactly as if the line had been suppressed. A test drives the real drain workflow (seams stubbed) with a progress seam that throws and asserts no exception escapes the run and the story still reaches its normal outcome bucket.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
 
 **AC2 — observability cannot alter control flow even on hard failure (integration):**
 
 In a drain run where every progress-heartbeat seam throws, the set of result buckets (completed / merged / pausedForHuman / blocked) and the drain reason are identical to a run where those seams succeed — strengthening Story 8.18's equivalence guarantee from garble-only to hard-failure. The test asserts the two runs produce an identical structured result, differing only in the absence of the progress lines.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
 
 **AC3 — the swallow-guard is scoped to read-only / observability seams; mutating seams still fail loud (integration):**
 
 The catch-and-degrade behaviour applies only to observability / read-only seams. A load-bearing mutating step that hard-fails still surfaces — the affected story lands in a paused-or-blocked outcome carrying the failure reason rather than being silently swallowed or treated as a success. The test injects a hard failure into a mutating step and asserts that story is NOT completed and its failure reason is preserved, proving the hardening cannot mask a real failure.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-observability-non-fatal.test.ts
 
 ## Notes
 
-Relevant code: the heartbeat wrappers `progressStart` / `progressDone` and the shared `seam()` courier live in `plugins/crew/workflows/drain.workflow.js`; the clock tools `drainPhaseStart` / `drainPhaseDone` are in `plugins/crew/mcp-server/src/tools/drain-phase-progress.ts`. The per-story routine (`processStory`) is awaited in both the orphan-recovery prelude and the main claim loop with no surrounding try/catch — that is why an unguarded hard rejection anywhere inside it aborts the whole run, and it is the reason the guard belongs at the observability-seam boundary (degrade there) rather than by wrapping `processStory` (which would also swallow load-bearing failures and reintroduce silent-success).
+Relevant code: the heartbeat wrappers `progressStart` / `progressDone` and the shared `seam()` courier live in `plugins/flow/workflows/drain.workflow.js`; the clock tools `drainPhaseStart` / `drainPhaseDone` are in `plugins/flow/mcp-server/src/tools/drain-phase-progress.ts`. The per-story routine (`processStory`) is awaited in both the orphan-recovery prelude and the main claim loop with no surrounding try/catch — that is why an unguarded hard rejection anywhere inside it aborts the whole run, and it is the reason the guard belongs at the observability-seam boundary (degrade there) rather than by wrapping `processStory` (which would also swallow load-bearing failures and reintroduce silent-success).
 
 Reuse the existing degrade convention: the seam layer already returns a parse-error sentinel on a garbled relay and the wrappers already skip the line in that case; extend the same "no line, keep going" behaviour to a hard rejection of an observability seam. Keep the distinction explicit — only the read-only / idempotent seams (the heartbeat, and any other pure-observability call) get the swallow; the mutating claim / verdict / gate seams keep their fail-loud, no-silent-failure contract (a garble or failure there still pauses or blocks that one story).
 
 Design points to settle during implementation and record in the completion notes: (1) whether the guard lives inside the `progressStart` / `progressDone` wrappers, inside `seam()` gated on a read-only flag, or both — prefer the smallest change that cannot accidentally cover a mutating seam; (2) whether a swallowed hard failure should emit a single quiet diagnostic line (so the operator knows the heartbeat degraded) or nothing at all — pick one and say why.
 
-This is a code change on the orchestration path: rebuild and commit `dist/` in the same change (CI fails on src / dist drift), keep the diff scoped, and run the full `pnpm build` and `pnpm test` from `plugins/crew/mcp-server` green before opening the PR. It is a `low`-risk, additive guard (it only removes a failure path; it adds no new behaviour to the happy path) and, like its siblings, is expected to pause the auto-merge gate for a human merge — that is correct. Do not write or edit any execution manifest or the team's local ledger files; the tools own the ledger. The literal story ref for this work is bmad:8.21.
+This is a code change on the orchestration path: rebuild and commit `dist/` in the same change (CI fails on src / dist drift), keep the diff scoped, and run the full `pnpm build` and `pnpm test` from `plugins/flow/mcp-server` green before opening the PR. It is a `low`-risk, additive guard (it only removes a failure path; it adds no new behaviour to the happy path) and, like its siblings, is expected to pause the auto-merge gate for a human merge — that is correct. Do not write or edit any execution manifest or the team's local ledger files; the tools own the ledger. The literal story ref for this work is bmad:8.21.

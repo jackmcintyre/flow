@@ -13,7 +13,7 @@ status: **PROPOSED — awaiting sign-off before any artefact mutation**
 
 The 2026-05-27 steering session redefined crew's success bar. crew is **no longer being assessed as a monetisable product**; it is a **proof-point/portfolio artifact** to anchor Jack's career-transition narrative. This invalidates the current PRD success criterion (which is built around an external stranger installing cold) and re-orders the epic sequence.
 
-In parallel, the first dogfood canary surfaced a substrate blocker: **`/crew:start` hangs before writing any code due to story-file parsing brittleness**. This is the proximate gate on the new ship goal (crew building itself) and outranks all other Epic 5 leftover work.
+In parallel, the first dogfood canary surfaced a substrate blocker: **`/flow:start` hangs before writing any code due to story-file parsing brittleness**. This is the proximate gate on the new ship goal (crew building itself) and outranks all other Epic 5 leftover work.
 
 ## 2. Impact Analysis
 
@@ -40,7 +40,7 @@ In parallel, the first dogfood canary surfaced a substrate blocker: **`/crew:sta
 
 ### Dogfood resumption
 
-Dogfood was unblocked 2026-05-27 (memory `project_dogfood_paused_until_l1`). The parser blocker does not re-block dogfood policy — it just means autonomous `/crew:start` will currently fail-fast on the planner→scan handoff. Manual `/ship-story` continues to work for substrate.
+Dogfood was unblocked 2026-05-27 (memory `project_dogfood_paused_until_l1`). The parser blocker does not re-block dogfood policy — it just means autonomous `/flow:start` will currently fail-fast on the planner→scan handoff. Manual `/ship-story` continues to work for substrate.
 
 ## 3. Recommended Approach
 
@@ -59,7 +59,7 @@ Ship order under Phase B:
 1. **5.14** — parser POC clamp. Unblocks self-bootstrap canary.
 2. **5.16** — picomatch dep. Trivial; pair-ship or hot-fix.
 3. **5.13b** — scan-sources to-do drift-check. Closes #159 retro debt.
-4. **Self-bootstrap canary attempt** — one clean autonomous `/crew:start`. If it works, the proximate ship gate is met.
+4. **Self-bootstrap canary attempt** — one clean autonomous `/flow:start`. If it works, the proximate ship gate is met.
 5. **5.18** — structural parser. Protected by an explicit trigger condition in the story body: *"author before any external-planner integration or before merging any change that adds a non-BMad adapter input shape."*
 
 ### Phase C — Rewrite the PRD success criterion + Epic 6 split
@@ -135,5 +135,5 @@ Before any of this lands, one PM call:
 
 **Success criteria for this proposal:**
 - Phase A produces a diagnosis specific enough to author 5.14's spec without speculation.
-- Phase B's 5.14 → 5.16 → 5.13b sequence yields one clean autonomous `/crew:start` cycle.
+- Phase B's 5.14 → 5.16 → 5.13b sequence yields one clean autonomous `/flow:start` cycle.
 - Phase C's PRD rewrite is shorter than the current success-criteria.md (the reframe is a focus exercise, not a scope expansion).

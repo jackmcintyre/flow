@@ -14,9 +14,9 @@ Skills are the constructive twin of rules. Rules codify "what shouldn't happen a
 
   | Scope | Location | Read by |
   |---|---|---|
-  | Project-specific | `<target-repo>/.crew/skills/<name>.md` | Agents on this project; user as a slash-command |
+  | Project-specific | `<target-repo>/.flow/skills/<name>.md` | Agents on this project; user as a slash-command |
   | Persona-specific | Referenced from `team/<role>/PERSONA.md` Knowledge section | That role's subagents only |
-  | Plugin-shipped | `plugins/crew/skills/<name>.md` | Every install (Growth-phase promotion path) |
+  | Plugin-shipped | `plugins/flow/skills/<name>.md` | Every install (Growth-phase promotion path) |
 
   Retro-promoted skills land at project-scope by default. Promotion to plugin-shipped is a Growth-phase action gated on cross-user evidence, not a v1 path.
 

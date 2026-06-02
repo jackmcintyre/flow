@@ -23,11 +23,11 @@ So that the cycle-level retro has parseable data to roll up.
 
 **Given** a story moving from `in-progress/` to `done/`,
 **When** the reviewer's terminal action runs,
-**Then** `record-story-retro` writes `lessons[]` (each with `kind: pitfall | pattern | tool-quirk | discipline`, `text`, optional `failure_class`, optional `routed_to`), `failure_class`, `duration_seconds`, `rework_count` into the manifest. _(FR11, FR55)_ `artifact: plugins/crew/mcp-server/src/tools/record-story-retro.ts`
+**Then** `record-story-retro` writes `lessons[]` (each with `kind: pitfall | pattern | tool-quirk | discipline`, `text`, optional `failure_class`, optional `routed_to`), `failure_class`, `duration_seconds`, `rework_count` into the manifest. _(FR11, FR55)_ `artifact: plugins/flow/mcp-server/src/tools/record-story-retro.ts`
 
-**Given** any lesson, **When** validated, **Then** `kind` is required and constrained to the four allowed values; `failure_class` is required when `kind: pitfall`. _(FR11)_ `artifact: plugins/crew/mcp-server/src/schemas/story-retro.ts`
+**Given** any lesson, **When** validated, **Then** `kind` is required and constrained to the four allowed values; `failure_class` is required when `kind: pitfall`. _(FR11)_ `artifact: plugins/flow/mcp-server/src/schemas/story-retro.ts`
 
-**AC3 (integration):** vitest covers happy-path retro write + each kind value. `vitest: plugins/crew/mcp-server/src/tools/__tests__/record-story-retro.test.ts`
+**AC3 (integration):** vitest covers happy-path retro write + each kind value. `vitest: plugins/flow/mcp-server/src/tools/__tests__/record-story-retro.test.ts`
 
 ## Story 6.2: `/retro` skill and retro-analyst subagent
 
@@ -39,31 +39,31 @@ So that I get a single proposal markdown summarising what to change.
 
 **Given** a cycle with stories in `done/` and a populated telemetry log,
 **When** I run `/<plugin>:retro`,
-**Then** the retro-analyst subagent reads every done manifest, the current JSONL telemetry, the rule registry, and the prior retro proposals (for context). _(FR56, FR57)_ `artifact: plugins/crew/skills/retro/SKILL.md`
+**Then** the retro-analyst subagent reads every done manifest, the current JSONL telemetry, the rule registry, and the prior retro proposals (for context). _(FR56, FR57)_ `artifact: plugins/flow/skills/retro/SKILL.md`
 
-**Given** the retro-analyst, **When** it runs, **Then** it cannot mutate the rule registry, `docs/standards.md`, sprint-history, or plugin skills directly — only emit a proposal markdown. _(FR60)_ `artifact: plugins/crew/catalogue/retro-analyst.md`
+**Given** the retro-analyst, **When** it runs, **Then** it cannot mutate the rule registry, `docs/standards.md`, sprint-history, or plugin skills directly — only emit a proposal markdown. _(FR60)_ `artifact: plugins/flow/catalogue/retro-analyst.md`
 
-**AC3 (integration):** vitest drives `/retro` against a fixture cycle and asserts the agent's allowlist refuses canonical-state writes. `vitest: plugins/crew/mcp-server/src/tools/__tests__/retro-skill.test.ts`
+**AC3 (integration):** vitest drives `/retro` against a fixture cycle and asserts the agent's allowlist refuses canonical-state writes. `vitest: plugins/flow/mcp-server/src/tools/__tests__/retro-skill.test.ts`
 
 ## Story 6.3: Retro proposal markdown with seven proposal types
 
 As a plugin operator,
-I want every cycle's retro to produce a single proposal markdown file under `.crew/retro-proposals/<ISO>.md` carrying any of seven proposal types,
+I want every cycle's retro to produce a single proposal markdown file under `.flow/retro-proposals/<ISO>.md` carrying any of seven proposal types,
 So that the calibration loop covers learning what not to do, what to always do, and how to evolve the team.
 
 **Acceptance Criteria:**
 
-**Given** the retro-analyst output, **When** parsed, **Then** it produces a single file at `<target-repo>/.crew/retro-proposals/<ISO-timestamp>.md`. _(FR58)_ `artifact: plugins/crew/mcp-server/src/tools/write-retro-proposal.ts`
+**Given** the retro-analyst output, **When** parsed, **Then** it produces a single file at `<target-repo>/.flow/retro-proposals/<ISO-timestamp>.md`. _(FR58)_ `artifact: plugins/flow/mcp-server/src/tools/write-retro-proposal.ts`
 
-**Given** any proposal in the file, **When** validated, **Then** its `type` is one of `rule | rule-retirement | skill-create | skill-revise | skill-supersede | skill-retire | team-change`. _(FR59, Architecture §Skill calibration loop)_ `artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts`
+**Given** any proposal in the file, **When** validated, **Then** its `type` is one of `rule | rule-retirement | skill-create | skill-revise | skill-supersede | skill-retire | team-change`. _(FR59, Architecture §Skill calibration loop)_ `artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts`
 
-**Given** a `rule` proposal, **When** validated, **Then** it carries `text`, `target_failure_class`, and `recommended_promotion_level`. _(FR59)_ `artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts`
+**Given** a `rule` proposal, **When** validated, **Then** it carries `text`, `target_failure_class`, and `recommended_promotion_level`. _(FR59)_ `artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts`
 
-**Given** a `skill-create` proposal, **When** validated, **Then** it carries `proposed_path`, `frontmatter_description`, and `body`. _(FR59)_ `artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts`
+**Given** a `skill-create` proposal, **When** validated, **Then** it carries `proposed_path`, `frontmatter_description`, and `body`. _(FR59)_ `artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts`
 
-**Given** a `team-change` proposal, **When** validated, **Then** it carries `action: hire | unhire`, `target_role`, `justification`, `predicted_impact` (which failure classes are expected to change). _(FR106)_ `artifact: plugins/crew/mcp-server/src/schemas/retro-proposal.ts`
+**Given** a `team-change` proposal, **When** validated, **Then** it carries `action: hire | unhire`, `target_role`, `justification`, `predicted_impact` (which failure classes are expected to change). _(FR106)_ `artifact: plugins/flow/mcp-server/src/schemas/retro-proposal.ts`
 
-**AC6 (integration):** vitest covers parsing and Zod validation of each proposal type. `vitest: plugins/crew/mcp-server/src/schemas/__tests__/retro-proposal.test.ts`
+**AC6 (integration):** vitest covers parsing and Zod validation of each proposal type. `vitest: plugins/flow/mcp-server/src/schemas/__tests__/retro-proposal.test.ts`
 
 ## Story 6.4: `/accept-proposal <id>` skill — diff-then-confirm gate
 
@@ -255,7 +255,7 @@ So that historical retros, outcome stats, and writeup analysis survive across cy
 
 **Given** a cycle whose `done/` is the only non-empty state directory,
 **When** `archive-cycle` is invoked,
-**Then** the cycle's manifests, retro proposals, and a telemetry summary are written to `<target-repo>/.crew/sprint-history/<cycle-id>-<ISO>.yaml` and the active state directories are reset. _(FR69)_
+**Then** the cycle's manifests, retro proposals, and a telemetry summary are written to `<target-repo>/.flow/sprint-history/<cycle-id>-<ISO>.yaml` and the active state directories are reset. _(FR69)_
 
 **Given** an already-archived cycle id,
 **When** `archive-cycle` is invoked again,
@@ -295,7 +295,7 @@ So that tuning a persona doesn't require knowing the full schema or reverse-engi
 
 **Given** the persona schema,
 **When** an operator looks for a minimal-valid template,
-**Then** `plugins/crew/templates/persona.minimal.md` (or equivalent docs path) exists, is referenced from the docs index, and is itself a valid persona file. _(NFR-tbd)_
+**Then** `plugins/flow/templates/persona.minimal.md` (or equivalent docs path) exists, is referenced from the docs index, and is itself a valid persona file. _(NFR-tbd)_
 
 **Given** the custom-role hire flow,
 **When** a new persona is instantiated without a catalogue entry,

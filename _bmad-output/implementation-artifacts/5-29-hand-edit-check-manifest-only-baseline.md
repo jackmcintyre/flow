@@ -33,26 +33,26 @@ PR #176 (bmad:6.1) hit this defect on close-out and had to be operator-overridde
 **AC1:**
 
 `detectInProgressHandEdit` compares the on-disk in-progress manifest against a baseline that was snapshotted at claim time and persisted on the manifest itself (or captured in-process and passed through). It no longer re-reads the source story file to rebuild the baseline. `deriveSourceBaseline` is either removed at the in-progress check call sites (`claimStory` re-entry path, `completeStory`) or its return value is replaced by a manifest-snapshot loader. Source-hash drift between the in-progress manifest and the **current** source story is no longer a hand-edit signal.
-artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
-artifact: plugins/crew/mcp-server/src/tools/complete-story.ts
-artifact: plugins/crew/mcp-server/src/tools/claim-story.ts
+artifact: plugins/flow/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/flow/mcp-server/src/tools/complete-story.ts
+artifact: plugins/flow/mcp-server/src/tools/claim-story.ts
 
 **AC2 (integration — regression):**
 
 A vitest test exercises the end-to-end dev-fills-implementation_notes path. Setup: a claimed manifest in `in-progress/` with `implementation_notes` field captured at claim time. Action: simulate the dev's edit by rewriting the source story file's `## Implementation Notes` section (changes source bytes, so the live `source_hash` differs from the manifest's `source_hash`, and the live source's implementation_notes string differs from the manifest's snapshot). Call `completeStory` (or `processReviewerTranscript` → `completeStory` if testing the full path). Assert: the call succeeds (no `InProgressHandEditError`), the manifest moves from `in-progress/` to `done/`, and no source-file drift is reported. This test is the regression guard for PR #176's defect.
-vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+vitest: plugins/flow/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
 
 **AC3 (integration — no false negatives):**
 
 A vitest test confirms operator manifest-tampering is still detected after the narrowing. Setup: a claimed manifest in `in-progress/`. Action: hand-edit the in-progress manifest file directly (e.g., flip `withdrawn`, reorder `acceptance_criteria`, change `title`) while leaving the source story file untouched. Call `claimStory` re-entry or `completeStory`. Assert: `InProgressHandEditError` is thrown with the correct `changedFields` array. This covers the existing c1–c3 hand-edit cases (`title`, `acceptance_criteria`, `withdrawn`) — each must remain detected.
-vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+vitest: plugins/flow/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
 
 **AC4:**
 
 `detectInProgressHandEdit` JSDoc is updated to reflect the new contract: "compares the on-disk in-progress manifest against the claim-time manifest snapshot; does not consult the source story file." The Story 3.7 caller contract reference is updated to point at this story. `deriveSourceBaseline` either has its JSDoc updated to note it is no longer used by the in-progress guard (if retained for other reasons) or is removed entirely if no remaining call sites exist. The c4 case in the existing test file (`source hash drift detected`) is updated or removed so the test name no longer implies source-file drift detection from the in-progress guard.
-artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
-artifact: plugins/crew/mcp-server/src/state/derive-source-baseline.ts
-artifact: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+artifact: plugins/flow/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/flow/mcp-server/src/state/derive-source-baseline.ts
+artifact: plugins/flow/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
 
 ---
 
@@ -76,24 +76,24 @@ The cleanest implementation captures the claim-time manifest snapshot **on the m
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/tools/claim-story.ts` — at the point where the manifest is written into `in-progress/`, also write the sidecar snapshot. Wrap the two writes so a failure of either leaves no half-claimed state (rollback the manifest write if the sidecar write fails; or write sidecar first, then atomic-rename manifest, so a stale sidecar is harmless).
-- `plugins/crew/mcp-server/src/state/manifest-state-machine.ts` — change `detectInProgressHandEdit`'s signature: remove `sourceHash` and `sourceFields` parameters; load the sidecar from `in-progress/<ref>.snapshot.yaml` inside the function and compare against the on-disk manifest. Update the JSDoc per AC4.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` — remove the `deriveSourceBaseline` call; just call `detectInProgressHandEdit({ targetRepoRoot, ref })`. On successful transition to `done/`, unlink the sidecar (or rely on the manifest-move primitive to do it — see Story 1.6's seam).
-- `plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts` — update existing c1/c2/c3 cases to set up the sidecar correctly (test helpers should write both manifest and sidecar). Update or remove c4 (source-hash drift) — under the new contract, source-hash drift between the manifest and the **sidecar** still flags as a hand-edit (because the operator hand-edited `source_hash` in the manifest), but source-hash drift between the manifest and the live source story is no longer the trigger. Add the new AC2 regression case.
+- `plugins/flow/mcp-server/src/tools/claim-story.ts` — at the point where the manifest is written into `in-progress/`, also write the sidecar snapshot. Wrap the two writes so a failure of either leaves no half-claimed state (rollback the manifest write if the sidecar write fails; or write sidecar first, then atomic-rename manifest, so a stale sidecar is harmless).
+- `plugins/flow/mcp-server/src/state/manifest-state-machine.ts` — change `detectInProgressHandEdit`'s signature: remove `sourceHash` and `sourceFields` parameters; load the sidecar from `in-progress/<ref>.snapshot.yaml` inside the function and compare against the on-disk manifest. Update the JSDoc per AC4.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` — remove the `deriveSourceBaseline` call; just call `detectInProgressHandEdit({ targetRepoRoot, ref })`. On successful transition to `done/`, unlink the sidecar (or rely on the manifest-move primitive to do it — see Story 1.6's seam).
+- `plugins/flow/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts` — update existing c1/c2/c3 cases to set up the sidecar correctly (test helpers should write both manifest and sidecar). Update or remove c4 (source-hash drift) — under the new contract, source-hash drift between the manifest and the **sidecar** still flags as a hand-edit (because the operator hand-edited `source_hash` in the manifest), but source-hash drift between the manifest and the live source story is no longer the trigger. Add the new AC2 regression case.
 
 **Consider removing (only if no other call sites remain):**
 
-- `plugins/crew/mcp-server/src/state/derive-source-baseline.ts` — grep for `deriveSourceBaseline` import sites across the codebase before removing. If there are none, delete the file and its test. If any callers remain (e.g., `scan-sources` may compute a similar baseline for its own purposes), leave the file and update its JSDoc to clarify it is no longer used by the in-progress guard.
+- `plugins/flow/mcp-server/src/state/derive-source-baseline.ts` — grep for `deriveSourceBaseline` import sites across the codebase before removing. If there are none, delete the file and its test. If any callers remain (e.g., `scan-sources` may compute a similar baseline for its own purposes), leave the file and update its JSDoc to clarify it is no longer used by the in-progress guard.
 
 **UNTOUCHED (DO NOT modify):**
 
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — source-hash drift at the `to-do/` layer (when a source story changes and a manifest in `to-do/` needs refreshing) is a separate concern and is already handled here. This story does not touch that path.
-- `plugins/crew/mcp-server/src/errors.ts` — `InProgressHandEditError` shape is unchanged. Only the conditions under which it fires change.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — source-hash drift at the `to-do/` layer (when a source story changes and a manifest in `to-do/` needs refreshing) is a separate concern and is already handled here. This story does not touch that path.
+- `plugins/flow/mcp-server/src/errors.ts` — `InProgressHandEditError` shape is unchanged. Only the conditions under which it fires change.
 - Adapter `readSourceStory` implementations (BMad, native) — unchanged.
 
 ### Build artefacts
 
-After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
+After any change in `plugins/flow/mcp-server/src/`, the dev agent MUST run `pnpm -r build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
 
 ### Dependencies
 

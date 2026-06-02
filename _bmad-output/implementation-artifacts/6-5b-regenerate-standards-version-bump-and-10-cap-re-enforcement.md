@@ -23,33 +23,33 @@ This story makes `docs/standards.md` a **derived projection** of `docs/disciplin
 **AC1 — `regenerate-standards` projects the registry into a valid `docs/standards.md` deterministically (integration):**
 
 A `regenerate-standards` function reads the parsed rule registry and writes `docs/standards.md` as a valid `StandardsDocSchema` document: each rule projects to exactly one criterion with a non-empty `name`, `what`, `check`, and `anti_criterion` derived deterministically from the rule's fields (see Implementation Notes for the projection). Given the same registry content, the same target version, and a fixed clock, two regenerations produce byte-identical output (the only nondeterministic input — the `updated` timestamp — is injected via a clock seam). The regenerated doc re-parses cleanly through the existing standards parser. A vitest regenerates from a seeded multi-rule registry twice with a fixed clock and asserts byte-identical output, asserts one criterion per rule with all four fields non-empty, and asserts the result re-parses against `StandardsDocSchema`.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
 
 **AC2 — the regenerated standards `version` bumps monotonically from the prior doc (integration):**
 
 `regenerate-standards` reads the prior `docs/standards.md` version (via `lookupStandards`, defaulting to a documented seed version when no standards doc exists yet) and writes a strictly greater semver version on a regeneration that follows an accepted rule change — the bump is deterministic (a patch increment by default) so the same prior version always yields the same next version. Re-parsing the new doc shows the bumped version. A vitest seeds a standards doc at a known version, regenerates after an accepted rule change, and asserts the new version is strictly greater and matches the deterministic bump rule.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
 
 **AC3 — a registry that would project more than ten criteria is refused atomically with a typed cap error (integration):**
 
 When the registry would project more than ten criteria, `regenerate-standards` raises a typed `StandardsCapExceededError` citing the offending criteria count and the cap, **before** writing `docs/standards.md`. On this path, the rule-apply handler restores `docs/discipline-rules.yaml` to its pre-append bytes (working-tree rollback) and re-raises, so the gate commits nothing and the working tree is left byte-identical to its pre-accept state — no half-applied rule, no partial standards doc. A vitest seeds a registry already holding ten rules, drives an accepted eleventh `rule` proposal through the production gate, and asserts: `StandardsCapExceededError` is raised with the count, `docs/discipline-rules.yaml` is byte-identical to its pre-accept content, `docs/standards.md` is unchanged, no commit was made, and no `retro.proposal.applied` telemetry event was emitted.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
 
 **AC4 — accepting a `rule` proposal updates the registry and the standards doc in one commit (integration):**
 
 With regeneration wired into the `rule`-apply path, accepting a (within-cap) `rule` proposal through the production gate appends the rule to `docs/discipline-rules.yaml`, regenerates `docs/standards.md` from the post-append registry, and the gate commits **both files plus the proposal stamp in a single commit**. The handler returns both repo-relative paths in `changedPaths`. A vitest drives an accepted within-cap `rule` proposal through the production gate and asserts both files changed, the standards doc now contains the criterion projected from the new rule, and exactly one commit carried `docs/discipline-rules.yaml`, `docs/standards.md`, and the proposal file together.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/regenerate-standards.test.ts
 
 **AC5 — `regenerate-standards` and `StandardsCapExceededError` are wired with the DomainError envelope (artifact):**
 
 `regenerate-standards` is implemented as a reusable library function (so Story 6.6's retirement path can call it) and, if exposed as an MCP tool, registered with the standard `DomainError` envelope. `StandardsCapExceededError` is defined in the errors module extending `DomainError`, carrying the offending criteria count and the cap (mirroring the `StandardsDocMalformedError` constructor shape). The existing `StandardsDocSchema` `.max(10)` cap is preserved and remains the single definition of the cap value, which `regenerate-standards` reads rather than hard-coding `10`.
-artifact: plugins/crew/mcp-server/src/lib/regenerate-standards.ts
+artifact: plugins/flow/mcp-server/src/lib/regenerate-standards.ts
 
 ## Definition of Done
 
 - [ ] All five ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; the new test file covers every integration AC clause.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; the new test file covers every integration AC clause.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit (CI fails on `src`/`dist` drift).
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean — AC1–AC4 are runnable vitest, AC5 is file-presence; the reviewer's runnable-AC pass should be all-green.
 - [ ] Determinism is proven by a byte-identical assertion across two regenerations with a fixed clock — not merely "the doc re-parses."
@@ -88,13 +88,13 @@ The epic's phrase "reverted via the git wrapper" predates this commit-after-hand
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/lib/regenerate-standards.ts` — the pure projection + version-bump function (reusable by 6.5 apply and 6.6 retirement).
-- `plugins/crew/mcp-server/src/tools/__tests__/regenerate-standards.test.ts` — AC1–AC4.
+- `plugins/flow/mcp-server/src/lib/regenerate-standards.ts` — the pure projection + version-bump function (reusable by 6.5 apply and 6.6 retirement).
+- `plugins/flow/mcp-server/src/tools/__tests__/regenerate-standards.test.ts` — AC1–AC4.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/lib/apply-rule-proposal.ts` (from 6.5) — extend `apply` to regenerate standards, add the cap-rollback ordering, return both changed paths.
-- `plugins/crew/mcp-server/src/errors.ts` — add `StandardsCapExceededError` extending `DomainError`.
-- `plugins/crew/mcp-server/src/tools/register.ts` — only if `regenerate-standards` is also exposed as a standalone MCP tool; otherwise no registry change (it's a library function the handler calls).
+- `plugins/flow/mcp-server/src/lib/apply-rule-proposal.ts` (from 6.5) — extend `apply` to regenerate standards, add the cap-rollback ordering, return both changed paths.
+- `plugins/flow/mcp-server/src/errors.ts` — add `StandardsCapExceededError` extending `DomainError`.
+- `plugins/flow/mcp-server/src/tools/register.ts` — only if `regenerate-standards` is also exposed as a standalone MCP tool; otherwise no registry change (it's a library function the handler calls).
 
 ### Existing seams to wire into (do not reinvent)
 
@@ -113,8 +113,8 @@ The epic's phrase "reverted via the git wrapper" predates this commit-after-hand
 ### Risk + build notes (drain context)
 
 - This is a `medium`-risk change: it makes accepting a rule mutate two canonical docs and introduces a hard refusal path. Expect the auto-merge gate to **pause for a human merge** — the intended outcome.
-- Code change touching lib + errors + the 6.5 handler: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/crew/mcp-server` before the PR.
-- Do not write any `.crew/state` manifest. The canonical surfaces this story writes are `docs/standards.md` (regenerated) and, via the unchanged 6.5 handler, `docs/discipline-rules.yaml`.
+- Code change touching lib + errors + the 6.5 handler: rebuild and commit `dist/` in the same change; full `pnpm build` + `pnpm test` green from `plugins/flow/mcp-server` before the PR.
+- Do not write any `.flow/state` manifest. The canonical surfaces this story writes are `docs/standards.md` (regenerated) and, via the unchanged 6.5 handler, `docs/discipline-rules.yaml`.
 
 ### References
 

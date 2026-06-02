@@ -23,17 +23,17 @@ The hard requirement is that concurrency changes **throughput only, never correc
 **AC1 — the drain processes multiple claimed stories concurrently, bounded by a configured cap (integration):**
 
 The drain claims and runs more than one story at a time up to a configured maximum concurrency, rather than strictly serially; given a backlog larger than the cap, at most `cap` stories are in flight at once and every story is eventually processed exactly once. A vitest drives the drain (seams stubbed) against a backlog of several stories with the cap set low, and asserts that more than one story is in flight simultaneously, that the number in flight never exceeds the cap, and that each story is processed exactly once.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
 
 **AC2 — concurrency changes throughput only, not the result (integration):**
 
 For a given backlog and a fixed set of stubbed per-story outcomes, the set of result buckets (completed / merged / pausedForHuman / blocked) and the drain reason are identical whether the drain runs serially (cap 1) or concurrently (cap greater than 1) — no story is lost, double-counted, or mis-bucketed under concurrency. A vitest runs the same backlog at cap 1 and at cap N and asserts the two structured results are equal, modulo the ordering of entries within a bucket.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
 
 **AC3 — a per-worker hard failure is isolated; the run and its siblings survive (integration):**
 
 A story whose worker hard-fails (a dev error, a seam failure, a build crash) lands in the blocked-or-paused bucket carrying its reason and does NOT abort the whole drain or disturb any concurrently-running sibling; the other in-flight stories still complete and land in their correct buckets. A vitest injects a hard failure into one concurrent worker and asserts the run completes, the failed story is bucketed with its reason preserved, and every sibling story reaches its expected bucket.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/drain-concurrent-dispatch.test.ts
 
 ## Notes
 
@@ -43,6 +43,6 @@ Design points to settle: (1) **The concurrency cap.** Pick a sane default and de
 
 Already-solid — do not re-litigate: claiming is atomic (a single-syscall rename — one worker wins, the loser gets a clean miss), so two concurrent claims can never hand out the same story; the result-bucket / drain-reason surface (Story 8.14) is the honest-exit contract to preserve exactly.
 
-Relevant code: the serial main loop (`for (let i = 0; ; i++)` over `claimNextStory`) and `processStory` in `plugins/crew/workflows/drain.workflow.js`; the result-bucket and drain-reason surface from `bmad:8.14`; the atomic claim `claimNextStory` / `claimStory`; and the per-dev editing isolation from `bmad:8.20`, which this story requires.
+Relevant code: the serial main loop (`for (let i = 0; ; i++)` over `claimNextStory`) and `processStory` in `plugins/flow/workflows/drain.workflow.js`; the result-bucket and drain-reason surface from `bmad:8.14`; the atomic claim `claimNextStory` / `claimStory`; and the per-dev editing isolation from `bmad:8.20`, which this story requires.
 
-This is a change to the orchestration loop: keep the diff scoped to the drain workflow loop + its result aggregation + the new tests (and a small concurrency-cap knob if added). If the change touches `mcp-server/src`, rebuild and commit `dist/` in the same change (CI fails on `src`/`dist` drift); run the full `pnpm build` and `pnpm test` from `plugins/crew/mcp-server` green before opening the PR. It is a `medium`-risk change (it restructures the orchestration loop) and is expected to pause the auto-merge gate for a human merge — that is correct. Do not write or edit any execution manifest or `.crew/state` file; the tools own the ledger. Literal refs (`bmad:8.20`, `bmad:8.22`) and state paths (`.crew/state`, `sprint-status.yaml`) are kept here in Notes and out of the AC text above so the planning-discipline scanner does not false-positive.
+This is a change to the orchestration loop: keep the diff scoped to the drain workflow loop + its result aggregation + the new tests (and a small concurrency-cap knob if added). If the change touches `mcp-server/src`, rebuild and commit `dist/` in the same change (CI fails on `src`/`dist` drift); run the full `pnpm build` and `pnpm test` from `plugins/flow/mcp-server` green before opening the PR. It is a `medium`-risk change (it restructures the orchestration loop) and is expected to pause the auto-merge gate for a human merge — that is correct. Do not write or edit any execution manifest or `.flow/state` file; the tools own the ledger. Literal refs (`bmad:8.20`, `bmad:8.22`) and state paths (`.flow/state`, `sprint-status.yaml`) are kept here in Notes and out of the AC text above so the planning-discipline scanner does not false-positive.

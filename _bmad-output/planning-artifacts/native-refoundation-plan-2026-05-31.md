@@ -13,7 +13,7 @@ The design note framed the native path as "scaffolded but unproven" and the re-f
 **Already built and wired (on the `native` adapter, not BMad):**
 - A native story format + parser (`parse-native-story.ts`) + writer (`writeNativeStory`) that **fails closed**: a draft that doesn't parse cannot be written.
 - The execution-manifest schema (23 fields) that every story becomes — the machine representation the drain consumes.
-- The **whole cockpit**: `crew:author` (drafts a native story), `crew:judge` (five-lens panel writing file-based verdicts), the **Quality Lead** (`adjudicateQualityLead` → `ready | rework | escalate`, blesses only via the 9.1 readiness brake), and `crew:board` (backlog view generated from live state).
+- The **whole cockpit**: `flow:author` (drafts a native story), `flow:judge` (five-lens panel writing file-based verdicts), the **Quality Lead** (`adjudicateQualityLead` → `ready | rework | escalate`, blesses only via the 9.1 readiness brake), and `flow:board` (backlog view generated from live state).
 - `classifyRiskTier` (the "Considered" lens's tiered bar) and the readiness brake (`markStoryReady` + the claim filter).
 
 **So the re-foundation is "promote native to primary + close the specific gaps," not a rewrite.** Below are the gaps, in priority order.
@@ -60,7 +60,7 @@ With these fields present, **Tier-0 becomes a pure function of the schema**: mar
 
 ## 4. Tier-0 completion in code
 
-The discipline validator codes 3 of the 6 Tier-0 checks today (integration-AC, implicit-deps, ship-gate). With §3's fields in place, add the missing deterministic checks, **fail-closed at write (`writeNativeStory`) and scan (`/crew:scan`)**:
+The discipline validator codes 3 of the 6 Tier-0 checks today (integration-AC, implicit-deps, ship-gate). With §3's fields in place, add the missing deterministic checks, **fail-closed at write (`writeNativeStory`) and scan (`/flow:scan`)**:
 
 - **T0-2:** every AC has a `verification` block.
 - **T0-6:** each `verification.target` resolves — the `vitest:` file exists / the `artifact:` path is real; reject invented flags.
@@ -77,16 +77,16 @@ Build the migration the design note names: a one-off, LLM-assisted transform, re
 
 - **Path:** `parseBmadStory` → `SourceStory` → (LLM enriches to the §3 shape: infer per-AC verification, tasks, cited sources from the prose) → discipline gate → `writeNativeStory`.
 - **One-way, reviewed, never a live sync** (LLM transforms are lossy — fine for seeding, fatal as a dependency).
-- Runs over the live `bmad:*` backlog once to seed `.crew/native-stories/`. Stories that can't be enriched to clear Tier-0 surface for human fix-up, not silent drop.
+- Runs over the live `bmad:*` backlog once to seed `.flow/native-stories/`. Stories that can't be enriched to clear Tier-0 surface for human fix-up, not silent drop.
 
 ---
 
 ## 6. Cutover plan
 
 1. Ship §3 (enriched schema) + §4 (Tier-0 completion) behind the existing native adapter — no behaviour change for live BMad work yet.
-2. Run §5 ingest over the live backlog into `.crew/native-stories/`; reconcile/triage anything that won't clear Tier-0.
+2. Run §5 ingest over the live backlog into `.flow/native-stories/`; reconcile/triage anything that won't clear Tier-0.
 3. Flip the repo's active adapter to `native`; BMad becomes **ingest-only** (the parser stays as an on-ramp; the live backlog is now native).
-4. Regenerate `crew:board` from native state; confirm the drain claims native `ready` stories.
+4. Regenerate `flow:board` from native state; confirm the drain claims native `ready` stories.
 5. Retire the BMad-substrate scaffolding that the move obsoletes (see §9).
 
 Cutover is reversible up to step 3 (both adapters coexist; native is additive until the flip).
@@ -95,7 +95,7 @@ Cutover is reversible up to step 3 (both adapters coexist; native is additive un
 
 ## 7. Proving the pipeline (the real risk)
 
-The design note's honest caveat: the native path is "unproven at the authoring-quality bar." The machinery exists; whether it *produces good stories* is untested. The re-foundation isn't done until we've **run a real feature end-to-end through the cockpit** — `crew:author` → `crew:judge` (five lenses) → Quality Lead → `ready` → drain → merge — and confirmed the output clears the rubric a human would apply. This is a validation story, not a code story, and it's where the residual risk actually sits. Do it on a low-risk real feature, with a human spot-check of the judge verdicts against the rubric.
+The design note's honest caveat: the native path is "unproven at the authoring-quality bar." The machinery exists; whether it *produces good stories* is untested. The re-foundation isn't done until we've **run a real feature end-to-end through the cockpit** — `flow:author` → `flow:judge` (five lenses) → Quality Lead → `ready` → drain → merge — and confirmed the output clears the rubric a human would apply. This is a validation story, not a code story, and it's where the residual risk actually sits. Do it on a low-risk real feature, with a human spot-check of the judge verdicts against the rubric.
 
 ---
 

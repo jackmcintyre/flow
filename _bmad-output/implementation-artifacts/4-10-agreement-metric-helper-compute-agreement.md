@@ -9,12 +9,12 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin maintainer**,
-I want **a `computeAgreement` MCP tool that reads `reviewer.verdict` + `reviewer.verdict.merge_action` telemetry events from `<targetRepoRoot>/.crew/telemetry/*.jsonl`, joins them by `(pr_number, session_id)`, walks the most-recent-first sorted resolved verdicts up to a configurable window size (default 50), and returns a deterministic `{ ratio, distribution, window_size, sample_size }` shape (or `null` on insufficient data)**,
+I want **a `computeAgreement` MCP tool that reads `reviewer.verdict` + `reviewer.verdict.merge_action` telemetry events from `<targetRepoRoot>/.flow/telemetry/*.jsonl`, joins them by `(pr_number, session_id)`, walks the most-recent-first sorted resolved verdicts up to a configurable window size (default 50), and returns a deterministic `{ ratio, distribution, window_size, sample_size }` shape (or `null` on insufficient data)**,
 so that **Story 4.10b's auto-merge gate has a measurable, deterministic input rather than a hardcoded vibes threshold — and Epic 6's outcome stats / skill-effectiveness reports have a single source of truth for "reviewer-verdict-vs-human-action agreement" without re-implementing the join walk every time**.
 
 ### What this story is, in one sentence
 
-Add a new MCP tool `computeAgreement` in `plugins/crew/mcp-server/src/tools/compute-agreement.ts` that loads every `*.jsonl` file under `<targetRepoRoot>/.crew/telemetry/`, parses lines via the existing `TelemetryEventSchema` (Story 1.5 / Story 4.12), keeps only `reviewer.verdict` and `reviewer.verdict.merge_action` events, joins them by `(pr_number, session_id)`, applies the exclusion rules (unresolved `still-open`, `timed_out: true`, `verdict: "reviewer-failure"`), sorts the resolved pairs newest-first by the verdict event's `ts`, takes the first `last_n_verdicts` of them, and returns `{ ratio, distribution, window_size, sample_size } | null`, with a shipped `AgreementMetricResultSchema` Zod type exported for downstream consumers (4.10b) to import.
+Add a new MCP tool `computeAgreement` in `plugins/flow/mcp-server/src/tools/compute-agreement.ts` that loads every `*.jsonl` file under `<targetRepoRoot>/.flow/telemetry/`, parses lines via the existing `TelemetryEventSchema` (Story 1.5 / Story 4.12), keeps only `reviewer.verdict` and `reviewer.verdict.merge_action` events, joins them by `(pr_number, session_id)`, applies the exclusion rules (unresolved `still-open`, `timed_out: true`, `verdict: "reviewer-failure"`), sorts the resolved pairs newest-first by the verdict event's `ts`, takes the first `last_n_verdicts` of them, and returns `{ ratio, distribution, window_size, sample_size } | null`, with a shipped `AgreementMetricResultSchema` Zod type exported for downstream consumers (4.10b) to import.
 
 ### What this story does (and why it needs its own story)
 
@@ -24,13 +24,13 @@ The helper has four substrate-level decisions worth pinning in their own story r
 
 1. **Agreement definition.** When does a `reviewer.verdict` "agree" with a `reviewer.verdict.merge_action`? Pin the 6-cell truth table explicitly (READY FOR MERGE × merged = agree; NEEDS CHANGES × merged = disagree; etc.) so that 4.10b and Epic 6 do not re-derive it independently. The `verdict: "reviewer-failure"` literal (Story 4.12 added it for the 8-min cap substitution path) is *excluded* from the window because a timed-out reviewer's verdict is not a substantive judgment.
 
-2. **Cross-month windowing.** Telemetry is bucketed monthly (`<YYYY-MM>.jsonl` — architecture decision). The last-50 window can easily span months. The helper reads ALL `*.jsonl` files under `.crew/telemetry/` (file count is bounded — one per month — and per-file size is bounded by NFR21's "JSONL line per event"). The naive O(files) read is acceptable; a future perf story can add a most-recent-N-month cap if profiling shows it matters.
+2. **Cross-month windowing.** Telemetry is bucketed monthly (`<YYYY-MM>.jsonl` — architecture decision). The last-50 window can easily span months. The helper reads ALL `*.jsonl` files under `.flow/telemetry/` (file count is bounded — one per month — and per-file size is bounded by NFR21's "JSONL line per event"). The naive O(files) read is acceptable; a future perf story can add a most-recent-N-month cap if profiling shows it matters.
 
 3. **`null` on insufficient data.** Per AC2 (and `NFR24`), an empty log or a sub-window log returns `null` rather than a misleading zero. The threshold for "insufficient" is "sample size strictly less than window size" — the window is the demanding contract; a partial sample is treated as no signal. 4.10b reads `null` as "no agreement signal yet → pause for human" (its own AC for the sub-threshold/insufficient-data branch).
 
 4. **Unresolved exclusion.** A `reviewer.verdict` event whose corresponding `merge_action` is `"still-open"` (or absent) is excluded from the window. This is AC3 verbatim. The walk semantics: find the first N resolved verdicts (most-recent-first), skipping unresolved ones — *not* "take the most recent N verdicts and discard the unresolved ones from that prefix." The distinction matters: a long tail of open PRs preceded by 50 resolved PRs should still yield a valid metric.
 
-This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns it), the `.crew/config.yaml` knob for tuning `last_n_verdicts` (deferred; v1 ships hardcoded default 50 and lets the caller override programmatically), Epic 6's outcome-stats or skill-effectiveness aggregations (they consume the same telemetry independently), or any caller for `computeAgreement` — Story 4.10b will be the first production caller; in v1 the tool is exercised by vitest only.
+This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns it), the `.flow/config.yaml` knob for tuning `last_n_verdicts` (deferred; v1 ships hardcoded default 50 and lets the caller override programmatically), Epic 6's outcome-stats or skill-effectiveness aggregations (they consume the same telemetry independently), or any caller for `computeAgreement` — Story 4.10b will be the first production caller; in v1 the tool is exercised by vitest only.
 
 ### What this story does NOT
 
@@ -39,13 +39,13 @@ This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns i
 - (c) Modify any telemetry-emission seam. Story 4.12 owns event emission (`postReviewerComments` writes `reviewer.verdict`; `recordPrCloseAction` writes `reviewer.verdict.merge_action`). This story is a pure consumer of the JSONL produced by those seams.
 - (d) Modify `TelemetryEventSchema` or any event-type schema. The discriminated union is closed; this tool reads the existing shapes via the existing schema. If a downstream change requires a new event type or field, a separate story extends the schema additively (per the 4.12 pattern).
 - (e) Add a `compute-agreement` CLI or any non-MCP-tool surface. v1 ships only the MCP tool. A future Epic 6 retro CLI can call the tool over MCP if needed; the tool's deterministic output shape makes it CLI-friendly.
-- (f) Introduce `.crew/config.yaml` overrides for `last_n_verdicts` or any agreement-related threshold. The tool accepts `lastNVerdicts?: number` as a caller-supplied option (default 50); 4.10b will hardcode its own threshold (0.8) on top. A future config-overlay story can add overrides without changing this tool's signature.
+- (f) Introduce `.flow/config.yaml` overrides for `last_n_verdicts` or any agreement-related threshold. The tool accepts `lastNVerdicts?: number` as a caller-supplied option (default 50); 4.10b will hardcode its own threshold (0.8) on top. A future config-overlay story can add overrides without changing this tool's signature.
 - (g) Cache the parsed JSONL across invocations. The tool re-reads on every call. JSONL files are bounded; agreement metric is computed at most once per reviewer pass; caching adds invalidation complexity (mtime check, cross-process coordination) for negligible saving. A Story 6.x perf story can revisit.
 - (h) Watch the JSONL for changes. Read-on-call only — no fsnotify, no polling.
 - (i) Emit a telemetry event of its own (e.g. `agreement.computed`). The architecture decision is one-way: helpers consume telemetry, they do not feed it back. A future story can add such an event additively if Epic 6 wants to track how often the metric was consulted.
-- (j) Persist any state outside the read path. No sidecar cache, no `.crew/state/sessions/<ulid>/agreement-result.json`. Pure-function semantics: same inputs (JSONL contents) → same output.
+- (j) Persist any state outside the read path. No sidecar cache, no `.flow/state/sessions/<ulid>/agreement-result.json`. Pure-function semantics: same inputs (JSONL contents) → same output.
 - (k) Handle malformed JSONL lines by failing. Lines that fail `TelemetryEventSchema.safeParse` are silently skipped (with a counter included in the return shape for surface-level visibility). The `telemetry.invalid` failure-recording substrate (Story 1.5) already handles bad-event-write surfacing; this consumer is robust to mid-stream corruption.
-- (l) Handle missing telemetry directory by failing. If `<targetRepoRoot>/.crew/telemetry/` does not exist (fresh repo, telemetry never written), the tool returns `null` (insufficient data) — same as an empty log. No directory creation.
+- (l) Handle missing telemetry directory by failing. If `<targetRepoRoot>/.flow/telemetry/` does not exist (fresh repo, telemetry never written), the tool returns `null` (insufficient data) — same as an empty log. No directory creation.
 - (m) Modify `apply-reviewer-labels.ts` (Story 4.8), `post-reviewer-comments.ts` (4.6b/4.7/4.12), or `record-agent-invoke.ts` (4.12). These are all upstream of `computeAgreement` and have no dependency on it.
 - (n) Add `computeAgreement` to any `permissions/*.yaml`. The reviewer subagent does not call it directly; 4.10b will be the first production caller, and 4.10b runs from the SKILL.md / dev session layer where MCP tools are available without per-role permission entries (the same pattern as `classifyRiskTier` — Story 4.9b Task 10.2).
 - (o) Special-case `verdict: "reviewer-failure"` in the agreement truth table. It is *excluded* from the window entirely (treated like an unresolved event). Rationale: a timed-out reviewer is a tool failure, not a substantive verdict; including it as either agreement or disagreement skews the metric. Excluding it makes the metric a measure of *substantive* reviewer accuracy.
@@ -54,7 +54,7 @@ This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns i
 
 ### Deferred work
 
-- **`.crew/config.yaml` override for `last_n_verdicts`.** A later additive story can introduce a `plugin.agreement_window` knob; the override-resolution pattern (Story 4.9) is the template.
+- **`.flow/config.yaml` override for `last_n_verdicts`.** A later additive story can introduce a `plugin.agreement_window` knob; the override-resolution pattern (Story 4.9) is the template.
 - **Most-recent-N-month read cap.** If telemetry history grows to many years' worth of files and read latency becomes measurable, cap the read at e.g. the 12 most-recent months. v1 reads everything.
 - **Per-month / per-week agreement breakdown.** A future Epic 6 stat surfaces "agreement over the last week vs last month vs all-time." Same join logic, different windowing — extract a shared `joinResolvedVerdicts` helper at that point.
 - **Per-reviewer-role agreement.** When yield-routed specialists post verdicts (Story 4.11), agreement could be sliced by `agent` (e.g. generalist-reviewer vs security-specialist). v1 collapses all reviewers into one bucket. Additive future story.
@@ -66,7 +66,7 @@ This story explicitly does NOT introduce the auto-merge gate (Story 4.10b owns i
 
 ## Acceptance Criteria
 
-> AC1–AC3 are verbatim from the epic (FR67 / NFR24 split as labelled). AC4 is the integration suite with a `vitest:` marker per the orchestrator's AC-marker-gap memory rule. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool's pure-function output and a JSONL-file consumer. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1–AC3 are verbatim from the epic (FR67 / NFR24 split as labelled). AC4 is the integration suite with a `vitest:` marker per the orchestrator's AC-marker-gap memory rule. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool's pure-function output and a JSONL-file consumer. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** the telemetry log with `reviewer.verdict` events carrying both `verdict` and `eventual_merge_action`,
@@ -157,7 +157,7 @@ vitest seeds telemetry across (a) a fully-resolved window, (b) a partially-resol
 **AC2 unpacked.** `null` return on insufficient data:
 
 - (2a) **Trigger conditions for `null` return:**
-  - The `.crew/telemetry/` directory does not exist (ENOENT on `readdir`).
+  - The `.flow/telemetry/` directory does not exist (ENOENT on `readdir`).
   - The directory exists but contains no `*.jsonl` files.
   - The directory contains `*.jsonl` files but no `reviewer.verdict` events.
   - Resolved-after-exclusions pair count is strictly less than `lastNVerdicts`.
@@ -192,7 +192,7 @@ vitest seeds telemetry across (a) a fully-resolved window, (b) a partially-resol
 
 - (4c) **(b) Partially-resolved window — `null` (insufficient).** Seed 30 fully-resolved pairs and 20 `reviewer.verdict` events with no merge_action (PRs still open). Call with default window 50. Assert: result is `null` (sample of 30 < window 50). Then call with `lastNVerdicts: 30`. Assert: `sample_size: 30`, `window_size: 30`, ratio matches the seeded agreement count, `skipped_unresolved: 20`.
 
-- (4d) **(c) Empty log — `null`.** No `.crew/telemetry/` directory. Call. Assert: `null`. Then create the directory but write no files. Assert: `null`. Then write one `*.jsonl` file containing only `agent.invoke` events (no `reviewer.verdict`). Assert: `null`.
+- (4d) **(c) Empty log — `null`.** No `.flow/telemetry/` directory. Call. Assert: `null`. Then create the directory but write no files. Assert: `null`. Then write one `*.jsonl` file containing only `agent.invoke` events (no `reviewer.verdict`). Assert: `null`.
 
 - (4e) **(d) `verdict: "reviewer-failure"` exclusion.** Seed 50 fully-resolved pairs of which 10 carry `verdict: "reviewer-failure"` and `timed_out: true`. Call. Assert: `null` (only 40 substantive verdicts remain; sample < window). Then call with `lastNVerdicts: 40`. Assert: `sample_size: 40`, `window_size: 40`, `skipped_excluded: 10`, distribution sums to 40.
 
@@ -223,20 +223,20 @@ vitest seeds telemetry across (a) a fully-resolved window, (b) a partially-resol
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [ ] **Task 1: Pure helper `isAgreement`** (AC: #1)
-  - [ ] 1.1 Create `plugins/crew/mcp-server/src/lib/agreement.ts`.
+  - [ ] 1.1 Create `plugins/flow/mcp-server/src/lib/agreement.ts`.
   - [ ] 1.2 Export `isAgreement(verdict: "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED", mergeAction: "merged" | "closed-unmerged"): boolean` implementing the truth table per AC1 unpacked (1c). The function explicitly accepts only resolved-non-excluded values — `"reviewer-failure"` and `"still-open"` are filtered upstream and never reach this helper. Caller-side exhaustiveness is enforced by the input type union.
   - [ ] 1.3 JSDoc citing this story key, FR67, NFR24, and the truth table.
-  - [ ] 1.4 Create `plugins/crew/mcp-server/src/lib/__tests__/agreement.test.ts` covering all six rows of the truth table.
+  - [ ] 1.4 Create `plugins/flow/mcp-server/src/lib/__tests__/agreement.test.ts` covering all six rows of the truth table.
 
 - [ ] **Task 2: Typed error `AgreementWindowInvalidError`** (AC: #1, #4i)
-  - [ ] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, append `AgreementWindowInvalidError` extending `DomainError`. Constructor: `{ lastNVerdicts: number; reason: string }`. Message: `` `computeAgreement: invalid lastNVerdicts=<lastNVerdicts> — <reason>. (FR67)` ``. Use the existing `extends DomainError` pattern; no new imports beyond what `errors.ts` already uses.
+  - [ ] 2.1 In `plugins/flow/mcp-server/src/errors.ts`, append `AgreementWindowInvalidError` extending `DomainError`. Constructor: `{ lastNVerdicts: number; reason: string }`. Message: `` `computeAgreement: invalid lastNVerdicts=<lastNVerdicts> — <reason>. (FR67)` ``. Use the existing `extends DomainError` pattern; no new imports beyond what `errors.ts` already uses.
 
 - [ ] **Task 3: `computeAgreement` MCP tool** (AC: #1, #2, #3)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/tools/compute-agreement.ts`.
+  - [ ] 3.1 Create `plugins/flow/mcp-server/src/tools/compute-agreement.ts`.
   - [ ] 3.2 Export Zod schema `AgreementMetricResultSchema` matching the AC1 unpacked (1b) shape. `.strict()` at every level. Numeric fields use `z.number().int().nonnegative()` where appropriate; `ratio` is `z.number().min(0).max(1)`; `distribution` is an explicit `.strict()` object with the three literal keys. Also export `AgreementMetricResult = z.infer<typeof AgreementMetricResultSchema>`.
   - [ ] 3.3 Implement the algorithm:
     1. Validate `lastNVerdicts` (default 50): must be a positive integer, finite. Else throw `AgreementWindowInvalidError`.
-    2. List `<targetRepoRoot>/.crew/telemetry/*.jsonl`. ENOENT on the directory → return `null`. No `*.jsonl` files → return `null`.
+    2. List `<targetRepoRoot>/.flow/telemetry/*.jsonl`. ENOENT on the directory → return `null`. No `*.jsonl` files → return `null`.
     3. Read every `*.jsonl` file. For each line: trim; if empty, skip (does NOT count as malformed). Else `JSON.parse` inside try/catch; on failure, increment `malformed_lines` and skip. Else `TelemetryEventSchema.safeParse`; on failure, increment `malformed_lines` and skip. (The two failures are distinct in reality but counted together — they're both "the read could not extract a valid event from this line.")
     4. Bucket parsed events: `verdicts` (type `reviewer.verdict`), `mergeActions` (type `reviewer.verdict.merge_action`). Discard all other types silently (do NOT count as malformed — they're valid events, just not relevant).
     5. For each `verdicts` entry: drop if `data.verdict === "reviewer-failure"`; count under `skipped_excluded`. (Per (1g).)
@@ -249,17 +249,17 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 3.5 The directory-listing step uses `fs.readdir(telemetryDir, { withFileTypes: true })` and filters by `entry.isFile() && entry.name.endsWith(".jsonl")`. Sort filenames ascending (lexicographic) so the read order is deterministic — this matters only for the tie-break on identical `ts` values (where file-then-line order is the final tiebreaker per (1e) closing sentence).
   - [ ] 3.6 JSDoc citing this story key, FR67, NFR24, the join-key (matches Story 4.12's `record-pr-close-action.ts` JSDoc), and the truth-table reference (links to `lib/agreement.ts`).
   - [ ] 3.7 Test seam: `readTelemetryDirImpl?: (dirPath: string) => Promise<string[]>` and `readFileImpl?: (filePath: string) => Promise<string>` as optional injection points on the impl's options object (mirror the `record-agent-invoke.ts` seam pattern). Production callers pass none; tests use the production defaults (real `fs`) per the 4-12 convention of "no `vi.mock` of production modules."
-  - [ ] 3.8 Create `plugins/crew/mcp-server/src/tools/__tests__/compute-agreement.test.ts` covering AC4 sub-cases (4b)–(4n).
+  - [ ] 3.8 Create `plugins/flow/mcp-server/src/tools/__tests__/compute-agreement.test.ts` covering AC4 sub-cases (4b)–(4n).
 
 - [ ] **Task 4: MCP-tool registration** (AC: #4o)
-  - [ ] 4.1 Register `computeAgreement` in `plugins/crew/mcp-server/src/tools/register.ts`. Bump tool-count assertion from 29 (post-4.9b) to 30 in any test that pins it (search for `\.toBe\(29\)` and `\.toHaveLength\(29\)` in `__tests__/`).
+  - [ ] 4.1 Register `computeAgreement` in `plugins/flow/mcp-server/src/tools/register.ts`. Bump tool-count assertion from 29 (post-4.9b) to 30 in any test that pins it (search for `\.toBe\(29\)` and `\.toHaveLength\(29\)` in `__tests__/`).
   - [ ] 4.2 Do NOT add `computeAgreement` to any `permissions/*.yaml`. v1 has no subagent-callable surface — Story 4.10b's auto-merge gate will call it via internal import (same pattern as `classifyRiskTier` per Story 4.9b Task 10.2). A future story that exposes the tool to a subagent (e.g. an Epic 6 "agreement dashboard" CLI) will add the permission entry then.
 
 - [ ] **Task 5: Build, vitest, dist** (AC: all)
-  - [ ] 5.1 `pnpm --dir plugins/crew/mcp-server install` (must succeed; no new dependencies).
-  - [ ] 5.2 `pnpm --dir plugins/crew/mcp-server build` passes with no TypeScript errors.
-  - [ ] 5.3 `pnpm --dir plugins/crew/mcp-server test` passes — existing tests from prior stories + new tests added here.
-  - [ ] 5.4 Commit `plugins/crew/mcp-server/dist/` with rebuilt output. (See CLAUDE.md "Plugin build output is tracked in git" — `/plugin install` copies the tree as-is and does not run a build step; CI fails on drift.)
+  - [ ] 5.1 `pnpm --dir plugins/flow/mcp-server install` (must succeed; no new dependencies).
+  - [ ] 5.2 `pnpm --dir plugins/flow/mcp-server build` passes with no TypeScript errors.
+  - [ ] 5.3 `pnpm --dir plugins/flow/mcp-server test` passes — existing tests from prior stories + new tests added here.
+  - [ ] 5.4 Commit `plugins/flow/mcp-server/dist/` with rebuilt output. (See CLAUDE.md "Plugin build output is tracked in git" — `/plugin install` copies the tree as-is and does not run a build step; CI fails on drift.)
   - [ ] 5.5 No leftover `TODO(4.10)` / `TODO(4-10)` comments in any touched source file.
 
 ---
@@ -308,29 +308,29 @@ The return shape's `skipped_unresolved`, `skipped_excluded`, `malformed_lines` c
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. This story is a consumer, not a writer; no logger change required.
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. The discriminated union is closed; this story reads the existing shapes.
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12 / 4.9b) — DO NOT modify. `reviewer.verdict` emission is owned by 4.12; 4.9b's evidence-block changes are unrelated.
-- `plugins/crew/mcp-server/src/tools/record-agent-invoke.ts` (Story 4.12) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/record-pr-close-action.ts` (Story 4.12) — DO NOT modify. The producer of `reviewer.verdict.merge_action` is the read counterpart's contract; this story reads via the schema, not via the producer's API.
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 / 4.9b) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 rev2) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/skills/yield-parser.ts` (Story 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` / `claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/classify-risk-tier.ts` (Story 4.9b) — DO NOT modify.
-- `plugins/crew/mcp-server/src/lib/runtime-limits.ts` (Story 4.12) — DO NOT modify. Agreement-window default lives in `compute-agreement.ts`, NOT in runtime-limits (the constants in `runtime-limits.ts` are for wall-clock caps, not for window sizing — different concept).
-- `plugins/crew/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7 / 4.3c / 4.9b) — DO NOT modify.
-- `plugins/crew/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11 / 4.9b) — DO NOT modify. v1 has no subagent-callable agreement surface.
-- `plugins/crew/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (Story 3.2 / 3.5 / 4.1 / 4.9b) — DO NOT modify. No manifest field changes in this story.
+- `plugins/flow/mcp-server/src/lib/logger.ts` (Story 1.5) — DO NOT modify. This story is a consumer, not a writer; no logger change required.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. The discriminated union is closed; this story reads the existing shapes.
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12 / 4.9b) — DO NOT modify. `reviewer.verdict` emission is owned by 4.12; 4.9b's evidence-block changes are unrelated.
+- `plugins/flow/mcp-server/src/tools/record-agent-invoke.ts` (Story 4.12) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/record-pr-close-action.ts` (Story 4.12) — DO NOT modify. The producer of `reviewer.verdict.merge_action` is the read counterpart's contract; this story reads via the schema, not via the producer's API.
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 / 4.9b) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 rev2) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/skills/yield-parser.ts` (Story 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` / `claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/classify-risk-tier.ts` (Story 4.9b) — DO NOT modify.
+- `plugins/flow/mcp-server/src/lib/runtime-limits.ts` (Story 4.12) — DO NOT modify. Agreement-window default lives in `compute-agreement.ts`, NOT in runtime-limits (the constants in `runtime-limits.ts` are for wall-clock caps, not for window sizing — different concept).
+- `plugins/flow/skills/start/SKILL.md` (Stories 4.2 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7 / 4.3c / 4.9b) — DO NOT modify.
+- `plugins/flow/permissions/generalist-dev.yaml` / `generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11 / 4.9b) — DO NOT modify. v1 has no subagent-callable agreement surface.
+- `plugins/flow/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (Story 3.2 / 3.5 / 4.1 / 4.9b) — DO NOT modify. No manifest field changes in this story.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2.1 appends `AgreementWindowInvalidError`. Routine additive growth following the established `extends DomainError` pattern.
-- **`plugins/crew/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 4.1 registers `computeAgreement`. Bump tool-count assertion 29 → 30 in any test that pins it.
+- **`plugins/flow/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 2.1 appends `AgreementWindowInvalidError`. Routine additive growth following the established `extends DomainError` pattern.
+- **`plugins/flow/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 4.1 registers `computeAgreement`. Bump tool-count assertion 29 → 30 in any test that pins it.
 
 ---
 
@@ -338,17 +338,17 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/agreement.ts` (Task 1)
-- `plugins/crew/mcp-server/src/lib/__tests__/agreement.test.ts` (Task 1.4)
-- `plugins/crew/mcp-server/src/tools/compute-agreement.ts` (Task 3)
-- `plugins/crew/mcp-server/src/tools/__tests__/compute-agreement.test.ts` (Task 3.8)
+- `plugins/flow/mcp-server/src/lib/agreement.ts` (Task 1)
+- `plugins/flow/mcp-server/src/lib/__tests__/agreement.test.ts` (Task 1.4)
+- `plugins/flow/mcp-server/src/tools/compute-agreement.ts` (Task 3)
+- `plugins/flow/mcp-server/src/tools/__tests__/compute-agreement.test.ts` (Task 3.8)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/errors.ts` — Task 2.1 (append `AgreementWindowInvalidError`).
-- `plugins/crew/mcp-server/src/tools/register.ts` — Task 4.1 (register `computeAgreement`, bump tool-count).
+- `plugins/flow/mcp-server/src/errors.ts` — Task 2.1 (append `AgreementWindowInvalidError`).
+- `plugins/flow/mcp-server/src/tools/register.ts` — Task 4.1 (register `computeAgreement`, bump tool-count).
 - Any existing test files pinning the tool-count assertion (search for `\.toHaveLength\(29\)` / `\.toBe\(29\)` in `__tests__/`) — Task 4.1.
-- `plugins/crew/mcp-server/dist/` — Task 5.4 (rebuilt output committed).
+- `plugins/flow/mcp-server/dist/` — Task 5.4 (rebuilt output committed).
 
 ### Current-state notes on files being modified or referenced
 
@@ -369,7 +369,7 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Testing standards
 
-- vitest with `pnpm vitest --run` from `plugins/crew/mcp-server/`.
+- vitest with `pnpm vitest --run` from `plugins/flow/mcp-server/`.
 - `fs.mkdtemp(path.join(os.tmpdir(), "compute-agreement-"))` for tmpdir fixtures; `fs.rm(..., { recursive: true, force: true })` in `afterEach`.
 - No global mocks. No `import.meta.url` mocking.
 - No `vi.mock` of production modules. Test seams (`readTelemetryDirImpl`, `readFileImpl`) are injection points on the tool's options object per Story 4.12's convention.

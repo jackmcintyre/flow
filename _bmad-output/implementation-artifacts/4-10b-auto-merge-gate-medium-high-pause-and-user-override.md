@@ -14,7 +14,7 @@ so that **low-risk PRs land hands-free once the reviewer has earned my trust, an
 
 ### What this story is, in one sentence
 
-Add a new MCP tool `runAutoMergeGate` in `plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts` that, given a session ULID and PR number on the `done-ready-for-merge` branch, reads the `done/<ref>.yaml` manifest to extract `risk_tier`, calls `computeAgreement` (Story 4.10) to get the rolling ratio, resolves the threshold from `.crew/config.yaml` `plugin.agreement_threshold` (default 0.8), makes the deterministic gate decision via a pure `lib/auto-merge-gate.ts` helper, then either calls `gh pr merge` (auto-merge branch) or applies the `needs-human` label via `gh api .../labels` (pause branch); plus a single new line in `plugins/crew/skills/start/SKILL.md` that invokes the tool exactly on the `done-ready-for-merge` branch (and nowhere else, preserving manual-merge authority on NEEDS CHANGES / BLOCKED branches by structural omission).
+Add a new MCP tool `runAutoMergeGate` in `plugins/flow/mcp-server/src/tools/run-auto-merge-gate.ts` that, given a session ULID and PR number on the `done-ready-for-merge` branch, reads the `done/<ref>.yaml` manifest to extract `risk_tier`, calls `computeAgreement` (Story 4.10) to get the rolling ratio, resolves the threshold from `.flow/config.yaml` `plugin.agreement_threshold` (default 0.8), makes the deterministic gate decision via a pure `lib/auto-merge-gate.ts` helper, then either calls `gh pr merge` (auto-merge branch) or applies the `needs-human` label via `gh api .../labels` (pause branch); plus a single new line in `plugins/flow/skills/start/SKILL.md` that invokes the tool exactly on the `done-ready-for-merge` branch (and nowhere else, preserving manual-merge authority on NEEDS CHANGES / BLOCKED branches by structural omission).
 
 ### What this story does (and why it needs its own story)
 
@@ -44,10 +44,10 @@ This story explicitly does NOT touch the producer code paths (4.9b's `classifyRi
 - (f) Apply or remove the `reviewed-by-agent` label. Story 4.8's `applyReviewerLabels` already applied it at step 10a of the SKILL.md inner cycle; the gate's pause branch adds `needs-human` ON TOP, never removes anything.
 - (g) Implement a wait-then-merge mode (e.g. `gh pr merge --auto`). v1 uses `gh pr merge --squash --delete-branch` directly; if CI hasn't passed, gh returns a non-zero exit and the gate surfaces it as a `gh-recoverable` block. A future story can switch to `--auto` once that flow's semantics are pinned.
 - (h) Re-classify the PR's risk tier. The classifier ran in `postReviewerComments` (Story 4.9b); the manifest holds the result. Re-running the classifier here would risk drift between the manifest's stamped tier and the gate's effective tier.
-- (i) Read or modify `.crew/state/sessions/<ulid>/reviewer-result.json` directly. The gate operates on the manifest (post-`completeStory`) and the workspace config. Other tools (`applyReviewerLabels`, `processReviewerTranscript`) own the session-result file.
+- (i) Read or modify `.flow/state/sessions/<ulid>/reviewer-result.json` directly. The gate operates on the manifest (post-`completeStory`) and the workspace config. Other tools (`applyReviewerLabels`, `processReviewerTranscript`) own the session-result file.
 - (j) Add a `runAutoMergeGate` entry to any `permissions/*.yaml`. The gate is called by the SKILL.md prose, which uses the inner-cycle MCP layer (the same pattern as `processReviewerTranscript`, `applyReviewerLabels` — both gate-able SKILL.md-callable tools live in `inner-cycle-allowed-tools.ts`, NOT in per-role permission specs). The new `gh_allow` entry that DOES need to land is `pr-merge` on the role used by the gate (default `generalist-dev`).
 - (k) Inject a yield protocol. Story 4.11 owns yield routing; this gate runs only on `done-ready-for-merge`, which by definition has already completed reviewer routing.
-- (l) Special-case repos without a `.crew/config.yaml`. `loadWorkspaceConfig` already returns the schema's defaults on a missing config; the gate inherits the `0.8` default transparently.
+- (l) Special-case repos without a `.flow/config.yaml`. `loadWorkspaceConfig` already returns the schema's defaults on a missing config; the gate inherits the `0.8` default transparently.
 - (m) Run `gh pr merge` against PRs that aren't open. If the PR has been merged or closed in the meantime (race with the operator), `gh pr merge` returns a non-zero exit; the gate surfaces it as a `gh-recoverable` block. v1 does NOT pre-check the PR state — the gh call IS the check.
 - (n) Cache the agreement metric or the manifest read across invocations. Same rationale as Story 4.10 — invalidation cost > saving for v1.
 - (o) Auto-promote `medium` to `high` based on diff-size. The classifier's tier is canonical; the gate consumes it.
@@ -58,19 +58,19 @@ This story explicitly does NOT touch the producer code paths (4.9b's `classifyRi
 
 - **`auto_merge.decision` telemetry event.** A future story logs `{ decision, reason, risk_tier, agreement_ratio, threshold_used, pr_number, session_id }` per gate run for retro analysis. Additive — does NOT change the gate's behaviour, only its observability.
 - **`gh pr merge --auto` (await-CI mode).** Replace the direct merge with `--auto` once the wait-then-merge semantics are spec'd. The gate's contract stays the same; only the execa args change.
-- **Operator pre-merge confirmation flag.** A `.crew/config.yaml` knob like `plugin.auto_merge_requires_confirmation: true` would surface a chat prompt before each auto-merge. Out of scope for v1 — the threshold gate IS the confirmation mechanism.
+- **Operator pre-merge confirmation flag.** A `.flow/config.yaml` knob like `plugin.auto_merge_requires_confirmation: true` would surface a chat prompt before each auto-merge. Out of scope for v1 — the threshold gate IS the confirmation mechanism.
 - **Per-role override of threshold.** Currently one threshold per repo. A future story could let each role specify its own threshold. Additive — same shape.
 - **Telemetry-driven threshold tuning.** A future Epic 6 story can compute "what threshold yields N% false-auto-merges over the last 100 PRs?" and surface a suggested config. v1 ships the dumb 0.8 default; tuning is manual.
-- **`gh pr merge` strategy override.** Currently hardcoded `--squash --delete-branch`. A `.crew/config.yaml` knob like `plugin.merge_strategy: squash | merge | rebase` could expose this. Additive.
+- **`gh pr merge` strategy override.** Currently hardcoded `--squash --delete-branch`. A `.flow/config.yaml` knob like `plugin.merge_strategy: squash | merge | rebase` could expose this. Additive.
 
 ---
 
 ## Acceptance Criteria
 
-> AC1–AC4 are verbatim from the epic (FR40, FR41, FR42). AC5 is the integration suite carrying the `vitest:` marker per the orchestrator's AC-marker-gap memory rule. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool's decision-and-side-effect contract plus a SKILL.md prose integration. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1–AC4 are verbatim from the epic (FR40, FR41, FR42). AC5 is the integration suite carrying the `vitest:` marker per the orchestrator's AC-marker-gap memory rule. None reference a slash command, operator-typed CLI, install-doc path, or Claude Code UI element — they describe an internal MCP tool's decision-and-side-effect contract plus a SKILL.md prose integration. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
-**Given** a PR with `verdict: READY FOR MERGE`, `risk_tier: low`, and `agreement_metric.ratio >= threshold` (default 0.8, configurable via `plugin.agreement_threshold` in `.crew/config.yaml`),
+**Given** a PR with `verdict: READY FOR MERGE`, `risk_tier: low`, and `agreement_metric.ratio >= threshold` (default 0.8, configurable via `plugin.agreement_threshold` in `.flow/config.yaml`),
 **When** the auto-merge gate runs,
 **Then** the plugin calls `gh pr merge` on the PR. _(FR40)_
 
@@ -109,10 +109,10 @@ vitest covers (a) auto-merge fires, (b) medium pauses, (c) high pauses, (d) low 
 - (1a) **Tool signature.** `runAutoMergeGate(opts: { targetRepoRoot, prNumber, ref, sessionUlid, thresholdOverride?, lastNVerdictsOverride?, dryRun?, execaImpl?, computeAgreementImpl?, readManifestImpl?, loadWorkspaceConfigImpl?, role?, pluginRootOverride? }) → Promise<AutoMergeGateResult>`. The signature mirrors `applyReviewerLabels` (Story 4.8) with additional test seams for the agreement + config + manifest reads. `thresholdOverride` (number 0..1) bypasses the workspace-config read entirely — test-only. `lastNVerdictsOverride` (positive integer) forwards into `computeAgreement` — test-only. `dryRun: true` skips the gh shell-out and returns the decision as if it had been executed (no execa call). `role` defaults to `"generalist-dev"`.
 - (1b) **Decision branch — auto-merge.** `risk_tier === "low"` AND `agreement_metric !== null` AND `agreement_metric.ratio >= threshold_used` → `decision: "auto-merge"`, `reason: "low-risk-met-threshold"`. The tool MUST call `gh pr merge <prNumber> --squash --delete-branch` via the role's `gh_allow: pr-merge` entry. On gh success the result carries `merged: true` and a single chat-log line: `auto-merge fired — PR #<n> merged (risk_tier: low, agreement: <ratio>, threshold: <t>)`.
 - (1c) **`gh pr merge` flags.** Hardcoded `--squash --delete-branch` for v1 — matches the team's existing convention (Story 4.4 PR-create flow assumes squash semantics). Future stories may parameterise; the gate ships with one shape.
-- (1d) **Threshold resolution.** Resolve `threshold_used` in this order: (i) caller-supplied `thresholdOverride` (test seam — `0 <= n <= 1`), (ii) workspace-config `plugin.agreement_threshold` from `loadWorkspaceConfig(targetRepoRoot)` (default `0.8` per `schemas/workspace-config.ts`). The tool never reads `.crew/config.yaml` directly; it always goes through `loadWorkspaceConfig` so future schema changes propagate transparently. `threshold_used` is stamped in the returned `AutoMergeGateResult` for retro analysis.
+- (1d) **Threshold resolution.** Resolve `threshold_used` in this order: (i) caller-supplied `thresholdOverride` (test seam — `0 <= n <= 1`), (ii) workspace-config `plugin.agreement_threshold` from `loadWorkspaceConfig(targetRepoRoot)` (default `0.8` per `schemas/workspace-config.ts`). The tool never reads `.flow/config.yaml` directly; it always goes through `loadWorkspaceConfig` so future schema changes propagate transparently. `threshold_used` is stamped in the returned `AutoMergeGateResult` for retro analysis.
 - (1e) **Agreement metric resolution.** Call `computeAgreement({ targetRepoRoot, lastNVerdicts: lastNVerdictsOverride })`. Use the production default (50) when no override is passed. The metric is `null` (insufficient) or a `AgreementMetricResult`; the gate uses `result === null` and `result.ratio` directly (no rounding, no fixed-decimal coercion).
 - (1f) **Ratio comparison uses `>=`, not `>`.** A ratio EQUAL to the threshold qualifies for auto-merge. Pin this in code: `agreement_metric.ratio >= threshold_used`. AC5(d) exercises the boundary case.
-- (1g) **Permission spec.** `plugins/crew/permissions/generalist-dev.yaml` gains `pr-merge` in `gh_allow`. The `gh` wrapper rejects subcommands not in `gh_allow`; without this entry the auto-merge branch raises `GhSubcommandDeniedError`.
+- (1g) **Permission spec.** `plugins/flow/permissions/generalist-dev.yaml` gains `pr-merge` in `gh_allow`. The `gh` wrapper rejects subcommands not in `gh_allow`; without this entry the auto-merge branch raises `GhSubcommandDeniedError`.
 
 **AC2 unpacked.** Medium/high pause — risk-tier triggered pause regardless of agreement.
 
@@ -155,7 +155,7 @@ vitest covers (a) auto-merge fires, (b) medium pauses, (c) high pauses, (d) low 
 - (5f) **(c) High pauses.** Seed a high-risk done manifest. Same shape as (5e), `reason: "high-risk"`.
 - (5g) **(d) Low + sub-threshold pauses.** Low-risk manifest. Seed 50 verdicts with agreement 0.7 (below default 0.8). Call. Assert: `decision: "pause-needs-human"`, `reason: "low-risk-sub-threshold"`, labels applied, no merge call. Then re-test with `thresholdOverride: 0.6` and agreement 0.7 — assert auto-merge fires (cross-check threshold-override path).
 - (5h) **(e) Low + insufficient-data pauses.** Low-risk manifest. Seed only 30 verdicts (sub-window for default 50). Assert: `agreement_metric: null`, `decision: "pause-needs-human"`, `reason: "low-risk-insufficient-data"`, labels applied. Then re-test with `lastNVerdictsOverride: 30` — assert agreement is computed and decision flips to whatever the 30-window ratio says.
-- (5i) **(f) Manual-merge override (structural).** Read `plugins/crew/skills/start/SKILL.md` (the worktree copy). Assert the file contains `runAutoMergeGate` (gate invocation present). Assert it appears EXACTLY under the `done-ready-for-merge` branch and does NOT appear under any `done-blocked-*` branch. The assertion uses regex on the section markers — pin the test fixture text per (5l).
+- (5i) **(f) Manual-merge override (structural).** Read `plugins/flow/skills/start/SKILL.md` (the worktree copy). Assert the file contains `runAutoMergeGate` (gate invocation present). Assert it appears EXACTLY under the `done-ready-for-merge` branch and does NOT appear under any `done-blocked-*` branch. The assertion uses regex on the section markers — pin the test fixture text per (5l).
 - (5j) **(g) No-tier pause.** Seed a done manifest without `risk_tier` (legacy manifest). Assert: `decision: "pause-needs-human"`, `reason: "no-tier-no-signal"`, labels applied. The agreement metric is still computed and stamped in the result.
 - (5k) **(h) Boundary — ratio exactly equals threshold.** Seed agreement 0.8 with threshold 0.8 default. Assert: auto-merge fires (the `>=` boundary). Pin the test to catch a future drift to `>`.
 - (5l) **(i) SKILL.md content-structure.** A separate vitest asserts the SKILL.md prose under `done-ready-for-merge` contains the literal `runAutoMergeGate({ targetRepoRoot, prNumber, ref, sessionUlid })` (with `prNumber` reused from earlier in the inner-cycle — the same `prNumber` that flowed into `applyReviewerLabels`). This is the structural anchor that AC4 / AC5(f) rely on. Use a regex that allows whitespace flex but pins the tool name and the argument keys.
@@ -172,14 +172,14 @@ vitest covers (a) auto-merge fires, (b) medium pauses, (c) high pauses, (d) low 
 Implementation order is load-bearing. Each task lists its AC dependencies.
 
 - [ ] **Task 1: Pure helper `decideAutoMerge`** (AC: #1, #2, #3, #4)
-  - [ ] 1.1 Create `plugins/crew/mcp-server/src/lib/auto-merge-gate.ts`.
+  - [ ] 1.1 Create `plugins/flow/mcp-server/src/lib/auto-merge-gate.ts`.
   - [ ] 1.2 Export `decideAutoMerge(input: { risk_tier: "low" | "medium" | "high" | undefined; agreement_metric: AgreementMetricResult | null; threshold: number }): { decision: "auto-merge" | "pause-needs-human"; reason: AutoMergeGateReason }`. Implements the six-branch decision per AC5(c). Pure function — no I/O, no async.
   - [ ] 1.3 Export `AutoMergeGateReason` type alias as the closed union per (5c).
   - [ ] 1.4 JSDoc citing this story key, FR40 / FR41 / FR42, and a per-branch table.
-  - [ ] 1.5 Create `plugins/crew/mcp-server/src/lib/__tests__/auto-merge-gate.test.ts` covering each branch (six rows + boundary case + no-tier).
+  - [ ] 1.5 Create `plugins/flow/mcp-server/src/lib/__tests__/auto-merge-gate.test.ts` covering each branch (six rows + boundary case + no-tier).
 
 - [ ] **Task 2: `runAutoMergeGate` MCP tool** (AC: #1, #2, #3, #5)
-  - [ ] 2.1 Create `plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts`.
+  - [ ] 2.1 Create `plugins/flow/mcp-server/src/tools/run-auto-merge-gate.ts`.
   - [ ] 2.2 Export Zod schema `AutoMergeGateResultSchema` (`.strict()` at every level) with shape:
     ```ts
     {
@@ -199,7 +199,7 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 2.3 Implement the algorithm:
     1. Validate `thresholdOverride` if present (must be `0 <= n <= 1`, finite, NaN-free); else `AutoMergeGateThresholdInvalidError`.
     2. Load workspace-config via `loadWorkspaceConfig(targetRepoRoot)`. Resolve `threshold_used = thresholdOverride ?? config.plugin.agreement_threshold`.
-    3. Read `done/<ref>.yaml` manifest via `readManifest(path.join(targetRepoRoot, ".crew", "state", "done", `${ref}.yaml`))`. Extract `risk_tier`. (Note: read from `done/` because `processReviewerTranscript` already moved the manifest before this tool runs.)
+    3. Read `done/<ref>.yaml` manifest via `readManifest(path.join(targetRepoRoot, ".flow", "state", "done", `${ref}.yaml`))`. Extract `risk_tier`. (Note: read from `done/` because `processReviewerTranscript` already moved the manifest before this tool runs.)
     4. Call `computeAgreement({ targetRepoRoot, lastNVerdicts: lastNVerdictsOverride })`. Get `AgreementMetricResult | null`.
     5. Call `decideAutoMerge({ risk_tier, agreement_metric, threshold })`. Get `{ decision, reason }`.
     6. Compose the chat-log line per (1b) or (2f).
@@ -209,37 +209,37 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
     10. Return the full `AutoMergeGateResult`.
   - [ ] 2.4 Inputs accepted via standard MCP-tool-schema. Test seams: `execaImpl`, `computeAgreementImpl`, `readManifestImpl`, `loadWorkspaceConfigImpl`, `pluginRootOverride` — all optional, production callers pass none.
   - [ ] 2.5 JSDoc citing this story key, FR40 / FR41 / FR42, the six-branch decision table (linked to `lib/auto-merge-gate.ts`), and the locked `gh pr merge` shape `--squash --delete-branch`.
-  - [ ] 2.6 Create `plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts` covering AC5(d)–(o).
+  - [ ] 2.6 Create `plugins/flow/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts` covering AC5(d)–(o).
 
 - [ ] **Task 3: Typed errors** (AC: #1)
-  - [ ] 3.1 In `plugins/crew/mcp-server/src/errors.ts`, append `AutoMergeGateThresholdInvalidError extends DomainError`. Constructor: `{ threshold: number; reason: string }`. Message: `` `runAutoMergeGate: invalid threshold=<threshold> — <reason>. (FR40)` ``. Use the existing `extends DomainError` pattern.
+  - [ ] 3.1 In `plugins/flow/mcp-server/src/errors.ts`, append `AutoMergeGateThresholdInvalidError extends DomainError`. Constructor: `{ threshold: number; reason: string }`. Message: `` `runAutoMergeGate: invalid threshold=<threshold> — <reason>. (FR40)` ``. Use the existing `extends DomainError` pattern.
 
 - [ ] **Task 4: Permission spec — `pr-merge` allowance** (AC: #1, #5p)
-  - [ ] 4.1 Edit `plugins/crew/permissions/generalist-dev.yaml`: append `pr-merge` to `gh_allow`. The role that fires the gate (default `generalist-dev`) needs the wrapper allowance.
+  - [ ] 4.1 Edit `plugins/flow/permissions/generalist-dev.yaml`: append `pr-merge` to `gh_allow`. The role that fires the gate (default `generalist-dev`) needs the wrapper allowance.
   - [ ] 4.2 No other permission specs change. Reviewer (`generalist-reviewer.yaml`) does NOT get `pr-merge` — the reviewer's negative-capability invariant (Story 4.8) preserves the "reviewer cannot merge" rule.
 
 - [ ] **Task 5: MCP-tool registration** (AC: #5m)
-  - [ ] 5.1 Register `runAutoMergeGate` in `plugins/crew/mcp-server/src/tools/register.ts`. Bump tool-count assertion from 30 (post-4.10) to 31 in any test that pins it (search for `\.toBe\(30\)` and `\.toHaveLength\(30\)` under `__tests__/`).
-  - [ ] 5.2 Add `runAutoMergeGate` to the inner-cycle allowed-tools array `plugins/crew/mcp-server/src/tools/inner-cycle-allowed-tools.ts` (or whichever file the SKILL.md inner cycle reads — search for the existing `processReviewerTranscript`, `applyReviewerLabels` entries in that allow-list to find the file). The gate is invoked from SKILL.md prose, so it must be in the inner-cycle allow-list.
+  - [ ] 5.1 Register `runAutoMergeGate` in `plugins/flow/mcp-server/src/tools/register.ts`. Bump tool-count assertion from 30 (post-4.10) to 31 in any test that pins it (search for `\.toBe\(30\)` and `\.toHaveLength\(30\)` under `__tests__/`).
+  - [ ] 5.2 Add `runAutoMergeGate` to the inner-cycle allowed-tools array `plugins/flow/mcp-server/src/tools/inner-cycle-allowed-tools.ts` (or whichever file the SKILL.md inner cycle reads — search for the existing `processReviewerTranscript`, `applyReviewerLabels` entries in that allow-list to find the file). The gate is invoked from SKILL.md prose, so it must be in the inner-cycle allow-list.
 
 - [ ] **Task 6: SKILL.md integration** (AC: #1, #2, #3, #4, #5i, #5l)
-  - [ ] 6.1 Edit `plugins/crew/skills/start/SKILL.md`. Locate step 12's `done-ready-for-merge` branch. AFTER the existing chat-surface line and BEFORE `return to outer loop step 4`, insert a new sub-step `12.1`:
+  - [ ] 6.1 Edit `plugins/flow/skills/start/SKILL.md`. Locate step 12's `done-ready-for-merge` branch. AFTER the existing chat-surface line and BEFORE `return to outer loop step 4`, insert a new sub-step `12.1`:
     ```
     12.1. invoke runAutoMergeGate({ targetRepoRoot, prNumber, ref, sessionUlid }). Switch on the `decision` field:
        - `auto-merge` → log every entry of the returned `chatLog` to the operator, then return to outer loop step 4.
        - `pause-needs-human` → log every entry of the returned `chatLog` to the operator. The PR now carries the `needs-human` label; do NOT loop into rework — the story is already in `done/`. Return to outer loop step 4.
-       - If `runAutoMergeGate` throws `GhRecoverableError`: log the error verbatim AND a follow-up line `auto-merge gate deferred — operator should re-run /crew:start or merge manually`. The manifest is already in `done/`; the story is closed from the plugin's POV. Return to outer loop step 4.
-       - If `runAutoMergeGate` throws `AutoMergeGateThresholdInvalidError` or any other typed error: log the error verbatim and halt the inner cycle. The manifest is in `done/`; the operator needs to fix `.crew/config.yaml` before continuing.
+       - If `runAutoMergeGate` throws `GhRecoverableError`: log the error verbatim AND a follow-up line `auto-merge gate deferred — operator should re-run /flow:start or merge manually`. The manifest is already in `done/`; the story is closed from the plugin's POV. Return to outer loop step 4.
+       - If `runAutoMergeGate` throws `AutoMergeGateThresholdInvalidError` or any other typed error: log the error verbatim and halt the inner cycle. The manifest is in `done/`; the operator needs to fix `.flow/config.yaml` before continuing.
     ```
     Mirror the existing step-12 prose style — sub-step numbering, verbatim chat-log surfacing, "return to outer loop step 4" closure.
   - [ ] 6.2 Do NOT add the gate invocation under any other branch of step 12. AC4 is satisfied by structural omission.
   - [ ] 6.3 Update the "# Failure modes" section of SKILL.md to add `AutoMergeGateThresholdInvalidError` and a brief `auto-merge-gate-deferred` entry (for the `GhRecoverableError` case).
 
 - [ ] **Task 7: Build, vitest, dist** (AC: all)
-  - [ ] 7.1 `pnpm --dir plugins/crew/mcp-server install` (must succeed; no new dependencies).
-  - [ ] 7.2 `pnpm --dir plugins/crew/mcp-server build` passes with no TypeScript errors.
-  - [ ] 7.3 `pnpm --dir plugins/crew/mcp-server test` passes — existing tests from prior stories + new tests added here.
-  - [ ] 7.4 Commit `plugins/crew/mcp-server/dist/` with rebuilt output. (CLAUDE.md "Plugin build output is tracked in git" — `/plugin install` copies the tree as-is and does not run a build step; CI fails on drift.)
+  - [ ] 7.1 `pnpm --dir plugins/flow/mcp-server install` (must succeed; no new dependencies).
+  - [ ] 7.2 `pnpm --dir plugins/flow/mcp-server build` passes with no TypeScript errors.
+  - [ ] 7.3 `pnpm --dir plugins/flow/mcp-server test` passes — existing tests from prior stories + new tests added here.
+  - [ ] 7.4 Commit `plugins/flow/mcp-server/dist/` with rebuilt output. (CLAUDE.md "Plugin build output is tracked in git" — `/plugin install` copies the tree as-is and does not run a build step; CI fails on drift.)
   - [ ] 7.5 No leftover `TODO(4.10b)` / `TODO(4-10b)` comments in any touched source file.
 
 ---
@@ -288,36 +288,36 @@ Each `auto_merge.decision` event would be useful for retro analysis but adds zer
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- `plugins/crew/mcp-server/src/tools/compute-agreement.ts` (Story 4.10) — DO NOT modify. This story is a pure consumer.
-- `plugins/crew/mcp-server/src/lib/agreement.ts` (Story 4.10) — DO NOT modify. The truth table is owned by 4.10.
-- `plugins/crew/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. No new event type in this story (deferred).
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (Story 3.2 / 3.5 / 4.1 / 4.9b) — DO NOT modify. The `risk_tier` field already exists; the gate reads only.
-- `plugins/crew/mcp-server/src/schemas/workspace-config.ts` (Story 1.2 / earlier) — DO NOT modify. `plugin.agreement_threshold` already exists with default `0.8`.
-- `plugins/crew/mcp-server/src/tools/classify-risk-tier.ts` (Story 4.9b) — DO NOT modify. The classifier is upstream.
-- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12 / 4.9b) — DO NOT modify. Stamps `risk_tier`; no change needed.
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 / 4.9b) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 rev-2) — DO NOT modify. The gate fires AFTER it returns.
-- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. The gate has its own label-application path (single label, gated on decision).
-- `plugins/crew/mcp-server/src/tools/complete-story.ts` / `claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/record-pr-close-action.ts` (Story 4.12) — DO NOT modify.
-- `plugins/crew/mcp-server/src/tools/record-agent-invoke.ts` (Story 4.12) — DO NOT modify.
-- `plugins/crew/mcp-server/src/lib/runtime-limits.ts` (Story 4.12) — DO NOT modify.
-- `plugins/crew/mcp-server/src/lib/manifest-io.ts` (Story 3.2 / 4.1) — DO NOT modify. The gate uses `readManifest` as-is.
-- `plugins/crew/mcp-server/src/lib/gh.ts` (Story 4.4 / 4.5 / 4.8) — DO NOT modify. The gate uses the wrapper as-is.
-- `plugins/crew/mcp-server/src/lib/gh-error-map.ts` (Story 4.5) — DO NOT modify.
-- `plugins/crew/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
-- `plugins/crew/permissions/generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11 / 4.9b) — DO NOT modify. The reviewer never gets `pr-merge` allowance.
-- `plugins/crew/permissions/orchestrator.yaml`, `planner.yaml`, `hiring-manager.yaml`, `ask-mode.yaml`, `debugger.yaml`, `docs-specialist.yaml`, `retro-analyst.yaml`, `security-specialist.yaml`, `test-specialist.yaml` — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/compute-agreement.ts` (Story 4.10) — DO NOT modify. This story is a pure consumer.
+- `plugins/flow/mcp-server/src/lib/agreement.ts` (Story 4.10) — DO NOT modify. The truth table is owned by 4.10.
+- `plugins/flow/mcp-server/src/schemas/telemetry-events.ts` (Story 1.5 / 4.12 / 4.11) — DO NOT modify. No new event type in this story (deferred).
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (Story 3.2 / 3.5 / 4.1 / 4.9b) — DO NOT modify. The `risk_tier` field already exists; the gate reads only.
+- `plugins/flow/mcp-server/src/schemas/workspace-config.ts` (Story 1.2 / earlier) — DO NOT modify. `plugin.agreement_threshold` already exists with default `0.8`.
+- `plugins/flow/mcp-server/src/tools/classify-risk-tier.ts` (Story 4.9b) — DO NOT modify. The classifier is upstream.
+- `plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts` (Story 4.6b / 4.7 / 4.12 / 4.9b) — DO NOT modify. Stamps `risk_tier`; no change needed.
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` (Story 4.6 / 4.9b) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-transcript.ts` (Story 4.6 rev-2) — DO NOT modify. The gate fires AFTER it returns.
+- `plugins/flow/mcp-server/src/tools/process-dev-transcript.ts` (Story 4.3b / 4.5) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/apply-reviewer-labels.ts` (Story 4.8) — DO NOT modify. The gate has its own label-application path (single label, gated on decision).
+- `plugins/flow/mcp-server/src/tools/complete-story.ts` / `claim-next-story.ts` / `claim-story.ts` (Story 4.1) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/process-reviewer-yield.ts` (Story 4.11) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/record-pr-close-action.ts` (Story 4.12) — DO NOT modify.
+- `plugins/flow/mcp-server/src/tools/record-agent-invoke.ts` (Story 4.12) — DO NOT modify.
+- `plugins/flow/mcp-server/src/lib/runtime-limits.ts` (Story 4.12) — DO NOT modify.
+- `plugins/flow/mcp-server/src/lib/manifest-io.ts` (Story 3.2 / 4.1) — DO NOT modify. The gate uses `readManifest` as-is.
+- `plugins/flow/mcp-server/src/lib/gh.ts` (Story 4.4 / 4.5 / 4.8) — DO NOT modify. The gate uses the wrapper as-is.
+- `plugins/flow/mcp-server/src/lib/gh-error-map.ts` (Story 4.5) — DO NOT modify.
+- `plugins/flow/catalogue/*.md` (Story 2.1 / 4.11) — DO NOT modify.
+- `plugins/flow/permissions/generalist-reviewer.yaml` (Story 2.2 / 4.6 / 4.12 / 4.11 / 4.9b) — DO NOT modify. The reviewer never gets `pr-merge` allowance.
+- `plugins/flow/permissions/orchestrator.yaml`, `planner.yaml`, `hiring-manager.yaml`, `ask-mode.yaml`, `debugger.yaml`, `docs-specialist.yaml`, `retro-analyst.yaml`, `security-specialist.yaml`, `test-specialist.yaml` — DO NOT modify.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 3.1 appends `AutoMergeGateThresholdInvalidError`. Routine additive growth following the established `extends DomainError` pattern.
-- **`plugins/crew/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 5.1 registers `runAutoMergeGate`. Bump tool-count assertion 30 → 31 in any test that pins it.
-- **`plugins/crew/mcp-server/src/tools/inner-cycle-allowed-tools.ts`** (Story 4.3b — the SKILL.md inner-cycle allow-list source) — Task 5.2 appends `runAutoMergeGate` to the array. Pattern: same as the 4.3c widening for `completeStory`.
-- **`plugins/crew/skills/start/SKILL.md`** (Story 4.2 / 4.3 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7 / 4.8 / 4.9b / 4.11 / 4.12) — Task 6 integrates the gate at step 12. This is the JOIN integration this story exists to ship.
-- **`plugins/crew/permissions/generalist-dev.yaml`** (Story 2.2 / 4.1 / 4.4 / 4.8 / 4.9b) — Task 4.1 appends `pr-merge` to `gh_allow`. The role that fires the gate needs the allowance.
+- **`plugins/flow/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories) — Task 3.1 appends `AutoMergeGateThresholdInvalidError`. Routine additive growth following the established `extends DomainError` pattern.
+- **`plugins/flow/mcp-server/src/tools/register.ts`** (Story 1.4; locked due to tool-count assertion) — Task 5.1 registers `runAutoMergeGate`. Bump tool-count assertion 30 → 31 in any test that pins it.
+- **`plugins/flow/mcp-server/src/tools/inner-cycle-allowed-tools.ts`** (Story 4.3b — the SKILL.md inner-cycle allow-list source) — Task 5.2 appends `runAutoMergeGate` to the array. Pattern: same as the 4.3c widening for `completeStory`.
+- **`plugins/flow/skills/start/SKILL.md`** (Story 4.2 / 4.3 / 4.3b / 4.3c / 4.6 / 4.6b / 4.7 / 4.8 / 4.9b / 4.11 / 4.12) — Task 6 integrates the gate at step 12. This is the JOIN integration this story exists to ship.
+- **`plugins/flow/permissions/generalist-dev.yaml`** (Story 2.2 / 4.1 / 4.4 / 4.8 / 4.9b) — Task 4.1 appends `pr-merge` to `gh_allow`. The role that fires the gate needs the allowance.
 
 ---
 
@@ -325,20 +325,20 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/auto-merge-gate.ts` (Task 1)
-- `plugins/crew/mcp-server/src/lib/__tests__/auto-merge-gate.test.ts` (Task 1.5)
-- `plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts` (Task 2)
-- `plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts` (Task 2.6)
+- `plugins/flow/mcp-server/src/lib/auto-merge-gate.ts` (Task 1)
+- `plugins/flow/mcp-server/src/lib/__tests__/auto-merge-gate.test.ts` (Task 1.5)
+- `plugins/flow/mcp-server/src/tools/run-auto-merge-gate.ts` (Task 2)
+- `plugins/flow/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts` (Task 2.6)
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/errors.ts` — Task 3.1 (append `AutoMergeGateThresholdInvalidError`).
-- `plugins/crew/mcp-server/src/tools/register.ts` — Task 5.1 (register `runAutoMergeGate`, bump tool-count 30 → 31).
-- `plugins/crew/mcp-server/src/tools/inner-cycle-allowed-tools.ts` — Task 5.2 (append `runAutoMergeGate`).
-- `plugins/crew/permissions/generalist-dev.yaml` — Task 4.1 (append `pr-merge` to `gh_allow`).
-- `plugins/crew/skills/start/SKILL.md` — Task 6 (insert step 12.1 under `done-ready-for-merge` branch + Failure-modes entries).
+- `plugins/flow/mcp-server/src/errors.ts` — Task 3.1 (append `AutoMergeGateThresholdInvalidError`).
+- `plugins/flow/mcp-server/src/tools/register.ts` — Task 5.1 (register `runAutoMergeGate`, bump tool-count 30 → 31).
+- `plugins/flow/mcp-server/src/tools/inner-cycle-allowed-tools.ts` — Task 5.2 (append `runAutoMergeGate`).
+- `plugins/flow/permissions/generalist-dev.yaml` — Task 4.1 (append `pr-merge` to `gh_allow`).
+- `plugins/flow/skills/start/SKILL.md` — Task 6 (insert step 12.1 under `done-ready-for-merge` branch + Failure-modes entries).
 - Any existing test files pinning the tool-count assertion (search for `\.toHaveLength\(30\)` / `\.toBe\(30\)` under `__tests__/`) — Task 5.1.
-- `plugins/crew/mcp-server/dist/` — Task 7.4 (rebuilt output committed).
+- `plugins/flow/mcp-server/dist/` — Task 7.4 (rebuilt output committed).
 
 ### Current-state notes on files being modified or referenced
 
@@ -365,7 +365,7 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 
 ### Testing standards
 
-- vitest with `pnpm vitest --run` from `plugins/crew/mcp-server/`.
+- vitest with `pnpm vitest --run` from `plugins/flow/mcp-server/`.
 - `fs.mkdtemp(path.join(os.tmpdir(), "auto-merge-gate-"))` for tmpdir fixtures; `fs.rm(..., { recursive: true, force: true })` in `afterEach`.
 - No global mocks. No `import.meta.url` mocking.
 - No `vi.mock` of production modules. Test seams (`execaImpl`, `computeAgreementImpl`, `readManifestImpl`, `loadWorkspaceConfigImpl`, `pluginRootOverride`) are injection points on the tool's options object per Story 4.12 / 4.10 convention.

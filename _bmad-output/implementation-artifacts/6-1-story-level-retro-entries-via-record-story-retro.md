@@ -16,31 +16,31 @@ This is Epic 6's foundation story. It ships the **schema and tool** only — no 
 **AC1:**
 
 `record-story-retro` tool exists and writes `lessons[]`, `failure_class`, `duration_seconds` (and preserves existing `rework_count`) onto the `done/<ref>.yaml` manifest. The tool reads the existing manifest, merges the retro payload, validates the merged document via the existing `parseExecutionManifest` helper, and rewrites the file atomically via `writeManagedFile`. Refuses with a typed `DomainError` when the manifest is not in `done/` (state guard — retro is a post-completion concern). _(FR11, FR55)_
-artifact: plugins/crew/mcp-server/src/tools/record-story-retro.ts
+artifact: plugins/flow/mcp-server/src/tools/record-story-retro.ts
 
 **AC2:**
 
 The Zod schema for the retro payload constrains `lessons[].kind` to exactly `pitfall | pattern | tool-quirk | discipline` (closed enum, no `z.string()` fallback per memory `feedback_default_to_deterministic_seams`). `text` is required and non-empty on every lesson. `failure_class` on a lesson is **required when `kind === "pitfall"`** and optional otherwise. `routed_to` is optional on every lesson. The story-level `failure_class` and `duration_seconds` (non-negative integer) are optional. Unknown keys on lessons or the retro payload are rejected (`.strict()`). _(FR11)_
-artifact: plugins/crew/mcp-server/src/schemas/story-retro.ts
+artifact: plugins/flow/mcp-server/src/schemas/story-retro.ts
 
 **AC3 (integration):**
 
 Vitest covers: (a) happy-path write — a valid retro payload lands on a `done/` manifest and the file re-parses cleanly through `parseExecutionManifest`; (b) one assertion per `kind` value (four tests) demonstrating the closed enum accepts all four members; (c) `kind: "pitfall"` without `failure_class` is rejected at the Zod boundary; (d) the tool refuses with a typed error when invoked against a ref that lives in `to-do/`, `blocked/`, or `in-progress/` (not `done/`); (e) re-running `record-story-retro` on the same manifest is idempotent — second call with identical payload produces a byte-identical file. _(FR11, FR55)_
-vitest: plugins/crew/mcp-server/src/tools/__tests__/record-story-retro.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/record-story-retro.test.ts
 
 **AC4:**
 
-`ExecutionManifestSchema` (`plugins/crew/mcp-server/src/schemas/execution-manifest.ts`) is extended to accept the three new optional fields (`lessons`, `failure_class`, `duration_seconds`). Existing manifests (any state directory, any prior shape) MUST parse unchanged — additive only. The schema's `.strict()` posture is preserved; the new fields are declared on the manifest object directly so unknown-key rejection still holds.
-vitest: plugins/crew/mcp-server/src/schemas/__tests__/execution-manifest.test.ts
+`ExecutionManifestSchema` (`plugins/flow/mcp-server/src/schemas/execution-manifest.ts`) is extended to accept the three new optional fields (`lessons`, `failure_class`, `duration_seconds`). Existing manifests (any state directory, any prior shape) MUST parse unchanged — additive only. The schema's `.strict()` posture is preserved; the new fields are declared on the manifest object directly so unknown-key rejection still holds.
+vitest: plugins/flow/mcp-server/src/schemas/__tests__/execution-manifest.test.ts
 
 New test block: `describe("retro fields (Story 6.1)")` covering omitted-default round-trip, lessons array round-trip, story-level failure_class round-trip, duration_seconds non-negative-integer enforcement.
 
 **AC5:**
 
-`record-story-retro` is registered in `plugins/crew/mcp-server/src/tools/register.ts` following the existing pattern (typed `DomainError` → `{ isError: true }` envelope; otherwise `{ content: [{ type: "text", text: JSON.stringify(result) }] }`). The `generalist-reviewer` permission allowlist at `plugins/crew/permissions/generalist-reviewer.yaml` is extended to include `recordStoryRetro` so the reviewer subagent can call it from its session. No other persona's allowlist changes in this story.
-artifact: plugins/crew/mcp-server/src/tools/register.ts
+`record-story-retro` is registered in `plugins/flow/mcp-server/src/tools/register.ts` following the existing pattern (typed `DomainError` → `{ isError: true }` envelope; otherwise `{ content: [{ type: "text", text: JSON.stringify(result) }] }`). The `generalist-reviewer` permission allowlist at `plugins/flow/permissions/generalist-reviewer.yaml` is extended to include `recordStoryRetro` so the reviewer subagent can call it from its session. No other persona's allowlist changes in this story.
+artifact: plugins/flow/mcp-server/src/tools/register.ts
 
-(Also touches `plugins/crew/permissions/generalist-reviewer.yaml` — see Files touched.)
+(Also touches `plugins/flow/permissions/generalist-reviewer.yaml` — see Files touched.)
 
 ## Implementation Notes
 
@@ -53,23 +53,23 @@ artifact: plugins/crew/mcp-server/src/tools/register.ts
 ### Files touched
 
 **NEW:**
-- `plugins/crew/mcp-server/src/schemas/story-retro.ts` — Zod schema for the retro payload (lessons + story-level fields). Export `LessonSchema`, `StoryRetroPayloadSchema`, and a `parseStoryRetroPayload` helper that throws a typed `MalformedStoryRetroPayloadError` on failure (parallel to `parseExecutionManifest`'s shape).
-- `plugins/crew/mcp-server/src/tools/record-story-retro.ts` — the MCP tool implementation.
-- `plugins/crew/mcp-server/src/tools/__tests__/record-story-retro.test.ts` — tests per AC3.
+- `plugins/flow/mcp-server/src/schemas/story-retro.ts` — Zod schema for the retro payload (lessons + story-level fields). Export `LessonSchema`, `StoryRetroPayloadSchema`, and a `parseStoryRetroPayload` helper that throws a typed `MalformedStoryRetroPayloadError` on failure (parallel to `parseExecutionManifest`'s shape).
+- `plugins/flow/mcp-server/src/tools/record-story-retro.ts` — the MCP tool implementation.
+- `plugins/flow/mcp-server/src/tools/__tests__/record-story-retro.test.ts` — tests per AC3.
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — add three optional fields (`lessons`, `failure_class`, `duration_seconds`). Preserve `.strict()`. Preserve field-order convention (these new fields are retro-time additions; conventional position is **after** `risk_tier_evidence` at the end of the object, so YAML round-trip puts them last on disk).
-- `plugins/crew/mcp-server/src/schemas/__tests__/execution-manifest.test.ts` — new `describe("retro fields (Story 6.1)")` block per AC4.
-- `plugins/crew/mcp-server/src/tools/register.ts` — register `recordStoryRetro` with the existing typed-error envelope pattern. Place the registration near the other write-path tools (e.g. after `completeStory` registration at line ~503 — the order is loosely grouped by epic in the existing file, follow that).
-- `plugins/crew/mcp-server/src/errors.ts` — add two new typed errors:
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — add three optional fields (`lessons`, `failure_class`, `duration_seconds`). Preserve `.strict()`. Preserve field-order convention (these new fields are retro-time additions; conventional position is **after** `risk_tier_evidence` at the end of the object, so YAML round-trip puts them last on disk).
+- `plugins/flow/mcp-server/src/schemas/__tests__/execution-manifest.test.ts` — new `describe("retro fields (Story 6.1)")` block per AC4.
+- `plugins/flow/mcp-server/src/tools/register.ts` — register `recordStoryRetro` with the existing typed-error envelope pattern. Place the registration near the other write-path tools (e.g. after `completeStory` registration at line ~503 — the order is loosely grouped by epic in the existing file, follow that).
+- `plugins/flow/mcp-server/src/errors.ts` — add two new typed errors:
   - `MalformedStoryRetroPayloadError` (Zod-failure carrier; mirrors `MalformedExecutionManifestError`).
   - `StoryNotInDoneStateError` (refusal carrier for AC1 state guard; mirrors `ManifestNotFoundError`'s shape).
-- `plugins/crew/permissions/generalist-reviewer.yaml` — add `recordStoryRetro` to `tools_allow`.
+- `plugins/flow/permissions/generalist-reviewer.yaml` — add `recordStoryRetro` to `tools_allow`.
 
 ### Schema shape (binding)
 
 ```ts
-// plugins/crew/mcp-server/src/schemas/story-retro.ts
+// plugins/flow/mcp-server/src/schemas/story-retro.ts
 
 export const LESSON_KINDS = ["pitfall", "pattern", "tool-quirk", "discipline"] as const;
 
@@ -117,7 +117,7 @@ duration_seconds: z.number().int().nonnegative().optional(),
 ### Tool behaviour (binding)
 
 ```ts
-// plugins/crew/mcp-server/src/tools/record-story-retro.ts
+// plugins/flow/mcp-server/src/tools/record-story-retro.ts
 
 export interface RecordStoryRetroOptions {
   targetRepoRoot: string;
@@ -217,7 +217,7 @@ None on other in-flight Epic 6 stories — 6.1 is the leaf of the 6a tranche. To
 
 ### Build artefacts
 
-After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew/mcp-server build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git". Story 5.24 just fixed `.d.ts` determinism; verify a clean rebuild produces zero `dist/` drift before staging — if drift recurs, that's a 5.24 regression, not a 6.1 problem (flag it and stop).
+After any change in `plugins/flow/mcp-server/src/`, run `pnpm --dir plugins/flow/mcp-server build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git". Story 5.24 just fixed `.d.ts` determinism; verify a clean rebuild produces zero `dist/` drift before staging — if drift recurs, that's a 5.24 regression, not a 6.1 problem (flag it and stop).
 
 ### Edge cases worth surfacing in dev/review
 
@@ -233,14 +233,14 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 - **FR11 (story frontmatter retro fields)** — `_bmad-output/planning-artifacts/prd-crew-v1/functional-requirements.md` line 20.
 - **FR55 (reviewer records story-level retros)** — same file, line 84.
 - **Phasing context** — `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-27-reframe.md` and epic-file phasing note (6a vs 6b).
-- **Existing schema/tool pattern to mirror** — `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (closed-enum + `parseExecutionManifest` helper); `plugins/crew/mcp-server/src/tools/complete-story.ts` (atomic-manifest-rewrite shape). Match these patterns exactly; don't invent new conventions.
+- **Existing schema/tool pattern to mirror** — `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (closed-enum + `parseExecutionManifest` helper); `plugins/flow/mcp-server/src/tools/complete-story.ts` (atomic-manifest-rewrite shape). Match these patterns exactly; don't invent new conventions.
 - **Deterministic-seam principle** — memory `feedback_default_to_deterministic_seams`. The `.strict()` + closed `kind` enum + `parseStoryRetroPayload` helper is the load-bearing seam here; resist any future PR that adds `z.string()` fallbacks.
 
 ## Definition of Done
 
 - [ ] All five ACs met (AC1–AC5).
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; new vitest files exercise every AC clause listed in AC3 / AC4.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit; `git diff plugins/crew/mcp-server/dist/` shows only the genuine additions for this story.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green; new vitest files exercise every AC clause listed in AC3 / AC4.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit; `git diff plugins/flow/mcp-server/dist/` shows only the genuine additions for this story.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean — no rubber-stamp guard fires; AC4 and AC5 both have machine-checkable artifacts so the reviewer's runnable-AC pass should be all-green.
 - [ ] No changes to reviewer SKILL.md or PERSONA.md (call-site wiring is explicitly deferred to 6.2 per Implementation Notes § Out of scope).

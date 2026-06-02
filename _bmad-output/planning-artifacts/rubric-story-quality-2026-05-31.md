@@ -139,7 +139,7 @@ The rubric distills, it doesn't invent:
 
 - **Design note** `_bmad-output/planning-artifacts/design-note-2026-05-31-native-planning-and-judging.md` — §5 (judging mechanism, lens diversity, Quality Lead), §6 (the two-tier first cut this extends).
 - **Planning-discipline (the 5 rules)** `_bmad-output/_archive/planning-discipline.md` — rule 1 (integration AC) → Tier 0 / Verifiability floor; rule 2 (explicit deps) → T0-4; rule 3 (ship gate) → Discipline "system stays green per story"; rule 4 (runnable ACs) → T0-6; rule 5 (integration AC first) → Discipline spine.
-- **AC markers + the user-surface gate** `plugins/crew/docs/user-surface-acs.md` — the marker conventions and why "a string appears in a file" is the canonical anti-pattern.
+- **AC markers + the user-surface gate** `plugins/flow/docs/user-surface-acs.md` — the marker conventions and why "a string appears in a file" is the canonical anti-pattern.
 - **Worked targets** `_bmad-output/implementation-artifacts/9-1-readiness-brake-and-minimal-intake-cockpit.md` (the PASS examples above) and `_bmad-output/implementation-artifacts/6-4-accept-proposal-id-skill-diff-then-confirm-gate.md` (gold-standard AC shape, idempotency, scope discipline).
 - **The scar** bugfix-1 (the FAIL examples): green ACs that verified presence, not behaviour — the reason Verifiability is the deepest lens.
 

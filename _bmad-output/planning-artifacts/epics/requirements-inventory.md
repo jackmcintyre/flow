@@ -214,7 +214,7 @@
 **Starter template & scaffolding (Epic 1 Story 1 driver):**
 
 - **No external starter.** Scaffold the plugin skeleton directly against the Claude Code plugin contract.
-- **First implementation story = scaffold the plugin skeleton** at `plugins/crew/` with `.claude-plugin/plugin.json`, pnpm workspace, empty MCP server entrypoint, and empty `bmad` adapter returning a hardcoded empty list. Zero behaviour; establishes every path/schema/import the rest depends on.
+- **First implementation story = scaffold the plugin skeleton** at `plugins/flow/` with `.claude-plugin/plugin.json`, pnpm workspace, empty MCP server entrypoint, and empty `bmad` adapter returning a hardcoded empty list. Zero behaviour; establishes every path/schema/import the rest depends on.
 
 **Technology stack (pinned by architecture, inherits sprint-orchestrator precedent):**
 
@@ -229,20 +229,20 @@
 
 **Two-tree project layout:**
 
-- **Plugin tree** at `plugins/crew/` containing `.claude-plugin/plugin.json`, `catalogue/<role>.md` (10 role templates), `skills/<command>.md` (11 skills incl. `plan`, `start`, `watch`, `retro`, `accept-proposal`, `hire`, `team`, `ask`, `status`, `skip-hiring`, `scan`), `permissions/<role>.yaml` + `gh-error-map.yaml`, `mcp-server/src/{adapters,tools,schemas,state,lib,validators}/`, `mcp-server/tests/{unit,integration,fixtures}/`, `docs/{standards-example.md, risk-tiering.md, discipline-rules.example.yaml, README-install.md, session-recovery.md}`, `example/` (bundled BMad-shaped target repo).
-- **Target-repo tree** owned by the plugin: `<target-repo>/.crew/{config.yaml, state/{to-do,in-progress,blocked,done}/<ref>.yaml, sessions/<ulid>.json, telemetry/<YYYY-MM>.jsonl, retro-proposals/<ts>.md, sprint-history/<cycle>-<ts>.yaml, native-stories/<ref>.md (native adapter only)}`, `<target-repo>/team/<role>/PERSONA.md` (+ `custom/`, `_archived/`), `<target-repo>/docs/{standards.md, risk-tiering.md (optional override), discipline-rules.yaml}`.
+- **Plugin tree** at `plugins/flow/` containing `.claude-plugin/plugin.json`, `catalogue/<role>.md` (10 role templates), `skills/<command>.md` (11 skills incl. `plan`, `start`, `watch`, `retro`, `accept-proposal`, `hire`, `team`, `ask`, `status`, `skip-hiring`, `scan`), `permissions/<role>.yaml` + `gh-error-map.yaml`, `mcp-server/src/{adapters,tools,schemas,state,lib,validators}/`, `mcp-server/tests/{unit,integration,fixtures}/`, `docs/{standards-example.md, risk-tiering.md, discipline-rules.example.yaml, README-install.md, session-recovery.md}`, `example/` (bundled BMad-shaped target repo).
+- **Target-repo tree** owned by the plugin: `<target-repo>/.flow/{config.yaml, state/{to-do,in-progress,blocked,done}/<ref>.yaml, sessions/<ulid>.json, telemetry/<YYYY-MM>.jsonl, retro-proposals/<ts>.md, sprint-history/<cycle>-<ts>.yaml, native-stories/<ref>.md (native adapter only)}`, `<target-repo>/team/<role>/PERSONA.md` (+ `custom/`, `_archived/`), `<target-repo>/docs/{standards.md, risk-tiering.md (optional override), discipline-rules.yaml}`.
 
 **Planning Adapter Model (supersedes FR9 path literal):**
 
 - Source files belong to the planning tool (BMad first; native fallback; Linear/GitHub Issues later via the same interface) and are read-only.
-- Plugin owns an execution-manifest layer at `<target-repo>/.crew/state/<state>/<ref>.yaml`. Atomic `fs.rename` between four state directories. (PRD's literal `stories/{state}/` is replaced; FR9 intent — atomic-filesystem state machine — is preserved.)
+- Plugin owns an execution-manifest layer at `<target-repo>/.flow/state/<state>/<ref>.yaml`. Atomic `fs.rename` between four state directories. (PRD's literal `stories/{state}/` is replaced; FR9 intent — atomic-filesystem state machine — is preserved.)
 - Story refs use `<adapter>:<source-id>` (e.g. `bmad:1.2.3`); native adapter uses `native:<ULID>`.
 - Adapter contract (`PlanningAdapter` interface) at `mcp-server/src/adapters/<name>/`: `detect`, `listSourceStories`, `readSourceStory`, `resolveSourcePath`, optional `watchForChanges`. Adapters self-register via `mcp-server/src/adapters/registry.ts`.
 - Normalised internal `SourceStory` shape is the contract that matters across adapters.
 - `validateAgainstDiscipline(SourceStory)` is added to the adapter contract — planning-discipline (FR3/FR5/FR7) shifts from authoring-time to scan-time for external adapters. Non-conforming source stories surface as blockers (`blocked_by: planning-discipline`).
 - BMad adapter is v1's reference implementation. BMad-format spike required *before* the BMad-adapter implementation story.
-- Native adapter authors stories under `<target-repo>/.crew/native-stories/<ref>.md` for users without a planning tool.
-- Active adapter resolved on every skill invocation from `<target-repo>/.crew/config.yaml`; `detect()` runs on first invocation if no config; first-match wins; ambiguity prompts the user.
+- Native adapter authors stories under `<target-repo>/.flow/native-stories/<ref>.md` for users without a planning tool.
+- Active adapter resolved on every skill invocation from `<target-repo>/.flow/config.yaml`; `detect()` runs on first invocation if no config; first-match wins; ambiguity prompts the user.
 
 **Source-drift handling:**
 
@@ -252,18 +252,18 @@
 
 **Workspace resolution:**
 
-- Per-target-repo config at `<target-repo>/.crew/config.yaml` marks the repo as a valid target; plugin reads on every skill invocation.
+- Per-target-repo config at `<target-repo>/.flow/config.yaml` marks the repo as a valid target; plugin reads on every skill invocation.
 - Plugin location read from Claude Code's plugin loader.
 - Same-repo and split-repo configurations treated identically.
 
 **Heartbeat-based session liveness:**
 
-- Each session writes a heartbeat at `<target-repo>/.crew/sessions/<session-id>.json` every N seconds (configurable).
+- Each session writes a heartbeat at `<target-repo>/.flow/sessions/<session-id>.json` every N seconds (configurable).
 - Orchestration treats `claimed_by` with no heartbeat in last `2× interval` as stale; no lockfile recovery rituals.
 
 **Telemetry pipeline:**
 
-- JSONL at `<target-repo>/.crew/telemetry/<YYYY-MM>.jsonl`, monthly rollover, append-only.
+- JSONL at `<target-repo>/.flow/telemetry/<YYYY-MM>.jsonl`, monthly rollover, append-only.
 - Discriminated-union events on `type` field: `agent.invoke`, `reviewer.verdict`, `yield.handoff`, `retro.proposal`, `state.transition`, `team.change`, `persona.append`, `skill.invoke`. Closed Zod-validated schemas per type. No PII / no diff contents in telemetry.
 - Stats helpers (`computeAgreement`, `computeOutcomeStats`, `computeSkillEffectiveness`) are pure TS, exposed as MCP tools and CLI commands; identical code path for user and agents.
 

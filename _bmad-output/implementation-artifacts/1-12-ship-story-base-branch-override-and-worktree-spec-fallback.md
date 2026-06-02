@@ -24,7 +24,7 @@ Folding the three into one shipment is intentional. Each fix is small (≤50 lin
 
 The substrate-level decisions worth pinning in their own story:
 
-1. **`default_base` lives at the skill level, not in `.crew/config.yaml`.** `.crew/config.yaml` is per-target-repo config consumed by the MCP server at runtime. `ship-story` plumbing is REPO-level (not target-repo-level — the orchestrator is the same regardless of which target repo is shipping). The config file at `<repo>/.claude/skills/ship-story/config.yaml` co-locates with the skill assets, lives where future ship-story tunables (e.g. review-pass budget overrides) will naturally accumulate, and is discoverable from the skill directory rather than requiring operators to know about a separate config file. Green-field repos with no config file fall back to `origin/main` — back-compat is non-negotiable per AC4.
+1. **`default_base` lives at the skill level, not in `.flow/config.yaml`.** `.flow/config.yaml` is per-target-repo config consumed by the MCP server at runtime. `ship-story` plumbing is REPO-level (not target-repo-level — the orchestrator is the same regardless of which target repo is shipping). The config file at `<repo>/.claude/skills/ship-story/config.yaml` co-locates with the skill assets, lives where future ship-story tunables (e.g. review-pass budget overrides) will naturally accumulate, and is discoverable from the skill directory rather than requiring operators to know about a separate config file. Green-field repos with no config file fall back to `origin/main` — back-compat is non-negotiable per AC4.
 
 2. **`cmd_default_base` subcommand, not env var.** Operators don't set env vars; the SKILL.md template doesn't read env vars cleanly across shell variants. A subcommand that prints the resolved base to stdout is shell-substitutable (`--base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)"`), trivially testable via pytest, and consistent with the existing `review-budget` subcommand pattern (`ship.py review-budget <spec_path>` prints JSON to stdout).
 
@@ -32,12 +32,12 @@ The substrate-level decisions worth pinning in their own story:
 
 4. **`d3e1c81` revert ships in the same PR.** Leaving the TEMP patch in place while landing the proper mechanism creates a window where both paths could fight. AC1 mandates the revert. The dev agent should `git revert d3e1c81 --no-edit` so the revert commit lands alongside the implementation commit; the new `default_base` resolution then drives behaviour with no remaining TEMP layer.
 
-This story explicitly does NOT introduce a `.crew/config.yaml` knob for any other purpose; does NOT touch `STATUS_FILE`, `EPICS_DIR`, `REPO`, `_canonical_repo`, or any of the other established `ship.py` constants; does NOT change the run-log event schema; does NOT add an MCP tool surface (this is shell-script plumbing, not a Claude Code MCP surface); does NOT modify any plugin code under `plugins/crew/`; does NOT widen `_ALLOWED_STATUSES` or any other ship.py constant set; does NOT modify the `pnpm dev:install` symlink path; does NOT add a `--base` CLI flag to `ship.py worktree` (the SKILL.md template is the single caller; flag-driven mode adds surface area without value).
+This story explicitly does NOT introduce a `.flow/config.yaml` knob for any other purpose; does NOT touch `STATUS_FILE`, `EPICS_DIR`, `REPO`, `_canonical_repo`, or any of the other established `ship.py` constants; does NOT change the run-log event schema; does NOT add an MCP tool surface (this is shell-script plumbing, not a Claude Code MCP surface); does NOT modify any plugin code under `plugins/flow/`; does NOT widen `_ALLOWED_STATUSES` or any other ship.py constant set; does NOT modify the `pnpm dev:install` symlink path; does NOT add a `--base` CLI flag to `ship.py worktree` (the SKILL.md template is the single caller; flag-driven mode adds surface area without value).
 
 ### What this story does NOT
 
 - (a) Touch `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other file under `_bmad-output/implementation-artifacts/`. The orchestrator owns status transitions.
-- (b) Modify the plugin under `plugins/crew/`. This is purely ship-story plumbing.
+- (b) Modify the plugin under `plugins/flow/`. This is purely ship-story plumbing.
 - (c) Introduce a new sprint-status status, status transition, or `_ALLOWED_STATUSES` entry.
 - (d) Add a `dist/` build step (no MCP server changes).
 - (e) Modify the run-log event schema. The existing `worktree_ready` event already carries the path.
@@ -47,7 +47,7 @@ This story explicitly does NOT introduce a `.crew/config.yaml` knob for any othe
 - (i) Validate the configured base against `git branch --list`. If the operator misconfigures (e.g. `default_base: nonexistent`), `git fetch origin nonexistent` fails loudly — that's the right failure mode.
 - (j) Support multiple bases / branch overrides per story. One trunk per repo.
 - (k) ~~Modify `cmd_cleanup`'s fast-forward target.~~ **Removed during spec validation:** `d3e1c81` also patched `cmd_cleanup`'s fetch/merge/branch-check to `dev`. The revert restores `main`, so `cmd_cleanup` MUST also be threaded through `resolve_default_base()` — see Task 2.5. (Phase E's `dev → main` promotion mechanics are still out of scope; this story only replaces the hardcode pattern, not the promotion target semantics.)
-- (l) Touch `.crew/config.yaml` schema or workspace-config Zod schemas. No plugin code change.
+- (l) Touch `.flow/config.yaml` schema or workspace-config Zod schemas. No plugin code change.
 - (m) Add telemetry events for the gate. Out of scope.
 - (n) Remove the `# TEMP: dev-as-trunk override` comment by hand — `git revert d3e1c81` is the mechanism. Hand-removing the comment without reverting the commit leaves the diff messy.
 - (o) Modify `pnpm dev:install`, `pnpm build:watch`, or any other workspace script.
@@ -65,7 +65,7 @@ This story explicitly does NOT introduce a `.crew/config.yaml` knob for any othe
 
 ## Acceptance Criteria
 
-> AC1–AC4 are verbatim from the epic. AC5 is the integration suite carrying the `vitest:` marker per the AC-marker-gap memory. None reference a slash command, operator-typed CLI invocation, install-doc path, or Claude Code UI element — `ship.py` is invoked by the ship-story orchestrator (an LLM-driven layer), not by Jack directly. Per `plugins/crew/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
+> AC1–AC4 are verbatim from the epic. AC5 is the integration suite carrying the `vitest:` marker per the AC-marker-gap memory. None reference a slash command, operator-typed CLI invocation, install-doc path, or Claude Code UI element — `ship.py` is invoked by the ship-story orchestrator (an LLM-driven layer), not by Jack directly. Per `plugins/flow/docs/user-surface-acs.md`, this story is **substrate**; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** a `default_base` knob exposed on `ship.py` (configuration mechanism is implementer's call — env var, `.crew/ship.yaml`, or per-repo TOML — pick one and document),
@@ -239,7 +239,7 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
 
 Three choices considered:
 - `_bmad/config.toml` — BMad's existing config. Rejected: BMad is one of several adapters; ship-story is plugin-internal, not BMad-specific.
-- `.crew/config.yaml` — per-target-repo config. Rejected: this is REPO-level config (the orchestrator's trunk), not per-target.
+- `.flow/config.yaml` — per-target-repo config. Rejected: this is REPO-level config (the orchestrator's trunk), not per-target.
 - Environment variable. Rejected: SKILL.md template is the single production caller; env vars are clunky to reference in markdown templates across shell variants.
 - `<repo>/.claude/skills/ship-story/config.yaml` — chosen. Co-located with the skill. Discoverable from the skill directory. Future ship-story tunables (review-pass budget overrides, halt-code customisation) can accumulate in the same file. Matches the existing convention that skill assets live next to the skill.
 
@@ -271,7 +271,7 @@ The config is one field, one type (`default_base: <string>`), with a clear fallb
 
 These files are off-limits to this story. If a change appears necessary, STOP and surface the conflict — do not silently edit.
 
-- All files under `plugins/crew/` — this story is ship-story plumbing, NOT plugin code.
+- All files under `plugins/flow/` — this story is ship-story plumbing, NOT plugin code.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (orchestrator-owned) — DO NOT edit.
 - `_bmad-output/planning-artifacts/epics/*.md` — DO NOT edit. The Story 1.12 block was already added before this story started.
 - `_bmad-output/implementation-artifacts/epic-4-retrospective.md` (retro file) — read-only reference.

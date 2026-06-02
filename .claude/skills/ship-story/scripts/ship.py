@@ -79,14 +79,14 @@ def _canonical_repo(p: Path) -> Path:
 REPO = _canonical_repo(_RAW_REPO)
 STATUS_FILE = REPO / "_bmad-output/implementation-artifacts/sprint-status.yaml"
 EPICS_DIR = REPO / "_bmad-output/planning-artifacts/epics"
-# Tests override the runs dir via CREW_SHIP_RUNS_DIR. Resolved at call time
+# Tests override the runs dir via FLOW_SHIP_RUNS_DIR. Resolved at call time
 # (not module load) so the env var is robust to import order and to tests
 # that set it after import.
 _DEFAULT_RUNS_DIR = REPO / ".claude/skills/ship-story/.runs"
 
 
 def runs_dir() -> Path:
-    return Path(os.environ.get("CREW_SHIP_RUNS_DIR", str(_DEFAULT_RUNS_DIR)))
+    return Path(os.environ.get("FLOW_SHIP_RUNS_DIR", str(_DEFAULT_RUNS_DIR)))
 
 
 # ---------------------------------------------------------------- config helpers
@@ -139,9 +139,9 @@ def _cwd_sanity_check() -> None:
     to `cd` back to the main repo before proceeding. (Epic 3 retro,
     2026-05-21 — bit Stories 3.4 and 3.6.)
 
-    Tests can opt out via CREW_SHIP_SKIP_CWD_CHECK=1.
+    Tests can opt out via FLOW_SHIP_SKIP_CWD_CHECK=1.
     """
-    if os.environ.get("CREW_SHIP_SKIP_CWD_CHECK") == "1":
+    if os.environ.get("FLOW_SHIP_SKIP_CWD_CHECK") == "1":
         return
     cwd = Path.cwd().resolve()
     if ".worktrees" in cwd.parts:

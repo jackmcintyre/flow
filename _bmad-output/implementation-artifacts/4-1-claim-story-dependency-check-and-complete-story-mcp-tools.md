@@ -21,7 +21,7 @@ Land FR17 (atomic claim), FR18 (dependency check + refusal), FR19 (atomic comple
 Three threads close in this story:
 
 - **FR17 + FR19 — atomic claim and complete.** Story 1.6 shipped the `moveBetweenStates` primitive (single-syscall `rename(2)` between canonical state directories, EXDEV refusal, ENOENT mapping). Story 3.2 shipped the manifest schema and `scan-sources` writer. Until now there has been no tool that drives the `to-do → in-progress` and `in-progress → done` transitions. Story 4.2's `/start` skill cannot exist until those primitives do.
-- **FR18 — dependency check.** A story whose `depends_on` list names refs that are not yet in `done/` must not be claimed — claiming it would let the dev subagent run before its prerequisites land. The check is a directory-presence test against `<target-repo>/.crew/state/done/<dep-ref>.yaml`, returning a typed `DependenciesNotReadyError` that names the missing refs.
+- **FR18 — dependency check.** A story whose `depends_on` list names refs that are not yet in `done/` must not be claimed — claiming it would let the dev subagent run before its prerequisites land. The check is a directory-presence test against `<target-repo>/.flow/state/done/<dep-ref>.yaml`, returning a typed `DependenciesNotReadyError` that names the missing refs.
 - **FR14a — `detectInProgressHandEdit` wiring (closes Story 3.7 AC3 paper promise).** Story 3.7 landed the `detectInProgressHandEdit` predicate and the `InProgressHandEditError` type but shipped zero callers — the planner doesn't touch `in-progress/`. Story 4.1 is the first real consumer: both `claimStory` (when re-entered against an already-claimed ref) and `completeStory` MUST call the guard on entry and propagate the thrown error to the MCP layer verbatim. PRD FR14a names the claim path (Story 4.1) as the first required consumer.
 
 This story is the foundation of Epic 4. After it, Story 4.2 can layer `/start` on top; Stories 4.3–4.4 add the dev-subagent handoff and PR-creation surfaces. Without this story, the entire Epic 4 dev loop is paper.
@@ -39,14 +39,14 @@ This story is the foundation of Epic 4. After it, Story 4.2 can layer `/start` o
 - (i) Add new fields to `ExecutionManifestSchema` beyond what is strictly needed to widen `status` to accept `"in-progress"` and `"done"` and to admit an optional `claimed_by` ULID. The schema widening is a coordinated bump — see § Architecture compliance.
 - (j) Add a `--force` or `--i-know-what-im-doing` bypass for the hand-edit refusal. The refusal is unconditional, mirroring Story 3.7's design.
 - (k) Walk the in-progress directory defensively. The hand-edit guard runs only for the ref the tool is about to operate on (per Story 3.7's caller contract in `manifest-state-machine.ts` TSDoc lines 199–215).
-- (l) Read or write any source story file (BMad-tracked `_bmad-output/stories/*.md` or native `.crew/native-stories/<ULID>.md`). The dependency check is a pure `.crew/state/done/` directory check; no source-side read is required to gate the claim.
+- (l) Read or write any source story file (BMad-tracked `_bmad-output/stories/*.md` or native `.flow/native-stories/<ULID>.md`). The dependency check is a pure `.flow/state/done/` directory check; no source-side read is required to gate the claim.
 - (m) Emit JSONL telemetry. Telemetry is Story 4.12's deliverable (`agent.invoke`, `reviewer.verdict`). This story keeps the primitives pure with respect to side-effects beyond the manifest move.
 
 ---
 
 ## Acceptance Criteria
 
-> AC1–AC5 are verbatim from the epic. AC6 is the epic's integration AC. None carry the `(user-surface)` parenthetical because none names a slash command, CLI invocation, file path the operator opens by name, or Claude Code UI element — they all govern internal MCP tools and typed errors. (Per `plugins/crew/docs/user-surface-acs.md`.)
+> AC1–AC5 are verbatim from the epic. AC6 is the epic's integration AC. None carry the `(user-surface)` parenthetical because none names a slash command, CLI invocation, file path the operator opens by name, or Claude Code UI element — they all govern internal MCP tools and typed errors. (Per `plugins/flow/docs/user-surface-acs.md`.)
 
 **AC1:**
 **Given** a story in `to-do/` with all `depends_on` refs present in `done/`,
@@ -87,25 +87,25 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
 ## Tasks / Subtasks
 
 - [x] **Task 1 — Widen `ExecutionManifestSchema` to admit `in-progress` and `done` states and `claimed_by` (AC: 1, 3)**
-  - [x] 1.1 Edit `plugins/crew/mcp-server/src/schemas/execution-manifest.ts`. Change the `status` enum from `z.enum(["to-do", "blocked"])` to `z.enum(["to-do", "blocked", "in-progress", "done"])`. The schema's TSDoc on the `status` field (lines 36–40 today) MUST be updated to name the new producers: `claimStory` writes `"in-progress"`; `completeStory` writes `"done"`.
+  - [x] 1.1 Edit `plugins/flow/mcp-server/src/schemas/execution-manifest.ts`. Change the `status` enum from `z.enum(["to-do", "blocked"])` to `z.enum(["to-do", "blocked", "in-progress", "done"])`. The schema's TSDoc on the `status` field (lines 36–40 today) MUST be updated to name the new producers: `claimStory` writes `"in-progress"`; `completeStory` writes `"done"`.
   - [x] 1.2 Add an optional `claimed_by` field: `claimed_by: z.string().min(1).optional()`. Document in TSDoc that the value is the calling session's ULID and that the field is present iff `status === "in-progress" || status === "done"`. (No cross-field invariant enforced in Zod — the tools enforce the invariant on write. A Zod refinement here would block `scan-sources` rewrites of `to-do/` manifests that don't carry `claimed_by`.)
   - [x] 1.3 Update the strict-mode comment near `.strict()` to note that Story 4.1 widened the status vocabulary and added `claimed_by`, so a `yaml.stringify(parseExecutionManifest(...))` round-trip of an `in-progress/` or `done/` manifest preserves all fields.
   - [x] 1.4 No change to `parseExecutionManifest`'s error shape. `MalformedExecutionManifestError` continues to wrap Zod failures.
   - [x] 1.5 Regenerate / update any snapshot tests under `mcp-server/src/schemas/__tests__/` that pin the strict-mode rejection set. Existing tests asserting `"in-progress"` was rejected MUST be flipped to assert acceptance.
 
 - [x] **Task 2 — Add `DependenciesNotReadyError` and `WrongClaimantError` to `errors.ts` (AC: 2, 4)**
-  - [x] 2.1 Edit `plugins/crew/mcp-server/src/errors.ts`. Add `export class DependenciesNotReadyError extends DomainError` carrying `readonly ref: string`, `readonly missingDeps: readonly string[]`. Constructor message: `` `claim-story refused: '${ref}' depends on refs not yet in done/: [${missingDeps.join(", ")}]. Wait for these stories to complete, or remove them from depends_on via the source story.` ``. Cite FR18.
+  - [x] 2.1 Edit `plugins/flow/mcp-server/src/errors.ts`. Add `export class DependenciesNotReadyError extends DomainError` carrying `readonly ref: string`, `readonly missingDeps: readonly string[]`. Constructor message: `` `claim-story refused: '${ref}' depends on refs not yet in done/: [${missingDeps.join(", ")}]. Wait for these stories to complete, or remove them from depends_on via the source story.` ``. Cite FR18.
   - [x] 2.2 Add `export class WrongClaimantError extends DomainError` carrying `readonly ref: string`, `readonly expectedSessionUlid: string`, `readonly actualSessionUlid: string`. Constructor message: `` `complete-story refused: '${ref}' was claimed by session '${actualSessionUlid}' but the caller's session is '${expectedSessionUlid}'. Only the claiming session may complete a story.` ``.
   - [x] 2.3 Match the existing error style in `errors.ts` — class-name as `name` (auto via `DomainError`'s constructor), readonly fields exposed on the instance, message format `<tool-name> refused: <reason>` (mirrors `GitCommitMessageMalformedError`'s `git commit refused: …` precedent at line 360).
   - [x] 2.4 Export both errors from `errors.ts` (no barrel file — errors are imported by direct path; mirror existing pattern).
 
 - [x] **Task 3 — Implement `claimStory` MCP tool (AC: 1, 2, 5)**
-  - [x] 3.1 Create `plugins/crew/mcp-server/src/tools/claim-story.ts`. Export `claimStory(opts: { targetRepoRoot: string; ref: string; sessionUlid: string }): Promise<{ ref: string; absPath: string }>`.
+  - [x] 3.1 Create `plugins/flow/mcp-server/src/tools/claim-story.ts`. Export `claimStory(opts: { targetRepoRoot: string; ref: string; sessionUlid: string }): Promise<{ ref: string; absPath: string }>`.
   - [x] 3.2 Implementation flow (in order):
-    1. Resolve `absToDoPath = <targetRepoRoot>/.crew/state/to-do/<ref>.yaml` and `absInProgressPath = <targetRepoRoot>/.crew/state/in-progress/<ref>.yaml`.
+    1. Resolve `absToDoPath = <targetRepoRoot>/.flow/state/to-do/<ref>.yaml` and `absInProgressPath = <targetRepoRoot>/.flow/state/in-progress/<ref>.yaml`.
     2. **Hand-edit guard** (AC5 / FR14a). If `absInProgressPath` exists on disk (the ref is already in `in-progress/`), call `detectInProgressHandEdit({ targetRepoRoot, ref, sourceHash: <computed from active adapter's readSourceStory>, sourceFields: <derived from same> })` and let any thrown `InProgressHandEditError` propagate. Use `fs.stat` to test existence; ENOENT means proceed (ref is in `to-do/`). For sourceHash/sourceFields: re-read the source story via the active adapter's `readSourceStory(ref)` and compute the same canonical view `scan-sources` would write (see § Implementation strategy below for the helper).
     3. **Load to-do manifest.** `fs.readFile(absToDoPath)` → `yaml.parse` → `parseExecutionManifest`. Propagate `ENOENT` as `ManifestNotFoundError({ ref, expectedAbsPath: absToDoPath, fromState: "to-do" })`. Propagate `MalformedExecutionManifestError` unchanged.
-    4. **Dependency check** (AC2 / FR18). For each `dep` in `manifest.depends_on`, `fs.stat(<targetRepoRoot>/.crew/state/done/<dep>.yaml)`. Collect refs whose stat throws ENOENT into `missingDeps[]`. If non-empty, throw `DependenciesNotReadyError({ ref, missingDeps })`. (No partial state change occurred — bail clean.)
+    4. **Dependency check** (AC2 / FR18). For each `dep` in `manifest.depends_on`, `fs.stat(<targetRepoRoot>/.flow/state/done/<dep>.yaml)`. Collect refs whose stat throws ENOENT into `missingDeps[]`. If non-empty, throw `DependenciesNotReadyError({ ref, missingDeps })`. (No partial state change occurred — bail clean.)
     5. **Atomic transition** (AC1 / FR17). Call `moveBetweenStates({ targetRepoRoot, ref, from: "to-do", to: "in-progress" })` from `state/manifest-state-machine.ts`. The rename is the atomicity guarantee. After the rename returns, the file lives at `absInProgressPath`.
     6. **Field rewrite.** Build the updated manifest: spread the parsed manifest, set `status: "in-progress"`, set `claimed_by: sessionUlid`. Re-parse via `parseExecutionManifest` (defensive — guarantees the widened schema accepts the result). Serialise via `yaml.stringify(manifest, { lineWidth: 0 })`. Write via `writeManagedFile({ absPath: absInProgressPath, contents: yamlText, targetRepoRoot, mcpToolContext: { toolName: "claimStory", role: "<caller-role>" } })`. Use `writeManagedFile`'s `.tmp`-then-`rename` for atomicity at the rewrite step.
     7. Return `{ ref, absPath: absInProgressPath }`.
@@ -114,9 +114,9 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
   - [x] 3.5 Add TSDoc citing FR17 / FR18 / FR14a and Story 4.1, and pointing to `moveBetweenStates` and `detectInProgressHandEdit` as the load-bearing primitives.
 
 - [x] **Task 4 — Implement `completeStory` MCP tool (AC: 3, 4, 5)**
-  - [x] 4.1 Create `plugins/crew/mcp-server/src/tools/complete-story.ts`. Export `completeStory(opts: { targetRepoRoot: string; ref: string; sessionUlid: string; role?: string }): Promise<{ ref: string; absPath: string }>`.
+  - [x] 4.1 Create `plugins/flow/mcp-server/src/tools/complete-story.ts`. Export `completeStory(opts: { targetRepoRoot: string; ref: string; sessionUlid: string; role?: string }): Promise<{ ref: string; absPath: string }>`.
   - [x] 4.2 Implementation flow (in order):
-    1. Resolve `absInProgressPath = <targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` and `absDonePath = <targetRepoRoot>/.crew/state/done/<ref>.yaml`.
+    1. Resolve `absInProgressPath = <targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` and `absDonePath = <targetRepoRoot>/.flow/state/done/<ref>.yaml`.
     2. **Hand-edit guard** (AC5 / FR14a). Always call `detectInProgressHandEdit({ ... })` on entry — for `completeStory` the ref MUST be in `in-progress/` (otherwise the next step throws), so the guard is unconditional. Let any thrown `InProgressHandEditError` propagate. SourceHash/sourceFields derivation same as Task 3.
     3. **Load in-progress manifest.** `fs.readFile` → `yaml.parse` → `parseExecutionManifest`. Propagate `ENOENT` as `ManifestNotFoundError({ ref, expectedAbsPath: absInProgressPath, fromState: "in-progress" })`. Propagate `MalformedExecutionManifestError` unchanged.
     4. **Claimant check** (AC4). If `manifest.claimed_by !== opts.sessionUlid`, throw `WrongClaimantError({ ref, expectedSessionUlid: opts.sessionUlid, actualSessionUlid: manifest.claimed_by ?? "<unset>" })`. (Treat absent `claimed_by` as a mismatch — a story in `in-progress/` without `claimed_by` is malformed and should not be completable by any caller; the operator must fix the manifest or `block-story` it.)
@@ -126,24 +126,24 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
   - [x] 4.3 TSDoc citing FR19 / FR14a, Story 4.1, and the same primitive references as Task 3.
 
 - [x] **Task 5 — Source-hash + source-fields derivation helper (AC: 5)**
-  - [x] 5.1 Both tools need a `{ sourceHash, sourceFields }` view to feed `detectInProgressHandEdit`. The canonical source-of-truth is "what `scan-sources` would write for this ref against the current source story." Extract a helper `deriveSourceBaseline({ targetRepoRoot, ref, activeAdapter }): Promise<{ sourceHash: string; sourceFields: OperatorEditableFields }>` and place it under `plugins/crew/mcp-server/src/state/derive-source-baseline.ts` (co-located with `manifest-state-machine.ts` because it serves the state-machine layer).
+  - [x] 5.1 Both tools need a `{ sourceHash, sourceFields }` view to feed `detectInProgressHandEdit`. The canonical source-of-truth is "what `scan-sources` would write for this ref against the current source story." Extract a helper `deriveSourceBaseline({ targetRepoRoot, ref, activeAdapter }): Promise<{ sourceHash: string; sourceFields: OperatorEditableFields }>` and place it under `plugins/flow/mcp-server/src/state/derive-source-baseline.ts` (co-located with `manifest-state-machine.ts` because it serves the state-machine layer).
   - [x] 5.2 Implementation: call `activeAdapter.readSourceStory(ref)` to get a `SourceStory`. Compute `sourceHash` the same way `scan-sources` does (see `scan-sources.ts` — `SourceStory.source_hash` is already computed by the adapter at `listSourceStories` time; for `readSourceStory` the adapter may need to expose the hash; if not, recompute via `crypto.createHash("sha256").update(rawBytes).digest("hex")` where `rawBytes` is the raw file contents). Build `sourceFields = { title, narrative, acceptance_criteria, implementation_notes, depends_on, withdrawn: false }` from the `SourceStory`. (Note: `SourceStory` carries source-side `withdrawn` semantics if any; the baseline for a freshly-scanned story is `withdrawn: false` per Story 3.6.)
   - [x] 5.3 Resolve the active adapter via the existing `resolveWorkspace(targetRepoRoot)` → `getActiveAdapter(...)` path. Both new tools accept `targetRepoRoot` and do the resolution themselves; no adapter argument is plumbed through the public tool API.
   - [x] 5.4 Edge case: if the source story has been deleted from the planning tool (BMad file removed; native file removed), `readSourceStory` throws (`UnknownBmadRefError` / equivalent). In that case, propagate the error — claim and complete cannot proceed against a source-less ref. The orchestrator will surface this as a state inconsistency. Document in TSDoc.
 
 - [x] **Task 6 — Register both tools in `register.ts` (AC: all)**
-  - [x] 6.1 Edit `plugins/crew/mcp-server/src/tools/register.ts`. Import `claimStory` from `./claim-story.js` and `completeStory` from `./complete-story.js`.
+  - [x] 6.1 Edit `plugins/flow/mcp-server/src/tools/register.ts`. Import `claimStory` from `./claim-story.js` and `completeStory` from `./complete-story.js`.
   - [x] 6.2 Register `claimStory` with the MCP server. Tool name (per § 4 MCP Tool Naming in `implementation-patterns-consistency-rules.md`): `claimStory` (camelCase verb-noun, flat namespace). Description: `"Atomically claim a story for dev work (FR17) — moves manifest from to-do/ to in-progress/, stamps claimed_by with the caller's session ULID, refuses if any depends_on ref is not in done/ (FR18) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1."`. Input schema: `{ targetRepoRoot: string, ref: string, sessionUlid: string, role?: string }`. Handler validates via Zod, calls the tool function, returns the result as JSON-stringified text content. On thrown `DomainError`, set `isError: true` in the MCP response and include the error message + `name`.
   - [x] 6.3 Register `completeStory` symmetrically. Description: `"Atomically complete a claimed story (FR19) — moves manifest from in-progress/ to done/, preserves claimed_by, refuses if the caller's session ULID does not match the manifest's claimed_by (WrongClaimantError) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1."`. Input schema: same shape minus the role default.
   - [x] 6.4 Mirror the existing handler error-response pattern used by `scanSources` / `getStatus` in `register.ts` — Zod parse failure on args returns a typed error; tool-thrown `DomainError` is mapped to `isError: true` content.
 
 - [x] **Task 7 — Unit tests (AC: 2, 4, 5)**
-  - [x] 7.1 Add `plugins/crew/mcp-server/src/tools/__tests__/claim-story.test.ts` covering:
+  - [x] 7.1 Add `plugins/flow/mcp-server/src/tools/__tests__/claim-story.test.ts` covering:
     - (a) happy claim: seed a `to-do/<ref>.yaml` via the canonical write path (`scan-sources` against a tmpdir adapter fixture, OR direct `writeManagedFile` with the `scanSources` mcpToolContext). Pre-place all `depends_on` refs as `done/<dep>.yaml`. Call `claimStory`. Assert the manifest now lives at `in-progress/<ref>.yaml` with `status: "in-progress"` and `claimed_by: <supplied-ulid>`, and `to-do/<ref>.yaml` does NOT exist.
     - (b) deps-not-ready: same setup, but omit one `depends_on` ref from `done/`. Call `claimStory`. Assert it throws `DependenciesNotReadyError` with the missing ref in `missingDeps`. Assert the manifest is still at `to-do/<ref>.yaml`, unchanged byte-for-byte (compare file mtime + content hash).
     - (c) hand-edit refusal on re-entry: pre-place an `in-progress/<ref>.yaml` (mimicking a prior claim by a different session). Hand-edit `title` on disk. Call `claimStory(ref, <new-session>)`. Assert `InProgressHandEditError` thrown with `changedFields` listing `title`. Assert no move occurred.
     - (d) `claimed_by` defensive parse: assert that the rewritten manifest round-trips through `parseExecutionManifest` cleanly with the widened schema.
-  - [x] 7.2 Add `plugins/crew/mcp-server/src/tools/__tests__/complete-story.test.ts` covering:
+  - [x] 7.2 Add `plugins/flow/mcp-server/src/tools/__tests__/complete-story.test.ts` covering:
     - (a) happy complete: seed an `in-progress/<ref>.yaml` with `claimed_by: <ulidA>`. Call `completeStory(ref, ulidA)`. Assert manifest at `done/<ref>.yaml` with `status: "done"` and `claimed_by: <ulidA>` preserved.
     - (b) wrong claimant: seed `in-progress/<ref>.yaml` with `claimed_by: <ulidA>`. Call `completeStory(ref, ulidB)`. Assert `WrongClaimantError` thrown carrying both ULIDs. Assert manifest unchanged.
     - (c) hand-edit refusal: seed `in-progress/<ref>.yaml` with `claimed_by: <ulidA>`, then hand-edit `narrative` on disk. Call `completeStory(ref, ulidA)`. Assert `InProgressHandEditError` thrown.
@@ -151,7 +151,7 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
   - [x] 7.3 Both test files follow the existing pattern under `mcp-server/src/tools/__tests__/` — vitest, tmpdir fixtures, no reinvented test scaffolding. Use the BMad adapter fixture path established in Story 3.3 for the active-adapter resolution, OR mock the active adapter via the existing seam where simpler.
 
 - [x] **Task 8 — Integration + chaos tests (AC: 6)**
-  - [x] 8.1 Add `plugins/crew/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`. Build a tmpdir target repo with a real BMad adapter fixture, seed two source stories where `B.depends_on = [A]`. Run end-to-end:
+  - [x] 8.1 Add `plugins/flow/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`. Build a tmpdir target repo with a real BMad adapter fixture, seed two source stories where `B.depends_on = [A]`. Run end-to-end:
     1. `scanSources` → both manifests land in `to-do/`.
     2. `claimStory(A, sessionUlid)` → A moves to `in-progress/` with `claimed_by` stamped.
     3. `completeStory(A, sessionUlid)` → A moves to `done/`.
@@ -162,7 +162,7 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
   - [x] 8.3 The chaos test MUST be deterministic in its assertions even if it is non-deterministic in scheduling — exactly one winner is invariant by `rename(2)` semantics on a single filesystem.
 
 - [x] **Task 9 — Build artefacts and final checks (AC: all)**
-  - [x] 9.1 Run `pnpm build` at the plugin root. Commit `plugins/crew/mcp-server/dist/` per CLAUDE.md §Process notes (the plugin tree is shipped as-is via `/plugin install`).
+  - [x] 9.1 Run `pnpm build` at the plugin root. Commit `plugins/flow/mcp-server/dist/` per CLAUDE.md §Process notes (the plugin tree is shipped as-is via `/plugin install`).
   - [x] 9.2 Run the full vitest suite. All existing tests MUST remain green. The schema-widening in Task 1 may cause previously-passing tests that assert `"in-progress"` is rejected to fail — those assertions MUST be flipped, not the schema rolled back.
   - [x] 9.3 No telemetry events are emitted by either tool — Story 4.12 owns telemetry plumbing. The tools are silent with respect to JSONL.
   - [x] 9.4 No `console.log`, no `console.error` in either tool. Errors flow through the typed-error contract.
@@ -171,9 +171,9 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
 
 ## Architecture compliance
 
-- **`moveBetweenStates` is the only canonical atomic mover.** Story 1.6's primitive at `plugins/crew/mcp-server/src/state/manifest-state-machine.ts:76-144`. Both new tools delegate to it. The static `canonical-fs-guard.test.ts` enforces that no other module in `mcp-server/src/**` invokes `rename` against a state-machine path. The new tools comply because the `.tmp`-then-`rename` for field rewrite goes through `writeManagedFile` (whitelisted), and the state transition goes through `moveBetweenStates` (whitelisted).
-- **`writeManagedFile` is the only canonical writer.** `plugins/crew/mcp-server/src/lib/managed-fs.ts:137-155`. Both new tools route their field rewrites through it with an explicit `mcpToolContext: { toolName, role }`. The FR81 / NFR16 guard refuses canonical-state writes without this context, so the tools cannot accidentally bypass the contract.
-- **Schema widening is a coordinated bump.** `ExecutionManifestSchema` (`mcp-server/src/schemas/execution-manifest.ts`) gains two new status values (`in-progress`, `done`) and an optional `claimed_by` field. Per `implementation-patterns-consistency-rules.md` § 12, pattern changes that break existing artifacts ship as a breaking plugin-semver bump. The widening is additive (existing `to-do/` and `blocked/` manifests parse unchanged), so a semver minor bump is appropriate — no operator-side migration is required. Coordinate with the plugin version in `plugins/crew/.claude-plugin/plugin.json`.
+- **`moveBetweenStates` is the only canonical atomic mover.** Story 1.6's primitive at `plugins/flow/mcp-server/src/state/manifest-state-machine.ts:76-144`. Both new tools delegate to it. The static `canonical-fs-guard.test.ts` enforces that no other module in `mcp-server/src/**` invokes `rename` against a state-machine path. The new tools comply because the `.tmp`-then-`rename` for field rewrite goes through `writeManagedFile` (whitelisted), and the state transition goes through `moveBetweenStates` (whitelisted).
+- **`writeManagedFile` is the only canonical writer.** `plugins/flow/mcp-server/src/lib/managed-fs.ts:137-155`. Both new tools route their field rewrites through it with an explicit `mcpToolContext: { toolName, role }`. The FR81 / NFR16 guard refuses canonical-state writes without this context, so the tools cannot accidentally bypass the contract.
+- **Schema widening is a coordinated bump.** `ExecutionManifestSchema` (`mcp-server/src/schemas/execution-manifest.ts`) gains two new status values (`in-progress`, `done`) and an optional `claimed_by` field. Per `implementation-patterns-consistency-rules.md` § 12, pattern changes that break existing artifacts ship as a breaking plugin-semver bump. The widening is additive (existing `to-do/` and `blocked/` manifests parse unchanged), so a semver minor bump is appropriate — no operator-side migration is required. Coordinate with the plugin version in `plugins/flow/.claude-plugin/plugin.json`.
 - **`detectInProgressHandEdit` is the FR14a contract.** Story 3.7 shipped the predicate at `mcp-server/src/state/manifest-state-machine.ts:228-316` and the `InProgressHandEditError` at `mcp-server/src/errors.ts:700-716`. Story 4.1 is the first required caller per PRD FR14a sub-bullet. Both tools call the guard on entry against the in-progress layer. The guard's caller contract (TSDoc lines 199–215) explicitly names Epic 4/5 as the consumers.
 - **`PlanningAdapter` interface is unchanged.** The dependency check is a pure `done/` directory test — no adapter-side read is required to gate the claim. The hand-edit guard requires an adapter-side `readSourceStory` to derive the baseline, but that method already exists; no signature change.
 - **No new MCP tool category.** Both `claimStory` and `completeStory` fit the existing camelCase verb-noun convention (§ 4). No dotted namespacing, no new top-level grouping.
@@ -193,20 +193,20 @@ Plus a chaos test: 1,000 concurrent `claim-story` attempts against the same `to-
 ## File structure requirements
 
 New files:
-- `plugins/crew/mcp-server/src/tools/claim-story.ts`
-- `plugins/crew/mcp-server/src/tools/complete-story.ts`
-- `plugins/crew/mcp-server/src/state/derive-source-baseline.ts` (helper for hand-edit baseline)
-- `plugins/crew/mcp-server/src/tools/__tests__/claim-story.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/complete-story.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`
+- `plugins/flow/mcp-server/src/tools/claim-story.ts`
+- `plugins/flow/mcp-server/src/tools/complete-story.ts`
+- `plugins/flow/mcp-server/src/state/derive-source-baseline.ts` (helper for hand-edit baseline)
+- `plugins/flow/mcp-server/src/tools/__tests__/claim-story.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/complete-story.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`
 
 Modified files (UPDATE, not NEW — read fully before editing):
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — widen `status` enum, add optional `claimed_by`. Existing TSDoc updated. Existing call-sites of `parseExecutionManifest` (in `scan-sources.ts`, `manifest-state-machine.ts`, `mark-withdrawn.ts`, planner backlog validator) MUST be re-read to confirm none break on the widened enum. Spot check: `scan-sources.ts` line 322 forces `status: "blocked"` literal — unchanged. `scan-sources.ts` line 287 reads `status` from disk but does not switch on the enum exhaustively — unchanged. `mark-withdrawn.ts` writes back to `to-do/` only — unchanged.
-- `plugins/crew/mcp-server/src/errors.ts` — add `DependenciesNotReadyError` and `WrongClaimantError`. No edits to existing classes.
-- `plugins/crew/mcp-server/src/tools/register.ts` — add two `server.registerTool` calls for the new tools. No edits to existing registrations.
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — widen `status` enum, add optional `claimed_by`. Existing TSDoc updated. Existing call-sites of `parseExecutionManifest` (in `scan-sources.ts`, `manifest-state-machine.ts`, `mark-withdrawn.ts`, planner backlog validator) MUST be re-read to confirm none break on the widened enum. Spot check: `scan-sources.ts` line 322 forces `status: "blocked"` literal — unchanged. `scan-sources.ts` line 287 reads `status` from disk but does not switch on the enum exhaustively — unchanged. `mark-withdrawn.ts` writes back to `to-do/` only — unchanged.
+- `plugins/flow/mcp-server/src/errors.ts` — add `DependenciesNotReadyError` and `WrongClaimantError`. No edits to existing classes.
+- `plugins/flow/mcp-server/src/tools/register.ts` — add two `server.registerTool` calls for the new tools. No edits to existing registrations.
 
 Build output (regenerate, do not hand-edit):
-- `plugins/crew/mcp-server/dist/` — committed per CLAUDE.md §Process notes.
+- `plugins/flow/mcp-server/dist/` — committed per CLAUDE.md §Process notes.
 
 ## Testing requirements
 
@@ -233,12 +233,12 @@ Build output (regenerate, do not hand-edit):
 - Predecessor spec (FR14a paper promise): `_bmad-output/implementation-artifacts/3-7-plain-language-guideline-and-direct-edit-allowance.md` § Behavioural contract.
 - Architecture: `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md` (MCP tool naming § 4, locked phrases § 7, TS conventions § 6).
 - Architecture: `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.md` (tool layout — `mcp-server/src/tools/claim-story.ts` and `complete-story.ts` enumerated at lines 63–64).
-- Source: `plugins/crew/mcp-server/src/state/manifest-state-machine.ts` (`moveBetweenStates` at 76–144, `detectInProgressHandEdit` at 228–316).
-- Source: `plugins/crew/mcp-server/src/errors.ts` (`InProgressHandEditError` at 700–716, `ManifestNotFoundError` at 471–488, error-class precedent for `DependenciesNotReadyError` / `WrongClaimantError`).
-- Source: `plugins/crew/mcp-server/src/lib/managed-fs.ts` (`writeManagedFile` / `atomicWriteFile` at 115–155).
-- Source: `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (schema to widen).
-- Source: `plugins/crew/mcp-server/src/tools/register.ts` (registration pattern).
-- Source: `plugins/crew/mcp-server/src/tools/scan-sources.ts` (writer pattern, line 308 onward — mcpToolContext shape, yaml stringify options).
+- Source: `plugins/flow/mcp-server/src/state/manifest-state-machine.ts` (`moveBetweenStates` at 76–144, `detectInProgressHandEdit` at 228–316).
+- Source: `plugins/flow/mcp-server/src/errors.ts` (`InProgressHandEditError` at 700–716, `ManifestNotFoundError` at 471–488, error-class precedent for `DependenciesNotReadyError` / `WrongClaimantError`).
+- Source: `plugins/flow/mcp-server/src/lib/managed-fs.ts` (`writeManagedFile` / `atomicWriteFile` at 115–155).
+- Source: `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (schema to widen).
+- Source: `plugins/flow/mcp-server/src/tools/register.ts` (registration pattern).
+- Source: `plugins/flow/mcp-server/src/tools/scan-sources.ts` (writer pattern, line 308 onward — mcpToolContext shape, yaml stringify options).
 
 ### Project Structure Notes
 
@@ -271,23 +271,23 @@ None.
 ### File List
 
 New files:
-- `plugins/crew/mcp-server/src/tools/claim-story.ts`
-- `plugins/crew/mcp-server/src/tools/complete-story.ts`
-- `plugins/crew/mcp-server/src/state/derive-source-baseline.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/claim-story.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/complete-story.test.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`
+- `plugins/flow/mcp-server/src/tools/claim-story.ts`
+- `plugins/flow/mcp-server/src/tools/complete-story.ts`
+- `plugins/flow/mcp-server/src/state/derive-source-baseline.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/claim-story.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/complete-story.test.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/claim-complete-loop.integration.test.ts`
 
 Modified files:
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — widened status enum, added `claimed_by`, updated TSDoc
-- `plugins/crew/mcp-server/src/errors.ts` — added `DependenciesNotReadyError` and `WrongClaimantError`
-- `plugins/crew/mcp-server/src/tools/register.ts` — registered `claimStory` and `completeStory` tools
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` — updated tool count 13 → 15
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` — updated tool count 13 → 15
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` — updated tool count 13 → 15
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` — widened status enum, added `claimed_by`, updated TSDoc
+- `plugins/flow/mcp-server/src/errors.ts` — added `DependenciesNotReadyError` and `WrongClaimantError`
+- `plugins/flow/mcp-server/src/tools/register.ts` — registered `claimStory` and `completeStory` tools
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` — updated tool count 13 → 15
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` — updated tool count 13 → 15
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` — updated tool count 13 → 15
 
 Build output (regenerated):
-- `plugins/crew/mcp-server/dist/` — committed per CLAUDE.md §Process notes
+- `plugins/flow/mcp-server/dist/` — committed per CLAUDE.md §Process notes
 
 ### Change Log
 

@@ -19,33 +19,33 @@ so that the Considered lens grades each draft at the correct low/medium/high bar
 
 **AC1 — a scanned native story carries a meaningful, persisted risk_tier the Considered lens reads (integration):**
 
-Drive `/crew:scan` then the judge panel on a temp native workspace. (a) A native story whose `cited_sources` include state-mutating paths (matching the high/medium rules in the risk-tiering spec) produces a `to-do/` manifest stamped with a non-fallback `risk_tier` (e.g. `high`/`medium`) and `risk_tier_evidence`; a story citing only low-risk paths is stamped `low`. (b) The judge panel reads that persisted `risk_tier` and the Considered lens applies the matching §3.5 bar (the existing judge-panel test that asserts "the Considered bar scales with risk tier" passes when the tier comes from the manifest, not a fresh empty-diff computation). Observable spine: a native draft is judged at a tier derived from its declared paths, persisted before any build.
+Drive `/flow:scan` then the judge panel on a temp native workspace. (a) A native story whose `cited_sources` include state-mutating paths (matching the high/medium rules in the risk-tiering spec) produces a `to-do/` manifest stamped with a non-fallback `risk_tier` (e.g. `high`/`medium`) and `risk_tier_evidence`; a story citing only low-risk paths is stamped `low`. (b) The judge panel reads that persisted `risk_tier` and the Considered lens applies the matching §3.5 bar (the existing judge-panel test that asserts "the Considered bar scales with risk tier" passes when the tier comes from the manifest, not a fresh empty-diff computation). Observable spine: a native draft is judged at a tier derived from its declared paths, persisted before any build.
 
-vitest: plugins/crew/mcp-server/tests/scan-sources.test.ts
+vitest: plugins/flow/mcp-server/tests/scan-sources.test.ts
 
 **AC2 — scan computes and stamps risk_tier from declared paths, additively and BMad-safe (unit):**
 
 When creating a native `to-do/` manifest, `scanSources` calls `classifyRiskTier({ targetRepoRoot, pluginRoot, storyId: ref, changedPaths: <story.cited_sources>, commitMessages: [], diffSize: 0 })` (author-time mode — path-pattern matching with no diff) and stamps `risk_tier` + `risk_tier_evidence` on the manifest. A BMad/legacy story with no `cited_sources` is NOT stamped (`risk_tier` stays `undefined`) — no regression to BMad scanning.
 
-vitest: plugins/crew/mcp-server/tests/scan-sources.test.ts
+vitest: plugins/flow/mcp-server/tests/scan-sources.test.ts
 
 **AC3 — the judge panel prefers the persisted tier; legacy still recomputes (unit):**
 
 `runJudgePanel` uses the manifest's persisted `risk_tier` when present (single source of truth), and falls back to the current compute-from-`draft.changedPaths` behavior only when it is absent (legacy/BMad). The Considered lens receives the persisted tier.
 
-vitest: plugins/crew/mcp-server/src/tools/__tests__/judge-panel.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/judge-panel.test.ts
 
 **AC4 — classifyRiskTier returns a real tier in author-time mode (unit):**
 
 `classifyRiskTier` with declared `changedPaths`, `commitMessages: []`, `diffSize: 0` matches `path_patterns` rules and returns a meaningful tier (not just `fallback`) — confirming author-time classification is separable from a git diff. A path set matching a high-tier rule returns `high` with the matched rule id in evidence.
 
-vitest: plugins/crew/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts
 
 ## Definition of Done
 
 - [ ] All four ACs met.
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green — full suite (scan + judge are load-bearing).
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt.
+- [ ] `pnpm --dir plugins/flow/mcp-server test` green — full suite (scan + judge are load-bearing).
+- [ ] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt.
 - [ ] `pnpm knip` green.
 - [ ] PR opens against `main`. CI green.
 - [ ] Reviewer cycle clean.
@@ -67,13 +67,13 @@ vitest: plugins/crew/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts
 - **`classifyRiskTier`** (classify-risk-tier.ts L132) takes `changedPaths`/`commitMessages`/`diffSize` as first-class data — no git dependency. Author-time call: `changedPaths = story.cited_sources`, `commitMessages: []`, `diffSize: 0`. It loads the rule spec via `lookupRiskTieringSpec` (target-repo `docs/risk-tiering.md` → shipped default) — unchanged.
 - **Manifest fields** `risk_tier` (`z.enum(["low","medium","high"]).optional()`) and `risk_tier_evidence` (L264-279) — write the classifier's `tier` and `{ matched_rule, paths, change_types, diff_size }` into them. Already in the schema; no migration.
 - **Scan stamping** mirrors the post-build `stampRiskTierOnManifest` pattern (post-reviewer-comments.ts L142-179) — but at manifest *creation* in `scanSources`, not post-build. Reuse the evidence shape.
-- **Judge read** — `runJudgePanel` (judge-panel.ts L331-342) currently calls `classifyRiskTier` itself; change it to prefer `manifest.risk_tier` when set, else keep the current call. The `JudgeRunner.riskTier` param + Considered-lens bar (judge-panel.ts L117-124, /crew:judge SKILL.md L32) are unchanged.
+- **Judge read** — `runJudgePanel` (judge-panel.ts L331-342) currently calls `classifyRiskTier` itself; change it to prefer `manifest.risk_tier` when set, else keep the current call. The `JudgeRunner.riskTier` param + Considered-lens bar (judge-panel.ts L117-124, /flow:judge SKILL.md L32) are unchanged.
 
 ### Files touched
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` — on native `to-do/` manifest creation, compute + stamp `risk_tier`/`risk_tier_evidence` from `story.cited_sources` (gated to native/enriched stories with declared paths).
-- `plugins/crew/mcp-server/src/tools/judge-panel.ts` (~L331-342) — prefer the persisted `risk_tier`; fall back to compute when absent.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` — on native `to-do/` manifest creation, compute + stamp `risk_tier`/`risk_tier_evidence` from `story.cited_sources` (gated to native/enriched stories with declared paths).
+- `plugins/flow/mcp-server/src/tools/judge-panel.ts` (~L331-342) — prefer the persisted `risk_tier`; fall back to compute when absent.
 
 (No schema change. No new files unless a shared "compute author-time risk" helper is cleaner than inlining in scan.)
 
@@ -87,15 +87,15 @@ vitest: plugins/crew/mcp-server/src/tools/__tests__/classify-risk-tier.test.ts
 ### Risk + build notes (drain context)
 
 - **Risk tier: medium.** Touches scan (manifest creation) and judge wiring; additive (no schema change), default-safe (absent tier → existing fallback). Full-suite-green is the ship gate.
-- **Build/verify:** `pnpm --dir plugins/crew/mcp-server test` + `build` + `pnpm knip`, all green. Deterministic.
+- **Build/verify:** `pnpm --dir plugins/flow/mcp-server test` + `build` + `pnpm knip`, all green. Deterministic.
 - **Build-safe vs the live Epic 6 drain** — does not touch the discipline validator / standards surface.
 
 ### References
 
 - [Source: _bmad-output/planning-artifacts/native-refoundation-plan-2026-05-31.md §3] — "risk_tier carried from classifyRiskTier so the Considered lens applies the right bar — plumb into the draft, not just post-review."
 - [Source: _bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md §3.5] — the Considered lens's risk-tiered bar (low / medium-high / highest).
-- [Source: plugins/crew/mcp-server/src/tools/classify-risk-tier.ts L132-198] — the classifier (separable path-matching; rule-spec lookup; fallback tier).
-- [Source: plugins/crew/mcp-server/src/schemas/execution-manifest.ts L264-279] — existing `risk_tier`/`risk_tier_evidence` manifest fields.
-- [Source: plugins/crew/mcp-server/src/tools/judge-panel.ts L331-342, L117-124] — where the panel classifies + passes `riskTier` to the Considered lens.
-- [Source: plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts L142-179] — the post-build `stampRiskTierOnManifest` pattern to mirror (at scan instead of post-build).
+- [Source: plugins/flow/mcp-server/src/tools/classify-risk-tier.ts L132-198] — the classifier (separable path-matching; rule-spec lookup; fallback tier).
+- [Source: plugins/flow/mcp-server/src/schemas/execution-manifest.ts L264-279] — existing `risk_tier`/`risk_tier_evidence` manifest fields.
+- [Source: plugins/flow/mcp-server/src/tools/judge-panel.ts L331-342, L117-124] — where the panel classifies + passes `riskTier` to the Considered lens.
+- [Source: plugins/flow/mcp-server/src/tools/post-reviewer-comments.ts L142-179] — the post-build `stampRiskTierOnManifest` pattern to mirror (at scan instead of post-build).
 - [Source: _bmad-output/implementation-artifacts/10-2-native-tasks-ac-refs-cited-sources-and-narrative.md] — `cited_sources`, the author-time path signal this story consumes.

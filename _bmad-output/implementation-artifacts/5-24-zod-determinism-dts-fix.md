@@ -6,8 +6,8 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **the `.d.ts` files under `plugins/crew/mcp-server/dist/` to be byte-identical across clean `tsc` rebuilds**,
-So that **the working-tree-clean invariant from `pre-dogfood-hygiene.md` holds without a `git restore plugins/crew/mcp-server/dist/` workaround**.
+I want **the `.d.ts` files under `plugins/flow/mcp-server/dist/` to be byte-identical across clean `tsc` rebuilds**,
+So that **the working-tree-clean invariant from `pre-dogfood-hygiene.md` holds without a `git restore plugins/flow/mcp-server/dist/` workaround**.
 
 This story is independent — no spec or code dependencies on other in-flight Epic 5 stories. Investigative: the dev diagnoses root cause in AC2 and then implements the smallest fix that satisfies AC1.
 
@@ -15,10 +15,10 @@ This story is independent — no spec or code dependencies on other in-flight Ep
 
 **AC1:**
 
-Build determinism: run `pnpm --dir plugins/crew/mcp-server build` twice on a clean tree (first run produces `dist/`; second run after `rm -rf plugins/crew/mcp-server/dist && pnpm --dir plugins/crew/mcp-server build`). After both runs, `git diff plugins/crew/mcp-server/dist/` shows zero output. Repeat 5 times consecutively — zero drift on any pair.
-artifact: plugins/crew/mcp-server/scripts/normalise-dist.mjs
+Build determinism: run `pnpm --dir plugins/flow/mcp-server build` twice on a clean tree (first run produces `dist/`; second run after `rm -rf plugins/flow/mcp-server/dist && pnpm --dir plugins/flow/mcp-server build`). After both runs, `git diff plugins/flow/mcp-server/dist/` shows zero output. Repeat 5 times consecutively — zero drift on any pair.
+artifact: plugins/flow/mcp-server/scripts/normalise-dist.mjs
 
-(Dev picks the seam based on AC2 diagnosis — strategies A/B/C in Implementation Notes. Other possible artifacts: `plugins/crew/mcp-server/package.json` or schemas under `plugins/crew/mcp-server/src/schemas/`.)
+(Dev picks the seam based on AC2 diagnosis — strategies A/B/C in Implementation Notes. Other possible artifacts: `plugins/flow/mcp-server/package.json` or schemas under `plugins/flow/mcp-server/src/schemas/`.)
 
 **AC2:**
 
@@ -29,8 +29,8 @@ artifact: _bmad-output/implementation-artifacts/5-24-zod-determinism-dts-fix.md
 
 **AC3 (integration):**
 
-A vitest test in `plugins/crew/mcp-server/tests/` runs `pnpm build` twice (programmatically via `child_process.execSync` or equivalent, with the project's existing build script) and asserts `dist/` is byte-identical between runs. Test is part of the standard `pnpm test` flow so it catches future regression. Tolerable runtime overhead: this test may add 30-60 seconds to the test suite; if that's too much, mark it as a separate `pnpm test:determinism` script invoked only in CI.
-vitest: plugins/crew/mcp-server/tests/build-determinism.test.ts
+A vitest test in `plugins/flow/mcp-server/tests/` runs `pnpm build` twice (programmatically via `child_process.execSync` or equivalent, with the project's existing build script) and asserts `dist/` is byte-identical between runs. Test is part of the standard `pnpm test` flow so it catches future regression. Tolerable runtime overhead: this test may add 30-60 seconds to the test suite; if that's too much, mark it as a separate `pnpm test:determinism` script invoked only in CI.
+vitest: plugins/flow/mcp-server/tests/build-determinism.test.ts
 
 ## Implementation Notes
 
@@ -38,39 +38,39 @@ vitest: plugins/crew/mcp-server/tests/build-determinism.test.ts
 
 **Investigation order (do AC2 first):**
 
-1. Run `pnpm --dir plugins/crew/mcp-server build` twice; capture the diff. Identify which `.d.ts` files drift and which symbols/types inside them swap.
-2. Trace the drifting symbols back to their Zod source schemas (in `plugins/crew/mcp-server/src/schemas/` and a few inline schemas in `plugins/crew/mcp-server/src/tools/`).
+1. Run `pnpm --dir plugins/flow/mcp-server build` twice; capture the diff. Identify which `.d.ts` files drift and which symbols/types inside them swap.
+2. Trace the drifting symbols back to their Zod source schemas (in `plugins/flow/mcp-server/src/schemas/` and a few inline schemas in `plugins/flow/mcp-server/src/tools/`).
 3. Check `pnpm-lock.yaml` for the resolved Zod version; check `package.json` for the declared range.
 4. Confirm whether running the build twice with `dist/` deleted between runs reproduces the drift on the same machine. If yes: deterministic-emit issue (strategy B or C). If no: install-state issue (strategy A).
 
 **Strategy A (smallest, if version-driven):**
 
-- `plugins/crew/mcp-server/package.json` — pin Zod to an exact version (remove `^` range).
+- `plugins/flow/mcp-server/package.json` — pin Zod to an exact version (remove `^` range).
 - `pnpm-lock.yaml` — regenerate via `pnpm install` in the package dir.
 
 **Strategy B (source-side stabilisation, if Zod inference is non-deterministic):**
 
-- `plugins/crew/mcp-server/src/schemas/*.ts` — replace `z.union(...)` enum-like patterns with explicit `z.enum([...] as const)` declarations whose source-array ordering is stable.
+- `plugins/flow/mcp-server/src/schemas/*.ts` — replace `z.union(...)` enum-like patterns with explicit `z.enum([...] as const)` declarations whose source-array ordering is stable.
 - Touch only the schemas whose `.d.ts` emit drifts. Don't over-refactor.
 
 **Strategy C (post-build normaliser, if A and B don't hold):**
 
-- `plugins/crew/mcp-server/scripts/normalise-dist.ts` (NEW) — small script that walks `dist/**/*.d.ts` and sorts union members alphabetically inside type literals. Run after `tsc`.
-- `plugins/crew/mcp-server/package.json` — chain the normaliser into the `build` script: `tsc -p tsconfig.json && tsx scripts/normalise-dist.ts`.
+- `plugins/flow/mcp-server/scripts/normalise-dist.ts` (NEW) — small script that walks `dist/**/*.d.ts` and sorts union members alphabetically inside type literals. Run after `tsc`.
+- `plugins/flow/mcp-server/package.json` — chain the normaliser into the `build` script: `tsc -p tsconfig.json && tsx scripts/normalise-dist.ts`.
 - Most invasive; only reach for this if A and B aren't viable.
 
 **Regression check (regardless of strategy):**
 
-- `plugins/crew/mcp-server/tests/build-determinism.test.ts` (NEW) — per AC3.
+- `plugins/flow/mcp-server/tests/build-determinism.test.ts` (NEW) — per AC3.
 
 **Cleanup once fix lands:**
 
-- `plugins/crew/docs/pre-dogfood-hygiene.md` — remove the "Known recurring drift" section about `.d.ts` Zod-determinism + the `git restore plugins/crew/mcp-server/dist/` workaround.
+- `plugins/flow/docs/pre-dogfood-hygiene.md` — remove the "Known recurring drift" section about `.d.ts` Zod-determinism + the `git restore plugins/flow/mcp-server/dist/` workaround.
 - `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` — mark entry 4 as "Folded into 5.24".
 
 ### Build artefacts
 
-After any change in `plugins/crew/mcp-server/src/` or `package.json` or `scripts/`, run `pnpm --dir plugins/crew/mcp-server build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
+After any change in `plugins/flow/mcp-server/src/` or `package.json` or `scripts/`, run `pnpm --dir plugins/flow/mcp-server build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git".
 
 For this story specifically: the *whole point* is that two consecutive builds produce identical `dist/`. After the fix, doing a clean rebuild + staging the result should produce no further diffs on subsequent rebuilds. Verify before committing.
 
@@ -82,7 +82,7 @@ None. Leaf story but touches the build pipeline — be careful not to break the 
 
 - **Carry-forward entry 4** in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` is the source — surfaced from Story 5.12 ship onwards; now 5+ occurrences post-`pre-dogfood-resumption-3` (2026-05-27).
 - **Examples observed:** `dist/schemas/execution-manifest.d.ts`, `dist/tools/classify-risk-tier.d.ts`, `dist/tools/run-auto-merge-gate.d.ts` — the drift is enum union member ordering (`"medium" | "low"` ↔ `"low" | "medium"`).
-- **Documented workaround so far:** `git restore plugins/crew/mcp-server/dist/` before any clean-tree check. This story replaces that workaround.
+- **Documented workaround so far:** `git restore plugins/flow/mcp-server/dist/` before any clean-tree check. This story replaces that workaround.
 - **Memory `project_l1_fixes_validated_2026_05_27`** — none of this drift affects runtime behaviour; it's purely cosmetic. But the cumulative friction across `pre-dogfood-resumption-N` cycles is real (5+ workaround invocations to date).
 
 ### Edge cases worth surfacing in dev/review
@@ -96,11 +96,11 @@ None. Leaf story but touches the build pipeline — be careful not to break the 
 
 - [ ] All ACs met; vitest test green; build is deterministic across 5+ consecutive clean rebuilds.
 - [ ] Root cause documented in Dev Notes (AC2) — technical specifics, not hand-waving.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` passes; `dist/` rebuilt and staged.
+- [ ] `pnpm --dir plugins/flow/mcp-server build` passes; `dist/` rebuilt and staged.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean (no rubber-stamp guard fires).
 - [ ] `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` entry 4 marked "Folded into 5.24."
-- [ ] `plugins/crew/docs/pre-dogfood-hygiene.md` "Known recurring drift" section removed.
+- [ ] `plugins/flow/docs/pre-dogfood-hygiene.md` "Known recurring drift" section removed.
 
 ## Dev Notes
 

@@ -39,7 +39,7 @@ Folders:
 ## Current posture (post 2026-05-25 rollback)
 
 - **`main` is the trunk** (trunk-based development since 2026-05-31). All PRs target `main`; it is protected (PR + required CI), so never push directly. The old `dev` integration branch is retired — `main` is always-releasable, with no separate promote-to-main step. Tag releases/snapshots rather than maintaining a second branch.
-- **Dogfooding (`/crew:start`) is paused** until the three L1 tool defects from `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` are fixed: (a) dev transcript persistence, (b) orphan-recovery branch in `/crew:start`, (c) MCP idle-reap resilience.
+- **Dogfooding (`/flow:start`) is paused** until the three L1 tool defects from `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` are fixed: (a) dev transcript persistence, (b) orphan-recovery branch in `/flow:start`, (c) MCP idle-reap resilience.
 - **Use `/ship-story` for substrate work** in the interim. Manual per-story shipping, one PR at a time, onto `main`.
 - **Stop, don't fix forward.** When a tool I'm orchestrating fails unexpectedly, halt the outer loop, summarise state, and ask. Auto-mode does not authorise continuing a multi-step loop that has already failed once. Read the postmortem before any retry of dogfood.
 
@@ -47,10 +47,10 @@ Folders:
 
 - **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD (sharded under `prd-crew-v1/`), epics, and architecture all sit here and are tracked in git. Older briefs and backlogs are in `_bmad-output/_archive/`, which stays gitignored.
 - **Implementation artifacts live in `_bmad-output/implementation-artifacts/`.** Story specs (one `.md` per story), `sprint-status.yaml`, and per-epic retros all sit here and are tracked in git. The cloud spec-authoring routine reads this folder to compute queue depth and find recently-shipped specs for grounding.
-- **The plugin lives under `plugins/crew/`.** Epic 1 (plugin foundation) is in progress.
+- **The plugin lives under `plugins/flow/`.** Epic 1 (plugin foundation) is in progress.
 - **Discipline rules (inherited from sprint-orchestrator era):** the five planning-discipline rules from `_archive/planning-discipline.md` are the bar for every story we author. They're inherited by the new PRD even though the standalone file is archived.
 - **Deferred work tracker:** captured inside the relevant brief or PRD's deferred section, with reasoning. Promote to a follow-up workstream when ready.
-- **Plugin build output is tracked in git.** `plugins/crew/mcp-server/dist/` is committed because `/plugin install` copies the tree as-is and won't run a build step. If you change `src/`, rebuild and commit `dist/` in the same change — CI fails on drift. See `plugins/crew/docs/README-install.md` § Build artefacts.
+- **Plugin build output is tracked in git.** `plugins/flow/mcp-server/dist/` is committed because `/plugin install` copies the tree as-is and won't run a build step. If you change `src/`, rebuild and commit `dist/` in the same change — CI fails on drift. See `plugins/flow/docs/README-install.md` § Build artefacts.
 
 ## What Jack doesn't want
 

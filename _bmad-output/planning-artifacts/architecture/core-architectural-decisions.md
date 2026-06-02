@@ -4,7 +4,7 @@
 
 **Critical (block implementation):**
 - State-machine atomicity primitive (`fs.rename`)
-- Workspace-root resolution (`<target-repo>/.crew/config.yaml`)
+- Workspace-root resolution (`<target-repo>/.flow/config.yaml`)
 - MCP server stack (TypeScript on Node, single server, `@modelcontextprotocol/sdk`)
 - Agent invocation model (per-story clean-context subagent, persona injected at spawn)
 - GitHub wrapper (`execa` + per-agent subcommand allowlist)
@@ -13,7 +13,7 @@
 **Important (shape architecture):**
 - Planning-tool adapter model — see §Planning Adapter Model below; supersedes the "plugin owns story authorship" framing baked into the original PRD shape
 - Story-ref scheme (`<adapter>:<source-id>` for external adapters; `native:<ULID>` for the no-tool path)
-- Telemetry storage layout (`<target-repo>/.crew/telemetry/<YYYY-MM>.jsonl`)
+- Telemetry storage layout (`<target-repo>/.flow/telemetry/<YYYY-MM>.jsonl`)
 - Verdict-comment idempotency marker (locked footer string)
 - Yield-protocol domain matching (exact-match on `domain:`)
 - Risk-tier classification spec format (YAML block in `docs/risk-tiering.md` + Markdown body; default fallback tier = `medium`)
@@ -26,12 +26,12 @@
 
 ## State Machine & Persistence
 
-> **Revised by §Planning Adapter Model.** The state machine now moves *plugin-owned manifest files* in `<target-repo>/.crew/state/{to-do,in-progress,blocked,done}/<ref>.yaml`; source story files stay where the planning tool put them. The mechanics (atomic `fs.rename`, no-two-states-at-once invariant, heartbeat-based stale-claim detection) are unchanged.
+> **Revised by §Planning Adapter Model.** The state machine now moves *plugin-owned manifest files* in `<target-repo>/.flow/state/{to-do,in-progress,blocked,done}/<ref>.yaml`; source story files stay where the planning tool put them. The mechanics (atomic `fs.rename`, no-two-states-at-once invariant, heartbeat-based stale-claim detection) are unchanged.
 
 | Decision | Choice | Rationale |
 |---|---|---|
 | State-transition primitive | `fs.rename` (Node), same-filesystem only | NFR8 single-syscall atomicity; cross-filesystem moves out of scope |
-| Story source ownership | Source files belong to the planning tool (BMad, etc.); plugin owns an *execution manifest* per story in `.crew/state/<state>/<ref>.yaml` | User picks their planning tool; we reference rather than copy (see §Planning Adapter Model) |
+| Story source ownership | Source files belong to the planning tool (BMad, etc.); plugin owns an *execution manifest* per story in `.flow/state/<state>/<ref>.yaml` | User picks their planning tool; we reference rather than copy (see §Planning Adapter Model) |
 | Manifest file format | YAML, validated by Zod | Same conventions as other plugin-owned artifacts |
 | Story ref scheme | `<adapter>:<source-id>` (e.g. `bmad:1.2.3`); `native:<ULID>` for users without a planning tool | Refs survive a tool switch; carry adapter identity for routing back to source |
 | Frontmatter validation | Zod (TypeScript-first; runtime + compile-time types from one source) | Sprint-orchestrator precedent; superior DX over ajv |
@@ -57,7 +57,7 @@
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Target-repo discovery | A per-target-repo config at `<target-repo>/.crew/config.yaml` marks the repo as a valid target; plugin reads it on every skill invocation | Explicit, version-controllable; avoids fragile cwd heuristics that bit sprint-orchestrator |
+| Target-repo discovery | A per-target-repo config at `<target-repo>/.flow/config.yaml` marks the repo as a valid target; plugin reads it on every skill invocation | Explicit, version-controllable; avoids fragile cwd heuristics that bit sprint-orchestrator |
 | Plugin location | Read from Claude Code's plugin loader (the plugin knows its own install path) | Native to the plugin contract |
 | Same-repo vs split-repo | Treated identically — config file lives in the target repo's tree either way | Removes a code path |
 
@@ -65,7 +65,7 @@
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Storage layout | `<target-repo>/.crew/telemetry/<YYYY-MM>.jsonl` (monthly rollover, append-only) | One file per month keeps file size sane without per-day fragmentation |
+| Storage layout | `<target-repo>/.flow/telemetry/<YYYY-MM>.jsonl` (monthly rollover, append-only) | One file per month keeps file size sane without per-day fragmentation |
 | Schema | Discriminated-union JSONL events (`type:` field) — `agent.invoke`, `reviewer.verdict`, `yield.handoff`, `retro.proposal`, `state.transition`, `team.change` | Parseable without an LLM (NFR21) |
 | Version stamping | Each `reviewer.verdict` event records `standards_version` and `plugin_version`; plugin version comes from the plugin manifest at startup | Matches FR35 / NFR22 |
 | Stats helpers | Pure TS functions reading JSONL → deterministic output; exposed as MCP tools *and* CLI commands | Same code path for user and agents |
@@ -112,7 +112,7 @@
 
 1. Scaffold plugin skeleton + `.claude-plugin/plugin.json` + pnpm workspace.
 2. Stand up MCP server with the canonical-state tool surface (story moves, frontmatter validation via Zod).
-3. Wire workspace resolution (`.crew/config.yaml`) and heartbeat-based session liveness.
+3. Wire workspace resolution (`.flow/config.yaml`) and heartbeat-based session liveness.
 4. Author catalogue templates + persona file machinery + `/<plugin>:hire`.
 5. Plug the dev/reviewer subagent spawn + verdict idempotency marker into `/<plugin>:start`.
 6. Wire telemetry JSONL + agreement-metric + outcome-stats helpers.

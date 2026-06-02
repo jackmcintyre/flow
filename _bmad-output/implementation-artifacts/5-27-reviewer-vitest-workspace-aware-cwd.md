@@ -13,7 +13,7 @@ So that **vitest checks succeed in monorepo / pnpm-workspace target repos that h
 
 ### What this story is, in one sentence
 
-`runReviewerSession.runVitestCheck` currently invokes `pnpm vitest --run -t '<filter>'` with `cwd: targetRepoRoot` (or — post Story 5.26 — `cwd: checkRoot`). The crew repo is a pnpm workspace with **no root `package.json`**; the vitest-owning package lives at `plugins/crew/mcp-server/`. Invocation fails with `ERR_PNPM_NO_PKG_MANIFEST`; test never executes; status:fail; verdict:NEEDS CHANGES. This story makes `runVitestCheck` walk up from the test file's resolved absolute path to find the nearest enclosing `package.json` and use that directory as `cwd`.
+`runReviewerSession.runVitestCheck` currently invokes `pnpm vitest --run -t '<filter>'` with `cwd: targetRepoRoot` (or — post Story 5.26 — `cwd: checkRoot`). The crew repo is a pnpm workspace with **no root `package.json`**; the vitest-owning package lives at `plugins/flow/mcp-server/`. Invocation fails with `ERR_PNPM_NO_PKG_MANIFEST`; test never executes; status:fail; verdict:NEEDS CHANGES. This story makes `runVitestCheck` walk up from the test file's resolved absolute path to find the nearest enclosing `package.json` and use that directory as `cwd`.
 
 ### Why this matters now
 
@@ -32,20 +32,20 @@ Same lineage as Story 5.26: the marker classifier (carry-forward entry 7) was hi
 **AC1:**
 
 `runVitestCheck` resolves its invocation `cwd` by walking up from the test file's resolved absolute path until it finds the nearest `package.json` (inclusive of the test file's directory). The walk starts at `path.dirname(path.resolve(checkRoot, testFilePath))` where `testFilePath` is derived from the `vitest:` marker, and stops at the first directory containing a `package.json`. The found directory is used as `cwd` for the `pnpm vitest --run -t '<filter>'` invocation. `checkRoot` (the bound of the walk) is the PR-branch worktree from Story 5.26 if available, otherwise `targetRepoRoot`.
-artifact: plugins/crew/mcp-server/src/tools/run-reviewer-session.ts
+artifact: plugins/flow/mcp-server/src/tools/run-reviewer-session.ts
 
 **AC2:**
 
 If the walk reaches `checkRoot` (inclusive) without finding any `package.json`, `runVitestCheck` returns `status: "fail"` with the reason `"no package.json found between test file '<testFilePath>' and checkRoot '<checkRoot>' — vitest cannot run without a manifest"`. It does NOT fall back to `checkRoot` as the cwd; failing-loud is correct (matches the deterministic-seam principle — silent fallback to the wrong cwd was the original bug).
-artifact: plugins/crew/mcp-server/src/tools/run-reviewer-session.ts
+artifact: plugins/flow/mcp-server/src/tools/run-reviewer-session.ts
 
 **AC3 (integration):**
 
-A vitest at `plugins/crew/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts` seeds three fixture trees and runs `runVitestCheck` against each:
-- **Fixture A (workspace shape):** outer dir with no `package.json` + inner `plugins/crew/mcp-server/` with a valid `package.json` + a passing vitest test at `plugins/crew/mcp-server/tests/my-test.test.ts`. Asserts (a) `runVitestCheck` identifies `plugins/crew/mcp-server` as cwd, (b) runs vitest there, (c) returns `status: "pass"`.
+A vitest at `plugins/flow/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts` seeds three fixture trees and runs `runVitestCheck` against each:
+- **Fixture A (workspace shape):** outer dir with no `package.json` + inner `plugins/flow/mcp-server/` with a valid `package.json` + a passing vitest test at `plugins/flow/mcp-server/tests/my-test.test.ts`. Asserts (a) `runVitestCheck` identifies `plugins/flow/mcp-server` as cwd, (b) runs vitest there, (c) returns `status: "pass"`.
 - **Fixture B (no manifest):** outer dir with no `package.json` + inner test file at `tests/orphan.test.ts` (no `package.json` anywhere above it). Asserts `status: "fail"` with the AC2 missing-manifest reason.
 - **Fixture C (root-level manifest):** outer dir with a root `package.json` + test file at `tests/root.test.ts`. Asserts `cwd` resolves to the outer dir + runs successfully.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts
 
 **AC4:**
 
@@ -53,12 +53,12 @@ Compatibility test confirms BOTH paths work under 5.27:
 - **Path 1 (pre-5.26 — no PR-branch worktree):** `runVitestCheck` is called with `checkRoot === targetRepoRoot` (orchestrator's local dev). Walk happens there. Asserted by fixture A in AC3 with `checkRoot === fixtureRoot`.
 - **Path 2 (post-5.26 — PR-branch worktree present):** `runVitestCheck` is called with `checkRoot === worktreePath`. Walk happens inside the worktree. Asserted by a separate fixture that mimics a PR-branch worktree directory layout (or by stub-mocking the `materialisePrBranchWorktree` return in an integration test).
 Both must return identical behaviour given identical filesystem state — the walk is `checkRoot`-rooted regardless of which one is supplied.
-vitest: plugins/crew/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts
+vitest: plugins/flow/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts
 
 **AC5:**
 
 `runVitestCheck` accepts `testFilePath` as a NEW required parameter alongside `testNameFilter` (existing). Previously the function only knew `testNameFilter` and relied on vitest's own discovery from cwd — but to walk for the package root, we need the test file path. The caller (in the main `runReviewerSession` loop) plumbs this through from the `vitest:` marker's captured group. Update the function signature and the one call site.
-artifact: plugins/crew/mcp-server/src/tools/run-reviewer-session.ts
+artifact: plugins/flow/mcp-server/src/tools/run-reviewer-session.ts
 
 ---
 
@@ -77,12 +77,12 @@ Three approaches were considered:
 ### Files touched
 
 **UPDATE:**
-- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` — two changes:
+- `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts` — two changes:
   - `runVitestCheck` signature: add `testFilePath: string` parameter (the resolved absolute path of the test file). Add an internal helper `findPackageRoot({ testFilePathAbs, checkRoot })` that walks up using `path.dirname()` + `fs.access(path.join(dir, "package.json"))` until found OR until `dir === checkRoot` (inclusive). Returns `{ ok: true, packageRoot }` or `{ ok: false }`.
   - Update the main `runReviewerSession` AC-walk loop (currently line 429-456) to derive `testFilePath` from the `vitest:` marker's captured group. The current `VITEST_RE = /^vitest:\s*(.+)$/m` captures the path; `classifyAc` returns it as `testNameFilter` (confusingly named — it's the path used to construct the filter, but in practice the path IS the filter). Inspect dev to confirm whether `testNameFilter` already carries the path or if it's been transformed. If transformed, capture the raw path separately.
 
 **NEW:**
-- `plugins/crew/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts` — vitest per AC3 + AC4.
+- `plugins/flow/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts` — vitest per AC3 + AC4.
 
 ### Behavioural contract
 
@@ -188,7 +188,7 @@ function findPackageRoot(opts: {
 
 ### Why `testFilePath` separately from `testNameFilter`
 
-The current `classifyAc` extracts `testNameFilter` from the `vitest:` marker via `VITEST_RE`. The captured group is a single string. Reading the regex (`/^vitest:\s*(.+)$/m`), it captures everything after `vitest: ` to end-of-line. In practice this is a file path like `plugins/crew/mcp-server/tests/build-determinism.test.ts` — used as both the path AND the filter (vitest's `-t` flag matches against test names, not file paths, so this is actually a misuse that happens to work because vitest also discovers files from the filter when no file pattern is given).
+The current `classifyAc` extracts `testNameFilter` from the `vitest:` marker via `VITEST_RE`. The captured group is a single string. Reading the regex (`/^vitest:\s*(.+)$/m`), it captures everything after `vitest: ` to end-of-line. In practice this is a file path like `plugins/flow/mcp-server/tests/build-determinism.test.ts` — used as both the path AND the filter (vitest's `-t` flag matches against test names, not file paths, so this is actually a misuse that happens to work because vitest also discovers files from the filter when no file pattern is given).
 
 The dev should inspect the actual `classifyAc` behaviour. Two outcomes possible:
 1. `testNameFilter` IS the file path verbatim — then `testFilePath = testNameFilter` and no new field needed in `classifyAc`'s return. Pass through.
@@ -219,20 +219,20 @@ If `testNameFilter === testFilePath` always (which the current regex suggests), 
 
 ### Build artefacts
 
-After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew/mcp-server build` and stage the resulting `plugins/crew/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git". Post-5.24, the `pnpm build` chain includes the post-build normaliser — verify zero unexpected dist drift before staging.
+After any change in `plugins/flow/mcp-server/src/`, run `pnpm --dir plugins/flow/mcp-server build` and stage the resulting `plugins/flow/mcp-server/dist/` changes in the same commit. CI fails on drift between `src/` and `dist/` per project CLAUDE.md § "Plugin build output is tracked in git". Post-5.24, the `pnpm build` chain includes the post-build normaliser — verify zero unexpected dist drift before staging.
 
 ### Edge cases worth surfacing in dev/review
 
 - **Walk escapes `checkRoot`.** The `isWithinCheckRoot` guard in `findPackageRoot` (equality OR `startsWith(checkRootAbs + path.sep)`) ensures we never walk above `checkRoot` AND never falsely admit a sibling whose path string happens to begin with the `checkRoot` prefix (e.g. `checkRoot=/tmp/check`, sibling `/tmp/checker`). This protects against a test file with a misleading path that resolves to outside the worktree (shouldn't happen if 5.26's worktree materialisation is correct, but defence in depth).
 - **Symlinks in the walk.** `path.dirname` doesn't resolve symlinks. If a test file lives under a symlinked directory inside `checkRoot`, the walk may produce unexpected paths. Use `fs.realpathSync` on `testFilePathAbs` before starting the walk to canonicalise. Confirm in dev whether this matters for the crew repo's actual layout.
 - **Multiple `package.json` in the walk.** The first one found (closest to the test file) wins. That's the right semantic — the closest package owns the test. If a higher-level workspace `package.json` should override for some reason, the spec author should put the test elsewhere.
-- **`pnpm-workspace.yaml` at root with no root `package.json`.** This is the crew repo's actual shape. The walk skips `pnpm-workspace.yaml` (we're only looking for `package.json`) and continues up until either finding a `package.json` or hitting `checkRoot`. For crew, it'll find `plugins/crew/mcp-server/package.json` correctly.
+- **`pnpm-workspace.yaml` at root with no root `package.json`.** This is the crew repo's actual shape. The walk skips `pnpm-workspace.yaml` (we're only looking for `package.json`) and continues up until either finding a `package.json` or hitting `checkRoot`. For crew, it'll find `plugins/flow/mcp-server/package.json` correctly.
 - **`runVitestCheck` failure path stays compatible with `runArtifactCheck`.** Both return the same `AcResult` shape. The new failure variant for missing-manifest must conform to the existing `runnable-vitest` AcResult shape (with `stdout: ""`, `stderr: ""`, `exitCode: -1` per pattern of other timeout/setup failures in the function).
 - **Test framework other than vitest.** Out of scope — `runVitestCheck` is vitest-specific by design. If a future story adds support for other runners, the walk pattern from this story is reusable.
 
 ### Architectural fit / references
 
-- **Source code** — `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`, specifically `runVitestCheck` (lines 226-279 as of 2026-05-28 and `classifyAc` (line 158-177). The `VITEST_RE` constant (line 156) is the marker regex.
+- **Source code** — `plugins/flow/mcp-server/src/tools/run-reviewer-session.ts`, specifically `runVitestCheck` (lines 226-279 as of 2026-05-28 and `classifyAc` (line 158-177). The `VITEST_RE` constant (line 156) is the marker regex.
 - **Story 5.26** — `_bmad-output/implementation-artifacts/5-26-reviewer-session-artifact-check-against-pr-branch.md`. Soft dep — provides the `checkRoot` plumbing.
 - **Deterministic seam principle** — memory `feedback_default_to_deterministic_seams`. AC2's fail-loud-on-missing-manifest is exactly this pattern: refuse to silently degrade. Originally `runVitestCheck` silently failed at the pnpm level; AC2 makes the failure explicit and located at our boundary.
 - **Carry-forward source** — `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` entry 14. Authoritative description.
@@ -243,8 +243,8 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 ## Definition of Done
 
 - [x] All five ACs met (AC1–AC5).
-- [x] `pnpm --dir plugins/crew/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
-- [x] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [x] `pnpm --dir plugins/flow/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
+- [x] `pnpm --dir plugins/flow/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean — this PR's own reviewer pass should now use the fixed path (recursive validation). If the reviewer hits a vitest cwd failure on its own AC checks, that's a defect in the new code that the test suite missed.
 - [x] No changes to `docs/standards.md`, `discipline-rules.yaml`, persona files, or any state directory.

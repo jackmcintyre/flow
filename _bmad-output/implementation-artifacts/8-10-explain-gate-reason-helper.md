@@ -19,14 +19,14 @@ This is the Stage-2-for-code dogfood guinea pig (Epic 8): a small, self-containe
 
 **AC1 — maps each known gate reason to a non-empty plain-language explanation:**
 
-`explainGateReason(reason)` is a new exported pure function in `plugins/crew/mcp-server/src/lib/explain-gate-reason.ts`. Given any of the known auto-merge gate reason strings — `"low-risk-met-threshold"`, `"low-risk-sub-threshold"`, `"low-risk-insufficient-data"`, `"low-risk-provisional-trust"`, `"medium-risk"`, `"high-risk"`, `"no-tier-no-signal"`, `"ci-not-green"` — it returns a non-empty, human-readable one-line string (no newline characters) that accurately describes what that reason means for the merge decision. The function is pure and deterministic — no I/O, no mutation.
-vitest: plugins/crew/mcp-server/src/lib/__tests__/explain-gate-reason.test.ts
+`explainGateReason(reason)` is a new exported pure function in `plugins/flow/mcp-server/src/lib/explain-gate-reason.ts`. Given any of the known auto-merge gate reason strings — `"low-risk-met-threshold"`, `"low-risk-sub-threshold"`, `"low-risk-insufficient-data"`, `"low-risk-provisional-trust"`, `"medium-risk"`, `"high-risk"`, `"no-tier-no-signal"`, `"ci-not-green"` — it returns a non-empty, human-readable one-line string (no newline characters) that accurately describes what that reason means for the merge decision. The function is pure and deterministic — no I/O, no mutation.
+vitest: plugins/flow/mcp-server/src/lib/__tests__/explain-gate-reason.test.ts
 
 **AC2 — returns a safe fallback for an unknown reason and never throws:**
 
 Given a reason string that is not one of the known literals (including the empty string), `explainGateReason` returns a non-empty generic fallback explanation (e.g. mentioning an unrecognized reason) rather than throwing or returning an empty string. The function never throws for any string input.
-vitest: plugins/crew/mcp-server/src/lib/__tests__/explain-gate-reason.test.ts
+vitest: plugins/flow/mcp-server/src/lib/__tests__/explain-gate-reason.test.ts
 
 ## Notes
 
-Keep it tiny and self-contained — a single pure function (a map/switch over the reason literals plus a fallback) and a focused unit test, mirroring Story 8.7/8.8's shape. Do NOT import from or modify any existing module: accept a plain `string` and return a `string` so the PR's diff is purely new files (this keeps it classified `low.additive-only`). Run `pnpm --dir plugins/crew/mcp-server build && pnpm --dir plugins/crew/mcp-server test` GREEN before opening the PR, and commit the rebuilt `dist/`. Do not touch the execution manifest or any `.crew/state` file.
+Keep it tiny and self-contained — a single pure function (a map/switch over the reason literals plus a fallback) and a focused unit test, mirroring Story 8.7/8.8's shape. Do NOT import from or modify any existing module: accept a plain `string` and return a `string` so the PR's diff is purely new files (this keeps it classified `low.additive-only`). Run `pnpm --dir plugins/flow/mcp-server build && pnpm --dir plugins/flow/mcp-server test` GREEN before opening the PR, and commit the rebuilt `dist/`. Do not touch the execution manifest or any `.flow/state` file.

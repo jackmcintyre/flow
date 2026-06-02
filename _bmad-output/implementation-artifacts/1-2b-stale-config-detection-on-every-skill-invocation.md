@@ -15,7 +15,7 @@ This story layers a thin **stale-config-on-every-invocation** check on top of th
 ## Acceptance Criteria
 
 **AC1 — Configured adapter still matches → helper returns the workspace unchanged (happy path):**
-**Given** a target repo whose `.crew/config.yaml` names an adapter and the configured adapter's `detect(targetRepoRoot)` returns `true`,
+**Given** a target repo whose `.flow/config.yaml` names an adapter and the configured adapter's `detect(targetRepoRoot)` returns `true`,
 **When** `validateActiveAdapter(workspace)` is called (after `resolveWorkspace` has already returned a `Workspace`),
 **Then** the helper completes without throwing and returns the same `Workspace` instance it was given (identity-preserving — callers can chain `await validateActiveAdapter(await resolveWorkspace(...))`).
 
@@ -23,10 +23,10 @@ This story layers a thin **stale-config-on-every-invocation** check on top of th
 **Given** a target repo whose configured adapter's `detect()` returns `false`, but one or more *other* registered adapters' `detect()` returns `true`,
 **When** the helper inspects,
 **Then** it throws a typed `StaleWorkspaceConfigError` whose message:
-- names the configured adapter (the one from `.crew/config.yaml`),
+- names the configured adapter (the one from `.flow/config.yaml`),
 - states that its `detect()` returned `false`,
 - names every *other* registered adapter whose `detect()` returned `true`,
-- and points the user at `.crew/config.yaml` to update the `adapter:` key.
+- and points the user at `.flow/config.yaml` to update the `adapter:` key.
 
 **AC3 — Configured adapter mismatches and no other adapter matches → helper throws with config-rewrite guidance:**
 **Given** a target repo whose configured adapter's `detect()` returns `false` and no other registered adapter's `detect()` returns `true` either,
@@ -34,7 +34,7 @@ This story layers a thin **stale-config-on-every-invocation** check on top of th
 **Then** it throws a typed `StaleWorkspaceConfigError` whose message:
 - names the configured adapter and states `detect()` returned `false`,
 - states that no other registered adapter recognises the repo,
-- points the user at the workspace-config Zod schema (`mcp-server/src/schemas/workspace-config.ts`) and the canonical example in `plugins/crew/example/.crew/config.yaml`.
+- points the user at the workspace-config Zod schema (`mcp-server/src/schemas/workspace-config.ts`) and the canonical example in `plugins/flow/example/.flow/config.yaml`.
 
 **AC4 (integration) — vitest covers all three branches against fixture target repos and stub adapters:**
 `pnpm test` runs a new `mcp-server/tests/validate-active-adapter.test.ts` suite that:
@@ -49,13 +49,13 @@ All three sub-tests pass alongside the smoke suite from Story 1.1 and the resolv
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Author the `StaleWorkspaceConfigError` typed error** (AC: 2, 3)
-  - [ ] Extend `plugins/crew/mcp-server/src/errors.ts` with one new subclass of `DomainError`:
+  - [ ] Extend `plugins/flow/mcp-server/src/errors.ts` with one new subclass of `DomainError`:
     - `StaleWorkspaceConfigError` — fields: `targetRepoRoot: string`, `configuredAdapter: string`, `otherMatchingAdapters: string[]`, `schemaModule: string`.
     - Constructor composes the message from those fields. The shape must match the wording pinned in **Error message shape** below so README/`/status` (Story 1.7) can reference exact phrasings.
   - [ ] Do **not** touch `DomainError`, `NotImplementedError`, `InvalidWorkspaceConfigError`, `NoAdapterMatchedError`, or `AmbiguousAdapterError`. They were settled in 1.1/1.2.
 
 - [ ] **Task 2 — Implement `validateActiveAdapter` helper** (AC: 1, 2, 3)
-  - [ ] Create `plugins/crew/mcp-server/src/state/validate-active-adapter.ts`.
+  - [ ] Create `plugins/flow/mcp-server/src/state/validate-active-adapter.ts`.
   - [ ] Export a single async function:
     `validateActiveAdapter(workspace: Workspace, opts?: { adapters?: PlanningAdapter[] }): Promise<Workspace>`
     - `adapters` defaults to the live registry `adapters` from `mcp-server/src/adapters/registry.js`. The override exists for tests (AC4b/c).
@@ -70,10 +70,10 @@ All three sub-tests pass alongside the smoke suite from Story 1.1 and the resolv
   - [ ] **Does not** mutate the workspace argument or call any state-machine, telemetry, or git wrapper. This is a pure inspector.
 
 - [ ] **Task 3 — Re-export the helper from the state-module surface** (AC: 1)
-  - [ ] If `plugins/crew/mcp-server/src/state/` already has an index/barrel after Story 1.2, add `export { validateActiveAdapter } from "./validate-active-adapter.js";` to it. If no barrel exists, **do not invent one** — leave the helper importable directly via its file path. (Match whatever pattern Story 1.2 left behind; do not reorganise.)
+  - [ ] If `plugins/flow/mcp-server/src/state/` already has an index/barrel after Story 1.2, add `export { validateActiveAdapter } from "./validate-active-adapter.js";` to it. If no barrel exists, **do not invent one** — leave the helper importable directly via its file path. (Match whatever pattern Story 1.2 left behind; do not reorganise.)
 
 - [ ] **Task 4 — Author the vitest suite and stub adapters** (AC: 4)
-  - [ ] Create `plugins/crew/mcp-server/tests/validate-active-adapter.test.ts`.
+  - [ ] Create `plugins/flow/mcp-server/tests/validate-active-adapter.test.ts`.
   - [ ] Reuse the same `makeStubAdapter({ name, detectResult })` pattern Story 1.2 used in `workspace-resolver.test.ts`. **Do not** export the helper from the production tree — duplicate the stub factory inline in the new test file (or import from the existing test file if Story 1.2 exported it; if not, duplicate to keep the production surface clean).
   - [ ] Construct synthetic `Workspace` objects directly in the test (do **not** call `resolveWorkspace` — that's covered by the 1.2 suite and would couple this suite to fixture trees it doesn't need). Each `Workspace` needs only: `targetRepoRoot: "/tmp/anything"`, `activeAdapterName: stub.name`, `activeAdapter: stub`, `adapterConfig: {}`, `pluginSettings: { agreement_threshold: 0.8, orchestration_interval_seconds: 120 }`.
   - [ ] Cover AC4a, AC4b, AC4c with one `describe` block and three `it` cases.
@@ -93,7 +93,7 @@ All three sub-tests pass alongside the smoke suite from Story 1.1 and the resolv
 
 ### Why this story matters
 
-The resolver (Story 1.2) trusts the configured adapter name once `config.yaml` parses cleanly. That's the right boundary for the resolver — but it means a user who copies `example/.crew/config.yaml` into a repo that *doesn't* match that adapter gets silent zero-result behaviour from every skill (no source stories found, no errors). The PRD and architecture both call this out as the highest-cost greenfield onboarding mistake. This story closes that gap with a single tiny helper that every skill (Story 1.7's `/status` first, then every Epic 2+ skill) will call as the second step of the workspace boundary — after `resolveWorkspace`, before any other work.
+The resolver (Story 1.2) trusts the configured adapter name once `config.yaml` parses cleanly. That's the right boundary for the resolver — but it means a user who copies `example/.flow/config.yaml` into a repo that *doesn't* match that adapter gets silent zero-result behaviour from every skill (no source stories found, no errors). The PRD and architecture both call this out as the highest-cost greenfield onboarding mistake. This story closes that gap with a single tiny helper that every skill (Story 1.7's `/status` first, then every Epic 2+ skill) will call as the second step of the workspace boundary — after `resolveWorkspace`, before any other work.
 
 **Boundary discipline:** this helper is a pure inspector. It does not mutate config, it does not call the state machine, it does not write telemetry, it does not register MCP tools. It calls `detect()` and either returns the workspace or throws. Anything more belongs to a different story.
 
@@ -102,19 +102,19 @@ The resolver (Story 1.2) trusts the configured adapter name once `config.yaml` p
 ### Files this story touches
 
 **NEW:**
-- `plugins/crew/mcp-server/src/state/validate-active-adapter.ts`
-- `plugins/crew/mcp-server/tests/validate-active-adapter.test.ts`
+- `plugins/flow/mcp-server/src/state/validate-active-adapter.ts`
+- `plugins/flow/mcp-server/tests/validate-active-adapter.test.ts`
 
 **UPDATE (minimal — preserve existing surface):**
-- `plugins/crew/mcp-server/src/errors.ts` — add `StaleWorkspaceConfigError` only. Do not touch the four classes already there (`DomainError`, `NotImplementedError`, `InvalidWorkspaceConfigError`, `NoAdapterMatchedError`, `AmbiguousAdapterError`).
-- (Optional, only if Story 1.2 created a state barrel) `plugins/crew/mcp-server/src/state/index.ts` — append the re-export. If no barrel exists, skip.
+- `plugins/flow/mcp-server/src/errors.ts` — add `StaleWorkspaceConfigError` only. Do not touch the four classes already there (`DomainError`, `NotImplementedError`, `InvalidWorkspaceConfigError`, `NoAdapterMatchedError`, `AmbiguousAdapterError`).
+- (Optional, only if Story 1.2 created a state barrel) `plugins/flow/mcp-server/src/state/index.ts` — append the re-export. If no barrel exists, skip.
 
 **MUST NOT touch:**
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts` — the resolver's contract is fixed by Story 1.2. Stale-config logic does **not** belong inside it.
-- `plugins/crew/mcp-server/src/schemas/workspace-config.ts` — the schema is settled.
-- `plugins/crew/mcp-server/src/adapters/*` — no adapter contract changes. The helper uses `PlanningAdapter.detect` exactly as Story 1.2 defined it.
-- `plugins/crew/mcp-server/src/server.ts`, `index.ts` — no tool registration in this story.
-- `plugins/crew/mcp-server/tests/workspace-resolver.test.ts`, `tests/smoke.test.ts` — must still pass unchanged.
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts` — the resolver's contract is fixed by Story 1.2. Stale-config logic does **not** belong inside it.
+- `plugins/flow/mcp-server/src/schemas/workspace-config.ts` — the schema is settled.
+- `plugins/flow/mcp-server/src/adapters/*` — no adapter contract changes. The helper uses `PlanningAdapter.detect` exactly as Story 1.2 defined it.
+- `plugins/flow/mcp-server/src/server.ts`, `index.ts` — no tool registration in this story.
+- `plugins/flow/mcp-server/tests/workspace-resolver.test.ts`, `tests/smoke.test.ts` — must still pass unchanged.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions.
 - Anything under `plugins/sprint-orchestrator/` — retired (2026-05-19).
 
@@ -157,10 +157,10 @@ export class StaleWorkspaceConfigError extends DomainError {
       opts.otherMatchingAdapters.length > 0
         ? `Other registered adapters that recognise this repo: ` +
           `[${opts.otherMatchingAdapters.join(", ")}]. ` +
-          `Update the 'adapter:' key in .crew/config.yaml.`
+          `Update the 'adapter:' key in .flow/config.yaml.`
         : `No other registered adapter recognises this repo either. ` +
           `See ${opts.schemaModule} and the canonical example in ` +
-          `plugins/crew/example/.crew/config.yaml.`;
+          `plugins/flow/example/.flow/config.yaml.`;
     super(
       `Configured adapter '${opts.configuredAdapter}' returned detect()=false ` +
         `for ${opts.targetRepoRoot}. ${redirect}`,
@@ -216,9 +216,9 @@ export async function validateActiveAdapter(
 The user sees this error verbatim through `/status` and every other skill. Aim for one line, no jargon. Examples (matching Task 1's pinned wording):
 
 - **Redirect case (AC2):**
-  `Configured adapter 'bmad' returned detect()=false for /Users/jack/projects/foo. Other registered adapters that recognise this repo: [native]. Update the 'adapter:' key in .crew/config.yaml.`
+  `Configured adapter 'bmad' returned detect()=false for /Users/jack/projects/foo. Other registered adapters that recognise this repo: [native]. Update the 'adapter:' key in .flow/config.yaml.`
 - **Schema-rewrite case (AC3):**
-  `Configured adapter 'bmad' returned detect()=false for /Users/jack/projects/foo. No other registered adapter recognises this repo either. See mcp-server/src/schemas/workspace-config.ts and the canonical example in plugins/crew/example/.crew/config.yaml.`
+  `Configured adapter 'bmad' returned detect()=false for /Users/jack/projects/foo. No other registered adapter recognises this repo either. See mcp-server/src/schemas/workspace-config.ts and the canonical example in plugins/flow/example/.flow/config.yaml.`
 
 ### Library / framework requirements
 
@@ -234,7 +234,7 @@ The user sees this error verbatim through `/status` and every other skill. Aim f
 ### File structure requirements
 
 ```
-plugins/crew/
+plugins/flow/
 └── mcp-server/
     ├── src/
     │   ├── errors.ts                              # UPDATED — adds StaleWorkspaceConfigError
@@ -253,7 +253,7 @@ Stay within this list. Anything else is scope creep.
 
 - All three sub-tests are unit-level vitest, in-process, no subprocess transport, **no disk fixtures**. The helper takes a `Workspace` as input — the test constructs synthetic workspaces directly.
 - The test file must import from source paths using `.js` extensions (NodeNext): `import { validateActiveAdapter } from "../src/state/validate-active-adapter.js"` and `import { StaleWorkspaceConfigError } from "../src/errors.js"`.
-- `pnpm test` from `plugins/crew/` must continue to run the existing smoke + resolver suites unchanged, plus the new 3-test suite. Total: 11 tests, all green.
+- `pnpm test` from `plugins/flow/` must continue to run the existing smoke + resolver suites unchanged, plus the new 3-test suite. Total: 11 tests, all green.
 - Stub adapter shape (`makeStubAdapter`) must satisfy the full `PlanningAdapter` interface (including the `defaultConfig` and `adapterConfigSchema` members 1.2 added). Use a `z.object({}).passthrough()` (or `z.any()`) for `adapterConfigSchema` since the helper does not touch `adapter_config`.
 
 ### Anti-patterns to avoid (high-cost LLM mistakes)
@@ -301,7 +301,7 @@ Stay within this list. Anything else is scope creep.
 
 - Recent commits (`e3791eb`, `fe2c20f`, `d970559`, `6a93977`, `6d14fc5`) show: ship-story is the conventional flow; commits are scope-prefixed (`feat(1-2): …`); CI watch loop runs on PR creation; worktrees live inside the repo at `.worktrees/<key>/`.
 - Conventional commit for this story: `feat(1-2b): stale-config detection helper` (subject ≤72 chars).
-- The plugin tree under `plugins/crew/` is the only mutation surface. `pnpm-lock.yaml` should be untouched (no new deps).
+- The plugin tree under `plugins/flow/` is the only mutation surface. `pnpm-lock.yaml` should be untouched (no new deps).
 - The previous story (1.2) shipped under `feat(1-2): workspace resolver + per-target-repo config schema (#53)` — reference its file layout patterns when in doubt.
 
 ### Latest tech information

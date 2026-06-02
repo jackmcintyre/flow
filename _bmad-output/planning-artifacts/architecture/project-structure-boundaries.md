@@ -5,14 +5,14 @@ This project has **two distinct trees**:
 - **Plugin tree** — what gets shipped (catalogue, skills, MCP server, adapters, example, docs templates).
 - **Target-repo tree** — the per-project working set the plugin reads and writes. The plugin's tree is execution-layer-only (`.crew/`, `team/`, `docs/`); source story files live wherever the planning tool keeps them.
 
-Both can live in the same repo (Jack dog-fooding) or different repos (Maya). The plugin discovers the target via `<target-repo>/.crew/config.yaml`.
+Both can live in the same repo (Jack dog-fooding) or different repos (Maya). The plugin discovers the target via `<target-repo>/.flow/config.yaml`.
 
 The plugin's v1 working name is `crew`.
 
 ## Plugin tree
 
 ```
-plugins/crew/
+plugins/flow/
 ├── .claude-plugin/
 │   └── plugin.json
 ├── catalogue/                                # FR82, FR83 — role templates
@@ -189,7 +189,7 @@ plugins/crew/
 | Capability group | Lives in |
 |---|---|
 | Planning (FR1–FR8) | Native: `skills/plan.md` + `catalogue/planner.md`. External: `skills/plan.md` is a pointer to the source tool; adapter implements `listSourceStories` / `readSourceStory` |
-| Story persistence & state machine (FR9–FR23) | `.crew/state/<state>/<ref>.yaml`, `mcp-server/src/state/manifest-state-machine.ts`, `mcp-server/src/tools/{claim,complete,block,scan-sources}.ts` |
+| Story persistence & state machine (FR9–FR23) | `.flow/state/<state>/<ref>.yaml`, `mcp-server/src/state/manifest-state-machine.ts`, `mcp-server/src/tools/{claim,complete,block,scan-sources}.ts` |
 | Source-drift detection | `mcp-server/src/state/source-hash.ts`; surfaced via `SourceDriftError` and orchestration |
 | Hiring (FR84–FR92) | `skills/hire.md`, `mcp-server/src/tools/{read-catalogue,instantiate-persona}.ts`, `catalogue/hiring-manager.md` |
 | Persona management (FR93–FR97) | `team/`, `mcp-server/src/tools/{read-persona,append-persona-knowledge}.ts` |
@@ -199,22 +199,22 @@ plugins/crew/
 | Standards doc (FR43–FR48) | `mcp-server/src/tools/{lookup,regenerate}-standards.ts`, `validators/standards-doc.ts`, target-repo `docs/standards.md` |
 | Orchestration (FR49–FR54) | `skills/watch.md`, `catalogue/orchestrator.md`, `mcp-server/src/state/heartbeat-store.ts` |
 | Retro & calibration (FR55–FR64a) | `skills/{retro,accept-proposal}.md`, `catalogue/retro-analyst.md`, `mcp-server/src/tools/{apply-rule-proposal,apply-skill-proposal,apply-team-change}.ts`; lessons live in execution manifests (not source frontmatter) |
-| Telemetry & outcome verification (FR65–FR70, NFR21–24) | `mcp-server/src/lib/logger.ts`, `mcp-server/src/tools/{compute-agreement,compute-outcome-stats,archive-cycle}.ts`, `.crew/telemetry/` |
+| Telemetry & outcome verification (FR65–FR70, NFR21–24) | `mcp-server/src/lib/logger.ts`, `mcp-server/src/tools/{compute-agreement,compute-outcome-stats,archive-cycle}.ts`, `.flow/telemetry/` |
 | Install & onboarding (FR71–FR75) | `docs/README-install.md`, `example/`, root `README.md` |
 | Non-engineer ergonomics (FR76–FR78) | `skills/ask.md`; FR78 discard via `mark-withdrawn.ts` + adapter's source-side discard for external adapters |
 | Permissions (FR79–FR81, NFR12–16) | `permissions/<role>.yaml`, enforced by `mcp-server/src/lib/gh.ts` and the MCP tool layer |
 | Team-change & team observability (FR105–FR110) | `mcp-server/src/tools/apply-team-change.ts`, `skills/{team,ask}.md` |
-| Planning-tool integration (this section) | `mcp-server/src/adapters/<adapter>/`, `.crew/config.yaml`, `mcp-server/src/tools/{scan-sources,read-source-story}.ts` |
+| Planning-tool integration (this section) | `mcp-server/src/adapters/<adapter>/`, `.flow/config.yaml`, `mcp-server/src/tools/{scan-sources,read-source-story}.ts` |
 
 ## Integration points
 
 **Internal communication (between sessions):**
 
 - Sessions share no in-memory state. All inter-session communication is via the filesystem:
-  - Execution-state moves → `.crew/state/<state>/<ref>.yaml`
+  - Execution-state moves → `.flow/state/<state>/<ref>.yaml`
   - Liveness → `.crew/sessions/<session-id>.json` heartbeats
-  - Telemetry → `.crew/telemetry/<YYYY-MM>.jsonl`
-  - Proposals → `.crew/retro-proposals/<ts>.md`
+  - Telemetry → `.flow/telemetry/<YYYY-MM>.jsonl`
+  - Proposals → `.flow/retro-proposals/<ts>.md`
 - Sessions reach the MCP server via Claude Code's native MCP transport.
 
 **External integrations:**
@@ -226,7 +226,7 @@ plugins/crew/
 **Data flow (per story, happy path, BMad adapter):**
 
 1. User authors a story in BMad (`/bmad-create-story`); story file lands in `_bmad-output/.../stories/1.2.3.md`.
-2. `/<plugin>:scan` or any state-changing skill triggers `scanSources` → BMad adapter's `listSourceStories` returns `bmad:1.2.3` as a new ref → `.crew/state/to-do/bmad:1.2.3.yaml` is written with `source_hash` captured.
+2. `/<plugin>:scan` or any state-changing skill triggers `scanSources` → BMad adapter's `listSourceStories` returns `bmad:1.2.3` as a new ref → `.flow/state/to-do/bmad:1.2.3.yaml` is written with `source_hash` captured.
 3. Dev session's `start` skill calls `claimStory("bmad:1.2.3")` → atomic mv of manifest from `to-do/` → `in-progress/`.
 4. Skill spawns dev subagent (clean context) with persona prompt assembled from `team/generalist-dev/PERSONA.md`; subagent reads source via `readSourceStory` → BMad adapter resolves path → returns normalised `SourceStory`.
 5. Subagent recomputes `source_hash`; mismatch → `SourceDriftError` → skill calls `blockStory` with `blocked_by: source-drift`.

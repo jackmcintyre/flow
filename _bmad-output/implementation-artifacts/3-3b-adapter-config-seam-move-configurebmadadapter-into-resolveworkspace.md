@@ -37,7 +37,7 @@ Story 3.3 (BMad adapter v1) landed `configureBmadAdapter` as a per-process mutab
 
 ## Acceptance Criteria
 
-> **Verbatim from epic.** The five ACs below match `_bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md` § Story 3.3b exactly. Every AC governs an internal TypeScript function (`resolveWorkspace`, `configureBmadAdapter`, `scanSources`), an internal import statement, an internal `Workspace` invariant, a hard-coded default literal, or vitest coverage against fixtures. None of the ACs names a slash command, a CLI literal the operator types verbatim, a README-named install path, or a Claude Code UI element. They are therefore **all untagged** per `plugins/crew/docs/user-surface-acs.md`. (This story is `story_shape: substrate` — pure refactor seam, no user-facing surface.)
+> **Verbatim from epic.** The five ACs below match `_bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md` § Story 3.3b exactly. Every AC governs an internal TypeScript function (`resolveWorkspace`, `configureBmadAdapter`, `scanSources`), an internal import statement, an internal `Workspace` invariant, a hard-coded default literal, or vitest coverage against fixtures. None of the ACs names a slash command, a CLI literal the operator types verbatim, a README-named install path, or a Claude Code UI element. They are therefore **all untagged** per `plugins/flow/docs/user-surface-acs.md`. (This story is `story_shape: substrate` — pure refactor seam, no user-facing surface.)
 
 **AC1:**
 **Given** `resolveWorkspace` in `mcp-server/src/state/workspace-resolver.ts`,
@@ -71,7 +71,7 @@ the existing vitest suite for `scan-sources` (and any workspace-resolver tests) 
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Move the binding into `resolveWorkspace` (AC: 1, 4)**
-  - [ ] 1.1 Open `plugins/crew/mcp-server/src/state/workspace-resolver.ts`.
+  - [ ] 1.1 Open `plugins/flow/mcp-server/src/state/workspace-resolver.ts`.
   - [ ] 1.2 Add an import: `import { configureBmadAdapter } from "../adapters/bmad/index.js";`. Place it alongside the existing adapter-registry import.
   - [ ] 1.3 At the **end** of `resolveWorkspace()` — after the `Workspace` object is fully assembled (after the `pluginSettings` parse, immediately before the `return`) — add a narrow dispatch:
     ```
@@ -90,9 +90,9 @@ the existing vitest suite for `scan-sources` (and any workspace-resolver tests) 
   - [ ] 1.6 Add a TSDoc comment on the dispatch block explaining: "Per-adapter context binding. Today only BMad needs this; future adapters should add their own narrow branch here (or graduate to a `PlanningAdapter.configure?(workspace)` hook — see Dev Notes)."
 
 - [ ] **Task 2 — Strip the binding out of `scanSources` (AC: 2)**
-  - [ ] 2.1 Open `plugins/crew/mcp-server/src/tools/scan-sources.ts`.
+  - [ ] 2.1 Open `plugins/flow/mcp-server/src/tools/scan-sources.ts`.
   - [ ] 2.2 Remove the entire `if (activeAdapterName === "bmad") { ... }` block (currently lines 170–183, including the comment header at lines 170–176). Replace nothing — `resolveWorkspace` now owns this.
-  - [ ] 2.3 Remove the import at line 5: `import { configureBmadAdapter } from "../adapters/bmad/index.js";`. After this story, `scan-sources.ts` MUST NOT contain the string `configureBmadAdapter` anywhere. Verify with `grep -n configureBmadAdapter plugins/crew/mcp-server/src/tools/scan-sources.ts` → expect zero matches.
+  - [ ] 2.3 Remove the import at line 5: `import { configureBmadAdapter } from "../adapters/bmad/index.js";`. After this story, `scan-sources.ts` MUST NOT contain the string `configureBmadAdapter` anywhere. Verify with `grep -n configureBmadAdapter plugins/flow/mcp-server/src/tools/scan-sources.ts` → expect zero matches.
   - [ ] 2.4 Update the surrounding comment block at the top of `scanSources()` to reflect the new contract: the comment that today reads "Configure adapter context before calling any adapter methods..." (lines 170–176) is deleted entirely; the dev loop now relies on `resolveWorkspace` having wired the adapter. Do NOT add a replacement comment in `scanSources()` — the contract belongs on `resolveWorkspace`, not on its callers. (The TSDoc on `Workspace.activeAdapter` is updated in Task 3 instead.)
   - [ ] 2.5 Confirm `scanSources()` still compiles. `activeAdapterName` and `adapterConfig` may now be referenced only by the `result.adapterName = activeAdapterName` line; that's fine — keep them in the destructure on line 168. Do not over-prune.
 
@@ -105,10 +105,10 @@ the existing vitest suite for `scan-sources` (and any workspace-resolver tests) 
   - [ ] 4.2 No edit to `get-status.ts` is required or desired. Confirm in the Dev Agent Record that the file was inspected and found to need no change. If during implementation the dev discovers a `resolveWorkspace` caller that DOES manually `configureBmadAdapter` today (other than `scan-sources`), strip that call in the same change — but the audit (Task 6) should confirm there is none.
 
 - [ ] **Task 5 — Tests (AC: 5)**
-  - [ ] 5.1 Open `plugins/crew/mcp-server/tests/workspace-resolver.test.ts`. Add a focused test inside the existing `describe("resolveWorkspace", () => { ... })` block. Name: `it("binds BmadAdapter context so listSourceStories() works without an explicit configureBmadAdapter call", ...)`.
+  - [ ] 5.1 Open `plugins/flow/mcp-server/tests/workspace-resolver.test.ts`. Add a focused test inside the existing `describe("resolveWorkspace", () => { ... })` block. Name: `it("binds BmadAdapter context so listSourceStories() works without an explicit configureBmadAdapter call", ...)`.
   - [ ] 5.2 The test:
     1. Imports the real `BmadAdapter` from `../src/adapters/bmad/index.js` and `resetBmadAdapter` for cleanup.
-    2. In `beforeEach` of this test (or via the existing fixture-setup pattern in this file), creates a tmp dir that looks like a BMad-shaped target repo: a `.crew/config.yaml` containing `adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\nplugin: {}\n`, and at least one valid BMad story file at `_bmad-output/planning-artifacts/stories/9-9-fixture-story.md` whose contents are enough for `parseBmadStory` to succeed (mirror an existing fixture from `tests/bmad-adapter.test.ts` if convenient).
+    2. In `beforeEach` of this test (or via the existing fixture-setup pattern in this file), creates a tmp dir that looks like a BMad-shaped target repo: a `.flow/config.yaml` containing `adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\nplugin: {}\n`, and at least one valid BMad story file at `_bmad-output/planning-artifacts/stories/9-9-fixture-story.md` whose contents are enough for `parseBmadStory` to succeed (mirror an existing fixture from `tests/bmad-adapter.test.ts` if convenient).
     3. Calls `resetBmadAdapter()` to ensure the adapter starts unbound.
     4. Calls `await resolveWorkspace({ targetRepoRoot: tmp, adapters: [BmadAdapter] })`.
     5. Asserts `ws.activeAdapterName === "bmad"`.
@@ -119,12 +119,12 @@ the existing vitest suite for `scan-sources` (and any workspace-resolver tests) 
   - [ ] 5.5 Run the **existing** `tests/bmad-adapter.test.ts` suite unchanged. Same rule: any failure is a Task-1 bug, not a license to edit BMad adapter tests.
 
 - [ ] **Task 6 — Audit & build (AC: 1, 2, 3)**
-  - [ ] 6.1 Run `grep -rn "configureBmadAdapter" plugins/crew/mcp-server/src/ --include="*.ts"`. Expected matches after this story:
+  - [ ] 6.1 Run `grep -rn "configureBmadAdapter" plugins/flow/mcp-server/src/ --include="*.ts"`. Expected matches after this story:
     - `adapters/bmad/index.ts` — the export itself, the TSDoc reference, and the `requireContext()` error message. (Updating the error message's hint text is out of scope; leave it as today's `"Call configureBmadAdapter({ targetRepo, storiesRoot }) before invoking..."` — the error is still accurate for direct test callers and for any future adapter-internal code path that bypasses `resolveWorkspace`.)
     - `state/workspace-resolver.ts` — the new import and the new dispatch (added by Task 1).
     - Expected to be **absent**: any reference in `tools/scan-sources.ts` or any other file under `src/tools/`.
-  - [ ] 6.2 Rebuild the TypeScript output: `cd plugins/crew/mcp-server && pnpm run build`. Per the project rule in `plugins/crew/docs/README-install.md` § Build artefacts, the resulting `plugins/crew/mcp-server/dist/` MUST be committed in the same change. Stage and commit the `dist/` diff alongside the `src/` and `tests/` diffs. CI fails on `src`/`dist` drift.
-  - [ ] 6.3 Run the full vitest suite from `plugins/crew/mcp-server/`: `pnpm test`. All suites must pass. No skips, no `.only`s introduced.
+  - [ ] 6.2 Rebuild the TypeScript output: `cd plugins/flow/mcp-server && pnpm run build`. Per the project rule in `plugins/flow/docs/README-install.md` § Build artefacts, the resulting `plugins/flow/mcp-server/dist/` MUST be committed in the same change. Stage and commit the `dist/` diff alongside the `src/` and `tests/` diffs. CI fails on `src`/`dist` drift.
+  - [ ] 6.3 Run the full vitest suite from `plugins/flow/mcp-server/`: `pnpm test`. All suites must pass. No skips, no `.only`s introduced.
 
 ---
 
@@ -153,29 +153,29 @@ This is a comment-only change; it does not affect AC count or behaviour.
 
 Per the workflow rule, the dev MUST read the current state of every UPDATE file end-to-end before editing it:
 
-- `plugins/crew/mcp-server/src/state/workspace-resolver.ts` (177 lines) — UPDATE. State today: Branch A (no config → detect → write synthesised config) and Branch B (config exists → parse → validate against adapter schema → assemble `Workspace`). Adds adapter-binding step at end of Branch B (which Branch A falls through to). Preserve all existing error paths (`NoAdapterMatchedError`, `AmbiguousAdapterError`, `InvalidWorkspaceConfigError`); they fire **before** the new dispatch, so a misconfigured workspace never reaches `configureBmadAdapter`.
-- `plugins/crew/mcp-server/src/tools/scan-sources.ts` (288 lines) — UPDATE. State today: imports `configureBmadAdapter` (line 5), calls it inside `scanSources` (lines 177–183). Removes both. The `scanSources` function body's Step 2+ logic (listSourceStories, per-story create/update/unchanged/skip branching, `validateAgainstDiscipline` seam at line 203) is unchanged. Preserve every other behaviour.
-- `plugins/crew/mcp-server/src/adapters/bmad/index.ts` (309 lines) — UPDATE (TSDoc only). State today: exports `BmadAdapter`, `configureBmadAdapter`, `resetBmadAdapter`; the JSDoc on line 28–32 references `getActiveAdapter()`. Update that JSDoc per "Relationship to Story 3.3's TSDoc claims" above. No code change.
-- `plugins/crew/mcp-server/tests/workspace-resolver.test.ts` — UPDATE (additions only). State today: stub-adapter-based tests of the three branches. Adds two new `it(...)` blocks per Task 5; touches nothing else.
-- `plugins/crew/mcp-server/src/tools/get-status.ts` (117 lines) — READ ONLY. State today: calls `resolveWorkspace` (line 52), never calls `configureBmadAdapter`, never calls adapter list/read/resolve methods. Confirm no edit needed; record the audit in the Dev Agent Record.
+- `plugins/flow/mcp-server/src/state/workspace-resolver.ts` (177 lines) — UPDATE. State today: Branch A (no config → detect → write synthesised config) and Branch B (config exists → parse → validate against adapter schema → assemble `Workspace`). Adds adapter-binding step at end of Branch B (which Branch A falls through to). Preserve all existing error paths (`NoAdapterMatchedError`, `AmbiguousAdapterError`, `InvalidWorkspaceConfigError`); they fire **before** the new dispatch, so a misconfigured workspace never reaches `configureBmadAdapter`.
+- `plugins/flow/mcp-server/src/tools/scan-sources.ts` (288 lines) — UPDATE. State today: imports `configureBmadAdapter` (line 5), calls it inside `scanSources` (lines 177–183). Removes both. The `scanSources` function body's Step 2+ logic (listSourceStories, per-story create/update/unchanged/skip branching, `validateAgainstDiscipline` seam at line 203) is unchanged. Preserve every other behaviour.
+- `plugins/flow/mcp-server/src/adapters/bmad/index.ts` (309 lines) — UPDATE (TSDoc only). State today: exports `BmadAdapter`, `configureBmadAdapter`, `resetBmadAdapter`; the JSDoc on line 28–32 references `getActiveAdapter()`. Update that JSDoc per "Relationship to Story 3.3's TSDoc claims" above. No code change.
+- `plugins/flow/mcp-server/tests/workspace-resolver.test.ts` — UPDATE (additions only). State today: stub-adapter-based tests of the three branches. Adds two new `it(...)` blocks per Task 5; touches nothing else.
+- `plugins/flow/mcp-server/src/tools/get-status.ts` (117 lines) — READ ONLY. State today: calls `resolveWorkspace` (line 52), never calls `configureBmadAdapter`, never calls adapter list/read/resolve methods. Confirm no edit needed; record the audit in the Dev Agent Record.
 
 ### Source tree / paths
 
-Per `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.md`, all source under `plugins/crew/mcp-server/src/` is owned by the plugin; `dist/` is build output (committed per Story 1.9 rules); `tests/` is unit + integration test code.
+Per `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.md`, all source under `plugins/flow/mcp-server/src/` is owned by the plugin; `dist/` is build output (committed per Story 1.9 rules); `tests/` is unit + integration test code.
 
 ### Testing standards
 
-- Framework: `vitest` (already configured; see `plugins/crew/mcp-server/vitest.config.ts`).
-- Test files live alongside `src/` under `plugins/crew/mcp-server/tests/`.
+- Framework: `vitest` (already configured; see `plugins/flow/mcp-server/vitest.config.ts`).
+- Test files live alongside `src/` under `plugins/flow/mcp-server/tests/`.
 - Use `beforeEach`/`afterEach` for tmp-dir setup and `resetBmadAdapter()` cleanup. Follow the existing pattern in `workspace-resolver.test.ts` (which already creates tmp dirs and uses stub adapters).
 - No `.only`, no `.skip` in committed test code.
 
 ### Acceptance verification commands (for the AC-verifier)
 
-- AC1 + AC4: `grep -n "configureBmadAdapter\|_bmad-output/planning-artifacts/stories" plugins/crew/mcp-server/src/state/workspace-resolver.ts` → expect both literals present.
-- AC2: `grep -n "configureBmadAdapter" plugins/crew/mcp-server/src/tools/scan-sources.ts` → expect zero matches.
-- AC3: `grep -n "configureBmadAdapter" plugins/crew/mcp-server/src/tools/*.ts` → expect zero matches (after Task 2; AC3 is "no tool calls it").
-- AC5: `cd plugins/crew/mcp-server && pnpm test` → all suites green, with the new `binds BmadAdapter context...` test present in the workspace-resolver suite output.
+- AC1 + AC4: `grep -n "configureBmadAdapter\|_bmad-output/planning-artifacts/stories" plugins/flow/mcp-server/src/state/workspace-resolver.ts` → expect both literals present.
+- AC2: `grep -n "configureBmadAdapter" plugins/flow/mcp-server/src/tools/scan-sources.ts` → expect zero matches.
+- AC3: `grep -n "configureBmadAdapter" plugins/flow/mcp-server/src/tools/*.ts` → expect zero matches (after Task 2; AC3 is "no tool calls it").
+- AC5: `cd plugins/flow/mcp-server && pnpm test` → all suites green, with the new `binds BmadAdapter context...` test present in the workspace-resolver suite output.
 
 ### Project Structure Notes
 
@@ -191,8 +191,8 @@ Per `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.m
 - Architecture: `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.md` (file locations)
 - Previous story (BMad adapter v1, source of `configureBmadAdapter`): `_bmad-output/implementation-artifacts/3-3-bmad-adapter-v1-reference-implementation.md`
 - Story that introduced the workaround being removed: `_bmad-output/implementation-artifacts/3-2-execution-manifest-schema-scan-sources-mcp-tool-and-source-hash-capture.md`
-- User-surface AC rubric (confirms zero ACs tagged here): `plugins/crew/docs/user-surface-acs.md`
-- Build-artefact rule (dist/ commit requirement): `plugins/crew/docs/README-install.md` § Build artefacts
+- User-surface AC rubric (confirms zero ACs tagged here): `plugins/flow/docs/user-surface-acs.md`
+- Build-artefact rule (dist/ commit requirement): `plugins/flow/docs/README-install.md` § Build artefacts
 
 ## Dev Agent Record
 

@@ -14,11 +14,11 @@ so that **downstream stories (reviewer read, label, auto-merge gate) have a cons
 
 ### What this story is, in one sentence
 
-Add a single MCP-tool entrypoint `runDevTerminalAction` that, given a finished dev subagent's story ref and a list of staged paths, (a) creates a branch `story/<ref-slug>-<title-slug>`, (b) commits in conventional-commits format with body wrapping at 72 columns, (c) `git push -u`, and (d) opens a PR via `gh pr create` with title `<type>(<ref>): <story title>` and a body whose first section is a machine-readable block (story link, ACs checklist mirrored from the story file) followed by a free-form summary — all gated through the existing `execa` wrappers in `plugins/crew/mcp-server/src/lib/git.ts` and `plugins/crew/mcp-server/src/lib/gh.ts`, extended where necessary to refuse `--no-verify` and unsanctioned `--force-with-lease` before any subprocess spawn.
+Add a single MCP-tool entrypoint `runDevTerminalAction` that, given a finished dev subagent's story ref and a list of staged paths, (a) creates a branch `story/<ref-slug>-<title-slug>`, (b) commits in conventional-commits format with body wrapping at 72 columns, (c) `git push -u`, and (d) opens a PR via `gh pr create` with title `<type>(<ref>): <story title>` and a body whose first section is a machine-readable block (story link, ACs checklist mirrored from the story file) followed by a free-form summary — all gated through the existing `execa` wrappers in `plugins/flow/mcp-server/src/lib/git.ts` and `plugins/flow/mcp-server/src/lib/gh.ts`, extended where necessary to refuse `--no-verify` and unsanctioned `--force-with-lease` before any subprocess spawn.
 
 ### What this story fixes (and why it needs its own story)
 
-Today, the dev subagent's permission spec at `plugins/crew/permissions/generalist-dev.yaml` lists `pr-create` in `gh_allow`, but no plugin code actually composes a branch name, a commit message, a PR title, or a PR body that matches `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md §9`. The shipped `gitCommit` helper (Story 1.5 AC4) constrains commit messages to the plugin-internal shape `<tool-name>: <ref>` — that shape is correct for plugin-side housekeeping commits (e.g. `regenerateStandards: bmad:1.2.3`) but is **NOT** the conventional-commits shape the dev subagent must use when shipping a story PR. The current `gh` wrapper enforces the `gh_allow` allowlist but does NOT inspect args for `--no-verify` or `--force-with-lease`, and `gitCommit` has no `push` partner at all.
+Today, the dev subagent's permission spec at `plugins/flow/permissions/generalist-dev.yaml` lists `pr-create` in `gh_allow`, but no plugin code actually composes a branch name, a commit message, a PR title, or a PR body that matches `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md §9`. The shipped `gitCommit` helper (Story 1.5 AC4) constrains commit messages to the plugin-internal shape `<tool-name>: <ref>` — that shape is correct for plugin-side housekeeping commits (e.g. `regenerateStandards: bmad:1.2.3`) but is **NOT** the conventional-commits shape the dev subagent must use when shipping a story PR. The current `gh` wrapper enforces the `gh_allow` allowlist but does NOT inspect args for `--no-verify` or `--force-with-lease`, and `gitCommit` has no `push` partner at all.
 
 Three concrete gaps:
 
@@ -40,17 +40,17 @@ This story closes those gaps by adding one composite MCP tool and three small he
 - (h) Spawn the dev subagent itself, parse the handoff phrase, or own any inner-cycle plumbing. Stories 4.2 / 4.3 / 4.3b own those. This story is the **terminal action** that the dev subagent emits AFTER its implementation work is done and BEFORE it emits the locked handoff phrase. The subagent calls `runDevTerminalAction` via the MCP tool surface (added to the dev role's `tools_allow` in this story); on success the tool returns the PR URL, which the subagent includes verbatim in its final message before emitting the handoff phrase. The handoff parser (Story 4.3) does NOT need to be aware of the PR URL — it only checks for the locked phrase.
 - (i) Add a separate `git push` MCP tool. The push is performed inside `runDevTerminalAction` between commit and `gh pr create`. There is no standalone push tool — push only happens via this terminal-action entrypoint.
 - (j) Persist the PR URL anywhere in the manifest. The URL is returned to the dev subagent in the tool's response and surfaces in the subagent's final transcript. Story 4.6 will fetch the PR via `gh pr list` keyed by branch name; the manifest does not store the URL in v1. (A future story may add `pr_url` to the manifest for faster reviewer-side lookup; not in scope here.)
-- (k) Implement a recovery path for partial failures (commit succeeds, push fails; push succeeds, `gh pr create` fails). v1 returns a typed error and leaves the local branch in place — operator inspects, recovers manually, and re-runs `/crew:start`. Story 4.5 (`gh-error-map.yaml`) will refine the recoverable-error classification.
+- (k) Implement a recovery path for partial failures (commit succeeds, push fails; push succeeds, `gh pr create` fails). v1 returns a typed error and leaves the local branch in place — operator inspects, recovers manually, and re-runs `/flow:start`. Story 4.5 (`gh-error-map.yaml`) will refine the recoverable-error classification.
 - (l) Sign commits (`-S`). The existing `gitCommit` helper explicitly forbids `-S` and we preserve that.
-- (m) Touch `plugins/crew/skills/start/SKILL.md` or any other skill prose. The terminal action is invoked by the dev subagent itself (via its persona prompt's instruction set) — not by the outer `/crew:start` prose layer. SKILL.md's inner-cycle section (Story 4.3b) hands control to the dev subagent; the subagent does the implementation work, calls `runDevTerminalAction`, and only then emits the handoff phrase.
+- (m) Touch `plugins/flow/skills/start/SKILL.md` or any other skill prose. The terminal action is invoked by the dev subagent itself (via its persona prompt's instruction set) — not by the outer `/flow:start` prose layer. SKILL.md's inner-cycle section (Story 4.3b) hands control to the dev subagent; the subagent does the implementation work, calls `runDevTerminalAction`, and only then emits the handoff phrase.
 - (n) Add a `dry-run` mode. v1 either runs the terminal action end-to-end or fails fast.
-- (o) Modify the `generalist-dev` persona body (`plugins/crew/catalogue/generalist-dev.md`). The persona's instruction set already says "open a PR as your terminal action"; this story adds the MCP tool that the persona reaches for. (A small follow-up edit to the persona prompt may be warranted to name `runDevTerminalAction` explicitly, but that is a knowledge-edit, not a code change, and the dev agent may make it in passing — see § Implementation strategy.)
+- (o) Modify the `generalist-dev` persona body (`plugins/flow/catalogue/generalist-dev.md`). The persona's instruction set already says "open a PR as your terminal action"; this story adds the MCP tool that the persona reaches for. (A small follow-up edit to the persona prompt may be warranted to name `runDevTerminalAction` explicitly, but that is a knowledge-edit, not a code change, and the dev agent may make it in passing — see § Implementation strategy.)
 
 ---
 
 ## Acceptance Criteria
 
-> AC1 and AC2 are verbatim from the epic; AC3 is verbatim from the epic and is the integration-test AC. None of the three reference a slash command, CLI command Jack types, install-doc path, or Claude Code UI element — they describe internal git/gh execa-wrapper plumbing the dev subagent invokes. Per `plugins/crew/docs/user-surface-acs.md`, this story is substrate; no `(user-surface)` tags apply.
+> AC1 and AC2 are verbatim from the epic; AC3 is verbatim from the epic and is the integration-test AC. None of the three reference a slash command, CLI command Jack types, install-doc path, or Claude Code UI element — they describe internal git/gh execa-wrapper plumbing the dev subagent invokes. Per `plugins/flow/docs/user-surface-acs.md`, this story is substrate; no `(user-surface)` tags apply.
 
 **AC1:**
 **Given** a finished implementation,
@@ -92,7 +92,7 @@ vitest runs the dev terminal action against a fixture repo and asserts branch na
     - [ ] AC2: <verbatim AC2 first line, truncated to 120 chars>
     - [ ] AC3: <verbatim AC3 first line, truncated to 120 chars>
     ...
-    <!-- /crew:pr:machine -->
+    <!-- /flow:pr:machine -->
     ```
     The opening and closing HTML comments are the parse anchors Story 4.6's reviewer side keys on. The ACs checklist is mirrored from the story spec file — the tool reads the spec at `manifestPath` → derived `specPath` (see § Implementation strategy), greps every `^\*\*AC(\d+)(\s*\([^)]+\))?\s*:\*\*` line, extracts the first non-blank line of each AC's body, and emits the checklist entries in numeric order. Checkbox state is always unchecked (`[ ]`) — reviewer will tick boxes in a later story when ACs pass.
   - **Section 2 (free-form summary):** the caller passes a `summary` string verbatim; the tool emits it after the blank line. No 72-char wrap is applied to the summary (PRs render Markdown; the wrap is commit-message-specific).
@@ -112,7 +112,7 @@ vitest runs the dev terminal action against a fixture repo and asserts branch na
   - the branch was created (`git branch --show-current` returns the expected name);
   - the commit subject equals `feat(<ref>): <title>`;
   - the commit body has every line ≤72 chars (URLs excepted);
-  - the `gh pr create` execa spy was called with the expected `--title` and a `--body` whose substring includes the machine block (with `<!-- crew:pr:machine -->` and `<!-- /crew:pr:machine -->` anchors), the ACs checklist (three `- [ ] ACn: ...` lines in order), and the free-form summary;
+  - the `gh pr create` execa spy was called with the expected `--title` and a `--body` whose substring includes the machine block (with `<!-- crew:pr:machine -->` and `<!-- /flow:pr:machine -->` anchors), the ACs checklist (three `- [ ] ACn: ...` lines in order), and the free-form summary;
   - the tool's return value is `{ ok: true, branch, commitSha, prUrl }` with `prUrl` equal to the stubbed `gh pr create` stdout.
 - (3b) Branch-slug edge cases: title containing punctuation, uppercase, runs of whitespace, and Unicode — slug-builder collapses to kebab and trims to 40 chars; assert exact slug strings for three fixture inputs.
 - (3c) Commit-type validation: invalid `type` ("feature") raises `ConventionalCommitTypeUnknownError` before any execa spawn; spy on `execaImpl` confirms zero calls.
@@ -123,7 +123,7 @@ vitest runs the dev terminal action against a fixture repo and asserts branch na
   - (3e-iii) Same for the `git` wrapper: caller attempts a push with `--no-verify` in the args → refused at the wrapper before spawn.
 - (3f) Push failure: a stubbed `git push` returns non-zero exit code → tool raises `GitPushFailedError` carrying stderr; the local branch and commit are NOT rolled back (operator-side recovery).
 - (3g) `gh pr create` failure: a stubbed `gh pr create` returns non-zero exit code → tool raises `GhPrCreateFailedError`. Story 4.5's recoverable-error classification will wrap this later; this story raises the raw typed error.
-- (3h) Manifest is NOT mutated: the in-progress manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` is bytewise unchanged before and after the tool runs. The terminal action is a side-effect on git/gh state, not on plugin state. The story-status transition (in-progress → done) is the responsibility of `completeStory` (Story 4.1) and is invoked by the reviewer/auto-merge gate later, not by this tool.
+- (3h) Manifest is NOT mutated: the in-progress manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` is bytewise unchanged before and after the tool runs. The terminal action is a side-effect on git/gh state, not on plugin state. The story-status transition (in-progress → done) is the responsibility of `completeStory` (Story 4.1) and is invoked by the reviewer/auto-merge gate later, not by this tool.
 - (3i) ACs checklist mirroring: the fixture story spec has three ACs (one tagged `(user-surface)`, one tagged `(integration)`, one untagged); the tool's emitted machine block contains three `- [ ] ACn: ...` lines in numeric order, each starting with the verbatim first line of the AC body truncated to 120 chars. (The `(integration)`-tagged AC exposes any regression of the AC-extractor regex to a narrower parenthetical match.)
 - (3j) Tool count: the registered MCP tool list contains exactly `<prior baseline + 1>` entries (prior baseline is whatever the codebase has at the time of this story's merge — pull the number from `register.ts` and update the existing tool-count assertions; do NOT hard-code a number in this spec).
 
@@ -132,10 +132,10 @@ vitest runs the dev terminal action against a fixture repo and asserts branch na
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Extend `gh` and `git` execa wrappers with negative-capability refusal (AC: 2, 3)**
-  - [ ] 1.1 Add a `NegativeCapabilityDeniedError` typed error to `plugins/crew/mcp-server/src/errors.ts` with fields `{ attempted_flag, role, callSite: "gh" | "git" }`.
-  - [ ] 1.2 In `plugins/crew/mcp-server/src/lib/gh.ts`, add a pre-spawn check: if `args` contains any of `{ "--no-verify", "--force", "--force-with-lease" }` OR any arg starting with `--force-with-lease=`, raise `NegativeCapabilityDeniedError` before the `execaImpl` call. The check runs AFTER `gh_allow` enforcement (so denied subcommands still surface as `GhSubcommandDeniedError`).
-  - [ ] 1.3 In `plugins/crew/mcp-server/src/lib/git.ts`, extend the existing `gitCommit` and the new `gitPush` / `gitCheckoutBranch` helpers (Task 2) with the same pre-spawn refusal check. Add an internal `assertNoNegativeFlags(args, role)` helper to avoid duplication.
-  - [ ] 1.4 Unit tests in `plugins/crew/mcp-server/src/lib/__tests__/gh.test.ts` and `.../__tests__/git.test.ts`: for each of `{--no-verify, --force, --force-with-lease, --force-with-lease=refs/heads/main}`, assert the wrapper raises `NegativeCapabilityDeniedError` AND the `execaImpl` spy is not called.
+  - [ ] 1.1 Add a `NegativeCapabilityDeniedError` typed error to `plugins/flow/mcp-server/src/errors.ts` with fields `{ attempted_flag, role, callSite: "gh" | "git" }`.
+  - [ ] 1.2 In `plugins/flow/mcp-server/src/lib/gh.ts`, add a pre-spawn check: if `args` contains any of `{ "--no-verify", "--force", "--force-with-lease" }` OR any arg starting with `--force-with-lease=`, raise `NegativeCapabilityDeniedError` before the `execaImpl` call. The check runs AFTER `gh_allow` enforcement (so denied subcommands still surface as `GhSubcommandDeniedError`).
+  - [ ] 1.3 In `plugins/flow/mcp-server/src/lib/git.ts`, extend the existing `gitCommit` and the new `gitPush` / `gitCheckoutBranch` helpers (Task 2) with the same pre-spawn refusal check. Add an internal `assertNoNegativeFlags(args, role)` helper to avoid duplication.
+  - [ ] 1.4 Unit tests in `plugins/flow/mcp-server/src/lib/__tests__/gh.test.ts` and `.../__tests__/git.test.ts`: for each of `{--no-verify, --force, --force-with-lease, --force-with-lease=refs/heads/main}`, assert the wrapper raises `NegativeCapabilityDeniedError` AND the `execaImpl` spy is not called.
 
 - [ ] **Task 2 — Add `gitCreateBranch` and `gitPush` helpers to `lib/git.ts` (AC: 1, 3)**
   - [ ] 2.1 Export `gitCreateBranch({ targetRepoRoot, branchName, execaImpl? })` — runs `git -C <root> checkout -b <branchName>`. Refuses if `branchName` does not match `^story/[a-z0-9-]+$` regex (the slug-builder produces conforming names; this is a defence-in-depth check). Raises `GitBranchNameMalformedError` on regex fail before spawn.
@@ -145,25 +145,25 @@ vitest runs the dev terminal action against a fixture repo and asserts branch na
   - [ ] 2.5 Unit tests: slug regex pass/fail, push happy + failure path, commit-message shape switch.
 
 - [ ] **Task 3 — Add slug-builder, body-wrapper, and PR-body-composer pure utilities (AC: 1, 3)**
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/pr-body.ts`. Export:
+  - [ ] 3.1 Create `plugins/flow/mcp-server/src/lib/pr-body.ts`. Export:
     - `buildBranchSlug({ ref, title }): string` — composes `story/<ref-slug>-<title-slug>` per AC1a; pure.
     - `wrapCommitBody(body: string, width: number = 72): string` — hard-wraps lines at width on space boundaries; leaves URL-containing lines untouched.
     - `composeCommitSubject({ type, ref, title }): string` — returns `<type>(<ref>): <title>`.
     - `composePrBody({ ref, specPath, acs, summary }): string` — composes the two-section body per AC1g.
-  - [ ] 3.2 Create `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts`. Export `extractAcsFromSpec(specPath: string): Promise<Array<{ index: number, firstLine: string }>>`. Reads the spec file, greps every `^\*\*AC(\d+)(\s*\([^)]+\))?\s*:\*\*` line, captures the first non-blank line of each AC body, truncates at 120 chars, returns in numeric order.
+  - [ ] 3.2 Create `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts`. Export `extractAcsFromSpec(specPath: string): Promise<Array<{ index: number, firstLine: string }>>`. Reads the spec file, greps every `^\*\*AC(\d+)(\s*\([^)]+\))?\s*:\*\*` line, captures the first non-blank line of each AC body, truncates at 120 chars, returns in numeric order.
   - [ ] 3.3 Unit tests for each utility: slug-builder against the three AC3b fixture inputs; body-wrapper against AC3d cases; AC-extractor against a fixture spec with mixed `(user-surface)` / untagged / interleaved-blank-line ACs.
 
 - [ ] **Task 4 — Create `runDevTerminalAction` MCP tool (AC: 1, 3)**
-  - [ ] 4.1 Create `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`. TSDoc top-of-file cites § Behavioural contract by full path.
+  - [ ] 4.1 Create `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`. TSDoc top-of-file cites § Behavioural contract by full path.
   - [ ] 4.2 Inputs (all required, JSON-only): `{ targetRepoRoot, ref, title, type, body, summary, manifestPath, sessionUlid }`. `type` is validated against the conventional-commits set before any subprocess spawn.
   - [ ] 4.3 Implementation sequence: (i) compose branch slug via `buildBranchSlug`, (ii) call `gitCreateBranch`, (iii) call `extractAcsFromSpec` on the spec path derived from `manifestPath` (see § Implementation strategy for path derivation), (iv) compose subject via `composeCommitSubject`, wrap body via `wrapCommitBody`, (v) call `gitCommit({ ..., messageShape: "conventional" })`, (vi) call `gitPush`, (vii) compose PR body via `composePrBody`, (viii) call `gh({ role: "generalist-dev", subcommand: "pr-create", args: ["--title", subject, "--body", prBody], permissions })`, (ix) return `{ ok: true, branch, commitSha, prUrl }`.
-  - [ ] 4.4 Register in `plugins/crew/mcp-server/src/tools/register.ts` with the eight-field input schema.
-  - [ ] 4.5 Add `runDevTerminalAction` to `plugins/crew/permissions/generalist-dev.yaml`'s `tools_allow` list. (The dev subagent now has the MCP tool it needs to perform the terminal action.)
+  - [ ] 4.4 Register in `plugins/flow/mcp-server/src/tools/register.ts` with the eight-field input schema.
+  - [ ] 4.5 Add `runDevTerminalAction` to `plugins/flow/permissions/generalist-dev.yaml`'s `tools_allow` list. (The dev subagent now has the MCP tool it needs to perform the terminal action.)
   - [ ] 4.6 Bump tool-count assertions in `ask-mode-enforcement.test.ts`, `ask-skill.test.ts`, `get-team-snapshot.test.ts` from the current baseline to `baseline + 1`. Pull the current number from `register.ts` — do NOT hard-code in spec.
 
 - [ ] **Task 5 — Integration suite for `runDevTerminalAction` (AC: 1, 2, 3)**
-  - [ ] 5.1 Create `plugins/crew/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts`.
-  - [ ] 5.2 Fixture: tmpdir with `git init`, an `.crew/state/in-progress/<ref>.yaml` manifest, a fixture spec file at the manifest's `spec_path` with three ACs (one tagged `(user-surface)`, one tagged `(integration)`, one untagged).
+  - [ ] 5.1 Create `plugins/flow/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts`.
+  - [ ] 5.2 Fixture: tmpdir with `git init`, an `.flow/state/in-progress/<ref>.yaml` manifest, a fixture spec file at the manifest's `spec_path` with three ACs (one tagged `(user-surface)`, one tagged `(integration)`, one untagged).
   - [ ] 5.3 Stub `gh pr create` via `execaImpl` injection; assert stdout is captured as `prUrl`.
   - [ ] 5.4 Cover (3a)–(3i) branches from AC3 above. (3j) is asserted in the existing tool-count tests bumped in Task 4.6.
   - [ ] 5.5 The integration test MUST NOT actually push to a remote (no network IO in vitest). Stub `git push` via the same `execaImpl` injection seam used in `gitPush`'s unit tests.
@@ -192,7 +192,7 @@ Conventional-commits has a richer grammar (BREAKING CHANGE footers, scopes with 
 
 ### How `specPath` is derived from `manifestPath`
 
-The execution manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` already carries a `spec_path` field (Story 3.2's execution-manifest schema). The tool reads the manifest via `manifest-io.ts`'s `readManifest`, extracts `spec_path`, resolves it relative to `targetRepoRoot`, and passes the absolute path to `extractAcsFromSpec`. No new field is added to the manifest schema.
+The execution manifest at `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml` already carries a `spec_path` field (Story 3.2's execution-manifest schema). The tool reads the manifest via `manifest-io.ts`'s `readManifest`, extracts `spec_path`, resolves it relative to `targetRepoRoot`, and passes the absolute path to `extractAcsFromSpec`. No new field is added to the manifest schema.
 
 ### Why the body-wrapper leaves URLs alone
 
@@ -204,11 +204,11 @@ The v1 push signature is `gitPush({ targetRepoRoot, branchName, role })` — no 
 
 ### Why `gh_allow` is not extended in this story
 
-`pr-create` is already in `plugins/crew/permissions/generalist-dev.yaml`'s `gh_allow`. The new `runDevTerminalAction` calls `gh pr create` via the existing wrapper, which checks `gh_allow` — no spec change needed. We DO add `runDevTerminalAction` to `tools_allow` (it's a new MCP tool the dev role uses), but `gh_allow` is unchanged.
+`pr-create` is already in `plugins/flow/permissions/generalist-dev.yaml`'s `gh_allow`. The new `runDevTerminalAction` calls `gh pr create` via the existing wrapper, which checks `gh_allow` — no spec change needed. We DO add `runDevTerminalAction` to `tools_allow` (it's a new MCP tool the dev role uses), but `gh_allow` is unchanged.
 
 ### Why this story does NOT touch the dev persona prompt body
 
-The persona body at `plugins/crew/catalogue/generalist-dev.md` already says "open a PR as your terminal action" (in spirit — Story 4.2 / 4.3 set the persona contract). The dev subagent learns the MCP tool name `runDevTerminalAction` from the `tools_allow` allowlist injected at spawn time (the persona prompt assembly in `buildPersonaSpawnPrompt` includes the allowlist verbatim). A small persona-body edit to NAME the tool explicitly (e.g. "use `runDevTerminalAction` as your terminal action") would be a knowledge-edit and is OK to fold in via a small change to the persona body — but it is not a contract-shape change and does not require a separate AC.
+The persona body at `plugins/flow/catalogue/generalist-dev.md` already says "open a PR as your terminal action" (in spirit — Story 4.2 / 4.3 set the persona contract). The dev subagent learns the MCP tool name `runDevTerminalAction` from the `tools_allow` allowlist injected at spawn time (the persona prompt assembly in `buildPersonaSpawnPrompt` includes the allowlist verbatim). A small persona-body edit to NAME the tool explicitly (e.g. "use `runDevTerminalAction` as your terminal action") would be a knowledge-edit and is OK to fold in via a small change to the persona body — but it is not a contract-shape change and does not require a separate AC.
 
 ### Risks and mitigations
 
@@ -256,34 +256,34 @@ Pure function across the MCP wire of `({ targetRepoRoot, ref, title, type, body,
 ### File map (likely — refine during implementation)
 
 **New files:**
-- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`
-- `plugins/crew/mcp-server/src/lib/pr-body.ts`
-- `plugins/crew/mcp-server/src/lib/extract-acs-from-spec.ts`
-- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts`
-- `plugins/crew/mcp-server/src/lib/__tests__/pr-body.test.ts`
-- `plugins/crew/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts`
+- `plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts`
+- `plugins/flow/mcp-server/src/lib/pr-body.ts`
+- `plugins/flow/mcp-server/src/lib/extract-acs-from-spec.ts`
+- `plugins/flow/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts`
+- `plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts`
+- `plugins/flow/mcp-server/src/lib/__tests__/extract-acs-from-spec.test.ts`
 
 **Modified files:**
-- `plugins/crew/mcp-server/src/lib/git.ts` (add `gitCreateBranch`, `gitPush`, extend `gitCommit` with `messageShape` switch, add `assertNoNegativeFlags` helper)
-- `plugins/crew/mcp-server/src/lib/gh.ts` (add pre-spawn negative-capability refusal)
-- `plugins/crew/mcp-server/src/lib/__tests__/git.test.ts`
-- `plugins/crew/mcp-server/src/lib/__tests__/gh.test.ts`
-- `plugins/crew/mcp-server/src/errors.ts` (add `NegativeCapabilityDeniedError`, `GitBranchNameMalformedError`, `GitPushFailedError`, `GhPrCreateFailedError`, `ConventionalCommitTypeUnknownError`, `BranchSlugUnrenderableError`)
-- `plugins/crew/mcp-server/src/tools/register.ts` (register the new MCP tool)
-- `plugins/crew/permissions/generalist-dev.yaml` (add `runDevTerminalAction` to `tools_allow`)
-- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count `+1`)
-- `plugins/crew/mcp-server/tests/ask-skill.test.ts` (tool count `+1`)
-- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` (tool count `+1`)
-- `plugins/crew/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
+- `plugins/flow/mcp-server/src/lib/git.ts` (add `gitCreateBranch`, `gitPush`, extend `gitCommit` with `messageShape` switch, add `assertNoNegativeFlags` helper)
+- `plugins/flow/mcp-server/src/lib/gh.ts` (add pre-spawn negative-capability refusal)
+- `plugins/flow/mcp-server/src/lib/__tests__/git.test.ts`
+- `plugins/flow/mcp-server/src/lib/__tests__/gh.test.ts`
+- `plugins/flow/mcp-server/src/errors.ts` (add `NegativeCapabilityDeniedError`, `GitBranchNameMalformedError`, `GitPushFailedError`, `GhPrCreateFailedError`, `ConventionalCommitTypeUnknownError`, `BranchSlugUnrenderableError`)
+- `plugins/flow/mcp-server/src/tools/register.ts` (register the new MCP tool)
+- `plugins/flow/permissions/generalist-dev.yaml` (add `runDevTerminalAction` to `tools_allow`)
+- `plugins/flow/mcp-server/tests/ask-mode-enforcement.test.ts` (tool count `+1`)
+- `plugins/flow/mcp-server/tests/ask-skill.test.ts` (tool count `+1`)
+- `plugins/flow/mcp-server/tests/get-team-snapshot.test.ts` (tool count `+1`)
+- `plugins/flow/mcp-server/dist/` (rebuild; commit per CLAUDE.md)
 
 **Optionally modified:**
-- `plugins/crew/catalogue/generalist-dev.md` — a one-line knowledge edit naming `runDevTerminalAction` as the terminal-action tool. Knowledge edit, not contract change. OK to skip if the dev agent prefers to land it as a follow-up.
+- `plugins/flow/catalogue/generalist-dev.md` — a one-line knowledge edit naming `runDevTerminalAction` as the terminal-action tool. Knowledge edit, not contract change. OK to skip if the dev agent prefers to land it as a follow-up.
 
 **Untouched:**
-- `plugins/crew/mcp-server/src/skills/handoff-parser.ts` / `verdict-parser.ts` (locked-phrase parsers — owned by Stories 4.3 / 4.3b)
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` (`spec_path` already declared by Story 3.2)
-- `plugins/crew/mcp-server/src/schemas/role-permissions.ts` (no schema change — `gh_allow` semantics unchanged; the new negative-capability refusal is in the wrapper, not the schema)
-- `plugins/crew/permissions/gh-error-map.yaml` (Story 4.5 owns this)
+- `plugins/flow/mcp-server/src/skills/handoff-parser.ts` / `verdict-parser.ts` (locked-phrase parsers — owned by Stories 4.3 / 4.3b)
+- `plugins/flow/mcp-server/src/schemas/execution-manifest.ts` (`spec_path` already declared by Story 3.2)
+- `plugins/flow/mcp-server/src/schemas/role-permissions.ts` (no schema change — `gh_allow` semantics unchanged; the new negative-capability refusal is in the wrapper, not the schema)
+- `plugins/flow/permissions/gh-error-map.yaml` (Story 4.5 owns this)
 
 ### Dependencies
 

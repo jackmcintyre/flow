@@ -9,7 +9,7 @@ Status: ready-for-dev
 ## Story
 
 As a **plugin operator**,
-I want **`/crew:scan` to recognise the BMad lifecycle states `draft`, `approved`, and `review` instead of throwing `MalformedBmadStoryError`**,
+I want **`/flow:scan` to recognise the BMad lifecycle states `draft`, `approved`, and `review` instead of throwing `MalformedBmadStoryError`**,
 so that **the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` scans clean and Phase 2 of the dogfood plan can start**.
 
 ### What this story is, in one sentence
@@ -35,13 +35,13 @@ This is a mechanical enum widening at three locations (the `BmadStatus` type, tw
 
 **AC1:**
 
-`BmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`) and the mirror `isKnownBmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:165-174`) both accept `draft`, `approved`, `review` in addition to today's six values. `mapBmadStatusToExecution` maps `draft → "to-do"`, `approved → "to-do"`, `review → "in-progress"`. The lifecycle table in `plugins/crew/docs/spikes/bmad-format.md` is updated to match. Unit tests cover the new values in both directions (parser accepts; `mapBmadStatusToExecution` returns the expected execution state). `reconcileStatus` is unaffected (its default branch already routes via the mapping it just received).
-`artifact: plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`
+`BmadStatus` (in `plugins/flow/mcp-server/src/adapters/bmad/map-bmad-status.ts`) and the mirror `isKnownBmadStatus` (in `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts:165-174`) both accept `draft`, `approved`, `review` in addition to today's six values. `mapBmadStatusToExecution` maps `draft → "to-do"`, `approved → "to-do"`, `review → "in-progress"`. The lifecycle table in `plugins/flow/docs/spikes/bmad-format.md` is updated to match. Unit tests cover the new values in both directions (parser accepts; `mapBmadStatusToExecution` returns the expected execution state). `reconcileStatus` is unaffected (its default branch already routes via the mapping it just received).
+`artifact: plugins/flow/mcp-server/src/adapters/bmad/map-bmad-status.ts`
 
 **AC2 (integration):**
 
 vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementation-artifacts/` (using the real repo path as the fixture root via a `path.resolve(__dirname, ...)` walk), asserts zero `MalformedBmadStoryError` throws, and asserts every result's `raw_frontmatter.status` round-trips the on-disk literal. **Precondition baked into the same commit:** `4-3c-call-completestory-after-ready-for-merge.md`'s `Status: revised — re-implement per new architectural direction (tool-layer seam)` is normalised to `Status: done` (the spec is marked `done` in `sprint-status.yaml`). The free-text grammar is explicitly NOT accepted — `revised — ...` remains a `MalformedBmadStoryError` by design.
-`vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
+`vitest: plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
 
 ---
 
@@ -51,15 +51,15 @@ vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementati
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts` — widen the `BmadStatus` union type (lines 5-11), widen the `isKnownBmadStatus` guard (lines 94-103), add three new `case` arms to `mapBmadStatusToExecution`'s `switch` (lines 19-34).
-- `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts` — widen the mirror `isKnownBmadStatus` guard (lines 165-174). This is a duplicate of the guard in `map-bmad-status.ts` and MUST be kept in sync (Dev Notes § "Two-mirror invariant" below covers why).
-- `plugins/crew/docs/spikes/bmad-format.md` — add three rows to the "Lifecycle vocabulary" table (lines 57-65) for `draft`, `approved`, `review`.
+- `plugins/flow/mcp-server/src/adapters/bmad/map-bmad-status.ts` — widen the `BmadStatus` union type (lines 5-11), widen the `isKnownBmadStatus` guard (lines 94-103), add three new `case` arms to `mapBmadStatusToExecution`'s `switch` (lines 19-34).
+- `plugins/flow/mcp-server/src/adapters/bmad/parse-bmad-story.ts` — widen the mirror `isKnownBmadStatus` guard (lines 165-174). This is a duplicate of the guard in `map-bmad-status.ts` and MUST be kept in sync (Dev Notes § "Two-mirror invariant" below covers why).
+- `plugins/flow/docs/spikes/bmad-format.md` — add three rows to the "Lifecycle vocabulary" table (lines 57-65) for `draft`, `approved`, `review`.
 - `_bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md` — line 4: replace `Status: revised — re-implement per new architectural direction (tool-layer seam)` with `Status: done`. This is a one-line spec-file cleanup, NOT a behaviour change; `sprint-status.yaml` already records the story as `done`. This edit is the precondition that lets AC2's corpus test pass.
 
 **NEW:**
 
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — the integration test required by AC2. Walks the live repo corpus via `path.resolve(__dirname, '../../../../../../../_bmad-output/implementation-artifacts')`. See Dev Notes § "AC2 fixture layout" for the exact path-arithmetic and assertion shape.
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/map-bmad-status.test.ts` OR additions to an existing co-located unit test file — unit coverage required by AC1. There is currently no unit-test file for `map-bmad-status.ts`; the existing `__tests__/` directory contains only `parse-bmad-story.ship-gate.test.ts`. Recommended: create a new `map-bmad-status.test.ts` file co-located with the other adapter tests, since the assertions cover a distinct module. Cases:
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — the integration test required by AC2. Walks the live repo corpus via `path.resolve(__dirname, '../../../../../../../_bmad-output/implementation-artifacts')`. See Dev Notes § "AC2 fixture layout" for the exact path-arithmetic and assertion shape.
+- `plugins/flow/mcp-server/src/adapters/bmad/__tests__/map-bmad-status.test.ts` OR additions to an existing co-located unit test file — unit coverage required by AC1. There is currently no unit-test file for `map-bmad-status.ts`; the existing `__tests__/` directory contains only `parse-bmad-story.ship-gate.test.ts`. Recommended: create a new `map-bmad-status.test.ts` file co-located with the other adapter tests, since the assertions cover a distinct module. Cases:
   - `mapBmadStatusToExecution("draft")` returns `"to-do"`
   - `mapBmadStatusToExecution("approved")` returns `"to-do"`
   - `mapBmadStatusToExecution("review")` returns `"in-progress"`
@@ -111,7 +111,7 @@ These were locked at planning time. The dev agent must NOT propose alternatives:
 The integration test file lives at:
 
 ```
-plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts
+plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts
 ```
 
 The corpus it walks lives at:
@@ -165,15 +165,15 @@ The reframe doc proposed clamping the planner template's allowed Status values. 
 
 ### Test strategy summary
 
-- **AC1 unit coverage** lands in `plugins/crew/mcp-server/src/adapters/bmad/__tests__/map-bmad-status.test.ts` (new file). Covers the full `mapBmadStatusToExecution` matrix (nine values + the `optional` null skip) and parser acceptance of the three new Status literals via minimal fixture files.
-- **AC2 integration coverage** lands in `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (new file). Walks the live corpus.
+- **AC1 unit coverage** lands in `plugins/flow/mcp-server/src/adapters/bmad/__tests__/map-bmad-status.test.ts` (new file). Covers the full `mapBmadStatusToExecution` matrix (nine values + the `optional` null skip) and parser acceptance of the three new Status literals via minimal fixture files.
+- **AC2 integration coverage** lands in `plugins/flow/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (new file). Walks the live corpus.
 - The existing `parse-bmad-story.ship-gate.test.ts` is unaffected and MUST continue to pass.
 
 Run order during dev: `pnpm typecheck` → `pnpm test` from the repo root. Both must pass before opening the PR.
 
 ### Build artefact reminder
 
-`plugins/crew/mcp-server/dist/` is checked into git (`/plugin install` copies the tree as-is and does not run a build step). After changing `src/`, run `pnpm build` and commit `dist/` in the same change. CI fails on drift. See `plugins/crew/docs/README-install.md` § Build artefacts.
+`plugins/flow/mcp-server/dist/` is checked into git (`/plugin install` copies the tree as-is and does not run a build step). After changing `src/`, run `pnpm build` and commit `dist/` in the same change. CI fails on drift. See `plugins/flow/docs/README-install.md` § Build artefacts.
 
 ---
 
@@ -197,5 +197,5 @@ None. Leaf story.
 
 - Schema migration for `BmadStatus` consumers (none required — the type widening is additive).
 - Backfilling the BMad authoring template (the upstream skill already emits the new values; the parser is the one that was behind).
-- Any change to `/crew:scan` skill prose or surface (substrate-only).
+- Any change to `/flow:scan` skill prose or surface (substrate-only).
 - Any change to `sprint-status.yaml` (state file — the orchestrator owns transitions).

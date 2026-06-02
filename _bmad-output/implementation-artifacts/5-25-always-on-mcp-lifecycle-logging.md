@@ -9,7 +9,7 @@ Status: review
 ## Story
 
 As a **plugin operator**,
-I want **the crew MCP server to (a) emit a persistent JSON-line lifecycle log so every disconnect reveals its trigger, (b) send a periodic keepalive ping that prevents Claude Code's ~10 min idle reap from firing, (c) survive unhandled errors and stdout EPIPE without crashing, and (d) drop Story 5.12's zombie-keeping setInterval since stdin-close is the spec-correct shutdown signal**,
+I want **the flow MCP server to (a) emit a persistent JSON-line lifecycle log so every disconnect reveals its trigger, (b) send a periodic keepalive ping that prevents Claude Code's ~10 min idle reap from firing, (c) survive unhandled errors and stdout EPIPE without crashing, and (d) drop Story 5.12's zombie-keeping setInterval since stdin-close is the spec-correct shutdown signal**,
 so that **mid-session "tools no longer available" stops being the dominant friction in long sessions, and so that when disconnects do happen, the log file tells me exactly which trigger fired**.
 
 ### What this story is, in one sentence
@@ -36,23 +36,23 @@ Cost of (b): ~150–250 lines of new code (lifecycle logger module + index.ts wi
 
 ### What this story does (and why it needs its own story)
 
-Story 5.12 (shipped 2026-05-27) added a module-level `setInterval` keep-alive to `plugins/crew/mcp-server/src/index.ts` plus `swallowStdinEnd`/`swallowStdinClose` handlers. The theory at the time was that Claude Code's ~10 min stdin-close was an unintentional side-effect of idle reaping, and that keeping the child alive would let tool calls resume once the parent next sent a request.
+Story 5.12 (shipped 2026-05-27) added a module-level `setInterval` keep-alive to `plugins/flow/mcp-server/src/index.ts` plus `swallowStdinEnd`/`swallowStdinClose` handlers. The theory at the time was that Claude Code's ~10 min stdin-close was an unintentional side-effect of idle reaping, and that keeping the child alive would let tool calls resume once the parent next sent a request.
 
 Post-ship evidence (this story's investigation, 2026-05-28) shows that theory was wrong:
 
 1. **stdin-close is intentional, per spec.** The MCP stdio transport spec defines stdin-close as the client's first shutdown step. Claude Code is following the spec. Story 5.12's keep-alive defies the spec.
 2. **Claude Code does not reconnect.** Anthropic's open issues (#36308, #43177, #57207) confirm: once the host closes stdin and considers the server dead, there is no mechanism to reattach. The kept-alive child sits idle until SIGTERM eventually arrives or until the user restarts Claude Code. The keep-alive bought nothing user-visible.
 3. **The real lever is keeping the timer from firing.** If the parent's idle timer is reset by traffic on the pipe (the standard pattern), then a 5-minute server-sent ping never lets the timer reach the ~10 minute reap threshold. The reap simply does not happen.
-4. **We cannot tell whether the friction is stdin-close or something else.** Story 5.12 had an opt-in `CREW_MCP_DIAG` env, but nobody runs it routinely. Every reported "tools no longer available" today is a guess about which trigger fired. The persistent log file is the disambiguating instrument.
+4. **We cannot tell whether the friction is stdin-close or something else.** Story 5.12 had an opt-in `FLOW_MCP_DIAG` env, but nobody runs it routinely. Every reported "tools no longer available" today is a guess about which trigger fired. The persistent log file is the disambiguating instrument.
 
 This story replaces 5.12's mechanism with one that aligns with how stdio MCP is meant to work, plus a permanent observability layer so the next investigation does not start from zero.
 
 ### What this story does NOT
 
 - (a) Add a parent-side reconnect orchestrator. We cannot reconnect from the child side; Anthropic owns that surface (#57207 tracks the feature request).
-- (b) Fork or modify the `@modelcontextprotocol/sdk` package. All work lives in `plugins/crew/mcp-server/src/`.
+- (b) Fork or modify the `@modelcontextprotocol/sdk` package. All work lives in `plugins/flow/mcp-server/src/`.
 - (c) Change any MCP tool, schema, descriptor, or permission allowlist. `createServer()`, `registerAllTools()`, and every file under `mcp-server/src/tools/` and `mcp-server/src/schemas/` are untouched.
-- (d) Modify any skill prose (`plugins/crew/skills/`). The fix is invisible at the prose layer.
+- (d) Modify any skill prose (`plugins/flow/skills/`). The fix is invisible at the prose layer.
 - (e) Add operator-facing chat surface. No new slash commands, no new JSONL events, no new system reminders. The lifecycle log is a file-level diagnostic, not a chat surface.
 - (f) Add a custom JSON-RPC notification or method name. The keepalive uses the MCP-spec `ping` request, which the SDK's `Protocol` class already handles (auto-pongs on the client side, auto-replies on the server side via the registered `PingRequestSchema` handler).
 - (g) Monkey-patch `process.exit` or any stdlib method.
@@ -60,7 +60,7 @@ This story replaces 5.12's mechanism with one that aligns with how stdio MCP is 
 - (i) Configure log rotation or retention. The log file is append-only with no rotation in v1; if it grows unbounded over months of use, a follow-up story can add rotation. Expected growth: ~10–20 KB/day on a heavily-used session.
 - (j) Move existing tools' diagnostic logging into the lifecycle log. Tool-level pino logs (Story 1.5 telemetry) remain separate; the lifecycle log captures only process- and transport-level events.
 - (k) Change the MCP server's `package.json`, `tsconfig.json`, or build configuration. No new dependencies; the implementation uses only Node stdlib (`node:fs`, `node:path`, `node:os`, `node:process`) plus the existing SDK exports.
-- (l) Reintroduce or extend the opt-in `CREW_MCP_DIAG` flag as a separate stream. The flag's behaviour is absorbed into the always-on log; the env var name is retained as an alias that simply sets the log path if `CREW_MCP_LIFECYCLE_LOG` is unset (back-compat for any operator who already uses it).
+- (l) Reintroduce or extend the opt-in `FLOW_MCP_DIAG` flag as a separate stream. The flag's behaviour is absorbed into the always-on log; the env var name is retained as an alias that simply sets the log path if `FLOW_MCP_LIFECYCLE_LOG` is unset (back-compat for any operator who already uses it).
 - (m) Cover non-stdin reap causes specifically. SIGTERM/SIGKILL from the OS, OOM, manual `kill -9` are logged when they fire (via the `signal` and `exit` event sites) but no special survival mechanism is added.
 - (n) Detect or react to a missing pong response. If the client does not pong within some window, we still log `keepalive.sent` but no `keepalive.response`; the analysis is left to the operator reading the log. v1 does not add a "client appears dead, take action" path.
 - (o) Add an MCP tool that exposes lifecycle log contents. The log lives at a predictable path on disk; operators read it with `tail` or `cat`. No `getLifecycleLog` tool is added.
@@ -84,45 +84,45 @@ This story replaces 5.12's mechanism with one that aligns with how stdio MCP is 
 > ACs are reproduced from the epic block (`epic-5 § Story 5.25`) with per-AC implementation details added below each one. AC markers (`artifact:` / `vitest:`) use plain unbacked-tick form per memory `project_reviewer_toolchain_gaps`.
 
 **AC1:**
-The MCP server appends JSON lines to a stable log path (default `~/.crew/mcp-lifecycle.log`, overridable via `CREW_MCP_LIFECYCLE_LOG` env). Events captured each as one JSON line: `boot` (pid, timestamp, plugin version), `transport.connected`, `tool.call` (name, ms-since-boot), `keepalive.sent`, `keepalive.response`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal` (SIGTERM/SIGINT/SIGHUP), `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit` (code). Logging is fail-open — an unwritable log path never crashes the server. The opt-in `CREW_MCP_DIAG` env from Story 5.12 is migrated into this layer (the old separate stderr stream is removed).
-artifact: plugins/crew/mcp-server/src/lib/lifecycle-log.ts
-artifact: plugins/crew/mcp-server/src/index.ts
+The MCP server appends JSON lines to a stable log path (default `~/.flow/mcp-lifecycle.log`, overridable via `FLOW_MCP_LIFECYCLE_LOG` env). Events captured each as one JSON line: `boot` (pid, timestamp, plugin version), `transport.connected`, `tool.call` (name, ms-since-boot), `keepalive.sent`, `keepalive.response`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal` (SIGTERM/SIGINT/SIGHUP), `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit` (code). Logging is fail-open — an unwritable log path never crashes the server. The opt-in `FLOW_MCP_DIAG` env from Story 5.12 is migrated into this layer (the old separate stderr stream is removed).
+artifact: plugins/flow/mcp-server/src/lib/lifecycle-log.ts
+artifact: plugins/flow/mcp-server/src/index.ts
 
-<!-- Implementation: the lib exports `createLifecycleLog(opts)` returning `{ log(event, fields?) }` where `log` is fire-and-forget. Internally uses `fs.createWriteStream(path, { flags: 'a' })` and swallows any write errors silently. If both `CREW_MCP_LIFECYCLE_LOG` and `CREW_MCP_DIAG` are unset, the default path `path.join(os.homedir(), '.crew', 'mcp-lifecycle.log')` is used after a best-effort `mkdir -p`. If mkdir fails or the path is otherwise unwritable, log() becomes a no-op for the lifetime of the process. Each call writes one JSON line: `{"event": "<name>", "ts": <epoch-ms>, "pid": <pid>, ...fields}`. -->
+<!-- Implementation: the lib exports `createLifecycleLog(opts)` returning `{ log(event, fields?) }` where `log` is fire-and-forget. Internally uses `fs.createWriteStream(path, { flags: 'a' })` and swallows any write errors silently. If both `FLOW_MCP_LIFECYCLE_LOG` and `FLOW_MCP_DIAG` are unset, the default path `path.join(os.homedir(), '.flow', 'mcp-lifecycle.log')` is used after a best-effort `mkdir -p`. If mkdir fails or the path is otherwise unwritable, log() becomes a no-op for the lifetime of the process. Each call writes one JSON line: `{"event": "<name>", "ts": <epoch-ms>, "pid": <pid>, ...fields}`. -->
 
 **AC2:**
-The server sends a JSON-RPC ping request (`{method: "ping"}`) to the client every 5 minutes (configurable via `CREW_MCP_KEEPALIVE_MS`, default 300000; disable with `0`). Each ping is logged as `keepalive.sent`; the client's pong reply is logged as `keepalive.response`. The keepalive uses the SDK's `Protocol.request()` method (inherited by `Server`) — no new MCP scaffolding is introduced. Ping failures are logged but do not crash the server. The timer is unref'd so it does not by itself hold the process alive after stdin close.
-artifact: plugins/crew/mcp-server/src/index.ts
+The server sends a JSON-RPC ping request (`{method: "ping"}`) to the client every 5 minutes (configurable via `FLOW_MCP_KEEPALIVE_MS`, default 300000; disable with `0`). Each ping is logged as `keepalive.sent`; the client's pong reply is logged as `keepalive.response`. The keepalive uses the SDK's `Protocol.request()` method (inherited by `Server`) — no new MCP scaffolding is introduced. Ping failures are logged but do not crash the server. The timer is unref'd so it does not by itself hold the process alive after stdin close.
+artifact: plugins/flow/mcp-server/src/index.ts
 
 <!-- Implementation: after `server.connect(transport)`, schedule `setInterval(sendPing, intervalMs).unref()`. `sendPing` awaits `server.ping()` if exposed by the SDK, or `(server as any).request({ method: "ping" }, PingResultSchema)` if not (verify via SDK docs/types — the MCP-spec Ping request expects an empty result, and `Protocol.request()` is the underlying method). Wrap in try/catch and log `keepalive.error` on rejection. `intervalMs <= 0` disables the timer entirely (no setInterval scheduled). -->
 
 **AC3:**
 The server installs `process.on('uncaughtException')`, `process.on('unhandledRejection')`, and `process.stdout.on('error')` handlers that log the event to the lifecycle log and do NOT exit the process. The existing `main().catch(err => process.exit(1))` is preserved (it only fires on init failure, not on in-flight errors). The server also installs `process.on('SIGTERM')`, `process.on('SIGINT')`, and `process.on('SIGHUP')` handlers that log the signal event then call `process.exit(143/130/129)` respectively — because adding any Node.js signal listener prevents the default termination, the explicit `process.exit` call preserves clean shutdown with conventional exit codes.
-artifact: plugins/crew/mcp-server/src/index.ts
+artifact: plugins/flow/mcp-server/src/index.ts
 
 <!-- Implementation: install these handlers AT MODULE LOAD (top of index.ts, before `main()` runs) so they catch errors from synchronous module init too. Handler body: stringify the error (preserve `.message`, `.stack`, `.name`) into the log line; return without calling exit. The stdout 'error' handler specifically catches EPIPE when the parent closes its read end of the pipe — without this handler, Node's default behaviour is to emit an unhandled 'error' event which crashes the process. -->
 
 **AC4:**
-The module-level `_keepAliveHandle` setInterval and the `swallowStdinEnd`/`swallowStdinClose`/`process.stdin.resume()` block from Story 5.12 are removed from `plugins/crew/mcp-server/src/index.ts`. The story spec must document the justification: per MCP stdio transport spec, stdin close IS the parent's shutdown signal; the server should exit cleanly when it receives one. AC2's keepalive prevents stdin close from being the parent's choice in the first place; if the parent decides to shut down, we honour it.
-artifact: plugins/crew/mcp-server/src/index.ts
+The module-level `_keepAliveHandle` setInterval and the `swallowStdinEnd`/`swallowStdinClose`/`process.stdin.resume()` block from Story 5.12 are removed from `plugins/flow/mcp-server/src/index.ts`. The story spec must document the justification: per MCP stdio transport spec, stdin close IS the parent's shutdown signal; the server should exit cleanly when it receives one. AC2's keepalive prevents stdin close from being the parent's choice in the first place; if the parent decides to shut down, we honour it.
+artifact: plugins/flow/mcp-server/src/index.ts
 
 <!-- Implementation: delete lines 14–94 of the current index.ts (the entire 5.12 keep-alive block including the long header comment). Replace with: a smaller header comment that links to THIS story's spec for context, explains that 5.12's setInterval was reverted, and notes that the keepalive (AC2) is the durable mechanism. The new header is ~10 lines. Listeners on stdin's 'end'/'close' still fire to the lifecycle logger (per AC1) but no longer suppress shutdown — the server exits when the SDK transport tears down, as it should. -->
 
 **AC5:**
-The existing test `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` is renamed to `mcp-stdin-close-shutdown.test.ts` and rewritten to assert the new contract: on stdin close, the child exits cleanly within 5 seconds with exit code 0. The "survive stdin close" assertions are deleted; the SIGTERM and dispatch-regression assertions are preserved.
-vitest: plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts
+The existing test `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` is renamed to `mcp-stdin-close-shutdown.test.ts` and rewritten to assert the new contract: on stdin close, the child exits cleanly within 5 seconds with exit code 0. The "survive stdin close" assertions are deleted; the SIGTERM and dispatch-regression assertions are preserved.
+vitest: plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts
 
 <!-- Implementation: `git mv` the file. The 4a "spawn-and-survive" test is replaced with "spawn-and-shutdown": spawn dist, complete initialize handshake, close stdin, assert the 'exit' event fires within 5 seconds with code 0 (NOT signal SIGTERM — the parent never sent one). Keep 4c (SIGTERM still kills), 4d (no premature exit during steady-state — same 5-second healthy window, but only relevant before stdin close), and 4e (dispatch unaffected). Drop 4b (stdout still open after stdin close — no longer a relevant invariant). -->
 
 **AC6 (integration):**
-vitest spawns the real `dist/index.js` with `CREW_MCP_LIFECYCLE_LOG` set to a tmp path, drives a `tools/list` call, sends SIGTERM, and asserts the log file contains the expected event sequence (`boot` → `transport.connected` → `tool.call` → `signal` → `exit`). A second test asserts that an unwritable log path (e.g., `/proc/nonexistent/log`) does not crash the server (server still answers tool calls; log writes silently noop).
-vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+vitest spawns the real `dist/index.js` with `FLOW_MCP_LIFECYCLE_LOG` set to a tmp path, drives a `tools/list` call, sends SIGTERM, and asserts the log file contains the expected event sequence (`boot` → `transport.connected` → `tool.call` → `signal` → `exit`). A second test asserts that an unwritable log path (e.g., `/proc/nonexistent/log`) does not crash the server (server still answers tool calls; log writes silently noop).
+vitest: plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
 
-<!-- Implementation: use `os.tmpdir()` + a per-test unique subdir for the log path. After the child exits, read the log file as text, split on newline, JSON.parse each non-empty line, assert events appear in order. The "unwritable path" test sets `CREW_MCP_LIFECYCLE_LOG=/proc/this-cannot-exist/log` on macOS or `/nonexistent/log` on Linux (the test should detect the platform and pick a path guaranteed to fail mkdir + write). The test drives a `tools/list` request after the spawn-and-handshake to confirm the server still answers despite the bad log path. -->
+<!-- Implementation: use `os.tmpdir()` + a per-test unique subdir for the log path. After the child exits, read the log file as text, split on newline, JSON.parse each non-empty line, assert events appear in order. The "unwritable path" test sets `FLOW_MCP_LIFECYCLE_LOG=/proc/this-cannot-exist/log` on macOS or `/nonexistent/log` on Linux (the test should detect the platform and pick a path guaranteed to fail mkdir + write). The test drives a `tools/list` request after the spawn-and-handshake to confirm the server still answers despite the bad log path. -->
 
 **AC7 (integration):**
-vitest spawns the dist with `CREW_MCP_KEEPALIVE_MS=2000` and `CREW_MCP_LIFECYCLE_LOG` set to a tmp path. After 7 seconds, the test reads the log and asserts at least 3 `keepalive.sent` events and at least 1 `keepalive.response` event (proving the SDK's auto-pong path works end-to-end). A second test sets `CREW_MCP_KEEPALIVE_MS=0` and asserts no `keepalive.sent` events appear within 5 seconds (disabled-by-zero contract).
-vitest: plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts
+vitest spawns the dist with `FLOW_MCP_KEEPALIVE_MS=2000` and `FLOW_MCP_LIFECYCLE_LOG` set to a tmp path. After 7 seconds, the test reads the log and asserts at least 3 `keepalive.sent` events and at least 1 `keepalive.response` event (proving the SDK's auto-pong path works end-to-end). A second test sets `FLOW_MCP_KEEPALIVE_MS=0` and asserts no `keepalive.sent` events appear within 5 seconds (disabled-by-zero contract).
+vitest: plugins/flow/mcp-server/src/__tests__/mcp-keepalive.test.ts
 
 <!-- Implementation: the keepalive test spawns dist with the env, completes the initialize handshake (the SDK's client-side ping handler is wired automatically as part of `connect()`), waits 7 real seconds (set `{timeout: 15000}` on the test), then reads the log. For the response side, we are acting as the client over raw stdio — to get a pong back, our test client must answer the incoming ping request. The test fixture must therefore include a tiny ping-responder loop that reads incoming JSON-RPC from the child's stdout and writes a `{result: {}}` response back on stdin. -->
 
@@ -135,11 +135,11 @@ vitest: plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts
 Implementation order is load-bearing. Task 1 builds the lib in isolation (testable headless). Tasks 2–5 wire it through `index.ts` in order so each step is verifiable. Task 6 ships.
 
 - [x] **Task 1: Build the lifecycle logger lib** (AC: #1)
-  - [x] 1.1 Create `plugins/crew/mcp-server/src/lib/lifecycle-log.ts`. Export `createLifecycleLog(opts?: { path?: string }): { log: (event: string, fields?: Record<string, unknown>) => void; close: () => void }`. Default path resolution: `opts.path ?? process.env.CREW_MCP_LIFECYCLE_LOG ?? process.env.CREW_MCP_DIAG ?? path.join(os.homedir(), ".crew", "mcp-lifecycle.log")`. (The `CREW_MCP_DIAG` fallback preserves back-compat for the Story 5.12 env name — when set, its value becomes the log path; when unset, the default applies.)
+  - [x] 1.1 Create `plugins/flow/mcp-server/src/lib/lifecycle-log.ts`. Export `createLifecycleLog(opts?: { path?: string }): { log: (event: string, fields?: Record<string, unknown>) => void; close: () => void }`. Default path resolution: `opts.path ?? process.env.FLOW_MCP_LIFECYCLE_LOG ?? process.env.FLOW_MCP_DIAG ?? path.join(os.homedir(), ".flow", "mcp-lifecycle.log")`. (The `FLOW_MCP_DIAG` fallback preserves back-compat for the Story 5.12 env name — when set, its value becomes the log path; when unset, the default applies.)
   - [x] 1.2 Internal: `mkdir -p` the dirname; on failure, set a `disabled` flag and make `log` a no-op for the process lifetime. Use `fs.createWriteStream(path, { flags: "a" })`; on the stream's `'error'` event, set `disabled = true` and stop writing (no crash, no rethrow).
   - [x] 1.3 `log(event, fields?)`: when not disabled, build `{ event, ts: Date.now(), pid: process.pid, ...fields }`, serialize with `JSON.stringify`, write to the stream followed by `"\n"`. The write is fire-and-forget; no await, no callback.
   - [x] 1.4 `close()`: end the write stream gracefully; called once from a `process.on('exit', ...)` site in `index.ts` so the final 'exit' line lands on disk before the OS reclaims the fd.
-  - [x] 1.5 Unit test in `lib/__tests__/lifecycle-log.test.ts`: covers (a) writes a JSON line per call, (b) survives unwritable path without throwing, (c) honours the `CREW_MCP_LIFECYCLE_LOG` env var, (d) `CREW_MCP_DIAG` env var falls back when LIFECYCLE_LOG unset, (e) `close()` flushes pending writes.
+  - [x] 1.5 Unit test in `lib/__tests__/lifecycle-log.test.ts`: covers (a) writes a JSON line per call, (b) survives unwritable path without throwing, (c) honours the `FLOW_MCP_LIFECYCLE_LOG` env var, (d) `FLOW_MCP_DIAG` env var falls back when LIFECYCLE_LOG unset, (e) `close()` flushes pending writes.
 
 - [x] **Task 2: Install crash-resilience handlers at module load** (AC: #3)
   - [x] 2.1 At the very top of `index.ts` (before importing the SDK), instantiate the lifecycle log: `const lifecycle = createLifecycleLog();`. This binds the handle once for the module lifetime.
@@ -159,7 +159,7 @@ Implementation order is load-bearing. Task 1 builds the lib in isolation (testab
   - [x] 4.3 Replace stdin-close swallowers with logging + clean shutdown: stdin 'end' listener calls `server.close()` then `process.exit(0)`. The SDK's StdioServerTransport does not listen for stdin 'end' internally, so explicit shutdown is needed.
 
 - [x] **Task 5: Install the keepalive ping timer** (AC: #2)
-  - [x] 5.1 After `await server.connect(transport)` completes in `main()`, compute `const intervalMs = Number(process.env.CREW_MCP_KEEPALIVE_MS ?? 300000);`. If `intervalMs > 0`, schedule the timer; if `<= 0`, log `keepalive.disabled` and skip.
+  - [x] 5.1 After `await server.connect(transport)` completes in `main()`, compute `const intervalMs = Number(process.env.FLOW_MCP_KEEPALIVE_MS ?? 300000);`. If `intervalMs > 0`, schedule the timer; if `<= 0`, log `keepalive.disabled` and skip.
   - [x] 5.2 Inside the timer callback: call `server.ping()` — the SDK exposes this as a convenience method.
   - [x] 5.3 Before the ping call: `lifecycle.log('keepalive.sent', { intervalMs })`. After success: `lifecycle.log('keepalive.response', { latencyMs: <measured> })`. On failure: `lifecycle.log('keepalive.error', { message: err.message })` — do NOT rethrow.
   - [x] 5.4 `setInterval(sendPing, intervalMs).unref()` — the `.unref()` is critical.
@@ -180,7 +180,7 @@ Implementation order is load-bearing. Task 1 builds the lib in isolation (testab
 - [x] **Task 8: Build, dist, drift check** (AC: all)
   - [x] 8.1 `pnpm build` produces clean dist (tsc + normalise-dist.mjs).
   - [x] 8.2 Second `pnpm build` confirmed byte-identical output (determinism invariant holds).
-  - [x] 8.3 `plugins/crew/mcp-server/dist/` committed per `CLAUDE.md § Plugin build output is tracked in git`.
+  - [x] 8.3 `plugins/flow/mcp-server/dist/` committed per `CLAUDE.md § Plugin build output is tracked in git`.
   - [x] 8.4 Dist changes confined to index.js, lib/lifecycle-log.js, renamed/new test files and their .d.ts siblings. Old `mcp-stdin-close-resilience.*` dist files removed.
 
 ---
@@ -223,19 +223,19 @@ Same reason as Story 5.12's AC4f: the artefact Claude Code loads is `dist/index.
 
 ## Locked files
 
-- `plugins/crew/mcp-server/src/server.ts` (Stories 1.1 / 1.4 / 2.x) — NOT touched. The `createServer()` factory, the dispatcher, and the tool registry are unchanged. (Risk: Task 6.3's `tool.call` logging may need a hook into the dispatcher. If implementation finds the only viable path requires modifying `server.ts`, the dev must update this Locked Files block AND raise the change in the PR description; do not silently violate.)
-- `plugins/crew/mcp-server/src/tools/**` — NOT touched.
-- `plugins/crew/mcp-server/src/schemas/**` — NOT touched.
-- `plugins/crew/skills/**` — NOT touched. No prose changes.
-- `plugins/crew/permissions/**` — NOT touched. No allowlist changes.
-- `plugins/crew/.claude-plugin/plugin.json` — NOT touched.
-- `plugins/crew/mcp-server/package.json` — NOT touched. No new dependencies; everything is Node stdlib + existing SDK exports.
+- `plugins/flow/mcp-server/src/server.ts` (Stories 1.1 / 1.4 / 2.x) — NOT touched. The `createServer()` factory, the dispatcher, and the tool registry are unchanged. (Risk: Task 6.3's `tool.call` logging may need a hook into the dispatcher. If implementation finds the only viable path requires modifying `server.ts`, the dev must update this Locked Files block AND raise the change in the PR description; do not silently violate.)
+- `plugins/flow/mcp-server/src/tools/**` — NOT touched.
+- `plugins/flow/mcp-server/src/schemas/**` — NOT touched.
+- `plugins/flow/skills/**` — NOT touched. No prose changes.
+- `plugins/flow/permissions/**` — NOT touched. No allowlist changes.
+- `plugins/flow/.claude-plugin/plugin.json` — NOT touched.
+- `plugins/flow/mcp-server/package.json` — NOT touched. No new dependencies; everything is Node stdlib + existing SDK exports.
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- `plugins/crew/mcp-server/src/index.ts` (Story 1.1, modified by Story 5.12) — Tasks 2/3/4/5/6 rewrite the file. Story 5.12's keep-alive block is deleted; new wiring is additive at the same level of abstraction. The `createServer()` → `registerAllTools()` → `server.connect(transport)` sequence is preserved.
-- `plugins/crew/mcp-server/dist/index.js` (Story 1.9 dist-shipping contract) — Task 8 rebuilds and ships.
-- `plugins/crew/mcp-server/dist/index.d.ts` and dist outputs for any new lib/test files — rebuilt by `tsc` during Task 8.
+- `plugins/flow/mcp-server/src/index.ts` (Story 1.1, modified by Story 5.12) — Tasks 2/3/4/5/6 rewrite the file. Story 5.12's keep-alive block is deleted; new wiring is additive at the same level of abstraction. The `createServer()` → `registerAllTools()` → `server.connect(transport)` sequence is preserved.
+- `plugins/flow/mcp-server/dist/index.js` (Story 1.9 dist-shipping contract) — Task 8 rebuilds and ships.
+- `plugins/flow/mcp-server/dist/index.d.ts` and dist outputs for any new lib/test files — rebuilt by `tsc` during Task 8.
 
 ---
 
@@ -243,29 +243,29 @@ Same reason as Story 5.12's AC4f: the artefact Claude Code loads is `dist/index.
 
 ### Files this story will create
 
-- `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` (Task 1) — JSON-line append-only logger; ~50 lines.
-- `plugins/crew/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (Task 1.5) — unit test for the logger.
-- `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (Task 7.2) — integration test for the log file's event sequence.
-- `plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts` (Task 7.3) — integration test for the keepalive timer.
+- `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` (Task 1) — JSON-line append-only logger; ~50 lines.
+- `plugins/flow/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (Task 1.5) — unit test for the logger.
+- `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (Task 7.2) — integration test for the log file's event sequence.
+- `plugins/flow/mcp-server/src/__tests__/mcp-keepalive.test.ts` (Task 7.3) — integration test for the keepalive timer.
 
 ### Files this story will modify
 
-- `plugins/crew/mcp-server/src/index.ts` (Tasks 2–6) — rewritten; Story 5.12 keep-alive removed; new logging, error handlers, keepalive, signal handlers.
-- `plugins/crew/mcp-server/dist/index.js` and corresponding `.d.ts` / `.map` siblings (Task 8) — rebuilt artefacts.
+- `plugins/flow/mcp-server/src/index.ts` (Tasks 2–6) — rewritten; Story 5.12 keep-alive removed; new logging, error handlers, keepalive, signal handlers.
+- `plugins/flow/mcp-server/dist/index.js` and corresponding `.d.ts` / `.map` siblings (Task 8) — rebuilt artefacts.
 
 ### Files this story will rename
 
-- `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` → `mcp-stdin-close-shutdown.test.ts` (Task 7.1) — `git mv` to preserve history; contents rewritten per AC5.
+- `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` → `mcp-stdin-close-shutdown.test.ts` (Task 7.1) — `git mv` to preserve history; contents rewritten per AC5.
 
 ### Files this story will NOT modify
 
 - Anything in `src/server.ts`, `src/tools/`, `src/schemas/`, `src/permissions/` (see Locked files above).
-- Anything in `plugins/crew/skills/`, `plugins/crew/docs/`, `_bmad-output/` (no prose changes).
+- Anything in `plugins/flow/skills/`, `plugins/flow/docs/`, `_bmad-output/` (no prose changes).
 
 ### Current-state notes on files being modified
 
-- `plugins/crew/mcp-server/src/index.ts` (current, post-5.12, 107 lines): imports SDK transport, `createServer`, `registerAllTools`. Has a large header comment (lines 14–44) explaining the 5.12 keep-alive. Module-level `_keepAliveHandle = setInterval(...)` at line 55. `swallowStdinEnd` / `swallowStdinClose` functions at lines 67–83. `main()` registers stdin 'end'/'close' handlers, calls `process.stdin.resume()`, then connects the transport. All of this comes out in Task 4.
-- `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (current, post-5.12): spawns dist, completes init handshake, closes stdin, asserts child survives 10 seconds. The "survive 10s" assertion is the one that inverts (AC5).
+- `plugins/flow/mcp-server/src/index.ts` (current, post-5.12, 107 lines): imports SDK transport, `createServer`, `registerAllTools`. Has a large header comment (lines 14–44) explaining the 5.12 keep-alive. Module-level `_keepAliveHandle = setInterval(...)` at line 55. `swallowStdinEnd` / `swallowStdinClose` functions at lines 67–83. `main()` registers stdin 'end'/'close' handlers, calls `process.stdin.resume()`, then connects the transport. All of this comes out in Task 4.
+- `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` (current, post-5.12): spawns dist, completes init handshake, closes stdin, asserts child survives 10 seconds. The "survive 10s" assertion is the one that inverts (AC5).
 
 ### Reap evidence and spec citations (read-only context)
 
@@ -287,9 +287,9 @@ Same reason as Story 5.12's AC4f: the artefact Claude Code loads is `dist/index.
 - [Source: `~/.claude/plans/continue-optimized-patterson.md`] — full investigation and plan that motivated this story.
 - [Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1`] — the original idle-reap RCA that prompted 5.12.
 - [Source: `_bmad-output/implementation-artifacts/5-12-mcp-child-resilient-to-parent-stdin-close.md`] — Story 5.12 spec, which this story partially supersedes (AC4 removes 5.12's keep-alive block).
-- [Source: `plugins/crew/mcp-server/src/index.ts`] — current entrypoint, including 5.12's keep-alive that Task 4 removes.
-- [Source: `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts`] — current test that AC5 renames and rewrites.
-- [Source: `plugins/crew/mcp-server/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_*/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js`] — verified during investigation: `Protocol.request()` exists and the auto-pong ping handler is registered at construction time. `Protocol.connect()` chains `onclose`/`onerror`/`onmessage` so our hooks compose with the SDK's, they do not replace them.
+- [Source: `plugins/flow/mcp-server/src/index.ts`] — current entrypoint, including 5.12's keep-alive that Task 4 removes.
+- [Source: `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts`] — current test that AC5 renames and rewrites.
+- [Source: `plugins/flow/mcp-server/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_*/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js`] — verified during investigation: `Protocol.request()` exists and the auto-pong ping handler is registered at construction time. `Protocol.connect()` chains `onclose`/`onerror`/`onmessage` so our hooks compose with the SDK's, they do not replace them.
 - [Source: project memory `project_mcp_server_silent_disconnect`] — the disconnect's mechanism; this story is the durable fix.
 - [Source: project memory `project_diag_instrumentation_pattern`] — pattern reference for the 15-line lifecycle logger; this story formalises and ships it.
 - [Source: project memory `project_dev_loop_plugin_dir`] — dev iteration loop (`--plugin-dir` + `pnpm build:watch`).
@@ -304,7 +304,7 @@ Same reason as Story 5.12's AC4f: the artefact Claude Code loads is `dist/index.
 
 - 5.12 shipped a module-level `setInterval(() => {}, 1 << 30)` to keep the event loop alive past stdin close. Diag log evidence at the time confirmed the SDK was innocent: the natural event-loop drain was the killer. 5.12's keep-alive fixed that drain.
 - What 5.12 did NOT anticipate: the parent's MCP client has no reconnect mechanism. Keeping the child alive after the parent has closed stdin produces a zombie process that the parent eventually SIGTERMs anyway. The user-visible "tools no longer available" gap is unchanged.
-- 5.12's `CREW_MCP_DIAG` env var was an opt-in diagnostic to stderr. This story migrates that opt-in into the always-on `CREW_MCP_LIFECYCLE_LOG`. The env name is preserved as a fallback for back-compat: if a user has `CREW_MCP_DIAG=1` set from before, the logger uses that as the log path. (Operator-visible diff: stderr no longer carries the diag JSON lines; the log file does instead.)
+- 5.12's `FLOW_MCP_DIAG` env var was an opt-in diagnostic to stderr. This story migrates that opt-in into the always-on `FLOW_MCP_LIFECYCLE_LOG`. The env name is preserved as a fallback for back-compat: if a user has `FLOW_MCP_DIAG=1` set from before, the logger uses that as the log path. (Operator-visible diff: stderr no longer carries the diag JSON lines; the log file does instead.)
 - 5.12's integration test (`mcp-stdin-close-resilience.test.ts`) asserted survival on stdin close. AC5 inverts the assertion to "clean exit on stdin close" — the contract changes because the design changes.
 
 ### From Story 5.10 (transcript persistence)
@@ -348,30 +348,30 @@ claude-sonnet-4-6
 - **Task 2**: All crash-resilience handlers installed at module load in `index.ts`.
 - **Task 3**: Signal handlers use `logSync` so lines are guaranteed on disk before `process.exit`. Exit handler also uses `logSync`.
 - **Task 4**: Story 5.12 keep-alive block fully removed. stdin 'end' handler inside `main()` performs `server.close()` + `process.exit(0)` for clean shutdown.
-- **Task 5**: Keepalive timer uses `server.ping()` (SDK convenience method). `CREW_MCP_KEEPALIVE_MS=0` disables it.
+- **Task 5**: Keepalive timer uses `server.ping()` (SDK convenience method). `FLOW_MCP_KEEPALIVE_MS=0` disables it.
 - **Task 6**: `boot`, `transport.connected`, `transport.onclose` events wired. Tool call logging deferred — no modification to `server.ts` required; `tool.call` events not implemented per locked-file constraint. (AC1 lists this event but the spec's Task 6.3 escalation path applies: server.ts is locked.)
 - **Task 7**: All 3 integration tests + 1 unit test created. 1502 tests, all passing.
 - **Task 8**: Two deterministic builds confirmed. Old stale dist files cleaned up.
 
 ### File List
 
-- `plugins/crew/mcp-server/src/lib/lifecycle-log.ts` (created)
-- `plugins/crew/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (created)
-- `plugins/crew/mcp-server/src/index.ts` (modified — Story 5.12 keep-alive removed, new lifecycle logging/keepalive/signal/stdin handlers)
-- `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts` (renamed from mcp-stdin-close-resilience.test.ts + rewritten)
-- `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (created)
-- `plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts` (created)
-- `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` (modified — lifecycle-log.ts whitelisted)
-- `plugins/crew/mcp-server/dist/index.js` (rebuilt)
-- `plugins/crew/mcp-server/dist/index.d.ts` (rebuilt)
-- `plugins/crew/mcp-server/dist/lib/lifecycle-log.js` (new)
-- `plugins/crew/mcp-server/dist/lib/lifecycle-log.d.ts` (new)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-shutdown.test.js` (updated)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-shutdown.test.d.ts` (updated)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-lifecycle-log.test.js` (new)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-lifecycle-log.test.d.ts` (new)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-keepalive.test.js` (new)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-keepalive.test.d.ts` (new)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.js` (deleted — old file from rename)
-- `plugins/crew/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.d.ts` (deleted — old file from rename)
+- `plugins/flow/mcp-server/src/lib/lifecycle-log.ts` (created)
+- `plugins/flow/mcp-server/src/lib/__tests__/lifecycle-log.test.ts` (created)
+- `plugins/flow/mcp-server/src/index.ts` (modified — Story 5.12 keep-alive removed, new lifecycle logging/keepalive/signal/stdin handlers)
+- `plugins/flow/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts` (renamed from mcp-stdin-close-resilience.test.ts + rewritten)
+- `plugins/flow/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` (created)
+- `plugins/flow/mcp-server/src/__tests__/mcp-keepalive.test.ts` (created)
+- `plugins/flow/mcp-server/tests/canonical-fs-guard.test.ts` (modified — lifecycle-log.ts whitelisted)
+- `plugins/flow/mcp-server/dist/index.js` (rebuilt)
+- `plugins/flow/mcp-server/dist/index.d.ts` (rebuilt)
+- `plugins/flow/mcp-server/dist/lib/lifecycle-log.js` (new)
+- `plugins/flow/mcp-server/dist/lib/lifecycle-log.d.ts` (new)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-shutdown.test.js` (updated)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-shutdown.test.d.ts` (updated)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-lifecycle-log.test.js` (new)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-lifecycle-log.test.d.ts` (new)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-keepalive.test.js` (new)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-keepalive.test.d.ts` (new)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.js` (deleted — old file from rename)
+- `plugins/flow/mcp-server/dist/__tests__/mcp-stdin-close-resilience.test.d.ts` (deleted — old file from rename)
 - `_bmad-output/implementation-artifacts/5-25-always-on-mcp-lifecycle-logging.md` (this file — tasks checked, dev record, status: review)
