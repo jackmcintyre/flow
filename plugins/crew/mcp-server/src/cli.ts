@@ -55,6 +55,7 @@ import { markStoryReady } from "./tools/mark-story-ready.js";
 import { guardCleanRoot } from "./tools/guard-clean-root.js";
 import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
+import { recordAgentFriction } from "./tools/record-agent-friction.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -107,6 +108,10 @@ const TOOLS: Record<string, ToolFn> = {
   writeLensVerdict,
   aggregateJudgePanel,
   adjudicateQualityLead,
+  // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — friction-signal write seam.
+  // Registered here so drain-path agents (seam-agents running node dist/cli.js)
+  // can emit friction events without a persistent MCP server in the loop.
+  recordAgentFriction,
 };
 
 function emit(obj: unknown): void {

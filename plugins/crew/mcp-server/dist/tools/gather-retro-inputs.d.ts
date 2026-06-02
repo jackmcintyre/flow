@@ -47,6 +47,17 @@
 import { type ExecutionManifest } from "../schemas/execution-manifest.js";
 import { type TelemetryEvent } from "../schemas/telemetry-events.js";
 import { type PromotionCandidate, type RetirementCandidate, type FireCountConfig } from "../lib/failure-class-fire-counts.js";
+import { type FrictionKind } from "./record-agent-friction.js";
+/**
+ * One entry in the `recurringFriction` array — a friction kind that recurred
+ * at or above the threshold (count >= 2) within the cycle.
+ */
+export interface RecurringFrictionEntry {
+    /** The friction kind (closed enum from `AgentFrictionEventSchema`). */
+    kind: FrictionKind;
+    /** How many `agent.friction` events of this kind occurred in the cycle. */
+    count: number;
+}
 /**
  * The deterministic input bundle handed to the retro-analyst subagent.
  */
@@ -77,6 +88,19 @@ export interface RetroInputs {
         promotionCandidates: PromotionCandidate[];
         retirementCandidates: RetirementCandidate[];
     } | null;
+    /**
+     * All `agent.friction` events from the cycle's telemetry JSONL files,
+     * grouped by `kind`. Only friction that recurs at threshold (count >= 2)
+     * is included — one-off noise is excluded. Empty array when no recurring
+     * friction was recorded.
+     *
+     * The retro-analyst MUST draft proposals from these computed entries — it
+     * MUST NOT recount friction from raw telemetry, mirroring the
+     * `fireCountSignal` discipline.
+     *
+     * Story native:01KT2RAXBSQ91Y80Z51DD26KPX.
+     */
+    recurringFriction: RecurringFrictionEntry[];
 }
 export interface GatherRetroInputsOptions {
     /** Absolute path to the target repository root. */

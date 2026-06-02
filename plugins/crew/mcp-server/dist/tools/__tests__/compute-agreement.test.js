@@ -512,7 +512,8 @@ describe("AC4o — MCP tool registration smoke", () => {
         // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
         // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
         // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
-        expect(registeredTools.length).toBe(45);
+        // Story native:01KT2RAXBSQ91Y80Z51DD26KPX added recordAgentFriction (friction-signal). 45 → 46.
+        expect(registeredTools.length).toBe(46);
     });
 });
 // ---------------------------------------------------------------------------

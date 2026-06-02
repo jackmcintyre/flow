@@ -48,7 +48,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest, } from "../schemas/execution-manifest.js";
-import { TelemetryEventSchema } from "../schemas/telemetry-events.js";
+import { TelemetryEventSchema, } from "../schemas/telemetry-events.js";
 import { parseRuleRegistry } from "../schemas/discipline-rules.js";
 import { computeFailureClassFireCounts, } from "../lib/failure-class-fire-counts.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
@@ -77,7 +77,10 @@ export async function gatherRetroInputs(opts) {
             retirementCandidates: result.retirementCandidates,
         };
     }
-    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal };
+    // Compute recurring friction signal from telemetry events.
+    // Only friction that recurs at threshold (count >= 2) is surfaced.
+    const recurringFriction = computeRecurringFriction(telemetrySummary.events);
+    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
 }
 // ---------------------------------------------------------------------------
 // done/ manifests
@@ -229,6 +232,41 @@ async function gatherRuleRegistry(targetRepoRoot) {
     }
     // Validated parse — raises RuleRegistryMalformedError on a bad registry.
     return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+// ---------------------------------------------------------------------------
+// recurring friction
+// ---------------------------------------------------------------------------
+/**
+ * Compute the recurring-friction signal from the cycle's telemetry events.
+ *
+ * Groups `agent.friction` events by `kind`, then returns only those kinds
+ * whose count reaches the threshold (count >= 2). One-off friction (count < 2)
+ * is excluded to avoid flooding the retro with noise.
+ *
+ * The analyst MUST consume `recurringFriction` only — it MUST NOT recount
+ * from raw telemetry, mirroring the `fireCountSignal` discipline.
+ */
+function computeRecurringFriction(events) {
+    const RECURRING_THRESHOLD = 2;
+    // Accumulate counts per kind.
+    const counts = new Map();
+    for (const event of events) {
+        if (event.type === "agent.friction") {
+            // Narrow to AgentFrictionEvent for type-safe access to data.kind.
+            const frictionEvent = event;
+            const kind = frictionEvent.data.kind;
+            counts.set(kind, (counts.get(kind) ?? 0) + 1);
+        }
+    }
+    // Return only kinds at or above the threshold, sorted by kind for determinism.
+    const result = [];
+    for (const [kind, count] of counts) {
+        if (count >= RECURRING_THRESHOLD) {
+            result.push({ kind, count });
+        }
+    }
+    result.sort((a, b) => a.kind.localeCompare(b.kind));
+    return result;
 }
 // ---------------------------------------------------------------------------
 // helpers

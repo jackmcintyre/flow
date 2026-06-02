@@ -44052,6 +44052,19 @@ var SkillInvokeEventSchema = TelemetryEventBase.extend({
     invocation_source: external_exports.enum(["user-slash-command", "agent-call"])
   }).strict()
 }).strict();
+var AgentFrictionEventSchema = TelemetryEventBase.extend({
+  type: external_exports.literal("agent.friction"),
+  data: external_exports.object({
+    kind: external_exports.enum([
+      "empty-input",
+      "missing-cited-source",
+      "forced-fallback",
+      "repeated-retry"
+    ]),
+    expected: external_exports.string().min(1),
+    observed: external_exports.string().min(1)
+  }).strict()
+}).strict();
 var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -44064,7 +44077,8 @@ var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   DraftAuthoredEventSchema,
   PanelGradedEventSchema,
   QualityAdjudicatedEventSchema,
-  SkillInvokeEventSchema
+  SkillInvokeEventSchema,
+  AgentFrictionEventSchema
 ]);
 
 // src/lib/logger.ts
@@ -45373,7 +45387,8 @@ async function gatherRetroInputs(opts) {
       retirementCandidates: result.retirementCandidates
     };
   }
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal };
+  const recurringFriction = computeRecurringFriction(telemetrySummary.events);
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
 }
 async function gatherDoneManifests(targetRepoRoot) {
   const doneDir = path22.join(targetRepoRoot, ".crew", "state", "done");
@@ -45471,6 +45486,25 @@ async function gatherRuleRegistry(targetRepoRoot) {
     throw err;
   }
   return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+function computeRecurringFriction(events) {
+  const RECURRING_THRESHOLD = 2;
+  const counts = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    if (event.type === "agent.friction") {
+      const frictionEvent = event;
+      const kind = frictionEvent.data.kind;
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+  }
+  const result = [];
+  for (const [kind, count2] of counts) {
+    if (count2 >= RECURRING_THRESHOLD) {
+      result.push({ kind, count: count2 });
+    }
+  }
+  result.sort((a2, b) => a2.kind.localeCompare(b.kind));
+  return result;
 }
 function isEnoent5(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
@@ -51799,6 +51833,60 @@ async function adjudicateQualityLead(opts) {
   };
 }
 
+// src/tools/record-agent-friction.ts
+var RecordAgentFrictionOptionsSchema = external_exports.object({
+  /** Absolute path to the target repository root. */
+  targetRepoRoot: external_exports.string().min(1),
+  /** Role name of the agent experiencing the friction (kebab-cased). */
+  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  /**
+   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
+   * inside a story flow.
+   */
+  story_id: external_exports.string().min(1).optional(),
+  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  session_id: external_exports.string().min(1),
+  /** The closed-enum friction category. */
+  kind: external_exports.enum([
+    "empty-input",
+    "missing-cited-source",
+    "forced-fallback",
+    "repeated-retry"
+  ]),
+  /** What the agent expected to receive. Keep short and structural (NFR14). */
+  expected: external_exports.string().min(1),
+  /** What the agent actually received / had to compensate for (NFR14). */
+  observed: external_exports.string().min(1),
+  /**
+   * Optional role label for downstream correlation. Defaults to the
+   * value of `agent` when omitted (they are the same in most callers).
+   */
+  role: external_exports.string().optional()
+}).strict();
+async function recordAgentFriction(opts) {
+  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
+  const {
+    targetRepoRoot,
+    agent,
+    story_id,
+    session_id,
+    kind,
+    expected,
+    observed
+  } = validated;
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "agent.friction",
+      session_id,
+      agent,
+      ...story_id !== void 0 ? { story_id } : {},
+      data: { kind, expected, observed }
+    }
+  });
+  return { ok: true, kind, agent, session_id };
+}
+
 // src/tools/register.ts
 function registerAllTools(server) {
   server.registerTool({
@@ -53484,6 +53572,45 @@ function registerAllTools(server) {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true
+          };
+        }
+        throw err;
+      }
+    }
+  });
+  server.registerTool({
+    name: "recordAgentFriction",
+    description: "Persist a structured agent.friction telemetry event when an agent compensates for a surprising or broken input. The event carries a closed-enum kind ('empty-input' | 'missing-cited-source' | 'forced-fallback' | 'repeated-retry'), plus expected and observed strings describing the mismatch. gatherRetroInputs groups these events by kind and surfaces kinds with count >= 2 as recurringFriction in the retro bundle, so the retro-analyst can draft a fix proposal for a seam that agents are silently compensating for. Story native:01KT2RAXBSQ91Y80Z51DD26KPX.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        agent: { type: "string" },
+        story_id: { type: "string" },
+        session_id: { type: "string" },
+        kind: { type: "string" },
+        expected: { type: "string" },
+        observed: { type: "string" },
+        role: { type: "string" }
+      },
+      required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"]
+    },
+    handler: async (args) => {
+      try {
+        const result = await recordAgentFriction(args);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }]
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: err.name, message: err.message })
+              }
+            ],
             isError: true
           };
         }
