@@ -160,6 +160,24 @@ const LENS_RUBRIC = {
 
 const LENSES = ['structure', 'verifiability', 'discipline', 'domain', 'considered']
 
+// Per-lens model tiering (operator decision 2026-06-02). The judge panel is the
+// silent-failure gate, so we keep Opus on the three lenses where a miss is subtle
+// and costly to catch downstream — Verifiability (does each AC pin observable
+// behaviour?), Domain (technical accuracy), Considered (failure-mode/cold-dev
+// sufficiency). The two most MECHANICAL lenses — Structure (well-formed
+// Given/When/Then, decomposition) and Discipline (one coherent concern, no scope
+// creep) — drop to Sonnet, where a loud, pattern-based check is adequate. This
+// trims ~25-35% off the panel's cost (its largest spend bucket) while preserving
+// gate depth where it matters. Validate against a known-hollow draft before fully
+// trusting it: the deep lenses (esp. Verifiability) must still bounce it.
+const LENS_MODEL = {
+  structure: 'sonnet',
+  discipline: 'sonnet',
+  verifiability: 'opus',
+  domain: 'opus',
+  considered: 'opus',
+}
+
 const judgeResults = await Promise.all(
   LENSES.map(async (lens) => {
     const role = lensRoles[lens]
@@ -202,7 +220,7 @@ const judgeResults = await Promise.all(
       `The verdict is written to: \`${verdictFilePath}\``
 
     try {
-      await agent(judgePrompt, { label: `judge:${lens}`, phase: 'judge' })
+      await agent(judgePrompt, { label: `judge:${lens}`, phase: 'judge', model: LENS_MODEL[lens] })
     } catch (e) {
       log(`judge ${lens} agent threw: ${String(e)} — aggregation will fail loudly on the missing verdict file`)
     }
