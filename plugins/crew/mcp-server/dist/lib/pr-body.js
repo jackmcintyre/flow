@@ -11,6 +11,7 @@
  */
 import { BranchSlugUnrenderableError } from "../errors.js";
 import { CONVENTIONAL_COMMIT_TYPES } from "./git.js";
+import { shortHandle } from "./short-handle.js";
 export { CONVENTIONAL_COMMIT_TYPES };
 // ---------------------------------------------------------------------------
 // buildBranchSlug
@@ -105,11 +106,32 @@ function wrapLine(line, width) {
 // composeCommitSubject
 // ---------------------------------------------------------------------------
 /**
- * Compose a conventional-commits subject line `<type>(<ref>): <title>`.
- * Identical shape to the PR title (AC1c / AC1f).
+ * Compose a conventional-commits subject line `<type>(<shortHandle>): <title>`.
+ * The scope is the human-friendly short handle derived from the story ref via
+ * `shortHandle()`, so operator-visible surfaces (PR title, commit log) show a
+ * concise identifier instead of the full 26-character ULID.
+ *
+ * **Full-ref preservation (AC2):** the full story ref is NOT lost — it is written
+ * verbatim into the PR body's machine block by `composePrBody` via the `Story:`
+ * line. `runDevTerminalAction` passes the unshortened `ref` to `composePrBody`
+ * directly (see `run-dev-terminal-action.ts` lines ~257–262), so no correlation
+ * information is dropped by shortening the scope here.
+ *
+ * **Reviewer correlation (AC1, AC2):** `runReviewerSession` correlates stories
+ * via the `ref` parameter passed directly to `runReviewerSession` — it does NOT
+ * parse the ref from the commit subject or PR title. Shortening the scope here is
+ * therefore safe: the reviewer's correlation path is unaffected.
+ *
+ * **Safe fallback (AC3):** `shortHandle()` returns the full input string unchanged
+ * when the ref contains no colon separator (unrecognised shape). In that case this
+ * function emits the full ref as the scope, so the subject is never left without a
+ * usable story identifier. No extra guard is required here.
  */
 export function composeCommitSubject(opts) {
-    return `${opts.type}(${opts.ref}): ${opts.title.trim()}`;
+    // Use the short human-friendly handle in the scope for operator readability.
+    // The full ref is preserved in the PR body's `Story:` line (see composePrBody).
+    const handle = shortHandle(opts.ref);
+    return `${opts.type}(${handle}): ${opts.title.trim()}`;
 }
 // ---------------------------------------------------------------------------
 // composePrBody

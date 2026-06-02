@@ -49549,7 +49549,8 @@ function wrapLine(line, width) {
   return parts.join("\n");
 }
 function composeCommitSubject(opts) {
-  return `${opts.type}(${opts.ref}): ${opts.title.trim()}`;
+  const handle = shortHandle(opts.ref);
+  return `${opts.type}(${handle}): ${opts.title.trim()}`;
 }
 function composePrBody(opts) {
   const acLines = opts.acs.map((ac) => `- [ ] AC${ac.index}: ${ac.firstLine}`).join("\n");

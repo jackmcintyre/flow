@@ -48,8 +48,26 @@ export declare function buildBranchSlug(opts: {
  */
 export declare function wrapCommitBody(body: string, width?: number): string;
 /**
- * Compose a conventional-commits subject line `<type>(<ref>): <title>`.
- * Identical shape to the PR title (AC1c / AC1f).
+ * Compose a conventional-commits subject line `<type>(<shortHandle>): <title>`.
+ * The scope is the human-friendly short handle derived from the story ref via
+ * `shortHandle()`, so operator-visible surfaces (PR title, commit log) show a
+ * concise identifier instead of the full 26-character ULID.
+ *
+ * **Full-ref preservation (AC2):** the full story ref is NOT lost — it is written
+ * verbatim into the PR body's machine block by `composePrBody` via the `Story:`
+ * line. `runDevTerminalAction` passes the unshortened `ref` to `composePrBody`
+ * directly (see `run-dev-terminal-action.ts` lines ~257–262), so no correlation
+ * information is dropped by shortening the scope here.
+ *
+ * **Reviewer correlation (AC1, AC2):** `runReviewerSession` correlates stories
+ * via the `ref` parameter passed directly to `runReviewerSession` — it does NOT
+ * parse the ref from the commit subject or PR title. Shortening the scope here is
+ * therefore safe: the reviewer's correlation path is unaffected.
+ *
+ * **Safe fallback (AC3):** `shortHandle()` returns the full input string unchanged
+ * when the ref contains no colon separator (unrecognised shape). In that case this
+ * function emits the full ref as the scope, so the subject is never left without a
+ * usable story identifier. No extra guard is required here.
  */
 export declare function composeCommitSubject(opts: {
     type: string;
