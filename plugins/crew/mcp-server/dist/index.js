@@ -35279,6 +35279,23 @@ var RetirementWouldEmptyRegistryError = class extends DomainError {
     this.targetRuleId = opts.targetRuleId;
   }
 };
+var PrePrTestFailedError = class extends DomainError {
+  exitCode;
+  testCommand;
+  testCwd;
+  stdout;
+  stderr;
+  constructor(opts) {
+    super(
+      `pre-PR test gate failed: '${opts.testCommand}' (cwd: ${opts.testCwd}) exited with code ${opts.exitCode}. No pull request was opened. Fix the failing tests and re-run \u2014 the gate runs the project's full test suite so it catches regressions in files the story did not touch. stderr: ${opts.stderr || "(empty)"}. stdout: ${opts.stdout || "(empty)"}. (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)`
+    );
+    this.exitCode = opts.exitCode;
+    this.testCommand = opts.testCommand;
+    this.testCwd = opts.testCwd;
+    this.stdout = opts.stdout;
+    this.stderr = opts.stderr;
+  }
+};
 
 // src/server.ts
 function createServer(opts) {
@@ -49639,6 +49656,23 @@ async function runProjectBuild(opts) {
     commandLine: `${PROJECT_BUILD_COMMAND} ${PROJECT_BUILD_ARGS.join(" ")}`
   };
 }
+var PROJECT_TEST_COMMAND = "pnpm";
+var PROJECT_TEST_ARGS = ["test"];
+async function runProjectTests(opts) {
+  const execaImpl = opts.execaImpl ?? execa;
+  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const result = await execaImpl(PROJECT_TEST_COMMAND, [...PROJECT_TEST_ARGS], {
+    cwd,
+    reject: false
+  });
+  return {
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    cwd,
+    commandLine: `${PROJECT_TEST_COMMAND} ${PROJECT_TEST_ARGS.join(" ")}`
+  };
+}
 
 // src/tools/run-dev-terminal-action.ts
 var ROLE = "generalist-dev";
@@ -49703,6 +49737,19 @@ async function runDevTerminalAction(opts) {
         buildCwd: buildResult.cwd,
         stdout: buildResult.stdout,
         stderr: buildResult.stderr
+      });
+    }
+    const testResult = await runProjectTests({
+      devWorkingDir: gitRoot,
+      ...execaImpl ? { execaImpl } : {}
+    });
+    if (testResult.exitCode !== 0) {
+      throw new PrePrTestFailedError({
+        exitCode: testResult.exitCode,
+        testCommand: testResult.commandLine,
+        testCwd: testResult.cwd,
+        stdout: testResult.stdout,
+        stderr: testResult.stderr
       });
     }
     await gitPush({

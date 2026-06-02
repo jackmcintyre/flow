@@ -2080,3 +2080,39 @@ export class RetirementWouldEmptyRegistryError extends DomainError {
     this.targetRuleId = opts.targetRuleId;
   }
 }
+
+/**
+ * The pre-PR test gate ran the project's full test suite and it exited
+ * non-zero. No pull request was opened.
+ * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)
+ */
+export class PrePrTestFailedError extends DomainError {
+  readonly exitCode: number;
+  readonly testCommand: string;
+  readonly testCwd: string;
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(opts: {
+    exitCode: number;
+    testCommand: string;
+    testCwd: string;
+    stdout: string;
+    stderr: string;
+  }) {
+    super(
+      `pre-PR test gate failed: '${opts.testCommand}' (cwd: ${opts.testCwd}) ` +
+        `exited with code ${opts.exitCode}. No pull request was opened. ` +
+        `Fix the failing tests and re-run — the gate runs the project's full ` +
+        `test suite so it catches regressions in files the story did not touch. ` +
+        `stderr: ${opts.stderr || "(empty)"}. ` +
+        `stdout: ${opts.stdout || "(empty)"}. ` +
+        `(Story native:01KT3ER5E9ACCERHAEJ5NM94TH)`,
+    );
+    this.exitCode = opts.exitCode;
+    this.testCommand = opts.testCommand;
+    this.testCwd = opts.testCwd;
+    this.stdout = opts.stdout;
+    this.stderr = opts.stderr;
+  }
+}

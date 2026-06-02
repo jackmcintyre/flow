@@ -1415,3 +1415,22 @@ export declare class RetirementWouldEmptyRegistryError extends DomainError {
         targetRuleId: string;
     });
 }
+/**
+ * The pre-PR test gate ran the project's full test suite and it exited
+ * non-zero. No pull request was opened.
+ * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)
+ */
+export declare class PrePrTestFailedError extends DomainError {
+    readonly exitCode: number;
+    readonly testCommand: string;
+    readonly testCwd: string;
+    readonly stdout: string;
+    readonly stderr: string;
+    constructor(opts: {
+        exitCode: number;
+        testCommand: string;
+        testCwd: string;
+        stdout: string;
+        stderr: string;
+    });
+}
