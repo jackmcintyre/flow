@@ -20,6 +20,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { stringify as yamlStringify } from "yaml";
 import { MalformedExecutionManifestError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { readBacklogInventory } from "../read-backlog-inventory.js";
@@ -231,5 +232,86 @@ describe("readBacklogInventory (8) — Story 10.6 cutover: native reads ULID ref
         const entry = result.backlog_inventory.find((e) => e.ref === `native:${ulid}`);
         expect(entry).toBeDefined();
         expect(entry?.state).toBe("native-source-only");
+    });
+});
+// ---------------------------------------------------------------------------
+// (9) gate-1 spec-feed fix — `includeSpecText` enriches entries with the real
+// source markdown + persisted risk tier, and `ref` returns a single entry.
+// Without this the gate-1 judge workflow fed the lens judges an empty spec.
+// ---------------------------------------------------------------------------
+describe("readBacklogInventory (9) — includeSpecText + ref single-item fetch", () => {
+    const SPEC_ULID = "01HZABC0000000000000000091";
+    const SOURCE_ONLY_ULID = "01HZABC0000000000000000092";
+    const SPEC_CONTENT = "# Spec-feed test story\n\n## Narrative\n\nAs a tester, I want the real spec fed to judges.\n\n## Acceptance Criteria\n\n**Given** a draft **When** the panel runs **Then** it grades the real text.\n";
+    const SOURCE_ONLY_CONTENT = "# Source-only draft\n\n## Narrative\n\nAs a tester, I want native-source-only specText too.\n";
+    async function buildRepo() {
+        const root = path.join(scratch, "spec-feed-native");
+        await fs.mkdir(path.join(root, ".crew", "native-stories"), { recursive: true });
+        await fs.mkdir(path.join(root, ".crew", "state", "to-do"), { recursive: true });
+        await atomicWriteFile(path.join(root, ".crew", "config.yaml"), "adapter: native\n");
+        // A scanned to-do story: source file + manifest carrying source_path + risk_tier.
+        await atomicWriteFile(path.join(root, ".crew", "native-stories", `${SPEC_ULID}.md`), SPEC_CONTENT);
+        const manifest = {
+            ref: `native:${SPEC_ULID}`,
+            status: "to-do",
+            adapter: "native",
+            source_path: `.crew/native-stories/${SPEC_ULID}.md`,
+            source_hash: "a".repeat(64),
+            depends_on: [],
+            acceptance_criteria: [
+                { text: "**Given** x **When** y **Then** z", kind: "unit" },
+            ],
+            title: "Spec-feed test story",
+            narrative: "As a tester, I want the real spec fed to judges.",
+            risk_tier: "medium",
+            withdrawn: false,
+            ready: true,
+        };
+        await atomicWriteFile(path.join(root, ".crew", "state", "to-do", `native:${SPEC_ULID}.yaml`), yamlStringify(manifest));
+        // A native-source-only story (no manifest).
+        await atomicWriteFile(path.join(root, ".crew", "native-stories", `${SOURCE_ONLY_ULID}.md`), SOURCE_ONLY_CONTENT);
+        return root;
+    }
+    it("omits specText/riskTier by default (lean path unchanged)", async () => {
+        const root = await buildRepo();
+        const result = await readBacklogInventory({ targetRepoRoot: root });
+        const entry = result.backlog_inventory.find((e) => e.ref === `native:${SPEC_ULID}`);
+        expect(entry).toBeDefined();
+        expect(entry?.specText).toBeUndefined();
+        expect(entry?.riskTier).toBeUndefined();
+    });
+    it("includeSpecText returns the real source markdown + persisted risk tier", async () => {
+        const root = await buildRepo();
+        const result = await readBacklogInventory({
+            targetRepoRoot: root,
+            includeSpecText: true,
+        });
+        const entry = result.backlog_inventory.find((e) => e.ref === `native:${SPEC_ULID}`);
+        expect(entry?.specText).toBe(SPEC_CONTENT);
+        expect(entry?.riskTier).toBe("medium");
+    });
+    it("native-source-only entries get their file content as specText (no riskTier)", async () => {
+        const root = await buildRepo();
+        const result = await readBacklogInventory({
+            targetRepoRoot: root,
+            includeSpecText: true,
+        });
+        const entry = result.backlog_inventory.find((e) => e.ref === `native:${SOURCE_ONLY_ULID}`);
+        expect(entry?.state).toBe("native-source-only");
+        expect(entry?.specText).toBe(SOURCE_ONLY_CONTENT);
+        expect(entry?.riskTier).toBeUndefined();
+    });
+    it("ref returns exactly the matching entry (single-item fetch), still enriched", async () => {
+        const root = await buildRepo();
+        const result = await readBacklogInventory({
+            targetRepoRoot: root,
+            ref: `native:${SPEC_ULID}`,
+            includeSpecText: true,
+        });
+        expect(result.backlog_inventory).toHaveLength(1);
+        expect(result.backlog_inventory[0]?.ref).toBe(`native:${SPEC_ULID}`);
+        expect(result.backlog_inventory[0]?.specText).toBe(SPEC_CONTENT);
+        // mode still reflects the whole backlog (>=1 item), not the filtered view.
+        expect(result.mode).toBe("re-open");
     });
 });
