@@ -46734,7 +46734,22 @@ async function resolveWorkspace(opts) {
 
 // src/tools/read-backlog-inventory.ts
 var ReadBacklogInventoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1)
+  targetRepoRoot: external_exports.string().min(1),
+  /**
+   * Optional single-item filter. When set, only the entry whose `ref` matches
+   * is returned (the others are still scanned so `mode` stays accurate). The
+   * gate-1 judge workflow passes this so it fetches exactly the draft under
+   * judgement instead of relaying the whole backlog through a seam courier.
+   */
+  ref: external_exports.string().min(1).optional(),
+  /**
+   * When true, each returned entry is enriched with `specText` (the draft's full
+   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
+   * Default false keeps the inventory lean for its planner/board/dashboard
+   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
+   * the real draft (not an empty `"(spec text not available)"` placeholder).
+   */
+  includeSpecText: external_exports.boolean().optional()
 });
 var ULID_PATTERN = /^[0-9A-Z]{26}$/;
 function extractH1Title(content, fallback) {
@@ -46773,14 +46788,23 @@ async function readBacklogInventory(rawInput) {
           break;
         }
       }
-      inventory.push({
+      const entry = {
         ref: manifest.ref,
         title: manifest.title,
         state: stateName,
         withdrawn: manifest.withdrawn,
         ready: manifest.ready,
         depsReady
-      });
+      };
+      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
+        const specAbs = path28.isAbsolute(manifest.source_path) ? manifest.source_path : path28.join(targetRepoRoot, manifest.source_path);
+        try {
+          entry.specText = await fs21.readFile(specAbs, "utf8");
+        } catch {
+        }
+        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
+      }
+      inventory.push(entry);
       seenRefs.add(manifest.ref);
     }
   }
@@ -46801,18 +46825,23 @@ async function readBacklogInventory(rawInput) {
       const absPath = path28.join(nativeStoriesDir2, filename);
       const content = await fs21.readFile(absPath, "utf8");
       const title = extractH1Title(content, basename5);
-      inventory.push({
+      const entry = {
         ref,
         title,
         state: "native-source-only",
         withdrawn: false,
         ready: false,
         depsReady: true
-      });
+      };
+      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
+        entry.specText = content;
+      }
+      inventory.push(entry);
     }
   }
   const mode = inventory.length === 0 ? "first-run" : "re-open";
-  return { mode, backlog_inventory: inventory };
+  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
+  return { mode, backlog_inventory };
 }
 
 // src/tools/render-backlog-dashboard.ts
@@ -52447,11 +52476,13 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "readBacklogInventory",
-    description: "Build the backlog inventory for the target repo server-side (Story 3.6). Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn}] }. Scans all four state directories and (on native) the native-stories dir. MalformedExecutionManifestError surfaces verbatim. Used by the /crew:plan skill to derive re-open mode and assemble <initial-context>.",
+    description: "Build the backlog inventory for the target repo server-side (Story 3.6). Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn, ready, depsReady}] }. Scans all four state directories and (on native) the native-stories dir. Optional `ref` returns only the matching entry; optional `includeSpecText` enriches each returned entry with `specText` + `riskTier` (used by the gate-1 judge workflow). MalformedExecutionManifestError surfaces verbatim. Used by the /crew:plan skill to derive re-open mode and assemble <initial-context>.",
     inputSchema: {
       type: "object",
       properties: {
-        targetRepoRoot: { type: "string" }
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        includeSpecText: { type: "boolean" }
       },
       required: ["targetRepoRoot"]
     },

@@ -21,6 +21,8 @@ import { z } from "zod";
 import { type StateName } from "../state/manifest-state-machine.js";
 export declare const ReadBacklogInventoryInputSchema: z.ZodObject<{
     targetRepoRoot: z.ZodString;
+    ref: z.ZodOptional<z.ZodString>;
+    includeSpecText: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 /** State values for backlog inventory entries. Extends StateName with the native-source-only sentinel. */
 export type InventoryState = StateName | "native-source-only";
@@ -46,6 +48,22 @@ export interface BacklogInventoryEntry {
      * (they carry no `depends_on` until scanned).
      */
     depsReady: boolean;
+    /**
+     * The draft's full source markdown. Present ONLY when the caller passes
+     * `includeSpecText: true`; otherwise `undefined`. Read from the manifest's
+     * `source_path` for in-manifest entries, or the native-stories file content
+     * for `native-source-only` entries. The gate-1 judge workflow needs this so
+     * the lens judges grade the real draft rather than an empty spec.
+     */
+    specText?: string;
+    /**
+     * The manifest's persisted `risk_tier` (Story 10.4 single source of truth).
+     * Present ONLY when `includeSpecText: true` and the manifest carries one;
+     * `undefined` for `native-source-only` entries (no manifest) and legacy
+     * manifests authored before the field existed. The gate-1 workflow feeds this
+     * to the Considered lens so it grades at the persisted tier.
+     */
+    riskTier?: "low" | "medium" | "high";
 }
 /** Output shape returned by `readBacklogInventory`. */
 export interface ReadBacklogInventoryOutput {

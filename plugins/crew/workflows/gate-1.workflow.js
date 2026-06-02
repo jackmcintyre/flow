@@ -86,16 +86,38 @@ if (!lensRolesResult || lensRolesResult._parseError || lensRolesResult.error) {
 const lensRoles = lensRolesResult.lensRoles
 log(`lens→role binding resolved: ${JSON.stringify(lensRoles)}`)
 
-// Fetch the draft's spec text from the backlog inventory. We also extract the
-// persisted riskTier from the manifest if present (Story 10.4 single source of truth).
-const inventory = await seam(`node ${CLI} readBacklogInventory --json '${J({ targetRepoRoot: REPO })}'`, 'inventory', true)
+// Fetch the draft's spec text + persisted riskTier from the backlog inventory.
+// We pass `ref` (single-item fetch) and `includeSpecText: true` so the tool reads
+// the real source markdown (from the manifest's source_path, or the native-stories
+// file) and returns it as `specText`. Without this the tool returns only
+// ref/title/state — the judges then grade an empty `(spec text not available)`
+// placeholder (the gate-1 spec-feed defect that wasted whole re-judge panels).
+// `riskTier` is the Story 10.4 single source of truth when the manifest carries it.
+// The tool returns `{ mode, backlog_inventory: [...] }` (NOT `items`).
+const inventory = await seam(
+  `node ${CLI} readBacklogInventory --json '${J({ targetRepoRoot: REPO, ref: REF, includeSpecText: true })}'`,
+  'inventory',
+  true,
+)
 let specText = ''
 let riskTier = undefined
-if (inventory && !inventory._parseError && Array.isArray(inventory.items)) {
-  const item = inventory.items.find((i) => i.ref === REF)
-  if (item) {
-    specText = item.specText || item.spec_text || ''
-    riskTier = item.riskTier || item.risk_tier
+const invItem = Array.isArray(inventory?.backlog_inventory)
+  ? inventory.backlog_inventory.find((i) => i.ref === REF)
+  : undefined
+if (invItem) {
+  specText = invItem.specText || ''
+  riskTier = invItem.riskTier
+}
+// Fail loud rather than silently grade an empty spec — a blind panel is wasted
+// tokens and a false verdict (no success-by-luck). The operator re-runs once the
+// draft is scannable/readable.
+if (!specText) {
+  log(`ref=${REF} ABORTED — no spec text available to judge (readBacklogInventory returned no specText). Ensure the draft exists at its source_path and re-run.`)
+  return {
+    error: 'spec-text-unavailable',
+    detail: `readBacklogInventory returned no specText for ref=${REF}; refusing to judge an empty draft.`,
+    sessionUlid: SU,
+    ref: REF,
   }
 }
 
@@ -253,13 +275,17 @@ if (decision === 'ready') {
   log(`ref=${REF} unexpected decision=${decision} — this workflow always uses round=1 k=1, so rework should never occur.`)
 }
 
+// Compact return. The full per-lens detail, escalation reason, and bless/escalate
+// narration are already emitted via log() above, so the launcher does NOT need the
+// verbose panelVerdict/adjudicationVerdict objects nor the duplicate lensResults —
+// those re-bill the main-loop context on every turn. Return only the structured
+// summary a launcher acts on: the decision, the risk tier, a one-line-per-lens
+// pass/fail map, and the failed lenses with their `missed` reason.
 return {
   sessionUlid: SU,
   ref: REF,
-  riskTier: aggregateResult.riskTier,
-  panelVerdict: aggregateResult.verdict,
-  adjudicationVerdict: adjudicateResult.verdict,
   decision,
-  // Convenience summary.
-  lensResults: aggregateResult.verdict?.lenses?.map((l) => ({ lens: l.lens, pass: l.pass, missed: l.missed })),
+  riskTier: aggregateResult.riskTier,
+  perLens: aggregateResult.verdict?.lenses?.map((l) => ({ lens: l.lens, pass: l.pass })),
+  failed: aggregateResult.verdict?.lenses?.filter((l) => !l.pass).map((l) => ({ lens: l.lens, missed: l.missed })),
 }

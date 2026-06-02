@@ -36094,7 +36094,22 @@ var import_yaml9 = __toESM(require_dist(), 1);
 import { promises as fs18 } from "node:fs";
 import * as path29 from "node:path";
 var ReadBacklogInventoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1)
+  targetRepoRoot: external_exports.string().min(1),
+  /**
+   * Optional single-item filter. When set, only the entry whose `ref` matches
+   * is returned (the others are still scanned so `mode` stays accurate). The
+   * gate-1 judge workflow passes this so it fetches exactly the draft under
+   * judgement instead of relaying the whole backlog through a seam courier.
+   */
+  ref: external_exports.string().min(1).optional(),
+  /**
+   * When true, each returned entry is enriched with `specText` (the draft's full
+   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
+   * Default false keeps the inventory lean for its planner/board/dashboard
+   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
+   * the real draft (not an empty `"(spec text not available)"` placeholder).
+   */
+  includeSpecText: external_exports.boolean().optional()
 });
 var ULID_PATTERN = /^[0-9A-Z]{26}$/;
 function extractH1Title(content, fallback) {
@@ -36133,14 +36148,23 @@ async function readBacklogInventory(rawInput) {
           break;
         }
       }
-      inventory.push({
+      const entry = {
         ref: manifest.ref,
         title: manifest.title,
         state: stateName,
         withdrawn: manifest.withdrawn,
         ready: manifest.ready,
         depsReady
-      });
+      };
+      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
+        const specAbs = path29.isAbsolute(manifest.source_path) ? manifest.source_path : path29.join(targetRepoRoot, manifest.source_path);
+        try {
+          entry.specText = await fs18.readFile(specAbs, "utf8");
+        } catch {
+        }
+        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
+      }
+      inventory.push(entry);
       seenRefs.add(manifest.ref);
     }
   }
@@ -36161,18 +36185,23 @@ async function readBacklogInventory(rawInput) {
       const absPath = path29.join(nativeStoriesDir2, filename);
       const content = await fs18.readFile(absPath, "utf8");
       const title = extractH1Title(content, basename4);
-      inventory.push({
+      const entry = {
         ref,
         title,
         state: "native-source-only",
         withdrawn: false,
         ready: false,
         depsReady: true
-      });
+      };
+      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
+        entry.specText = content;
+      }
+      inventory.push(entry);
     }
   }
   const mode = inventory.length === 0 ? "first-run" : "re-open";
-  return { mode, backlog_inventory: inventory };
+  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
+  return { mode, backlog_inventory };
 }
 
 // src/tools/claim-next-story.ts

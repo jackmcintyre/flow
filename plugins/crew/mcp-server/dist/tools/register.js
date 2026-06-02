@@ -607,14 +607,17 @@ export function registerAllTools(server) {
     server.registerTool({
         name: "readBacklogInventory",
         description: "Build the backlog inventory for the target repo server-side (Story 3.6). " +
-            "Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn}] }. " +
+            "Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn, ready, depsReady}] }. " +
             "Scans all four state directories and (on native) the native-stories dir. " +
+            "Optional `ref` returns only the matching entry; optional `includeSpecText` enriches each returned entry with `specText` + `riskTier` (used by the gate-1 judge workflow). " +
             "MalformedExecutionManifestError surfaces verbatim. " +
             "Used by the /crew:plan skill to derive re-open mode and assemble <initial-context>.",
         inputSchema: {
             type: "object",
             properties: {
                 targetRepoRoot: { type: "string" },
+                ref: { type: "string" },
+                includeSpecText: { type: "boolean" },
             },
             required: ["targetRepoRoot"],
         },

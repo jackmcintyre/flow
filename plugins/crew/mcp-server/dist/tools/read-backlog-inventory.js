@@ -26,6 +26,21 @@ import { STATE_NAMES } from "../state/manifest-state-machine.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 export const ReadBacklogInventoryInputSchema = z.object({
     targetRepoRoot: z.string().min(1),
+    /**
+     * Optional single-item filter. When set, only the entry whose `ref` matches
+     * is returned (the others are still scanned so `mode` stays accurate). The
+     * gate-1 judge workflow passes this so it fetches exactly the draft under
+     * judgement instead of relaying the whole backlog through a seam courier.
+     */
+    ref: z.string().min(1).optional(),
+    /**
+     * When true, each returned entry is enriched with `specText` (the draft's full
+     * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
+     * Default false keeps the inventory lean for its planner/board/dashboard
+     * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
+     * the real draft (not an empty `"(spec text not available)"` placeholder).
+     */
+    includeSpecText: z.boolean().optional(),
 });
 /** ULID pattern: 26 characters from [0-9A-Z]. */
 const ULID_PATTERN = /^[0-9A-Z]{26}$/;
@@ -93,14 +108,35 @@ export async function readBacklogInventory(rawInput) {
                     break;
                 }
             }
-            inventory.push({
+            const entry = {
                 ref: manifest.ref,
                 title: manifest.title,
                 state: stateName,
                 withdrawn: manifest.withdrawn,
                 ready: manifest.ready,
                 depsReady,
-            });
+            };
+            // Enrich with the real spec text + persisted risk tier only when asked,
+            // and only for the entry the caller actually wants (so a `ref` filter does
+            // not pay a file read for every other manifest). Resolve `source_path` the
+            // same way the dev tool does (run-dev-terminal-action.ts): absolute as-is,
+            // else relative to the repo root.
+            if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
+                const specAbs = path.isAbsolute(manifest.source_path)
+                    ? manifest.source_path
+                    : path.join(targetRepoRoot, manifest.source_path);
+                try {
+                    entry.specText = await fs.readFile(specAbs, "utf8");
+                }
+                catch {
+                    // Source file missing/unreadable — leave specText undefined so the
+                    // caller can tell "not requested" from "requested but unavailable"
+                    // rather than masking it as an empty (but present) spec.
+                }
+                if (manifest.risk_tier)
+                    entry.riskTier = manifest.risk_tier;
+            }
+            inventory.push(entry);
             seenRefs.add(manifest.ref);
         }
     }
@@ -126,16 +162,27 @@ export async function readBacklogInventory(rawInput) {
             const absPath = path.join(nativeStoriesDir, filename);
             const content = await fs.readFile(absPath, "utf8");
             const title = extractH1Title(content, basename);
-            inventory.push({
+            const entry = {
                 ref,
                 title,
                 state: "native-source-only",
                 withdrawn: false,
                 ready: false,
                 depsReady: true,
-            });
+            };
+            // The native-stories file content is already in hand (read for the title),
+            // so enriching specText is free. No manifest yet → no persisted riskTier.
+            if (input.includeSpecText && (!input.ref || ref === input.ref)) {
+                entry.specText = content;
+            }
+            inventory.push(entry);
         }
     }
+    // `mode` describes the whole backlog, so derive it BEFORE applying the optional
+    // single-item `ref` filter.
     const mode = inventory.length === 0 ? "first-run" : "re-open";
-    return { mode, backlog_inventory: inventory };
+    const backlog_inventory = input.ref
+        ? inventory.filter((e) => e.ref === input.ref)
+        : inventory;
+    return { mode, backlog_inventory };
 }
