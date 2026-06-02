@@ -641,6 +641,45 @@ export declare class PrePrBuildFailedError extends DomainError {
     });
 }
 /**
+ * The pre-PR sync gate (`runDevTerminalAction`) rebased the story branch onto
+ * the freshly-fetched `origin/main` and hit a GENUINE content conflict — the
+ * story's changes clash with trunk work that landed first. The wrapper has
+ * already run `git rebase --abort`, so the working tree is left clean (no
+ * half-applied rebase), and NO push or `gh pr create` runs — the conflicting
+ * branch never reaches origin and no doomed PR is opened.
+ *
+ * Carries a readable `reason` (the conflicting paths / abbreviated rebase
+ * stderr) so the caller (the drain seam-agent) surfaces it to the operator as a
+ * plain-language parked reason naming the clash, mirroring how
+ * `PrePrBuildFailedError` / `PrePrTestFailedError` are reported.
+ *
+ * This is the deterministic-seam fix for the PR #264 registry-collision scar:
+ * under a concurrent drain two stories cut their branches from the same base; if
+ * one merges first and both touched a shared file, the second story's PR opened
+ * with a merge conflict that could not merge cleanly. The gate now rebases each
+ * story onto the latest trunk BEFORE opening its PR, so a clean story opens an
+ * already-integrated PR and a genuinely-clashing story stops here with a
+ * readable reason instead of opening a PR that cannot merge.
+ *
+ * Mirrors `PrePrBuildFailedError` / `PrePrTestFailedError`'s shape (typed,
+ * carries the subprocess result). The safety argument for rebasing here without
+ * a force-push: the branch has not been pushed yet, so rebasing then pushing is
+ * a normal fast-forward from origin's view — a force-push is never needed or
+ * attempted, and the `--force` family stays unconditionally refused.
+ *
+ * (Story native:01KT40THFTS10F9PT37KCW9PF4)
+ */
+export declare class RebaseConflictError extends DomainError {
+    readonly reason: string;
+    readonly conflictingPaths: readonly string[];
+    readonly stderr: string;
+    constructor(opts: {
+        reason: string;
+        conflictingPaths?: readonly string[];
+        stderr?: string;
+    });
+}
+/**
  * `gh pr create` returned a non-zero exit code, or the stdout did not
  * contain a valid PR URL (starts with `https://github.com/`). Story
  * 4.5 will wrap this in the recoverable-error classifier. (Story 4.4

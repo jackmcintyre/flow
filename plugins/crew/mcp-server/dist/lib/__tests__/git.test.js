@@ -4,8 +4,8 @@
  * (Story 4.4 Task 1.3 / Task 1.4 / Task 2.1 / Task 2.2 / Task 2.3 / Task 2.5)
  */
 import { describe, expect, it, vi } from "vitest";
-import { assertNoNegativeFlags, gitCreateBranch, gitPush, gitCommit, stashWorkingTree, listDirtyPaths, CONVENTIONAL_COMMIT_TYPES, } from "../git.js";
-import { NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, GitCommitMessageMalformedError, } from "../../errors.js";
+import { assertNoNegativeFlags, gitCreateBranch, gitFetch, gitPush, gitRebaseOnto, gitCommit, stashWorkingTree, listDirtyPaths, CONVENTIONAL_COMMIT_TYPES, } from "../git.js";
+import { NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, GitCommitMessageMalformedError, RebaseConflictError, } from "../../errors.js";
 function makeOkStub(extraArgs) {
     return vi.fn(async () => ({
         stdout: "",
@@ -147,6 +147,133 @@ describe("gitPush", () => {
         catch (err) {
             expect(err).toBeInstanceOf(GitPushFailedError);
             expect(err.stderr).toBe("fatal: remote rejected");
+        }
+    });
+});
+// ---------------------------------------------------------------------------
+// gitFetch + gitRebaseOnto — pre-PR sync gate
+// (Story native:01KT40THFTS10F9PT37KCW9PF4 — AC3)
+// ---------------------------------------------------------------------------
+const FORCE_STYLE_FLAGS = [
+    "--force",
+    "--force-with-lease",
+    "--no-verify",
+    "--force-with-lease=refs/heads/main",
+];
+describe("gitFetch (Story native:01KT40THFTS10F9PT37KCW9PF4)", () => {
+    it("runs git -C <root> fetch origin", async () => {
+        const spy = makeOkStub();
+        await gitFetch({
+            targetRepoRoot: "/tmp/repo",
+            role: "generalist-dev",
+            execaImpl: spy,
+        });
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0]).toEqual([
+            "git",
+            ["-C", "/tmp/repo", "fetch", "origin"],
+        ]);
+    });
+    it("exposes a closed signature — there is no `args` passthrough", () => {
+        // Compile-time + shape guard: the opts object has no `args` key. A caller
+        // cannot thread arbitrary (force-style) flags through gitFetch.
+        const optsKeys = ["targetRepoRoot", "role", "execaImpl", "sleepImpl"];
+        expect(optsKeys).not.toContain("args");
+    });
+    // AC3: assertNoNegativeFlags is wired into the fixed arg list. The closed
+    // signature admits no caller flags, so we assert the refusal at the wrapper
+    // boundary that gitFetch routes through (same Set, same error).
+    it.each(FORCE_STYLE_FLAGS)("AC3: refuses force-style flag %s via assertNoNegativeFlags (the guard gitFetch routes through)", (flag) => {
+        expect(() => assertNoNegativeFlags(["fetch", "origin", flag], "generalist-dev", "git")).toThrow(NegativeCapabilityDeniedError);
+    });
+});
+describe("gitRebaseOnto (Story native:01KT40THFTS10F9PT37KCW9PF4)", () => {
+    it("runs git -C <root> rebase origin/main on the happy path", async () => {
+        const spy = makeOkStub();
+        await gitRebaseOnto({
+            targetRepoRoot: "/tmp/repo",
+            role: "generalist-dev",
+            execaImpl: spy,
+        });
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0]).toEqual([
+            "git",
+            ["-C", "/tmp/repo", "rebase", "origin/main"],
+            expect.objectContaining({ reject: false }),
+        ]);
+    });
+    it("honours an explicit `onto` ref", async () => {
+        const spy = makeOkStub();
+        await gitRebaseOnto({
+            targetRepoRoot: "/tmp/repo",
+            role: "generalist-dev",
+            onto: "origin/release",
+            execaImpl: spy,
+        });
+        expect(spy.mock.calls[0][1]).toEqual([
+            "-C", "/tmp/repo", "rebase", "origin/release",
+        ]);
+    });
+    it("exposes a closed signature — there is no `args` passthrough", () => {
+        const optsKeys = ["targetRepoRoot", "role", "onto", "execaImpl", "sleepImpl"];
+        expect(optsKeys).not.toContain("args");
+    });
+    // AC3: assertNoNegativeFlags is wired into the fixed arg list. The closed
+    // signature admits no caller flags; assert the refusal at the guard boundary.
+    it.each(FORCE_STYLE_FLAGS)("AC3: refuses force-style flag %s via assertNoNegativeFlags (the guard gitRebaseOnto routes through)", (flag) => {
+        expect(() => assertNoNegativeFlags(["rebase", "origin/main", flag], "generalist-dev", "git")).toThrow(NegativeCapabilityDeniedError);
+    });
+    it("AC3: on a non-zero rebase exit, runs `git rebase --abort` THEN throws RebaseConflictError", async () => {
+        const conflictOutput = "Auto-merging src/registry.ts\n" +
+            "CONFLICT (content): Merge conflict in src/registry.ts\n" +
+            "error: could not apply 1a2b3c4... feat: register tool\n";
+        const calls = [];
+        const spy = vi.fn(async (_cmd, args) => {
+            calls.push([...args]);
+            const subcmd = args[2];
+            if (subcmd === "rebase" && args[3] === "--abort") {
+                return { stdout: "", stderr: "", exitCode: 0 };
+            }
+            if (subcmd === "rebase") {
+                return { stdout: conflictOutput, stderr: "", exitCode: 1 };
+            }
+            return { stdout: "", stderr: "", exitCode: 0 };
+        });
+        await expect(gitRebaseOnto({
+            targetRepoRoot: "/tmp/repo",
+            role: "generalist-dev",
+            execaImpl: spy,
+        })).rejects.toBeInstanceOf(RebaseConflictError);
+        // The rebase ran, then `rebase --abort` ran (working tree left clean).
+        expect(calls[0]).toEqual(["-C", "/tmp/repo", "rebase", "origin/main"]);
+        expect(calls[1]).toEqual(["-C", "/tmp/repo", "rebase", "--abort"]);
+    });
+    it("AC3: RebaseConflictError carries the conflicting paths and a readable reason", async () => {
+        const conflictOutput = "CONFLICT (content): Merge conflict in src/registry.ts\n" +
+            "CONFLICT (content): Merge conflict in src/index.ts\n";
+        const spy = vi.fn(async (_cmd, args) => {
+            if (args[2] === "rebase" && args[3] === "--abort") {
+                return { stdout: "", stderr: "", exitCode: 0 };
+            }
+            if (args[2] === "rebase") {
+                return { stdout: conflictOutput, stderr: "", exitCode: 1 };
+            }
+            return { stdout: "", stderr: "", exitCode: 0 };
+        });
+        try {
+            await gitRebaseOnto({
+                targetRepoRoot: "/tmp/repo",
+                role: "generalist-dev",
+                execaImpl: spy,
+            });
+            expect.fail("should have thrown");
+        }
+        catch (err) {
+            expect(err).toBeInstanceOf(RebaseConflictError);
+            const e = err;
+            expect(e.conflictingPaths).toContain("src/registry.ts");
+            expect(e.conflictingPaths).toContain("src/index.ts");
+            expect(e.reason).toContain("src/registry.ts");
         }
     });
 });
