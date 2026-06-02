@@ -26062,11 +26062,19 @@ function isCanonicalPath(absPath, targetRepoRoot) {
   }
   return { canonical: false };
 }
+var atomicWriteSeq = 0;
 async function atomicWriteFile(absPath, contents) {
-  const tmpPath = `${absPath}.tmp`;
+  atomicWriteSeq = (atomicWriteSeq + 1) % Number.MAX_SAFE_INTEGER;
+  const tmpPath = `${absPath}.${process.pid}.${atomicWriteSeq}.tmp`;
   await fs5.mkdir(path6.dirname(absPath), { recursive: true });
   await fs5.writeFile(tmpPath, contents, "utf8");
-  await fs5.rename(tmpPath, absPath);
+  try {
+    await fs5.rename(tmpPath, absPath);
+  } catch (err) {
+    await fs5.rm(tmpPath, { force: true }).catch(() => {
+    });
+    throw err;
+  }
 }
 async function writeManagedFile(opts) {
   const { absPath, contents, targetRepoRoot, mcpToolContext } = opts;
