@@ -4,7 +4,7 @@
  * (Story 4.4 Task 1.3 / Task 1.4 / Task 2.1 / Task 2.2 / Task 2.3 / Task 2.5)
  */
 import { describe, expect, it, vi } from "vitest";
-import { assertNoNegativeFlags, gitCreateBranch, gitPush, gitCommit, stashWorkingTree, CONVENTIONAL_COMMIT_TYPES, } from "../git.js";
+import { assertNoNegativeFlags, gitCreateBranch, gitPush, gitCommit, stashWorkingTree, listDirtyPaths, CONVENTIONAL_COMMIT_TYPES, } from "../git.js";
 import { NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, GitCommitMessageMalformedError, } from "../../errors.js";
 function makeOkStub(extraArgs) {
     return vi.fn(async () => ({
@@ -306,5 +306,24 @@ describe("stashWorkingTree", () => {
         });
         expect(result.stashed).toBe(false);
         expect(result.stderr).toContain("index.lock");
+    });
+});
+describe("listDirtyPaths — bare `.crew` symlink exclusion (native:01KT3FKYB7HNSEE5QQYMS57F7C)", () => {
+    it("drops a bare `.crew` dirty path so the symlink can never be staged", async () => {
+        // `git status --porcelain -z` emits NUL-terminated `XY<space>PATH` records.
+        // The bare `.crew` symlink shows up as an untracked entry (`??`).
+        const stdout = "?? .crew\0 M src/lib/git.ts\0?? .crew/state/ledger.yaml\0 M .crew/state\0";
+        const spy = vi.fn(async () => ({ stdout, stderr: "", exitCode: 0 }));
+        const result = await listDirtyPaths({
+            cwd: "/repo",
+            execaImpl: spy,
+        });
+        // AC2: the bare symlink is filtered out regardless of the gitignore rule.
+        expect(result).not.toContain(".crew");
+        // Real story changes are still surfaced for staging.
+        expect(result).toContain("src/lib/git.ts");
+        // The pre-existing `.crew/state` filters remain in force (same predicate).
+        expect(result).not.toContain(".crew/state/ledger.yaml");
+        expect(result).not.toContain(".crew/state");
     });
 });

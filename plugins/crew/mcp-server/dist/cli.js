@@ -34878,7 +34878,7 @@ async function listDirtyPaths(opts) {
     out.push(p);
   }
   return out.filter(
-    (p) => !p.startsWith(".crew/state/") && p !== ".crew/state"
+    (p) => !p.startsWith(".crew/state/") && p !== ".crew/state" && p !== ".crew"
   );
 }
 async function stashWorkingTree(opts) {
