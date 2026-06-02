@@ -612,7 +612,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("computeSkillEffectiveness");
       // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
       expect(toolNames).toContain("bmadToNativeIngest");
-      expect(toolNames.length).toBe(45);
+      // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
+      expect(toolNames).toContain("resolveLensRoles");
+      expect(toolNames.length).toBe(46);
     } finally {
       await client.close();
       await server.close();

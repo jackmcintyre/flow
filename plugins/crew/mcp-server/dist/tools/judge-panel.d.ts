@@ -188,11 +188,37 @@ export declare function validateLensRoleBinding(lensRoles: LensRoleBinding): voi
  */
 export declare function runJudgePanel(opts: RunJudgePanelOptions): Promise<RunJudgePanelResult>;
 /**
- * The default lens→role binding from the rubric §3 brackets. Exported so the
- * `/crew:judge` skill and callers can start from it and override per the hired
- * roster. Each lens is bound to a DISTINCT role.
+ * The default lens→role binding from the rubric §3 brackets.
+ *
+ * Exported for documentation of the rubric §3 intent. The OPERATIVE path for
+ * auto-staffing is `resolveLensRoleBinding`, which derives the binding from the
+ * live hired roster. Each lens is bound to a DISTINCT role.
  */
 export declare const DEFAULT_LENS_ROLES: LensRoleBinding;
+/**
+ * Resolve the lens→role binding from a live hired roster using maximum bipartite
+ * matching (augmenting paths / Kuhn's algorithm).
+ *
+ * Algorithm:
+ *  1. For each lens, compute its candidate list = preference list ∩ hiredRoles
+ *     (filtered in preference order so the preferred specialist is tried first).
+ *  2. Run Kuhn's augmenting-path matching: iterate lenses in LENS_NAMES order;
+ *     for each lens, DFS through candidates (in preference order) looking for a
+ *     free role or an augmenting path through an already-matched lens.
+ *  3. If all five lenses are covered → return the binding (passes
+ *     validateLensRoleBinding by construction).
+ *  4. If any lens is uncovered → throw `LensJudgeUnavailableError` naming the
+ *     FIRST uncovered lens in LENS_NAMES order.
+ *
+ * This is the only correct approach for the default roster: greedy first-match
+ * fails because structure and discipline share planner/generalist-reviewer as
+ * fallbacks and collide. The augmenting-path search resolves conflicts by
+ * reassigning an already-matched lens to a different candidate when doing so
+ * frees a slot for the current lens.
+ *
+ * Exported for unit testing.
+ */
+export declare function resolveLensRoleBinding(hiredRoles: string[]): LensRoleBinding;
 export interface WriteLensVerdictOptions {
     targetRepoRoot: string;
     sessionUlid: string;
