@@ -16,6 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { stringify as yamlStringify } from "yaml";
 import { scanOrphanedInProgress } from "../scan-orphaned-in-progress.js";
+import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -49,8 +50,11 @@ function makeManifestYaml(ref, opts = {}) {
     }
     return yamlStringify(manifest, { lineWidth: 0 });
 }
-async function seedDevOutcome(stateRoot, sessionUlid, prNumber) {
-    const outcomePath = path.join(stateRoot, "sessions", sessionUlid, "dev-outcome.json");
+// Story native:01KT3YDHM10FPQ77N22BTJP9AF: the dev-outcome record is now
+// namespaced per story ref under the stale session's directory, so seeding takes
+// the ref and writes to the same per-ref path the crash-recovery reader derives.
+async function seedDevOutcome(targetRepoRoot, sessionUlid, ref, prNumber) {
+    const outcomePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
     await fs.mkdir(path.dirname(outcomePath), { recursive: true });
     await fs.writeFile(outcomePath, JSON.stringify({ prUrl: `https://x/pull/${prNumber}`, prNumber, branch: "b", commitSha: "abc123" }), "utf8");
 }
@@ -129,7 +133,7 @@ describe("scanOrphanedInProgress — crash-recovery fields", () => {
             claimed_by: STALE_ULID_A,
             drain_resume_attempts: 2,
         });
-        await seedDevOutcome(stateRoot, STALE_ULID_A, 42);
+        await seedDevOutcome(tmpDir, STALE_ULID_A, ref, 42);
         const result = await scanOrphanedInProgress({
             targetRepoRoot: tmpDir,
             sessionUlid: CURRENT_SESSION_ULID,
@@ -150,6 +154,63 @@ describe("scanOrphanedInProgress — crash-recovery fields", () => {
         expect(result.orphans).toHaveLength(1);
         expect(result.orphans[0].prNumber).toBeNull();
         expect(result.orphans[0].resumeAttempts).toBe(0);
+    });
+});
+// ---------------------------------------------------------------------------
+// AC1 (story native:01KT3YDHM10FPQ77N22BTJP9AF): a crash-recovery scan must
+// never cross-attribute a sibling's PR. Two stories built concurrently in ONE
+// drain run share a single session ULID; before the per-ref fix they wrote to
+// the same `dev-outcome.json`, so recovery resumed whichever story it scanned
+// against the last-written PR — marking an unbuilt story done against a
+// sibling's already-merged PR (the 2026-06-02 regression). With the per-ref
+// record each story recovers its OWN PR.
+// ---------------------------------------------------------------------------
+describe("scanOrphanedInProgress — sibling PR is never cross-attributed (AC1)", () => {
+    it("recovers each concurrently-built story's OWN prNumber when both share one session ULID", async () => {
+        const refA = "native:01JVWX2STALE000000000A0001";
+        const refB = "native:01JVWX2STALE000000000B0002";
+        // Both stories were claimed by the SAME (now-stale) drain session — the
+        // concurrency case that drove the regression.
+        await seedInProgressManifest(stateRoot, refA, { claimed_by: STALE_ULID_A });
+        await seedInProgressManifest(stateRoot, refB, { claimed_by: STALE_ULID_A });
+        // Each opened its own PR; both records live under the shared session ULID
+        // but at distinct per-ref paths.
+        await seedDevOutcome(tmpDir, STALE_ULID_A, refA, 101);
+        await seedDevOutcome(tmpDir, STALE_ULID_A, refB, 202);
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+        });
+        // Orphans are sorted by ref; refA sorts before refB.
+        expect(result.orphans).toHaveLength(2);
+        const orphanA = result.orphans.find((o) => o.ref === refA);
+        const orphanB = result.orphans.find((o) => o.ref === refB);
+        expect(orphanA).toBeDefined();
+        expect(orphanB).toBeDefined();
+        // The crux: each story resumes against its OWN PR — never the sibling's.
+        expect(orphanA.prNumber).toBe(101);
+        expect(orphanB.prNumber).toBe(202);
+    });
+    it("recovers prNumber for the built sibling as null for the unbuilt one — never the built one's PR", async () => {
+        // The exact regression shape: storyBuilt opened a PR; storyUnbuilt never did.
+        // An unbuilt story must recover prNumber: null, NOT the built sibling's PR
+        // (which previously let it be marked done against a PR it never produced).
+        const refBuilt = "native:01JVWX2STALEBUILT00000001";
+        const refUnbuilt = "native:01JVWX2STALEUNBUILT00002";
+        await seedInProgressManifest(stateRoot, refBuilt, { claimed_by: STALE_ULID_A });
+        await seedInProgressManifest(stateRoot, refUnbuilt, { claimed_by: STALE_ULID_A });
+        // Only the built story has a dev-outcome record.
+        await seedDevOutcome(tmpDir, STALE_ULID_A, refBuilt, 303);
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+        });
+        expect(result.orphans).toHaveLength(2);
+        const builtOrphan = result.orphans.find((o) => o.ref === refBuilt);
+        const unbuiltOrphan = result.orphans.find((o) => o.ref === refUnbuilt);
+        expect(builtOrphan.prNumber).toBe(303);
+        // The unbuilt story must NOT inherit the built sibling's PR.
+        expect(unbuiltOrphan.prNumber).toBeNull();
     });
 });
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { DevOutcomeFileMalformedError } from "../errors.js";
+import { sanitiseRefForPathSegment } from "./read-reviewer-result-file.js";
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -29,6 +30,43 @@ export interface DevOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// Path
+// ---------------------------------------------------------------------------
+
+/**
+ * Deterministically derive the absolute path to a story's `dev-outcome.json`
+ * within a session, namespaced per ref (Story native:01KT3YDHM10FPQ77N22BTJP9AF).
+ *
+ * Layout: `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/<sanitised-ref>/dev-outcome.json`.
+ *
+ * A drain run shares ONE session ULID across every story it processes, so the
+ * dev-outcome (PR-pointer) record must be namespaced per story ref — otherwise a
+ * later/concurrent story clobbers an earlier one's PR record and crash-recovery
+ * can resume an unbuilt story against a sibling's already-merged PR (the
+ * 2026-06-02 cross-attribution regression). Mirrors `reviewerResultFilePath`
+ * (Story 8.15) and reuses the same `sanitiseRefForPathSegment` helper so the
+ * writer and every reader derive an identical on-disk path.
+ *
+ * Used by BOTH the writer (`runDevTerminalAction`) and every reader so they
+ * cannot disagree on where a story's PR record lives.
+ */
+export function devOutcomeFilePath(
+  targetRepoRoot: string,
+  sessionUlid: string,
+  ref: string,
+): string {
+  return path.join(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+    sanitiseRefForPathSegment(ref),
+    "dev-outcome.json",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
@@ -37,21 +75,20 @@ export interface DevOutcome {
  * `runDevTerminalAction`. Returns `null` when the file is absent (ENOENT).
  * Throws `DevOutcomeFileMalformedError` on malformed JSON or unexpected shape.
  *
+ * Story native:01KT3YDHM10FPQ77N22BTJP9AF: now takes the story `ref` and reads
+ * from the per-ref namespaced path so two stories sharing one session ULID keep
+ * independent PR records.
+ *
  * @param targetRepoRoot - Absolute path to the target repository root.
  * @param sessionUlid - ULID of the calling session.
+ * @param ref - Story ref, used to derive the per-story dev-outcome path.
  */
 export async function readDevOutcomeFile(
   targetRepoRoot: string,
   sessionUlid: string,
+  ref: string,
 ): Promise<DevOutcome | null> {
-  const filePath = path.join(
-    targetRepoRoot,
-    ".crew",
-    "state",
-    "sessions",
-    sessionUlid,
-    "dev-outcome.json",
-  );
+  const filePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
 
   let raw: string;
   try {

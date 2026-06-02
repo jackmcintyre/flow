@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { execa as realExeca } from "execa";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 import { runDevTerminalAction } from "../run-dev-terminal-action.js";
 import { ConventionalCommitTypeUnknownError, GitPushFailedError, GhPrCreateFailedError, NegativeCapabilityDeniedError, } from "../../errors.js";
 // ---------------------------------------------------------------------------
@@ -650,8 +651,9 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
         // Confirm successful result
         expect(result.ok).toBe(true);
         expect(result.prUrl).toBe(targetPrUrl);
-        // dev-outcome.json must exist in the session directory
-        const devOutcomePath = path.join(ctx.repoRoot, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json");
+        // dev-outcome.json must exist in the per-ref session directory
+        // (story native:01KT3YDHM10FPQ77N22BTJP9AF).
+        const devOutcomePath = devOutcomeFilePath(ctx.repoRoot, SESSION_ULID, REF);
         const raw = await fs.readFile(devOutcomePath, "utf8");
         const parsed = JSON.parse(raw);
         expect(parsed.prUrl).toBe(targetPrUrl);
@@ -674,7 +676,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
             worktree: false,
             execaImpl: spy,
         });
-        const devOutcomePath = path.join(ctx.repoRoot, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json");
+        const devOutcomePath = devOutcomeFilePath(ctx.repoRoot, SESSION_ULID, REF);
         const raw = await fs.readFile(devOutcomePath, "utf8");
         const parsed = JSON.parse(raw);
         expect(parsed.prNumber).toBe(123);

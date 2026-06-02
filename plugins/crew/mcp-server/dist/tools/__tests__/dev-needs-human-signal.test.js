@@ -21,6 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 // ---------------------------------------------------------------------------
@@ -136,10 +137,9 @@ describe("dev needs-human-decision signal (Story 8.19 AC1)", () => {
         // handoff. We assert the handoff path is NOT classified as needs-human.
         const transcript = `Did the work.\n${HANDOFF_PHRASE}`;
         // Seed a dev-outcome.json so the handoff path can resolve a prNumber.
-        await fs.mkdir(path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID), {
-            recursive: true,
-        });
-        await atomicWriteFile(path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json"), JSON.stringify({
+        // Per-ref namespaced path (story native:01KT3YDHM10FPQ77N22BTJP9AF):
+        // atomicWriteFile creates parent dirs internally.
+        await atomicWriteFile(devOutcomeFilePath(tmpRoot, SESSION_ULID, STORY_REF), JSON.stringify({
             prNumber: 77,
             prUrl: "https://github.com/o/r/pull/77",
             branch: "crew/bmad-8-19",

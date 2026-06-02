@@ -26,6 +26,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 // ---------------------------------------------------------------------------
@@ -421,9 +422,10 @@ describe("Story 4.6 (m) — PR URL extraction: no URL → PrUrlNotFoundInDevTran
 // ---------------------------------------------------------------------------
 // Story 4.8b: dev-outcome.json seam tests
 // ---------------------------------------------------------------------------
-const SESSION_DIR_PATH = `.crew/state/sessions/${SESSION_ULID}`;
 async function writeDevOutcomeFile(root, content) {
-    const filePath = path.join(root, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json");
+    // Per-ref namespaced path (story native:01KT3YDHM10FPQ77N22BTJP9AF): the
+    // reader keys on STORY_REF, so the seed must land at the same per-ref path.
+    const filePath = devOutcomeFilePath(root, SESSION_ULID, STORY_REF);
     const raw = typeof content === "string" ? content : JSON.stringify(content, null, 2);
     // atomicWriteFile creates parent dirs internally; no fs.mkdir needed
     await atomicWriteFile(filePath, raw);

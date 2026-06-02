@@ -107,6 +107,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // write path. Test file only; the production tool routes its single telemetry
   // write through logTelemetryEvent (already whitelisted in src/lib/logger.ts).
   path.join(SRC_DIR, "tools", "__tests__", "retro-friction-signal.test.ts"),
+  // Story native:01KT3YDHM10FPQ77N22BTJP9AF: read-dev-outcome-file tests seed
+  // per-ref dev-outcome.json fixtures (valid + malformed) directly to tmpdir via
+  // raw fs.writeFile/mkdir to drive the parser and prove no cross-attribution
+  // across two refs in one session. Test file only; the production writer routes
+  // its single dev-outcome write through atomicWriteFile (managed-fs).
+  path.join(SRC_DIR, "lib", "__tests__", "read-dev-outcome-file.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

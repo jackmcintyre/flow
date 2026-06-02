@@ -35,6 +35,7 @@ import * as path from "node:path";
 import { execa as realExeca } from "execa";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 import { runDevTerminalAction } from "../run-dev-terminal-action.js";
 import { materialiseDevStoryWorktree } from "../../lib/dev-story-worktree.js";
 
@@ -274,10 +275,11 @@ describe("dev edits in worktree — AC1 (orchestrating checkout never holds the 
     expect(originFiles).toContain("src/index.ts");
     expect(originFiles).toContain("src/feature.ts");
 
-    // dev-outcome.json was written to the ORCHESTRATING checkout's session dir
-    // (resolved from the worktree via git --git-common-dir), not the worktree's.
+    // dev-outcome.json was written to the ORCHESTRATING checkout's per-ref
+    // session dir (resolved from the worktree via git --git-common-dir), not the
+    // worktree's. Per-ref namespaced (story native:01KT3YDHM10FPQ77N22BTJP9AF).
     const outcomeRaw = await fs.readFile(
-      path.join(ctx.repoRoot, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json"),
+      devOutcomeFilePath(ctx.repoRoot, SESSION_ULID, REF),
       "utf8",
     );
     const outcome = JSON.parse(outcomeRaw) as { prUrl: string; prNumber: number };
