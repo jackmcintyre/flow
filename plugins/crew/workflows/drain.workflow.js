@@ -20,12 +20,16 @@ export const meta = {
 //   maxRework      : per-story NEEDS-CHANGES rework cap. Default 2.
 //   maxResume      : per-story crash-resume cap. Past this many auto-resumes a
 //                    still-orphaned story is blocked for a human. Default 2.
-//   maxConcurrency : OPTIONAL cap on how many stories the MAIN drain loop runs at
+//   maxConcurrency     : OPTIONAL cap on how many stories the MAIN drain loop runs at
 //                    once (Story 8.22). Default 2. 1 → the historical strictly-serial
 //                    loop. Non-positive/garbage → the default. The orphan-resume
 //                    prelude stays serial regardless. Per-dev worktree isolation
 //                    (Story 8.20) is what makes >1 safe; the atomic claim guarantees
 //                    no two workers ever pick up the same ref.
+//   devReviewerModel : OPTIONAL model string for the dev and reviewer subagents.
+//                    Default 'sonnet'. Override to 'opus' (or any model) for a higher-
+//                    quality (higher-cost) run. Does NOT affect the seam-relay courier
+//                    (always 'sonnet'), the judge panel, or persona/QL calls.
 // ---------------------------------------------------------------------------
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
@@ -40,6 +44,12 @@ const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResum
 // maxRework / maxResume knobs. Default 2; clamp a non-positive/garbage value to 1
 // so the loop is never spawned with zero workers (which would never drain).
 const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency > 0 ? A.maxConcurrency : 2
+// Execution model for the dev and reviewer subagents (FU6). Default: 'sonnet' so
+// overnight drains use the cheaper model without hand-editing the workflow.
+// Override per-run by passing devReviewerModel: 'opus' (or any model string) in
+// the launch args. Does NOT affect the seam-relay courier (already 'sonnet'), the
+// judge panel, or persona/QL calls.
+const execModel = (A && A.devReviewerModel) || 'sonnet'
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
@@ -256,7 +266,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `That tool runs the project's full build itself (the same whole-project build CI runs) before opening the PR and refuses to open one on a red build (Story 8.17), so a red PR can no longer leak — but still build green yourself first. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, the build gate caught a red build — read the captured stderr/stdout in the error, fix the build (including breakage in files your story did not touch), and re-run the tool; do NOT hand off and do NOT emit the gh-recoverable line for a build failure. If it prints any other "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
-        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree' },
+        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree', model: execModel },
       )
 
       const devText = String(devFinal || '')
@@ -314,7 +324,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
         `Your FIRST and only mandatory action is to run EXACTLY this command (do not alter the path); it performs the three mandatory reads and writes the binding verdict to reviewer-result.json:\n` +
         `  node ${CLI} runReviewerSession --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, prNumber, role: 'generalist-reviewer' })}'\n` +
         `Then summarise the result it prints for the operator. Do NOT merge, push, edit the PR, or write any \`.crew/state\` file yourself — runReviewerSession owns the verdict file.`,
-      { label: `rev:${ref}:${rw}${tag}`, phase: ph },
+      { label: `rev:${ref}:${rw}${tag}`, phase: ph, model: execModel },
     )
     await progressDone(ref, 'review', reviewStartedAt)
 

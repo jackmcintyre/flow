@@ -505,9 +505,11 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("computeSkillEffectiveness");
             // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
             expect(toolNames).toContain("bmadToNativeIngest");
-            // Story native:01KT2RAXBSQ91Y80Z51DD26KPX added recordAgentFriction (friction-signal). 45 → 46.
+            // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
+            expect(toolNames).toContain("resolveLensRoles");
+            // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
             expect(toolNames).toContain("recordAgentFriction");
-            expect(toolNames.length).toBe(46);
+            expect(toolNames.length).toBe(47);
         }
         finally {
             await client.close();
