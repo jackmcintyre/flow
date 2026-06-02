@@ -450,7 +450,7 @@ export async function listDirtyPaths(opts) {
         }
         out.push(p);
     }
-    return out.filter((p) => !p.startsWith(".crew/state/") && p !== ".crew/state");
+    return out.filter((p) => !p.startsWith(".crew/state/") && p !== ".crew/state" && p !== ".crew");
 }
 // ---------------------------------------------------------------------------
 // stashWorkingTree (Epic 10 drain fix-plan — Fix 2b, clean-root guard)

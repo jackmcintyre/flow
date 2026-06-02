@@ -4,6 +4,7 @@ coverage/
 .DS_Store
 .sprint-orchestrator/
 .crew/
+.crew
 # Exception: the native adapter's test fixtures contain a fake `.crew/` tree
 # (committed test data, not a local backlog). Without this negation, `git add`
 # of a modified fixture under `.crew/` errors on the ignore rule.
