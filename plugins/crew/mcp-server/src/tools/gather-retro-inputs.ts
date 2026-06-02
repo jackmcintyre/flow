@@ -52,7 +52,11 @@ import {
   parseExecutionManifest,
   type ExecutionManifest,
 } from "../schemas/execution-manifest.js";
-import { TelemetryEventSchema, type TelemetryEvent } from "../schemas/telemetry-events.js";
+import {
+  TelemetryEventSchema,
+  type TelemetryEvent,
+  type AgentFrictionEvent,
+} from "../schemas/telemetry-events.js";
 import { parseRuleRegistry, type DisciplineRule } from "../schemas/discipline-rules.js";
 import {
   computeFailureClassFireCounts,
@@ -60,9 +64,21 @@ import {
   type RetirementCandidate,
   type FireCountConfig,
 } from "../lib/failure-class-fire-counts.js";
+import { type FrictionKind } from "./record-agent-friction.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
+
+/**
+ * One entry in the `recurringFriction` array — a friction kind that recurred
+ * at or above the threshold (count >= 2) within the cycle.
+ */
+export interface RecurringFrictionEntry {
+  /** The friction kind (closed enum from `AgentFrictionEventSchema`). */
+  kind: FrictionKind;
+  /** How many `agent.friction` events of this kind occurred in the cycle. */
+  count: number;
+}
 
 /**
  * The deterministic input bundle handed to the retro-analyst subagent.
@@ -91,6 +107,19 @@ export interface RetroInputs {
     promotionCandidates: PromotionCandidate[];
     retirementCandidates: RetirementCandidate[];
   } | null;
+  /**
+   * All `agent.friction` events from the cycle's telemetry JSONL files,
+   * grouped by `kind`. Only friction that recurs at threshold (count >= 2)
+   * is included — one-off noise is excluded. Empty array when no recurring
+   * friction was recorded.
+   *
+   * The retro-analyst MUST draft proposals from these computed entries — it
+   * MUST NOT recount friction from raw telemetry, mirroring the
+   * `fireCountSignal` discipline.
+   *
+   * Story native:01KT2RAXBSQ91Y80Z51DD26KPX.
+   */
+  recurringFriction: RecurringFrictionEntry[];
 }
 
 export interface GatherRetroInputsOptions {
@@ -135,7 +164,11 @@ export async function gatherRetroInputs(
     };
   }
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal };
+  // Compute recurring friction signal from telemetry events.
+  // Only friction that recurs at threshold (count >= 2) is surfaced.
+  const recurringFriction = computeRecurringFriction(telemetrySummary.events);
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +354,45 @@ async function gatherRuleRegistry(
 
   // Validated parse — raises RuleRegistryMalformedError on a bad registry.
   return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+
+// ---------------------------------------------------------------------------
+// recurring friction
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the recurring-friction signal from the cycle's telemetry events.
+ *
+ * Groups `agent.friction` events by `kind`, then returns only those kinds
+ * whose count reaches the threshold (count >= 2). One-off friction (count < 2)
+ * is excluded to avoid flooding the retro with noise.
+ *
+ * The analyst MUST consume `recurringFriction` only — it MUST NOT recount
+ * from raw telemetry, mirroring the `fireCountSignal` discipline.
+ */
+function computeRecurringFriction(events: TelemetryEvent[]): RecurringFrictionEntry[] {
+  const RECURRING_THRESHOLD = 2;
+
+  // Accumulate counts per kind.
+  const counts = new Map<FrictionKind, number>();
+  for (const event of events) {
+    if (event.type === "agent.friction") {
+      // Narrow to AgentFrictionEvent for type-safe access to data.kind.
+      const frictionEvent = event as AgentFrictionEvent;
+      const kind = frictionEvent.data.kind;
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+  }
+
+  // Return only kinds at or above the threshold, sorted by kind for determinism.
+  const result: RecurringFrictionEntry[] = [];
+  for (const [kind, count] of counts) {
+    if (count >= RECURRING_THRESHOLD) {
+      result.push({ kind, count });
+    }
+  }
+  result.sort((a, b) => a.kind.localeCompare(b.kind));
+  return result;
 }
 
 // ---------------------------------------------------------------------------

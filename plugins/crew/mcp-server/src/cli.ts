@@ -55,6 +55,7 @@ import { markStoryReady } from "./tools/mark-story-ready.js";
 import { guardCleanRoot } from "./tools/guard-clean-root.js";
 import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
+import { recordAgentFriction } from "./tools/record-agent-friction.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
@@ -108,6 +109,10 @@ const TOOLS: Record<string, ToolFn> = {
   writeLensVerdict,
   aggregateJudgePanel,
   adjudicateQualityLead,
+  // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — friction-signal write seam.
+  // Registered here so drain-path agents (seam-agents running node dist/cli.js)
+  // can emit friction events without a persistent MCP server in the loop.
+  recordAgentFriction,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
   // Callable on the no-MCP drain/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js

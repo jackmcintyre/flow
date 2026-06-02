@@ -365,6 +365,48 @@ export declare const SkillInvokeEventSchema: z.ZodObject<{
         }>;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `agent.friction` — emitted by `recordAgentFriction` when an agent compensates
+ * for a surprising / broken input (Story native:01KT2RAXBSQ91Y80Z51DD26KPX).
+ *
+ * Friction events are the raw signal for the retro-analyst's `recurringFriction`
+ * surface: when the same `kind` of friction recurs at or above the threshold
+ * (count >= 2) in a cycle, `gatherRetroInputs` promotes it into
+ * `recurringFriction` so the analyst can draft a fix proposal for the broken
+ * seam — rather than the problem silently disappearing once the agent stumbles
+ * through.
+ *
+ * - `kind`     — closed enum of the recognised friction categories (no silent
+ *                fallback variant — an unknown kind is a bug, not a skip).
+ * - `expected` — what the agent expected to receive (min 1 char).
+ * - `observed` — what the agent actually received / had to compensate for
+ *                (min 1 char). No body/diff/contents strings (NFR14) — keep
+ *                these short and structural.
+ *
+ * The envelope's `agent` field carries the role that experienced the friction;
+ * `session_id` is the drain-session ULID; `story_id` is the ref when the
+ * friction occurred inside a story flow (optional — tools can emit friction
+ * outside a story).
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export declare const AgentFrictionEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"agent.friction">;
+    data: z.ZodObject<{
+        kind: z.ZodEnum<{
+            "empty-input": "empty-input";
+            "forced-fallback": "forced-fallback";
+            "missing-cited-source": "missing-cited-source";
+            "repeated-retry": "repeated-retry";
+        }>;
+        expected: z.ZodString;
+        observed: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -538,8 +580,25 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
             "user-slash-command": "user-slash-command";
         }>;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"agent.friction">;
+    data: z.ZodObject<{
+        kind: z.ZodEnum<{
+            "empty-input": "empty-input";
+            "forced-fallback": "forced-fallback";
+            "missing-cited-source": "missing-cited-source";
+            "repeated-retry": "repeated-retry";
+        }>;
+        expected: z.ZodString;
+        observed: z.ZodString;
+    }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
 export type SkillInvokeEvent = z.infer<typeof SkillInvokeEventSchema>;
+export type AgentFrictionEvent = z.infer<typeof AgentFrictionEventSchema>;

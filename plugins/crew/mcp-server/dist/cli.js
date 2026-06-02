@@ -35493,6 +35493,19 @@ var SkillInvokeEventSchema = TelemetryEventBase.extend({
     invocation_source: external_exports.enum(["user-slash-command", "agent-call"])
   }).strict()
 }).strict();
+var AgentFrictionEventSchema = TelemetryEventBase.extend({
+  type: external_exports.literal("agent.friction"),
+  data: external_exports.object({
+    kind: external_exports.enum([
+      "empty-input",
+      "missing-cited-source",
+      "forced-fallback",
+      "repeated-retry"
+    ]),
+    expected: external_exports.string().min(1),
+    observed: external_exports.string().min(1)
+  }).strict()
+}).strict();
 var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -35505,7 +35518,8 @@ var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   DraftAuthoredEventSchema,
   PanelGradedEventSchema,
   QualityAdjudicatedEventSchema,
-  SkillInvokeEventSchema
+  SkillInvokeEventSchema,
+  AgentFrictionEventSchema
 ]);
 
 // src/lib/logger.ts
@@ -39426,6 +39440,60 @@ async function adjudicateQualityLead(opts) {
   };
 }
 
+// src/tools/record-agent-friction.ts
+var RecordAgentFrictionOptionsSchema = external_exports.object({
+  /** Absolute path to the target repository root. */
+  targetRepoRoot: external_exports.string().min(1),
+  /** Role name of the agent experiencing the friction (kebab-cased). */
+  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  /**
+   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
+   * inside a story flow.
+   */
+  story_id: external_exports.string().min(1).optional(),
+  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  session_id: external_exports.string().min(1),
+  /** The closed-enum friction category. */
+  kind: external_exports.enum([
+    "empty-input",
+    "missing-cited-source",
+    "forced-fallback",
+    "repeated-retry"
+  ]),
+  /** What the agent expected to receive. Keep short and structural (NFR14). */
+  expected: external_exports.string().min(1),
+  /** What the agent actually received / had to compensate for (NFR14). */
+  observed: external_exports.string().min(1),
+  /**
+   * Optional role label for downstream correlation. Defaults to the
+   * value of `agent` when omitted (they are the same in most callers).
+   */
+  role: external_exports.string().optional()
+}).strict();
+async function recordAgentFriction(opts) {
+  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
+  const {
+    targetRepoRoot,
+    agent,
+    story_id,
+    session_id,
+    kind,
+    expected,
+    observed
+  } = validated;
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "agent.friction",
+      session_id,
+      agent,
+      ...story_id !== void 0 ? { story_id } : {},
+      data: { kind, expected, observed }
+    }
+  });
+  return { ok: true, kind, agent, session_id };
+}
+
 // src/tools/resolve-lens-roles.ts
 import { promises as fs39 } from "node:fs";
 import * as path56 from "node:path";
@@ -39519,6 +39587,10 @@ var TOOLS = {
   writeLensVerdict,
   aggregateJudgePanel,
   adjudicateQualityLead,
+  // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — friction-signal write seam.
+  // Registered here so drain-path agents (seam-agents running node dist/cli.js)
+  // can emit friction events without a persistent MCP server in the loop.
+  recordAgentFriction,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
   // Callable on the no-MCP drain/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js

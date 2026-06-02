@@ -101,6 +101,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // Test file only; the production retirement handler routes every write through
   // writeManagedFile (with MCP tool context) and makes no commit of its own.
   path.join(SRC_DIR, "tools", "__tests__", "apply-rule-retirement.test.ts"),
+  // Story native:01KT2RAXBSQ91Y80Z51DD26KPX: retro-friction-signal tests seed
+  // telemetry JSONL fixture files directly to tmpdir via raw fs.writeFile/mkdir
+  // to test the gatherRetroInputs recurringFriction signal and recordAgentFriction
+  // write path. Test file only; the production tool routes its single telemetry
+  // write through logTelemetryEvent (already whitelisted in src/lib/logger.ts).
+  path.join(SRC_DIR, "tools", "__tests__", "retro-friction-signal.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

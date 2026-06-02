@@ -513,7 +513,8 @@ describe("AC4o — MCP tool registration smoke", () => {
         // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
         // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
         // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
-        expect(registeredTools.length).toBe(46);
+        // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
+        expect(registeredTools.length).toBe(47);
     });
 });
 // ---------------------------------------------------------------------------

@@ -53,6 +53,7 @@ import { blockOrphanNoTranscript } from "./block-orphan-no-transcript.js";
 import { writeLensVerdict, aggregateJudgePanel, DEFAULT_LENS_ROLES } from "./judge-panel.js";
 import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
+import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 
 /**
@@ -2276,6 +2277,58 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — recordAgentFriction: persist a
+  // structured `agent.friction` telemetry event when an agent compensates for a
+  // surprising or broken input. The retro-analyst reads the resulting
+  // `recurringFriction` signal from `gatherRetroInputs` at cycle end.
+  server.registerTool({
+    name: "recordAgentFriction",
+    description:
+      "Persist a structured agent.friction telemetry event when an agent compensates " +
+      "for a surprising or broken input. The event carries a closed-enum kind " +
+      "('empty-input' | 'missing-cited-source' | 'forced-fallback' | 'repeated-retry'), " +
+      "plus expected and observed strings describing the mismatch. " +
+      "gatherRetroInputs groups these events by kind and surfaces kinds with count >= 2 as " +
+      "recurringFriction in the retro bundle, so the retro-analyst can draft a fix proposal " +
+      "for a seam that agents are silently compensating for. " +
+      "Story native:01KT2RAXBSQ91Y80Z51DD26KPX.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        agent: { type: "string" },
+        story_id: { type: "string" },
+        session_id: { type: "string" },
+        kind: { type: "string" },
+        expected: { type: "string" },
+        observed: { type: "string" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"],
+    },
+    handler: async (args) => {
+      try {
+        const result = await recordAgentFriction(args as Parameters<typeof recordAgentFriction>[0]);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
             isError: true,
           };
         }

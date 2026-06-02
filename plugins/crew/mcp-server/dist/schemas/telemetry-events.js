@@ -325,6 +325,46 @@ export const SkillInvokeEventSchema = TelemetryEventBase.extend({
     })
         .strict(),
 }).strict();
+/**
+ * `agent.friction` — emitted by `recordAgentFriction` when an agent compensates
+ * for a surprising / broken input (Story native:01KT2RAXBSQ91Y80Z51DD26KPX).
+ *
+ * Friction events are the raw signal for the retro-analyst's `recurringFriction`
+ * surface: when the same `kind` of friction recurs at or above the threshold
+ * (count >= 2) in a cycle, `gatherRetroInputs` promotes it into
+ * `recurringFriction` so the analyst can draft a fix proposal for the broken
+ * seam — rather than the problem silently disappearing once the agent stumbles
+ * through.
+ *
+ * - `kind`     — closed enum of the recognised friction categories (no silent
+ *                fallback variant — an unknown kind is a bug, not a skip).
+ * - `expected` — what the agent expected to receive (min 1 char).
+ * - `observed` — what the agent actually received / had to compensate for
+ *                (min 1 char). No body/diff/contents strings (NFR14) — keep
+ *                these short and structural.
+ *
+ * The envelope's `agent` field carries the role that experienced the friction;
+ * `session_id` is the drain-session ULID; `story_id` is the ref when the
+ * friction occurred inside a story flow (optional — tools can emit friction
+ * outside a story).
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export const AgentFrictionEventSchema = TelemetryEventBase.extend({
+    type: z.literal("agent.friction"),
+    data: z
+        .object({
+        kind: z.enum([
+            "empty-input",
+            "missing-cited-source",
+            "forced-fallback",
+            "repeated-retry",
+        ]),
+        expected: z.string().min(1),
+        observed: z.string().min(1),
+    })
+        .strict(),
+}).strict();
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
     AgentInvokeEventSchema,
     TelemetryInvalidEventSchema,
@@ -338,4 +378,5 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
     PanelGradedEventSchema,
     QualityAdjudicatedEventSchema,
     SkillInvokeEventSchema,
+    AgentFrictionEventSchema,
 ]);
