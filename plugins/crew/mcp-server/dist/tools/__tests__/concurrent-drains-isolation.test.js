@@ -175,6 +175,11 @@ async function runDevFlow(ctx, story, execaImpl, sessionUlid = SESSION_ULID) {
             summary: `One-line summary for ${story.ref}.`,
             manifestPath: ctx.manifestPaths[story.ref],
             sessionUlid,
+            // Story native:01KT40THFTS10F9PT37KCW9PF4: the pre-PR sync gate rebases the
+            // branch onto `origin/<base>`. This test repo's trunk is `dev`; each story's
+            // branch was cut from `origin/dev` and touches only its own file, so the
+            // rebase is a clean fast-forward for both concurrent flows.
+            base: "dev",
             execaImpl: execaImpl,
         });
         return { worktreePath: wt.worktreePath, cleanup: wt.cleanup, result };

@@ -177,6 +177,14 @@ function makeStubExeca(opts: {
         return { stdout: "", stderr: "", exitCode: 0 };
       }
 
+      // Story native:01KT40THFTS10F9PT37KCW9PF4: the pre-PR sync gate runs
+      // `git fetch origin` + `git rebase origin/<base>` before the build/test
+      // gates. The tmpdir repo has no `origin`, so stub both green — these tests
+      // exercise the build/test gates, not the sync gate.
+      if (cmd === "git" && (args[2] === "fetch" || args[2] === "rebase")) {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+
       // Delegate real git ops (checkout/add/commit/rev-parse).
       const result = await realExeca(cmd, args as string[], { ...options, reject: false });
       return {

@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { execa as defaultExeca } from "execa";
-import { GitCommitMessageMalformedError, NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, } from "../errors.js";
+import { GitCommitMessageMalformedError, NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, RebaseConflictError, } from "../errors.js";
 /**
  * Required shape for plugin-side commit messages (Story 1.5 AC4 /
  * Epic-1 AC4): `<tool-name>: <ref-or-proposal-id>`. Lowercase tool
@@ -302,6 +302,129 @@ export async function gitPush(opts) {
             });
         }
     }, sleep);
+}
+// ---------------------------------------------------------------------------
+// gitFetch (Story native:01KT40THFTS10F9PT37KCW9PF4 — pre-PR sync gate)
+// ---------------------------------------------------------------------------
+/**
+ * Fetch the latest refs from `origin`.
+ *
+ * The v1 signature is CLOSED — there is no `args` passthrough. This is
+ * structural prevention of flag injection (belt-and-braces alongside the
+ * wrapper-level `assertNoNegativeFlags` check), mirroring `gitPush`. The fixed
+ * arg list is routed through `assertNoNegativeFlags` so the same negative-flag
+ * refusal applies even though the closed signature already admits no flags.
+ *
+ * Runs `git -C <root> fetch origin`. The fetch updates the remote-tracking ref
+ * in the shared `.git`; under concurrent drains that ref update can lose a lock
+ * race, so the spawn is wrapped in `retryGitOnLockContention` (a non-lock
+ * failure is re-thrown unchanged).
+ *
+ * Used by `runDevTerminalAction` to bring `origin/main` up to date right before
+ * the rebase-onto step, so the rebase integrates against the latest trunk.
+ *
+ * (Story native:01KT40THFTS10F9PT37KCW9PF4)
+ */
+export async function gitFetch(opts) {
+    const { targetRepoRoot, role } = opts;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const sleep = opts.sleepImpl ?? defaultGitLockSleep;
+    const args = ["fetch", "origin"];
+    // Belt-and-braces: the closed signature admits no caller flags, but route the
+    // fixed args through the same negative-flag refusal anyway (Pattern §9 / NFR16).
+    assertNoNegativeFlags(args, role, "git");
+    await retryGitOnLockContention(() => execaImpl("git", ["-C", targetRepoRoot, ...args]), sleep);
+}
+// ---------------------------------------------------------------------------
+// gitRebaseOnto (Story native:01KT40THFTS10F9PT37KCW9PF4 — pre-PR sync gate)
+// ---------------------------------------------------------------------------
+/**
+ * Rebase the current branch onto `origin/main`.
+ *
+ * The v1 signature is CLOSED — there is no `args` passthrough, so a destructive
+ * overwrite instruction (e.g. `--force` family / `--no-verify`) can never be
+ * threaded in. The fixed arg list is routed through `assertNoNegativeFlags`
+ * (throwing `NegativeCapabilityDeniedError` BEFORE any subprocess spawn) so the
+ * same negative-flag refusal applies as a defence-in-depth invariant.
+ *
+ * Runs `git -C <root> rebase origin/main`. On a non-zero exit — a genuine
+ * content conflict between the story's changes and trunk work that landed first
+ * — this function runs `git -C <root> rebase --abort` to leave the working tree
+ * clean (no half-applied rebase), THEN throws `RebaseConflictError` carrying a
+ * readable reason (the conflicting paths parsed from the rebase output, plus the
+ * abbreviated stderr). The caller stops BEFORE pushing, so no doomed PR is
+ * opened.
+ *
+ * The spawn is wrapped in `retryGitOnLockContention` (a transient lock
+ * collision is retried; a non-lock failure surfaces as the conflict path above).
+ * The retried thunk is idempotent on a lock-failed attempt because a lock
+ * collision means the rebase did not start.
+ *
+ * SAFETY: this is only ever run on a freshly-created, never-pushed branch (the
+ * push site in `runDevTerminalAction` creates the branch then pushes it exactly
+ * once). Rebasing a never-pushed branch then pushing is a normal fast-forward
+ * from origin's view — a force-push is never needed or attempted — so this is
+ * safe precisely because shared history is never rewritten.
+ *
+ * (Story native:01KT40THFTS10F9PT37KCW9PF4)
+ */
+export async function gitRebaseOnto(opts) {
+    const { targetRepoRoot, role } = opts;
+    const onto = opts.onto ?? "origin/main";
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const sleep = opts.sleepImpl ?? defaultGitLockSleep;
+    const args = ["rebase", onto];
+    // Belt-and-braces: refuse a destructive overwrite instruction before any spawn.
+    assertNoNegativeFlags(args, role, "git");
+    await retryGitOnLockContention(async () => {
+        const result = await execaImpl("git", ["-C", targetRepoRoot, ...args], {
+            reject: false,
+        });
+        if ((result.exitCode ?? 0) === 0)
+            return;
+        const stdout = result.stdout ?? "";
+        const stderr = result.stderr ?? "";
+        // A non-zero rebase exit on a freshly-created never-pushed branch is a
+        // genuine content conflict. Leave the tree clean before surfacing it.
+        await execaImpl("git", ["-C", targetRepoRoot, "rebase", "--abort"], {
+            reject: false,
+        });
+        throw new RebaseConflictError({
+            reason: summariseRebaseConflict(stdout, stderr),
+            conflictingPaths: parseConflictingPaths(stdout, stderr),
+            stderr,
+        });
+    }, sleep);
+}
+/** Conflicting-path lines look like `CONFLICT (content): Merge conflict in <path>`. */
+const REBASE_CONFLICT_PATH_REGEX = /Merge conflict in (.+)/g;
+/** Extract the conflicting repo-relative paths from the rebase output. */
+function parseConflictingPaths(stdout, stderr) {
+    const haystack = `${stdout}\n${stderr}`;
+    const paths = new Set();
+    for (const match of haystack.matchAll(REBASE_CONFLICT_PATH_REGEX)) {
+        const p = match[1]?.trim();
+        if (p)
+            paths.add(p);
+    }
+    return [...paths];
+}
+/**
+ * Build a short, readable reason from the rebase output: the conflicting paths
+ * if any were parsed, else an abbreviated stderr (first non-empty line).
+ */
+function summariseRebaseConflict(stdout, stderr) {
+    const paths = parseConflictingPaths(stdout, stderr);
+    if (paths.length > 0) {
+        return `rebase onto origin/main hit a content conflict in: ${paths.join(", ")}`;
+    }
+    const firstStderrLine = stderr
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0);
+    return firstStderrLine
+        ? `rebase onto origin/main failed: ${firstStderrLine}`
+        : "rebase onto origin/main failed with a content conflict";
 }
 // ---------------------------------------------------------------------------
 // gitInitWithEmptyCommit (Story 1.13 — smoke-harness scratch repo setup)

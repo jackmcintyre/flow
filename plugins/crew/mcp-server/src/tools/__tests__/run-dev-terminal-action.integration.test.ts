@@ -25,6 +25,7 @@ import {
   GitPushFailedError,
   GhPrCreateFailedError,
   NegativeCapabilityDeniedError,
+  RebaseConflictError,
 } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
@@ -148,6 +149,14 @@ function makeStubExeca(opts: {
   ghShouldFail?: boolean;
   ghStdout?: string;
   buildShouldFail?: boolean;
+  testShouldFail?: boolean;
+  /**
+   * Story native:01KT40THFTS10F9PT37KCW9PF4: when set, `git rebase <onto>`
+   * returns a non-zero exit carrying this conflict output, so the wrapper aborts
+   * and throws RebaseConflictError. The actual `rebase --abort` is stubbed to
+   * succeed.
+   */
+  rebaseConflictStdout?: string;
 }): ReturnType<typeof vi.fn> {
   return vi.fn(
     async (
@@ -155,9 +164,18 @@ function makeStubExeca(opts: {
       args: readonly string[],
       options?: Record<string, unknown>,
     ): Promise<ExecaResult> => {
-      // Story 8.17: the pre-PR full-build gate spawns `pnpm build`. Stub it so
-      // the integration tests never spawn a real build; default to success.
+      // Story 8.17 / native:01KT3ER5E9ACCERHAEJ5NM94TH: the pre-PR build gate
+      // spawns `pnpm build` and the test gate spawns `pnpm ... test`. Stub both
+      // so the integration tests never spawn a real build/test run; default to
+      // success. Distinguish by whether a test sub-command appears in the args.
       if (cmd === "pnpm") {
+        const isTestRun = args.some((a) => /test|vitest/.test(a));
+        if (isTestRun) {
+          if (opts.testShouldFail) {
+            return { stdout: "", stderr: "1 failed", exitCode: 1 };
+          }
+          return { stdout: "test ok", stderr: "", exitCode: 0 };
+        }
         if (opts.buildShouldFail) {
           return { stdout: "", stderr: "tsc: error TS2339", exitCode: 1 };
         }
@@ -177,6 +195,27 @@ function makeStubExeca(opts: {
 
       // git commands
       const subcmd = args[2]; // args = ["-C", root, subcmd, ...]
+
+      // Story native:01KT40THFTS10F9PT37KCW9PF4: the pre-PR sync gate runs
+      // `git fetch origin` then `git rebase origin/<base>` in the tmpdir repo,
+      // which has no `origin` remote. Stub both so the integration tests never
+      // touch a network remote; default fetch + rebase to success.
+      if (subcmd === "fetch") {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      if (subcmd === "rebase") {
+        // `rebase --abort` (args[3] === "--abort") always succeeds.
+        if (args[3] === "--abort") {
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        // `rebase <onto>`: a configured conflict returns non-zero with the
+        // conflict output so the wrapper aborts and throws RebaseConflictError.
+        if (opts.rebaseConflictStdout !== undefined) {
+          return { stdout: opts.rebaseConflictStdout, stderr: "", exitCode: 1 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+
       if (subcmd === "push") {
         if (opts.pushShouldFail) {
           // Return with exitCode non-zero (reject:false means no throw from real execa)
@@ -887,5 +926,146 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT40THFTS10F9PT37KCW9PF4 — pre-PR sync gate
+// (fetch + rebase onto latest origin/main before opening the PR)
+// ---------------------------------------------------------------------------
+
+/** Pull the `subcmd` from a recorded git call: args = ["-C", root, subcmd, ...]. */
+function gitCalls(spy: ReturnType<typeof vi.fn>): { subcmd: string; args: string[] }[] {
+  return (spy.mock.calls as [string, string[]][])
+    .filter(([cmd]) => cmd === "git")
+    .map(([, args]) => ({ subcmd: args[2]!, args }));
+}
+
+describe("runDevTerminalAction — pre-PR sync gate (AC1: origin/main advanced)", () => {
+  it("(AC1) fetches and rebases onto origin/<base> BEFORE the build/test gates, then opens the PR", async () => {
+    // The stub returns success for fetch + rebase (origin/main has advanced but
+    // the story integrates cleanly), so the PR opens against the integrated tree.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+
+    // fetch origin and rebase origin/main were both invoked.
+    const calls = gitCalls(spy);
+    const fetchCall = calls.find((c) => c.subcmd === "fetch");
+    const rebaseCall = calls.find(
+      (c) => c.subcmd === "rebase" && c.args[3] !== "--abort",
+    );
+    expect(fetchCall, "git fetch origin should run").toBeDefined();
+    expect(fetchCall!.args).toEqual([
+      "-C", ctx.repoRoot, "fetch", "origin",
+    ]);
+    expect(rebaseCall, "git rebase origin/<base> should run").toBeDefined();
+    expect(rebaseCall!.args).toEqual([
+      "-C", ctx.repoRoot, "rebase", "origin/main",
+    ]);
+
+    // No abort on the clean path.
+    expect(
+      calls.some((c) => c.subcmd === "rebase" && c.args[3] === "--abort"),
+    ).toBe(false);
+
+    // Ordering: fetch + rebase run BEFORE the build (pnpm) and test gates and
+    // BEFORE the push and `gh pr create` — the build/test gates validate the
+    // rebase-integrated tree, the exact state that lands on main.
+    const order = (spy.mock.calls as [string, string[]][])
+      .map(([cmd, args]): string | null => {
+        if (cmd === "git" && args[2] === "fetch") return "fetch";
+        if (cmd === "git" && args[2] === "rebase" && args[3] !== "--abort") return "rebase";
+        if (cmd === "pnpm" && args.some((a) => /test|vitest/.test(a))) return "test-gate";
+        if (cmd === "pnpm") return "build-gate";
+        if (cmd === "git" && args[2] === "push") return "push";
+        if (cmd === "gh") return "gh-pr-create";
+        return null;
+      })
+      .filter((s): s is string => s !== null);
+
+    const idxFetch = order.indexOf("fetch");
+    const idxRebase = order.indexOf("rebase");
+    const idxBuild = order.indexOf("build-gate");
+    const idxTest = order.indexOf("test-gate");
+    const idxPush = order.indexOf("push");
+    const idxGh = order.indexOf("gh-pr-create");
+
+    expect(idxFetch).toBeGreaterThanOrEqual(0);
+    expect(idxRebase).toBeGreaterThan(idxFetch);
+    expect(idxBuild).toBeGreaterThan(idxRebase);
+    expect(idxTest).toBeGreaterThan(idxBuild);
+    expect(idxPush).toBeGreaterThan(idxTest);
+    expect(idxGh).toBeGreaterThan(idxPush);
+  });
+});
+
+describe("runDevTerminalAction — pre-PR sync gate (AC2: genuine conflict)", () => {
+  const CONFLICT_OUTPUT =
+    "Auto-merging src/registry.ts\n" +
+    "CONFLICT (content): Merge conflict in src/registry.ts\n" +
+    "error: could not apply 1a2b3c4... feat: register new tool\n";
+
+  it("(AC2) aborts the rebase, never pushes or opens a PR, and carries the readable conflict reason", async () => {
+    const spy = makeStubExeca({ rebaseConflictStdout: CONFLICT_OUTPUT });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+      expect.fail("should have thrown RebaseConflictError");
+    } catch (err) {
+      caught = err;
+    }
+
+    // The returned outcome is a RebaseConflictError carrying the readable reason
+    // naming the clashing path (the parked reason surfaced to the operator).
+    expect(caught).toBeInstanceOf(RebaseConflictError);
+    const e = caught as RebaseConflictError;
+    expect(e.conflictingPaths).toContain("src/registry.ts");
+    expect(e.reason).toContain("src/registry.ts");
+    expect(e.message).toContain("src/registry.ts");
+    expect(e.message).toContain("NO pull request was opened");
+
+    const calls = gitCalls(spy);
+
+    // `git rebase --abort` ran to leave the working tree clean.
+    expect(
+      calls.some((c) => c.subcmd === "rebase" && c.args[3] === "--abort"),
+      "git rebase --abort should run after a genuine conflict",
+    ).toBe(true);
+
+    // push was NEVER invoked — the conflicting branch never reaches origin.
+    expect(calls.some((c) => c.subcmd === "push")).toBe(false);
+
+    // gh pr create was NEVER invoked — no doomed PR is opened.
+    expect((spy.mock.calls as [string, string[]][]).some(([cmd]) => cmd === "gh")).toBe(false);
+
+    // The build/test gates never ran either — the conflict aborts before them.
+    expect((spy.mock.calls as [string, string[]][]).some(([cmd]) => cmd === "pnpm")).toBe(false);
   });
 });

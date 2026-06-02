@@ -192,6 +192,11 @@ describe("dev edits in worktree — AC1 (orchestrating checkout never holds the 
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            // Story native:01KT40THFTS10F9PT37KCW9PF4: the pre-PR sync gate rebases the
+            // branch onto `origin/<base>` before opening the PR. This test repo's trunk
+            // is `dev`, so pin the base to it — the branch was cut from `origin/dev`, so
+            // the rebase is a clean no-op fast-forward (no conflict).
+            base: "dev",
             execaImpl: spy,
         });
         expect(result.ok).toBe(true);
@@ -247,6 +252,11 @@ describe("dev edits in worktree — AC2 (a stray pre-existing change never rides
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            // Story native:01KT40THFTS10F9PT37KCW9PF4: the pre-PR sync gate rebases the
+            // branch onto `origin/<base>` before opening the PR. This test repo's trunk
+            // is `dev`, so pin the base to it — the branch was cut from `origin/dev`, so
+            // the rebase is a clean no-op fast-forward (no conflict).
+            base: "dev",
             execaImpl: spy,
         });
         // The story commit contains ONLY the dev's own file, never the stray edit.

@@ -34849,6 +34849,20 @@ var PrePrBuildFailedError = class extends DomainError {
     this.stderr = opts.stderr;
   }
 };
+var RebaseConflictError = class extends DomainError {
+  reason;
+  conflictingPaths;
+  stderr;
+  constructor(opts) {
+    const paths = opts.conflictingPaths ?? [];
+    super(
+      `pre-PR sync gate stopped: the story branch could not be rebased onto the latest origin/main because it genuinely conflicts with trunk work that landed first. The rebase was aborted (working tree left clean) and NO pull request was opened \u2014 opening one would have produced a PR that cannot merge. ` + (paths.length > 0 ? `Conflicting paths: ${paths.join(", ")}. ` : "") + `reason: ${opts.reason || "(none)"}. Resolve the conflict against the latest trunk and re-run. (Story native:01KT40THFTS10F9PT37KCW9PF4)`
+    );
+    this.reason = opts.reason;
+    this.conflictingPaths = paths;
+    this.stderr = opts.stderr ?? "";
+  }
+};
 var GhPrCreateFailedError = class extends DomainError {
   stderr;
   diagnostic;
@@ -43885,6 +43899,60 @@ async function gitPush(opts) {
     }
   }, sleep);
 }
+async function gitFetch(opts) {
+  const { targetRepoRoot, role } = opts;
+  const execaImpl = opts.execaImpl ?? execa;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
+  const args = ["fetch", "origin"];
+  assertNoNegativeFlags(args, role, "git");
+  await retryGitOnLockContention(
+    () => execaImpl("git", ["-C", targetRepoRoot, ...args]),
+    sleep
+  );
+}
+async function gitRebaseOnto(opts) {
+  const { targetRepoRoot, role } = opts;
+  const onto = opts.onto ?? "origin/main";
+  const execaImpl = opts.execaImpl ?? execa;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
+  const args = ["rebase", onto];
+  assertNoNegativeFlags(args, role, "git");
+  await retryGitOnLockContention(async () => {
+    const result = await execaImpl("git", ["-C", targetRepoRoot, ...args], {
+      reject: false
+    });
+    if ((result.exitCode ?? 0) === 0) return;
+    const stdout = result.stdout ?? "";
+    const stderr = result.stderr ?? "";
+    await execaImpl("git", ["-C", targetRepoRoot, "rebase", "--abort"], {
+      reject: false
+    });
+    throw new RebaseConflictError({
+      reason: summariseRebaseConflict(stdout, stderr),
+      conflictingPaths: parseConflictingPaths(stdout, stderr),
+      stderr
+    });
+  }, sleep);
+}
+var REBASE_CONFLICT_PATH_REGEX = /Merge conflict in (.+)/g;
+function parseConflictingPaths(stdout, stderr) {
+  const haystack = `${stdout}
+${stderr}`;
+  const paths = /* @__PURE__ */ new Set();
+  for (const match of haystack.matchAll(REBASE_CONFLICT_PATH_REGEX)) {
+    const p = match[1]?.trim();
+    if (p) paths.add(p);
+  }
+  return [...paths];
+}
+function summariseRebaseConflict(stdout, stderr) {
+  const paths = parseConflictingPaths(stdout, stderr);
+  if (paths.length > 0) {
+    return `rebase onto origin/main hit a content conflict in: ${paths.join(", ")}`;
+  }
+  const firstStderrLine = stderr.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+  return firstStderrLine ? `rebase onto origin/main failed: ${firstStderrLine}` : "rebase onto origin/main failed with a content conflict";
+}
 async function gitInitWithEmptyCommit(opts) {
   const { cwd } = opts;
   const execaImpl = opts.execaImpl ?? execa;
@@ -49730,6 +49798,17 @@ async function runDevTerminalAction(opts) {
       role: ROLE,
       messageShape: "conventional",
       body: wrappedBody || void 0,
+      ...execaImpl ? { execaImpl } : {}
+    });
+    await gitFetch({
+      targetRepoRoot: gitRoot,
+      role: ROLE,
+      ...execaImpl ? { execaImpl } : {}
+    });
+    await gitRebaseOnto({
+      targetRepoRoot: gitRoot,
+      role: ROLE,
+      onto: `origin/${base}`,
       ...execaImpl ? { execaImpl } : {}
     });
     const buildResult = await runProjectBuild({

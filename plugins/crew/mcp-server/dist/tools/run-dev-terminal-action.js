@@ -55,7 +55,7 @@ import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, PrePrBuildFa
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
-import { gitCommit, gitCreateBranch, gitPush, listDirtyPaths, resolveSessionLedgerRoot, CONVENTIONAL_COMMIT_TYPES, } from "../lib/git.js";
+import { gitCommit, gitCreateBranch, gitFetch, gitPush, gitRebaseOnto, listDirtyPaths, resolveSessionLedgerRoot, CONVENTIONAL_COMMIT_TYPES, } from "../lib/git.js";
 import { buildBranchSlug, composeCommitSubject, composePrBody, wrapCommitBody, } from "../lib/pr-body.js";
 import { readManifest } from "../lib/manifest-io.js";
 import { devOutcomeFilePath } from "../lib/read-dev-outcome-file.js";
@@ -158,6 +158,34 @@ export async function runDevTerminalAction(opts) {
             role: ROLE,
             messageShape: "conventional",
             body: wrappedBody || undefined,
+            ...(execaImpl ? { execaImpl } : {}),
+        });
+        // (vii-b) Pre-PR sync gate (Story native:01KT40THFTS10F9PT37KCW9PF4). Fetch
+        // origin and rebase the freshly-created story branch onto the latest
+        // `origin/main` BEFORE the build/test gates and BEFORE the push. Rationale:
+        // under a concurrent drain two stories cut their branches from the same base;
+        // if one merges first and both touched a shared file, the second story's PR
+        // would open with a merge conflict and fail to merge cleanly (the PR #264
+        // registry-collision scar). Rebasing here opens the PR already-integrated and
+        // conflict-free. Placing it BEFORE the build/test gates means those gates
+        // validate the rebase-integrated tree — the exact state that will land on
+        // main. It is structurally the same shape as the build gate (Story 8.17) and
+        // the test gate (native:01KT3ER5E9ACCERHAEJ5NM94TH): on a GENUINE conflict
+        // gitRebaseOnto aborts the rebase (working tree left clean) and throws
+        // RebaseConflictError BEFORE the push, so NO branch reaches origin and NO PR
+        // is opened — the story routes to blocked/paused with a readable reason. The
+        // rebase is safe without a force-push precisely because the branch has not
+        // been pushed yet (created just above, pushed once below): rebase-then-push
+        // is a normal fast-forward from origin's view.
+        await gitFetch({
+            targetRepoRoot: gitRoot,
+            role: ROLE,
+            ...(execaImpl ? { execaImpl } : {}),
+        });
+        await gitRebaseOnto({
+            targetRepoRoot: gitRoot,
+            role: ROLE,
+            onto: `origin/${base}`,
             ...(execaImpl ? { execaImpl } : {}),
         });
         // (viii) Full-build gate (Story 8.17). Run the project's full build — the
