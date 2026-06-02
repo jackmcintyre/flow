@@ -100,12 +100,30 @@ export function isCanonicalPath(
 }
 
 /**
- * Atomically write `contents` to `absPath` using a `.tmp` sibling file
+ * Monotonic per-process counter that makes each `atomicWriteFile` temp sibling
+ * unique. Paired with `process.pid` (unique across concurrent drain processes)
+ * it guarantees two writers targeting the SAME final path never share one temp
+ * file — see `atomicWriteFile` for why a fixed `.tmp` raced under concurrency.
+ */
+let atomicWriteSeq = 0;
+
+/**
+ * Atomically write `contents` to `absPath` using a UNIQUE temp sibling file
  * followed by `fs.rename` (POSIX rename(2) — atomic on the same filesystem).
  *
- * The `.tmp` sibling is written first; if the write fails the final path is
+ * The temp sibling is written first; if the write fails the final path is
  * never touched. On success, `fs.rename` replaces `absPath` in a single
  * syscall so readers never see a partial file.
+ *
+ * **Why the temp name is unique per call (not a fixed `<absPath>.tmp`):** under
+ * concurrent drains two flows can target the SAME final path (e.g. a shared
+ * session's `dev-outcome.json`). With a fixed `.tmp` sibling, flow A's `rename`
+ * consumes `<f>.tmp` and flow B's `rename` then hits `ENOENT` because its temp
+ * was renamed out from under it — the consistent `concurrent-drains-isolation`
+ * CI red (mis-attributed to git-lock contention). A unique `<f>.<pid>.<seq>.tmp`
+ * per call gives each writer its own temp, so every `rename` succeeds; the final
+ * file is simply last-writer-wins (atomic, never partial). A failed `rename`
+ * cleans up its own temp so unique names can't accumulate as litter.
  *
  * This is the ONLY file in `mcp-server/src/**` (alongside
  * `state/manifest-state-machine.ts`) permitted to invoke `rename`.
@@ -114,10 +132,17 @@ export function isCanonicalPath(
  * rename whitelist.
  */
 export async function atomicWriteFile(absPath: string, contents: string): Promise<void> {
-  const tmpPath = `${absPath}.tmp`;
+  atomicWriteSeq = (atomicWriteSeq + 1) % Number.MAX_SAFE_INTEGER;
+  const tmpPath = `${absPath}.${process.pid}.${atomicWriteSeq}.tmp`;
   await fs.mkdir(path.dirname(absPath), { recursive: true });
   await fs.writeFile(tmpPath, contents, "utf8");
-  await fs.rename(tmpPath, absPath);
+  try {
+    await fs.rename(tmpPath, absPath);
+  } catch (err) {
+    // Best-effort: don't leave the unique temp sibling behind on a failed rename.
+    await fs.rm(tmpPath, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 /**
