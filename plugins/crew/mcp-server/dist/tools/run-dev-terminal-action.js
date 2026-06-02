@@ -51,7 +51,7 @@
  * (Story 4.4 FR29 / Pattern §9 / NFR16; worktree isolation: Story 8.16)
  */
 import * as path from "node:path";
-import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, PrePrBuildFailedError, } from "../errors.js";
+import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, PrePrBuildFailedError, PrePrTestFailedError, } from "../errors.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
@@ -60,7 +60,7 @@ import { buildBranchSlug, composeCommitSubject, composePrBody, wrapCommitBody, }
 import { readManifest } from "../lib/manifest-io.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
-import { runProjectBuild } from "../lib/run-project-build.js";
+import { runProjectBuild, runProjectTests } from "../lib/run-project-build.js";
 const ROLE = "generalist-dev";
 /**
  * Run the dev subagent's terminal action end-to-end.
@@ -179,6 +179,25 @@ export async function runDevTerminalAction(opts) {
                 buildCwd: buildResult.cwd,
                 stdout: buildResult.stdout,
                 stderr: buildResult.stderr,
+            });
+        }
+        // (viii-b) Full-test gate (Story native:01KT3ER5E9ACCERHAEJ5NM94TH). Run the
+        // project's full test suite — the same whole-project vitest CI runs — in the
+        // dev's working directory AFTER the build and BEFORE `gh pr create`. This is
+        // the deterministic seam that catches test regressions in files the story did
+        // not touch (the class of failure PR #211 exposed). A failing test suite raises
+        // PrePrTestFailedError and NO PR is opened.
+        const testResult = await runProjectTests({
+            devWorkingDir: gitRoot,
+            ...(execaImpl ? { execaImpl } : {}),
+        });
+        if (testResult.exitCode !== 0) {
+            throw new PrePrTestFailedError({
+                exitCode: testResult.exitCode,
+                testCommand: testResult.commandLine,
+                testCwd: testResult.cwd,
+                stdout: testResult.stdout,
+                stderr: testResult.stderr,
             });
         }
         // (ix) Push.

@@ -87,3 +87,57 @@ export async function runProjectBuild(opts: {
     commandLine: `${PROJECT_BUILD_COMMAND} ${PROJECT_BUILD_ARGS.join(" ")}`,
   };
 }
+
+/**
+ * The full-test command + args. Mirrors CI's `- run: pnpm test` step verbatim
+ * (the `test` script in `plugins/crew/package.json` is
+ * `NODE_OPTIONS=--max-old-space-size=8192 vitest run`). Kept as a named export
+ * so the test can assert the gate runs the project's full test suite and not a
+ * story-scoped subset.
+ *
+ * Story native:01KT3ER5E9ACCERHAEJ5NM94TH: test gate added after build gate.
+ */
+export const PROJECT_TEST_COMMAND = "pnpm" as const;
+export const PROJECT_TEST_ARGS: readonly string[] = ["test"] as const;
+
+export interface ProjectTestResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  /** The absolute working directory the tests ran in (`<devWorkingDir>/plugins/crew`). */
+  cwd: string;
+  /** The human-readable command line, for diagnostics (`pnpm test`). */
+  commandLine: string;
+}
+
+/**
+ * Run the project's full test suite in the dev's working directory and return a
+ * structured result (never throws on a non-zero exit — the caller decides how
+ * to surface a failure). The cwd is the same as the build: `<devWorkingDir>/plugins/crew`,
+ * matching CI's `working-directory: plugins/crew`.
+ *
+ * @param opts.devWorkingDir  The dev's working directory (worktree or targetRepoRoot).
+ * @param opts.execaImpl      Test seam — production callers omit this.
+ *
+ * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)
+ */
+export async function runProjectTests(opts: {
+  devWorkingDir: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<ProjectTestResult> {
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+
+  const result = await execaImpl(PROJECT_TEST_COMMAND, [...PROJECT_TEST_ARGS], {
+    cwd,
+    reject: false,
+  });
+
+  return {
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    cwd,
+    commandLine: `${PROJECT_TEST_COMMAND} ${PROJECT_TEST_ARGS.join(" ")}`,
+  };
+}
