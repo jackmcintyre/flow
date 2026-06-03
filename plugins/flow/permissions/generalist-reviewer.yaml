@@ -3,6 +3,7 @@ tools_allow:
   - runReviewerSession
   - recordStoryRetro
   - recordReviewerLesson
+  - recallLesson
 gh_allow:
   - pr-diff
   - pr-view

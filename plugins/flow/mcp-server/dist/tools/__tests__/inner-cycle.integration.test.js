@@ -513,7 +513,9 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("openCycle");
             // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
             expect(toolNames).toContain("recordReviewerLesson");
-            expect(toolNames.length).toBe(49);
+            // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
+            expect(toolNames).toContain("recallLesson");
+            expect(toolNames.length).toBe(50);
         }
         finally {
             await client.close();

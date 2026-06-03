@@ -35730,6 +35730,47 @@ function isEnoent(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
+// src/lib/parse-knowledge-section.ts
+var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX = " -->";
+function parseKnowledgeSection(knowledgeBody) {
+  const entries = [];
+  let migratedIndex = 0;
+  for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+      try {
+        const raw = JSON.parse(jsonStr);
+        if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
+          const obj = raw;
+          const id = typeof obj["id"] === "string" && obj["id"].length > 0 ? obj["id"] : `MISSING-ID-${migratedIndex++}`;
+          entries.push({
+            id,
+            kind: obj["kind"],
+            applies_when: String(obj["applies_when"]),
+            detail: String(obj["detail"]),
+            ...typeof obj["source_ref"] === "string" && obj["source_ref"].length > 0 ? { source_ref: obj["source_ref"] } : {}
+          });
+        }
+      } catch {
+      }
+      continue;
+    }
+    const match = /^-\s+(.+?)\s*$/.exec(line);
+    if (match) {
+      const text = match[1];
+      entries.push({
+        id: `MIGRATED-${migratedIndex++}`,
+        kind: "pattern",
+        applies_when: text,
+        detail: text
+      });
+    }
+  }
+  return entries;
+}
+
 // src/tools/build-persona-spawn-prompt.ts
 async function buildPersonaSpawnPrompt(opts) {
   const { targetRepoRoot, role } = opts;
@@ -35755,6 +35796,7 @@ function assemblePrompt(persona) {
       );
     }
   }
+  const knowledgeIndexLines = buildKnowledgeIndex(persona.sections["Knowledge"]);
   const parts = [
     `# ${displayName} \u2014 Persona`,
     ``,
@@ -35776,12 +35818,19 @@ function assemblePrompt(persona) {
     ``,
     `## Knowledge`,
     ``,
-    persona.sections["Knowledge"],
+    ...knowledgeIndexLines,
     ``,
     `## Locked phrases (do not paraphrase)`,
     ...lockedPhraseLines
   ];
   return parts.join("\n");
+}
+function buildKnowledgeIndex(knowledgeBody) {
+  const lessons = parseKnowledgeSection(knowledgeBody);
+  if (lessons.length === 0) {
+    return ["(no lessons yet)"];
+  }
+  return lessons.map((l) => `- [${l.id}] ${l.kind} | ${l.applies_when}`);
 }
 function toDisplayName2(role) {
   return role.split("-").map(
@@ -48170,15 +48219,15 @@ async function getTeamSnapshot(opts) {
     malformedTelemetryFiles: stats.malformedFiles
   });
 }
-var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
-var LESSON_BLOCK_SUFFIX = " -->";
+var LESSON_BLOCK_PREFIX2 = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX2 = " -->";
 function extractKnowledgeEntries(knowledgeBody, limit) {
   const structured = [];
   const migrated = [];
   for (const line of knowledgeBody.split("\n")) {
     const trimmed = line.trimStart();
-    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
-      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX2) && trimmed.endsWith(LESSON_BLOCK_SUFFIX2)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX2.length, trimmed.length - LESSON_BLOCK_SUFFIX2.length).trim();
       try {
         const raw = JSON.parse(jsonStr);
         if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
@@ -52615,6 +52664,25 @@ function isEnoent15(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
+// src/tools/recall-lesson.ts
+async function recallLesson(opts) {
+  const { targetRepoRoot, role, id } = opts;
+  const persona = await readPersona({ targetRepoRoot, role });
+  const lessons = parseKnowledgeSection(persona.sections["Knowledge"]);
+  const match = lessons.find((l) => l.id === id);
+  if (match === void 0) {
+    return { found: false };
+  }
+  return {
+    found: true,
+    id: match.id,
+    kind: match.kind,
+    applies_when: match.applies_when,
+    detail: match.detail,
+    ...match.source_ref !== void 0 ? { source_ref: match.source_ref } : {}
+  };
+}
+
 // src/tools/register.ts
 function registerAllTools(server) {
   server.registerTool({
@@ -54437,6 +54505,40 @@ function registerAllTools(server) {
       }).parse(args);
       try {
         const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }]
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true
+          };
+        }
+        throw err;
+      }
+    }
+  });
+  server.registerTool({
+    name: "recallLesson",
+    description: "Return the full body of one lesson from a role's Knowledge section by id (Story native:01KT6QEWY794ZY0DH6JHQFWG6V). Agents receive a one-line index of their lessons in their briefing (built by buildPersonaSpawnPrompt) and call this tool when they need the full detail of a specific lesson. Returns { found: true, id, kind, applies_when, detail, source_ref? } when the id matches an entry in the role's Knowledge section, or { found: false } when no entry has the given id. Throws PersonaFileNotFoundError when the persona file is absent. Read-only \u2014 never writes to disk.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        role: { type: "string" },
+        id: { type: "string" }
+      },
+      required: ["targetRepoRoot", "role", "id"]
+    },
+    handler: async (args) => {
+      const parsed = external_exports.object({
+        targetRepoRoot: external_exports.string().min(1),
+        role: external_exports.string().min(1),
+        id: external_exports.string().min(1)
+      }).parse(args);
+      try {
+        const result = await recallLesson(parsed);
         return {
           content: [{ type: "text", text: JSON.stringify(result) }]
         };

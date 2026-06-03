@@ -54,6 +54,7 @@
  * Story 4.2 Task 4.1–4.5.
  */
 import { readPersona } from "./read-persona.js";
+import { parseKnowledgeSection } from "../lib/parse-knowledge-section.js";
 /**
  * Assemble the system prompt for a dev-subagent spawn.
  *
@@ -107,6 +108,10 @@ export function assemblePrompt(persona) {
             lockedPhraseLines.push(`Substitute ${token} with the live value from your initial context before emission; emit the substituted phrase verbatim.`);
         }
     }
+    // Build the one-line knowledge index from the structured lesson store.
+    // Each line: `- [<id>] <kind> | <applies_when>`
+    // Agents receive the compact index; full lesson detail is on-demand via recallLesson.
+    const knowledgeIndexLines = buildKnowledgeIndex(persona.sections["Knowledge"]);
     const parts = [
         `# ${displayName} — Persona`,
         ``,
@@ -128,12 +133,31 @@ export function assemblePrompt(persona) {
         ``,
         `## Knowledge`,
         ``,
-        persona.sections["Knowledge"],
+        ...knowledgeIndexLines,
         ``,
         `## Locked phrases (do not paraphrase)`,
         ...lockedPhraseLines,
     ];
     return parts.join("\n");
+}
+/**
+ * Build the one-line knowledge index from the Knowledge section body.
+ *
+ * Returns one summary line per lesson in file order:
+ *   `- [<id>] <kind> | <applies_when>`
+ *
+ * When no lessons are present, returns `["(no lessons yet)"]`.
+ *
+ * Agents use this compact index to decide whether to recall a specific lesson
+ * via the `recallLesson` tool rather than receiving the full body of every lesson
+ * in the briefing regardless of relevance (Story native:01KT6QEWY794ZY0DH6JHQFWG6V).
+ */
+function buildKnowledgeIndex(knowledgeBody) {
+    const lessons = parseKnowledgeSection(knowledgeBody);
+    if (lessons.length === 0) {
+        return ["(no lessons yet)"];
+    }
+    return lessons.map((l) => `- [${l.id}] ${l.kind} | ${l.applies_when}`);
 }
 function toDisplayName(role) {
     return role

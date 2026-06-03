@@ -57,6 +57,7 @@ import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
+import { recallLesson } from "./recall-lesson.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2488,6 +2489,57 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — recallLesson: on-demand full-lesson read.
+  // Agents receive a compact one-line index of their role's lessons in the briefing
+  // (built by buildPersonaSpawnPrompt). When an agent wants the full body of a specific
+  // lesson, it calls this tool with the id from the index.
+  // Read-only — never writes disk. Used by generalist-dev and generalist-reviewer.
+  server.registerTool({
+    name: "recallLesson",
+    description:
+      "Return the full body of one lesson from a role's Knowledge section by id " +
+      "(Story native:01KT6QEWY794ZY0DH6JHQFWG6V). Agents receive a one-line index " +
+      "of their lessons in their briefing (built by buildPersonaSpawnPrompt) and call " +
+      "this tool when they need the full detail of a specific lesson. " +
+      "Returns { found: true, id, kind, applies_when, detail, source_ref? } when the " +
+      "id matches an entry in the role's Knowledge section, or { found: false } when " +
+      "no entry has the given id. " +
+      "Throws PersonaFileNotFoundError when the persona file is absent. " +
+      "Read-only — never writes to disk.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        role: { type: "string" },
+        id: { type: "string" },
+      },
+      required: ["targetRepoRoot", "role", "id"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          role: z.string().min(1),
+          id: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await recallLesson(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
