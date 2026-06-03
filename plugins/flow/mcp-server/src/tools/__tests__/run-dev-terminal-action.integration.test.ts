@@ -19,12 +19,14 @@ import { execa as realExeca } from "execa";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
+import { materialiseDevStoryWorktree } from "../../lib/dev-story-worktree.js";
 import { runDevTerminalAction } from "../run-dev-terminal-action.js";
 import {
   ConventionalCommitTypeUnknownError,
   GitPushFailedError,
   GhPrCreateFailedError,
   NegativeCapabilityDeniedError,
+  PrePrLeakDetectedError,
   RebaseConflictError,
 } from "../../errors.js";
 
@@ -1067,5 +1069,242 @@ describe("runDevTerminalAction — pre-PR sync gate (AC2: genuine conflict)", ()
 
     // The build/test gates never ran either — the conflict aborts before them.
     expect((spy.mock.calls as [string, string[]][]).some(([cmd]) => cmd === "pnpm")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT47430Q4C73K5E3ZECBSE5R — pre-PR leak gate (AC2)
+//
+// When a builder's edits have reached the shared master copy (the orchestrating
+// root checkout is dirty), `runDevTerminalAction` MUST stop BEFORE creating the
+// PR and throw `PrePrLeakDetectedError`. No `gh pr create` is ever called.
+//
+// Setup mirrors concurrent-drains-isolation.test.ts: a real bare origin, a work
+// checkout, a materialised worktree for the dev. The "leak" is simulated by
+// writing directly to the ORCHESTRATING ROOT (not the worktree), which is exactly
+// what a builder using an absolute shared-copy path would do.
+// ---------------------------------------------------------------------------
+
+interface WorktreeTestContext {
+  repoRoot: string;
+  originDir: string;
+  tmpDir: string;
+  manifestPath: string;
+  specPath: string;
+}
+
+async function setupWorktreeRepo(): Promise<WorktreeTestContext> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "leak-gate-"));
+  const repoRoot = path.join(tmpDir, "work");
+  const originDir = path.join(tmpDir, "origin.git");
+  await fs.mkdir(repoRoot, { recursive: true });
+
+  // Bare origin + work clone.
+  await realExeca("git", ["init", "--bare", "-b", "main", originDir]);
+  await realExeca("git", ["-C", repoRoot, "init", "-b", "main"]);
+  await realExeca("git", ["-C", repoRoot, "config", "user.email", "t@t.com"]);
+  await realExeca("git", ["-C", repoRoot, "config", "user.name", "Test User"]);
+  await realExeca("git", ["-C", repoRoot, "remote", "add", "origin", originDir]);
+
+  // Initial commit so HEAD exists and worktrees can be cut.
+  const srcDir = path.join(repoRoot, "src");
+  await fs.mkdir(srcDir, { recursive: true });
+  await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+  await realExeca("git", ["-C", repoRoot, "add", "."]);
+  await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
+  await realExeca("git", ["-C", repoRoot, "push", "-u", "origin", "main"]);
+
+  // Story spec + manifest under the work checkout.
+  const specRelPath = `_bmad-output/implementation-artifacts/${REF}.md`;
+  const specDir = path.join(repoRoot, "_bmad-output", "implementation-artifacts");
+  await fs.mkdir(specDir, { recursive: true });
+  const specPath = path.join(specDir, `${REF}.md`);
+  await atomicWriteFile(specPath, FIXTURE_SPEC);
+
+  const stateDir = path.join(repoRoot, ".flow", "state", "in-progress");
+  await fs.mkdir(stateDir, { recursive: true });
+  const manifestPath = path.join(stateDir, `${REF}.yaml`);
+  await atomicWriteFile(
+    manifestPath,
+    yamlStringify({
+      ref: REF,
+      status: "in-progress",
+      adapter: "bmad",
+      source_path: specRelPath,
+      source_hash: "a".repeat(64),
+      depends_on: [],
+      acceptance_criteria: [{ text: "AC1 text", kind: "unit" }],
+      title: TITLE,
+      narrative: "As a dev, I want a terminal action.",
+      withdrawn: false,
+      claimed_by: SESSION_ULID,
+    }),
+  );
+
+  // Commit the spec + manifest so the worktree base is clean.
+  await realExeca("git", ["-C", repoRoot, "add", "."]);
+  await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: scaffold spec"]);
+  await realExeca("git", ["-C", repoRoot, "push", "origin", "main"]);
+
+  return { repoRoot, originDir, tmpDir, manifestPath, specPath };
+}
+
+/**
+ * execaImpl for leak gate tests: real git everywhere; push and `gh` succeed;
+ * `pnpm` (build + test gates) passes. We never actually push or open a PR in
+ * these tests — the leak gate throws before reaching those calls.
+ */
+function makeLeakGateStubExeca(opts: {
+  ghStdout?: string;
+} = {}): ReturnType<typeof vi.fn> {
+  return vi.fn(
+    async (
+      cmd: string,
+      args: readonly string[],
+      options?: Record<string, unknown>,
+    ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+      if (cmd === "pnpm") {
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "gh") {
+        return { stdout: opts.ghStdout ?? FAKE_PR_URL, stderr: "", exitCode: 0 };
+      }
+      // Real git for everything else (branch creation, commit, etc.).
+      const result = await realExeca(cmd, args as string[], { ...options, reject: false });
+      return {
+        stdout: typeof result.stdout === "string" ? result.stdout : "",
+        stderr: typeof result.stderr === "string" ? result.stderr : "",
+        exitCode: typeof result.exitCode === "number" ? result.exitCode : 0,
+      };
+    },
+  );
+}
+
+describe("runDevTerminalAction — pre-PR leak gate (Story native:01KT47430Q4C73K5E3ZECBSE5R AC2)", () => {
+  let wtCtx: WorktreeTestContext;
+
+  beforeEach(async () => {
+    wtCtx = await setupWorktreeRepo();
+  });
+
+  afterEach(async () => {
+    await fs.rm(wtCtx.tmpDir, { recursive: true, force: true });
+  });
+
+  it("AC2: stops BEFORE pr-create and throws PrePrLeakDetectedError when the shared master is dirtied", async () => {
+    // Materialise the dev's worktree.
+    const wt = await materialiseDevStoryWorktree({
+      targetRepoRoot: wtCtx.repoRoot,
+      sessionUlid: SESSION_ULID,
+      ref: REF,
+      base: "main",
+    });
+
+    // The file path the builder will write — same relative path in both locations.
+    // A builder using an absolute shared-copy path would write to both.
+    const leakedRelPath = "src/new-feature.ts";
+
+    try {
+      // The dev writes its change INSIDE the worktree (its own editing surface).
+      const worktreeFile = path.join(wt.worktreePath, leakedRelPath);
+      await fs.mkdir(path.join(wt.worktreePath, "src"), { recursive: true });
+      await atomicWriteFile(worktreeFile, "export const y = 2;\n");
+
+      // SIMULATE a leak: the SAME relative path is ALSO written to the SHARED ROOT
+      // checkout. This is exactly what a builder using an absolute shared-copy path
+      // would produce — the same file appears in both the worktree and the root.
+      const leakedFile = path.join(wtCtx.repoRoot, leakedRelPath);
+      await atomicWriteFile(leakedFile, "leaked content — same path as worktree file\n");
+
+      const spy = makeLeakGateStubExeca();
+
+      let caught: unknown;
+      try {
+        await runDevTerminalAction({
+          targetRepoRoot: wt.worktreePath,
+          ref: REF,
+          title: TITLE,
+          type: TYPE,
+          body: BODY,
+          summary: SUMMARY,
+          manifestPath: wtCtx.manifestPath,
+          sessionUlid: SESSION_ULID,
+          base: "main",
+          // worktree: true (default)
+          execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+        });
+        expect.fail("should have thrown PrePrLeakDetectedError");
+      } catch (err) {
+        caught = err;
+      }
+
+      // The gate must throw PrePrLeakDetectedError.
+      expect(caught).toBeInstanceOf(PrePrLeakDetectedError);
+      const e = caught as PrePrLeakDetectedError;
+      // The leaked path must be named (same relative path the builder committed).
+      expect(e.leakedPaths.length).toBeGreaterThan(0);
+      expect(e.leakedPaths.some((p) => p.includes("new-feature.ts"))).toBe(true);
+      // The shared root path must be named.
+      expect(e.sharedRootPath).toBeTruthy();
+      // The message must be readable and name the leaked path.
+      expect(e.message).toContain("NO pull request was opened");
+      expect(e.message).toContain("new-feature.ts");
+
+      // gh pr create was NEVER called — no PR was opened.
+      expect(
+        (spy.mock.calls as [string, string[]][]).some(([cmd]) => cmd === "gh"),
+        "gh pr create must never be called when the leak gate fires",
+      ).toBe(false);
+
+      // push was NEVER called — the leaking branch never reaches origin.
+      const gitPushCalled = (spy.mock.calls as [string, string[]][]).some(
+        ([cmd, args]) => cmd === "git" && Array.isArray(args) && args[2] === "push",
+      );
+      expect(gitPushCalled, "git push must never be called when the leak gate fires").toBe(false);
+
+      // Clean up leaked file so afterEach teardown does not fail.
+      await fs.rm(leakedFile, { force: true });
+    } finally {
+      await wt.cleanup();
+    }
+  });
+
+  it("AC2 (clean path): does NOT throw when the shared master is clean and the PR opens normally", async () => {
+    // Materialise the dev's worktree.
+    const wt = await materialiseDevStoryWorktree({
+      targetRepoRoot: wtCtx.repoRoot,
+      sessionUlid: SESSION_ULID,
+      ref: REF,
+      base: "main",
+    });
+
+    try {
+      // The dev writes its change INSIDE the worktree only (no leak).
+      const worktreeFile = path.join(wt.worktreePath, "src", "new-feature.ts");
+      await fs.mkdir(path.join(wt.worktreePath, "src"), { recursive: true });
+      await atomicWriteFile(worktreeFile, "export const y = 2;\n");
+
+      const spy = makeLeakGateStubExeca({ ghStdout: FAKE_PR_URL });
+
+      const result = await runDevTerminalAction({
+        targetRepoRoot: wt.worktreePath,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: wtCtx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        base: "main",
+        // worktree: true (default)
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+
+      // Clean path: the tool succeeded and a PR was opened.
+      expect(result.ok).toBe(true);
+      expect(result.prUrl).toBe(FAKE_PR_URL);
+    } finally {
+      await wt.cleanup();
+    }
   });
 });

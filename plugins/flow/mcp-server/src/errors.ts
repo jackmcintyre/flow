@@ -2141,6 +2141,44 @@ export class RetirementWouldEmptyRegistryError extends DomainError {
 }
 
 /**
+ * The pre-PR leak gate (`runDevTerminalAction`) detected that the builder's edits
+ * reached the shared master copy (the orchestrating root checkout is dirty with
+ * the builder's changes). No pull request was opened.
+ *
+ * Root cause (probe-proven 2026-06-02): a worktree-isolated builder that edits by
+ * ABSOLUTE shared-copy path escapes its worktree and dirties the orchestrating root
+ * checkout; RELATIVE paths stay inside the worktree. The gate runs AFTER the build
+ * and test gates and BEFORE `gh pr create`, so a leaking story stops here instead
+ * of opening a PR whose changes would bleed into a sibling story's diff.
+ *
+ * Structurally identical to `PrePrBuildFailedError` / `PrePrTestFailedError`:
+ * thrown BEFORE any push or PR is created, carrying a human-readable reason so
+ * the drain can surface the block cleanly.
+ *
+ * (Story native:01KT47430Q4C73K5E3ZECBSE5R)
+ */
+export class PrePrLeakDetectedError extends DomainError {
+  readonly leakedPaths: readonly string[];
+  readonly sharedRootPath: string;
+
+  constructor(opts: { leakedPaths: readonly string[]; sharedRootPath: string }) {
+    const shown = opts.leakedPaths.slice(0, 5).join(", ");
+    const more = opts.leakedPaths.length > 5 ? `, +${opts.leakedPaths.length - 5} more` : "";
+    super(
+      `pre-PR leak gate stopped: the builder's edits reached the shared master copy ` +
+        `(${opts.sharedRootPath}). ` +
+        `${opts.leakedPaths.length} leaked path(s): ${shown}${more}. ` +
+        `NO pull request was opened. ` +
+        `Cause: the builder wrote to absolute shared-copy paths instead of paths ` +
+        `relative to its own work copy. Fix the build prompt to use relative paths ` +
+        `and re-run. (Story native:01KT47430Q4C73K5E3ZECBSE5R)`,
+    );
+    this.leakedPaths = [...opts.leakedPaths];
+    this.sharedRootPath = opts.sharedRootPath;
+  }
+}
+
+/**
  * The pre-PR test gate ran the project's full test suite and it exited
  * non-zero. No pull request was opened.
  * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)

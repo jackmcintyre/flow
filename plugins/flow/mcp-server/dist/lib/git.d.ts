@@ -310,3 +310,44 @@ export declare function stashWorkingTree(opts: {
     stdout: string;
     stderr: string;
 }>;
+/**
+ * Pre-PR leak gate: check whether the builder's own committed edits escaped its
+ * worktree and dirtied the orchestrating shared master copy.
+ *
+ * In worktree-isolated mode the dev's `targetRepoRoot` (the worktree) is a
+ * SEPARATE working tree from the orchestrating checkout. A builder that edits
+ * via an ABSOLUTE shared-copy path bypasses the worktree boundary and dirties the
+ * orchestrating root instead of its own worktree. This check detects that by:
+ *
+ *   1. Resolving the orchestrating root from inside the worktree via
+ *      `resolveSessionLedgerRoot` (uses `git --git-common-dir`).
+ *   2. If the resolved root equals the worktree cwd (the builder is NOT running
+ *      inside a worktree — e.g. legacy `worktree: false` mode), there is nothing
+ *      to check; returns `{ leaked: false, paths: [] }`.
+ *   3. Otherwise calls `listDirtyPaths` on the orchestrating root, then intersects
+ *      the result with `committedPaths` — only paths the builder actually committed
+ *      count as a leak. Pre-existing stray edits in OTHER files are not the builder's
+ *      concern and are left untouched (the clean-root guard handles them separately).
+ *
+ * Returns `{ leaked: true, paths: [...] }` when the builder's own committed paths
+ * appear dirty in the shared root; `{ leaked: false, paths: [] }` when clean,
+ * when running in non-worktree mode, or when committedPaths is empty.
+ *
+ * Best-effort: any git failure degrades to `leaked: false` (never breaks the
+ * build). Only `run-dev-terminal-action.ts` should call this — the gate runs
+ * AFTER the build/test gates and BEFORE the push so no PR is ever opened on a
+ * leaking story.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ */
+export declare function checkSharedRootLeak(opts: {
+    worktreeCwd: string;
+    /** The paths the builder committed — only these are tested for leakage. */
+    committedPaths: readonly string[];
+    execaImpl?: typeof defaultExeca;
+}): Promise<{
+    leaked: boolean;
+    paths: string[];
+    sharedRootPath: string;
+}>;
