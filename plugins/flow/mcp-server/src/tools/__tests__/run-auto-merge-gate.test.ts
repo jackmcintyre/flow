@@ -13,8 +13,8 @@
  *   (5l)  (i) SKILL.md content-structure (runAutoMergeGate under done-ready-for-merge).
  *   (5m)  (j) MCP tool registration smoke (runAutoMergeGate in register list, count 31).
  *   (5n)  (k) dryRun: true — decision made but no gh call.
- *   (5o)  (l) GhRecoverableError on pr merge failure.
- *   (5p)  (m) pr-merge denied without permission entry.
+ *   (5o)  (l) Recoverable gh error on pr merge folds to pause-needs-human/merge-failed.
+ *   (5p)  (m) pr-merge denied without permission folds to pause-needs-human/merge-failed.
  *   (5q)  (n) AutoMergeGateResultSchema round-trip.
  *
  * Strategy: inject `execaImpl` (never vi.mock production modules). The real `gh`
@@ -37,7 +37,7 @@ import {
 } from "../run-auto-merge-gate.js";
 import { registerAllTools } from "../register.js";
 import type { AgreementMetricResult } from "../compute-agreement.js";
-import { GhRecoverableError, GhSubcommandDeniedError, AutoMergeGateThresholdInvalidError } from "../../errors.js";
+import { AutoMergeGateThresholdInvalidError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import type { RolePermissions } from "../../schemas/role-permissions.js";
@@ -959,48 +959,70 @@ describe("AC5(k) — dryRun: true skips gh shell-out", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (5o) (l) GhRecoverableError on pr merge failure
+// (5o) (l) Recoverable gh error on pr merge folds to pause-needs-human
+//
+// The gate is a terminal seam in an unattended loop: a merge that gh refuses must
+// NOT throw out of the gate (a raw throw exits the process non-zero, which the
+// drain's one-shot seam courier can relay as garbled non-JSON — the PR #277 seam
+// break). It folds into a clean pause-needs-human/merge-failed result with the
+// cause recorded in chatLog, and the PR is still flagged needs-human.
 // ---------------------------------------------------------------------------
 
-describe("AC5(l) — GhRecoverableError on pr merge failure", () => {
-  it("non-zero exit on pr merge with mapped stderr → throws GhRecoverableError", async () => {
+describe("AC5(l) — recoverable gh error on pr merge folds to pause-needs-human", () => {
+  it("non-zero exit on pr merge with mapped stderr → pause-needs-human/merge-failed (no throw), label still applied", async () => {
     await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
-    // Fake execa that returns non-zero exit with a stderr matching the error map
+    // pr merge fails with a mapped (recoverable) stderr → gh() raises
+    // GhRecoverableError; repo-view + api-labels succeed so the fallback
+    // needs-human label still lands.
     const failExeca = makeFakeExeca([
       {
         match: (cmd, args) => cmd === "gh" && args[0] === "pr" && args[1] === "merge",
-        response: {
-          stdout: "",
-          stderr: "already been merged",
-          exitCode: 1,
-        },
+        response: { stdout: "", stderr: "already been merged", exitCode: 1 },
+      },
+      {
+        match: (cmd, args) => cmd === "gh" && args[0] === "repo" && args[1] === "view",
+        response: { stdout: DEFAULT_REPO_VIEW_JSON },
+      },
+      {
+        match: (cmd, args) => cmd === "gh" && args[0] === "api",
+        response: { stdout: DEFAULT_LABELS_RESPONSE },
       },
     ]);
 
-    await expect(
-      runAutoMergeGate(baseOpts({
-        dryRun: false,
-        execaImpl: failExeca.impl,
-        computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
-        thresholdOverride: 0.8,
-      })),
-    ).rejects.toMatchObject({
-      name: "GhRecoverableError",
-      class: "defer",
-    });
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: failExeca.impl,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
+      thresholdOverride: 0.8,
+    }));
+
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("merge-failed");
+    expect(result.merged).toBe(false);
+    expect(result.labelsApplied).toEqual(["needs-human"]);
+    // The cause is surfaced, not silently dropped.
+    expect(result.chatLog.join("\n")).toContain("auto-merge attempt failed");
+    // Seam-safety: the result is clean JSON that survives a stringify→parse round-trip.
+    expect(() => JSON.parse(JSON.stringify(result))).not.toThrow();
+    expect(() => AutoMergeGateResultSchema.parse(result)).not.toThrow();
   });
 });
 
 // ---------------------------------------------------------------------------
-// (5p) (m) pr-merge denied without permission entry
+// (5p) (m) pr-merge denied without permission folds to pause-needs-human
+//
+// A missing pr-merge permission used to throw GhSubcommandDeniedError out of the
+// gate. It now folds to pause-needs-human/merge-failed with the denial surfaced
+// in chatLog — the misconfiguration is visible (the story sits in the human bucket)
+// but the drain seam never breaks.
 // ---------------------------------------------------------------------------
 
-describe("AC5(m) — pr-merge denied without permission entry in gh_allow", () => {
-  it("throws GhSubcommandDeniedError when pr-merge is absent from generalist-dev gh_allow", async () => {
+describe("AC5(m) — pr-merge denied without permission folds to pause-needs-human", () => {
+  it("pr-merge absent from gh_allow → pause-needs-human/merge-failed (no throw), denial in chatLog", async () => {
     await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
-    // Create a plugin root WITHOUT pr-merge in gh_allow
+    // Create a plugin root WITHOUT pr-merge (and without repo-view/api) in gh_allow
     const restrictedPluginRoot = path.join(tmpRoot, "restricted-plugin");
     await fs.mkdir(path.join(restrictedPluginRoot, "permissions"), { recursive: true });
     await atomicWriteFile(
@@ -1022,20 +1044,80 @@ describe("AC5(m) — pr-merge denied without permission entry in gh_allow", () =
 
     const { impl: fakeExeca } = makeMergeExeca();
 
-    await expect(
-      runAutoMergeGate({
-        targetRepoRoot,
-        prNumber: PR_NUMBER,
-        ref: REF,
-        sessionUlid: SESSION_ULID,
-        pluginRootOverride: restrictedPluginRoot,
-        dryRun: false,
-        execaImpl: fakeExeca,
-        computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
-        thresholdOverride: 0.8,
-        ciGateImpl: async () => "green",
-      }),
-    ).rejects.toThrow(GhSubcommandDeniedError);
+    const result = await runAutoMergeGate({
+      targetRepoRoot,
+      prNumber: PR_NUMBER,
+      ref: REF,
+      sessionUlid: SESSION_ULID,
+      pluginRootOverride: restrictedPluginRoot,
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
+      thresholdOverride: 0.8,
+      ciGateImpl: async () => "green",
+    });
+
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("merge-failed");
+    expect(result.merged).toBe(false);
+    // repo-view/api are also denied → the fallback label can't be applied.
+    expect(result.labelsApplied).toEqual([]);
+    // The denial is surfaced in chatLog, not silently swallowed.
+    expect(result.chatLog.join("\n")).toContain("auto-merge attempt failed");
+    expect(() => JSON.parse(JSON.stringify(result))).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #277 regression — a side-effect failure on the PAUSE path never breaks the
+// drain's JSON seam.
+//
+// The 2026-06-03 failure: a medium-risk PR paused, the gate's label gh call
+// failed and threw, the gate exited non-zero with a verbose error blob, and the
+// drain's seam courier garbled it into a bare `BLOCKED` token that broke JSON
+// parsing — so the story paused with a SyntaxError reason and no label. The fix
+// makes the pause path fold any labeller failure into a clean result, preserving
+// the real decision/reason and keeping stdout JSON-only.
+// ---------------------------------------------------------------------------
+
+describe("PR #277 regression — label failure on the pause path stays JSON-only", () => {
+  it("medium-risk pause + gh label call throws (with a stray BLOCKED token) → clean pause-needs-human/medium-risk, label skipped, cause in chatLog", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+
+    // repo-view succeeds; the label POST throws an ExecaError-shaped error whose
+    // text carries a bare `BLOCKED` token — exactly the #277 shape that used to
+    // escape the gate and break the seam.
+    const labelThrowExeca = vi.fn().mockImplementation(
+      async (cmd: string, args: string[]) => {
+        if (cmd === "gh" && args[0] === "repo" && args[1] === "view") {
+          return { stdout: DEFAULT_REPO_VIEW_JSON, stderr: "", exitCode: 0 };
+        }
+        if (cmd === "gh" && args[0] === "api") {
+          throw new Error(
+            "Command failed with exit code 1: gh api ...\nHTTP 422: Validation Failed BLOCKED",
+          );
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    ) as unknown as typeof import("execa").execa;
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: labelThrowExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+    }));
+
+    // The real decision is preserved — the labeller failure does not change it.
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("medium-risk");
+    expect(result.merged).toBe(false);
+    expect(result.labelsApplied).toEqual([]);
+    expect(result.chatLog.join("\n")).toContain("needs-human label not applied");
+    // The crux: the gate returned clean JSON — the stray BLOCKED token never
+    // escapes, so a stringify→parse (the seam's relay) does not throw.
+    const relayed = JSON.parse(JSON.stringify(result));
+    expect(relayed.reason).toBe("medium-risk");
+    expect(() => AutoMergeGateResultSchema.parse(result)).not.toThrow();
   });
 });
 

@@ -13,8 +13,8 @@
  *   (5l)  (i) SKILL.md content-structure (runAutoMergeGate under done-ready-for-merge).
  *   (5m)  (j) MCP tool registration smoke (runAutoMergeGate in register list, count 31).
  *   (5n)  (k) dryRun: true — decision made but no gh call.
- *   (5o)  (l) GhRecoverableError on pr merge failure.
- *   (5p)  (m) pr-merge denied without permission entry.
+ *   (5o)  (l) Recoverable gh error on pr merge folds to pause-needs-human/merge-failed.
+ *   (5p)  (m) pr-merge denied without permission folds to pause-needs-human/merge-failed.
  *   (5q)  (n) AutoMergeGateResultSchema round-trip.
  *
  * Strategy: inject `execaImpl` (never vi.mock production modules). The real `gh`

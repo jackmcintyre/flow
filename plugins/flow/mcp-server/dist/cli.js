@@ -38373,7 +38373,8 @@ var AutoMergeGateReasonSchema = external_exports.enum([
   "medium-risk",
   "high-risk",
   "no-tier-no-signal",
-  "ci-not-green"
+  "ci-not-green",
+  "merge-failed"
 ]);
 var AutoMergeGateResultSchema = external_exports.object({
   decision: external_exports.enum(["auto-merge", "pause-needs-human"]),
@@ -38550,6 +38551,42 @@ async function runAutoMergeGate(opts) {
     });
   }
   const permissions = await loadRolePermissions({ role, pluginRoot });
+  const applyNeedsHumanLabel = async () => {
+    try {
+      const repoViewResult = await gh({
+        role,
+        permissions,
+        subcommand: "repo-view",
+        args: ["--json", "owner,name"],
+        execaImpl,
+        pluginRootOverride: pluginRoot
+      });
+      const repoViewJson = JSON.parse(repoViewResult.stdout);
+      const owner = repoViewJson.owner?.login ?? "";
+      const repo = repoViewJson.name ?? "";
+      if (!owner || !repo) {
+        throw new Error("missing owner or repo in repo-view shape");
+      }
+      const labelsUrl = `/repos/${owner}/${repo}/issues/${opts.prNumber}/labels`;
+      const labelResult = await gh({
+        role,
+        permissions,
+        subcommand: "api",
+        args: [labelsUrl, "--method", "POST", "--input", "-"],
+        input: JSON.stringify({ labels: ["needs-human"] }),
+        execaImpl,
+        pluginRootOverride: pluginRoot
+      });
+      const parsed = JSON.parse(labelResult.stdout);
+      if (!Array.isArray(parsed)) {
+        throw new Error(`expected array, got ${typeof parsed}`);
+      }
+      return { applied: ["needs-human"], note: null };
+    } catch (cause) {
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      return { applied: [], note: `needs-human label not applied: ${msg}` };
+    }
+  };
   const ciLog = [];
   if (decision === "auto-merge") {
     const ciState = await ciGateFn({
@@ -38567,78 +38604,64 @@ async function runAutoMergeGate(opts) {
   }
   const chatLine = composeChatLine(decision, reason);
   if (decision === "auto-merge") {
-    await gh({
-      role,
-      permissions,
-      subcommand: "pr-merge",
-      args: [String(opts.prNumber), "--squash", "--delete-branch"],
-      execaImpl,
-      pluginRootOverride: pluginRoot
-    });
-    return AutoMergeGateResultSchema.parse({
-      decision,
-      reason,
-      risk_tier: risk_tier ?? null,
-      agreement_metric,
-      threshold_used,
-      merged: true,
-      labelsApplied: [],
-      dryRun: false,
-      prNumber: opts.prNumber,
-      chatLog: [...ciLog, chatLine]
-    });
-  } else {
-    const repoViewResult = await gh({
-      role,
-      permissions,
-      subcommand: "repo-view",
-      args: ["--json", "owner,name"],
-      execaImpl,
-      pluginRootOverride: pluginRoot
-    });
-    let owner;
-    let repo;
     try {
-      const repoViewJson = JSON.parse(repoViewResult.stdout);
-      owner = repoViewJson.owner?.login ?? "";
-      repo = repoViewJson.name ?? "";
-      if (!owner || !repo) {
-        throw new Error("missing owner or repo in repo-view shape");
-      }
-    } catch (cause) {
-      throw new GhApiResponseShapeError({ subcommand: "repo-view", cause });
+      await gh({
+        role,
+        permissions,
+        subcommand: "pr-merge",
+        args: [String(opts.prNumber), "--squash", "--delete-branch"],
+        execaImpl,
+        pluginRootOverride: pluginRoot
+      });
+      return AutoMergeGateResultSchema.parse({
+        decision,
+        reason,
+        risk_tier: risk_tier ?? null,
+        agreement_metric,
+        threshold_used,
+        merged: true,
+        labelsApplied: [],
+        dryRun: false,
+        prNumber: opts.prNumber,
+        chatLog: [...ciLog, chatLine]
+      });
+    } catch (mergeErr) {
+      decision = "pause-needs-human";
+      reason = "merge-failed";
+      const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+      const { applied: applied2, note: note2 } = await applyNeedsHumanLabel();
+      const chatLog2 = [...ciLog, `auto-merge attempt failed: ${mergeMsg}`];
+      if (note2) chatLog2.push(note2);
+      chatLog2.push(composeChatLine(decision, reason));
+      return AutoMergeGateResultSchema.parse({
+        decision,
+        reason,
+        risk_tier: risk_tier ?? null,
+        agreement_metric,
+        threshold_used,
+        merged: false,
+        labelsApplied: applied2,
+        dryRun: false,
+        prNumber: opts.prNumber,
+        chatLog: chatLog2
+      });
     }
-    const labelsUrl = `/repos/${owner}/${repo}/issues/${opts.prNumber}/labels`;
-    const labelResult = await gh({
-      role,
-      permissions,
-      subcommand: "api",
-      args: [labelsUrl, "--method", "POST", "--input", "-"],
-      input: JSON.stringify({ labels: ["needs-human"] }),
-      execaImpl,
-      pluginRootOverride: pluginRoot
-    });
-    try {
-      const parsed = JSON.parse(labelResult.stdout);
-      if (!Array.isArray(parsed)) {
-        throw new Error(`expected array, got ${typeof parsed}`);
-      }
-    } catch (cause) {
-      throw new GhApiResponseShapeError({ subcommand: "api", url: labelsUrl, cause });
-    }
-    return AutoMergeGateResultSchema.parse({
-      decision,
-      reason,
-      risk_tier: risk_tier ?? null,
-      agreement_metric,
-      threshold_used,
-      merged: false,
-      labelsApplied: ["needs-human"],
-      dryRun: false,
-      prNumber: opts.prNumber,
-      chatLog: [...ciLog, chatLine]
-    });
   }
+  const { applied, note } = await applyNeedsHumanLabel();
+  const chatLog = [...ciLog, chatLine];
+  if (note) chatLog.push(note);
+  return AutoMergeGateResultSchema.parse({
+    decision,
+    reason,
+    risk_tier: risk_tier ?? null,
+    agreement_metric,
+    threshold_used,
+    merged: false,
+    labelsApplied: applied,
+    dryRun: false,
+    prNumber: opts.prNumber,
+    chatLog
+  });
 }
 
 // src/tools/get-team-snapshot.ts

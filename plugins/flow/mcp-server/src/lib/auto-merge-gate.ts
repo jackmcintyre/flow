@@ -54,7 +54,14 @@ export type AutoMergeGateReason =
   // Emitted by `runAutoMergeGate` (NOT `decideAutoMerge`): the risk gate said
   // auto-merge, but the PR's CI was not green within the wait window, so the
   // gate downgraded to pause-needs-human. (Stage-2 CI-gating.)
-  | "ci-not-green";
+  | "ci-not-green"
+  // Emitted by `runAutoMergeGate` (NOT `decideAutoMerge`): the risk gate cleared
+  // the change to auto-merge and CI was green, but the merge command itself did
+  // not complete (GitHub refused the merge, a recoverable gh error, a missing
+  // permission, or a transient API failure). The gate folds the failure into
+  // pause-needs-human rather than throwing, keeping its stdout JSON-only so the
+  // drain's seam never breaks; a human completes the merge.
+  | "merge-failed";
 
 export interface DecideAutoMergeInput {
   /** The manifest's `risk_tier` field. May be `undefined` for legacy manifests. */

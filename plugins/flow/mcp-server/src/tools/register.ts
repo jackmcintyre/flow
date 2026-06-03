@@ -1884,6 +1884,9 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "all other branches → gh api POST /labels with needs-human. " +
       "dryRun:true skips the gh shell-out. " +
       "Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. " +
+      "An operational gh failure (merge refused, label API hiccup, missing permission) NEVER throws: " +
+      "it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, " +
+      "so the gate's stdout stays JSON-only and the drain seam cannot break. " +
       "Story 4.10b.",
     inputSchema: {
       type: "object",
