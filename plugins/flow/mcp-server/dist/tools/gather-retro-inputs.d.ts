@@ -19,15 +19,23 @@
  *     `parseExecutionManifest`. A malformed manifest propagates as
  *     `MalformedExecutionManifestError` (NOT swallowed) — a corrupt done/
  *     manifest is a hard stop, not a skippable line. `.snapshot.yaml`
- *     sidecars (Story 5.29) are excluded.
+ *     sidecars (Story 5.29) are excluded. When a work cycle is open (the
+ *     `.flow/cycle-state.json` file is present), this is scoped to manifests
+ *     completed at or after the cycle's `opened_at` instant — a manifest's
+ *     completion time is its file mtime (the done/ manifest is written by
+ *     `completeStory` at completion). Story native:01KT484NY4HCBPBTT6VEY1Q0CS.
  *
  *   - `telemetrySummary`: every event from `<targetRepoRoot>/.flow/telemetry/*.jsonl`
- *     in the **current cycle window** (v1: every `.jsonl` file present at
- *     gather time — cycle boundaries land in Story 6.12), parsed line-by-line
- *     through `TelemetryEventSchema`. Malformed lines (bad JSON or failed Zod)
- *     are skipped, COUNTED, and the count is returned as `skipped_count` so
- *     the analyst can flag corrupt logs without the run crashing. Files are
- *     read in alphabetical order; events preserve in-file line order.
+ *     in the **current cycle window**, parsed line-by-line through
+ *     `TelemetryEventSchema`. When a cycle is open, events are scoped to those
+ *     whose `ts` is at or after the cycle's `opened_at`; when no cycle has ever
+ *     been opened, every `.jsonl` event present at gather time is included
+ *     (the existing baseline). Malformed lines (bad JSON or failed Zod) are
+ *     skipped, COUNTED, and the count is returned as `skipped_count` so the
+ *     analyst can flag corrupt logs without the run crashing. Files are read in
+ *     alphabetical order; events preserve in-file line order. Story
+ *     native:01KT484NY4HCBPBTT6VEY1Q0CS (the cycle-boundary work deferred by
+ *     Story 6.12).
  *
  *   - `priorProposals`: `{ path, iso_timestamp }` for every existing
  *     `<targetRepoRoot>/.flow/retro-proposals/*.md`, sorted by ISO timestamp
@@ -44,6 +52,7 @@
  *
  * **No writes. No network. No clock dependency.** Pure parameterised IO.
  */
+import { type CycleState } from "../schemas/cycle-state.js";
 import { type ExecutionManifest } from "../schemas/execution-manifest.js";
 import { type TelemetryEvent } from "../schemas/telemetry-events.js";
 import { type PromotionCandidate, type RetirementCandidate, type FireCountConfig } from "../lib/failure-class-fire-counts.js";
@@ -110,6 +119,15 @@ export interface GatherRetroInputsOptions {
      * defaults (promotionThreshold=3, retirementWindows=5, relaxFloor=1).
      */
     fireCountConfig?: FireCountConfig;
+    /**
+     * Optional cycle-state override (Story native:01KT484NY4HCBPBTT6VEY1Q0CS).
+     *
+     * Test seam. When omitted, the tool reads `.flow/cycle-state.json` itself
+     * (production path). Pass `null` to force the no-cycle baseline (full
+     * history) regardless of any file on disk, or a `CycleState` to force a
+     * specific window. Production callers (the MCP/CLI handler) never pass this.
+     */
+    cycleState?: CycleState | null;
 }
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.
