@@ -60,6 +60,7 @@ import { parseExecutionManifest, } from "../schemas/execution-manifest.js";
 import { TelemetryEventSchema, } from "../schemas/telemetry-events.js";
 import { parseRuleRegistry } from "../schemas/discipline-rules.js";
 import { computeFailureClassFireCounts, } from "../lib/failure-class-fire-counts.js";
+import { computeSkillEffectiveness, } from "./compute-skill-effectiveness.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
 /**
@@ -97,7 +98,13 @@ export async function gatherRetroInputs(opts) {
     // Compute recurring friction signal from telemetry events.
     // Only friction that recurs at threshold (count >= 2) is surfaced.
     const recurringFriction = computeRecurringFriction(telemetrySummary.events);
-    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
+    // Compute per-skill effectiveness signal (Story 6.8). The helper reads the
+    // cycle's skill.invoke + reviewer.verdict telemetry and joins each invocation
+    // to a downstream READY FOR MERGE verdict. It always returns a safe shape
+    // (an empty per_skill map when no telemetry exists), so no null-guard is
+    // needed and the retro never fails on an absent signal.
+    const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
+    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness };
 }
 // ---------------------------------------------------------------------------
 // done/ manifests

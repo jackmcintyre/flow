@@ -74,6 +74,10 @@ import {
   type FireCountConfig,
 } from "../lib/failure-class-fire-counts.js";
 import { type FrictionKind } from "./record-agent-friction.js";
+import {
+  computeSkillEffectiveness,
+  type SkillEffectivenessResult,
+} from "./compute-skill-effectiveness.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -129,6 +133,23 @@ export interface RetroInputs {
    * Story native:01KT2RAXBSQ91Y80Z51DD26KPX.
    */
   recurringFriction: RecurringFrictionEntry[];
+  /**
+   * Deterministic per-skill effectiveness signal computed by
+   * `computeSkillEffectiveness` (Story 6.8). `per_skill` maps each skill that
+   * fired in the cycle to its `invoke_count`, `useful_fire_count`, and
+   * `effectiveness_ratio` (useful fires / invocations). A skill that fired but
+   * never preceded a `READY FOR MERGE` verdict scores `effectiveness_ratio: 0`.
+   *
+   * The helper always returns a safe shape — `per_skill` is an empty map when
+   * no `skill.invoke` telemetry exists — so the retro never fails on an absent
+   * signal. The retro-analyst MUST cite `invoke_count` and `effectiveness_ratio`
+   * from `per_skill` when drafting skill-retire or skill-revise proposals — it
+   * MUST NOT recount invocations from raw telemetry, mirroring the
+   * `fireCountSignal` and `recurringFriction` disciplines.
+   *
+   * Story native:01KT49PKTMJPJM7WMCB67TA6EY.
+   */
+  skillEffectiveness: SkillEffectivenessResult;
 }
 
 export interface GatherRetroInputsOptions {
@@ -196,7 +217,14 @@ export async function gatherRetroInputs(
   // Only friction that recurs at threshold (count >= 2) is surfaced.
   const recurringFriction = computeRecurringFriction(telemetrySummary.events);
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
+  // Compute per-skill effectiveness signal (Story 6.8). The helper reads the
+  // cycle's skill.invoke + reviewer.verdict telemetry and joins each invocation
+  // to a downstream READY FOR MERGE verdict. It always returns a safe shape
+  // (an empty per_skill map when no telemetry exists), so no null-guard is
+  // needed and the retro never fails on an absent signal.
+  const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness };
 }
 
 // ---------------------------------------------------------------------------

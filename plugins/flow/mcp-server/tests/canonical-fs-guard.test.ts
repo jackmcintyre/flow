@@ -107,6 +107,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // write path. Test file only; the production tool routes its single telemetry
   // write through logTelemetryEvent (already whitelisted in src/lib/logger.ts).
   path.join(SRC_DIR, "tools", "__tests__", "retro-friction-signal.test.ts"),
+  // Story native:01KT49PKTMJPJM7WMCB67TA6EY: retro-skill-effectiveness tests seed
+  // telemetry JSONL fixture files (skill.invoke + reviewer.verdict events) directly
+  // to tmpdir via raw fs.writeFile/mkdir to drive the gatherRetroInputs
+  // skillEffectiveness signal. Test file only; the production tool routes its single
+  // telemetry write through logTelemetryEvent (already whitelisted in src/lib/logger.ts).
+  path.join(SRC_DIR, "tools", "__tests__", "retro-skill-effectiveness.test.ts"),
   // Story native:01KT3YDHM10FPQ77N22BTJP9AF: read-dev-outcome-file tests seed
   // per-ref dev-outcome.json fixtures (valid + malformed) directly to tmpdir via
   // raw fs.writeFile/mkdir to drive the parser and prove no cross-attribution
