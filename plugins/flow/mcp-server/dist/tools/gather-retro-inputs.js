@@ -50,11 +50,20 @@ import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest, } from "../schemas/execution-manifest.js";
 import { TelemetryEventSchema, } from "../schemas/telemetry-events.js";
 import { parseRuleRegistry } from "../schemas/discipline-rules.js";
-import { computeFailureClassFireCounts, } from "../lib/failure-class-fire-counts.js";
+import { computeFailureClassFireCounts, SINGLE_WINDOW_SEAM, } from "../lib/failure-class-fire-counts.js";
+import { readCycleState } from "../lib/cycle-state.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.
+ *
+ * When a cycle is active (`.flow/cycle-state.json` present), only done
+ * manifests whose `completed_at >= cycle.opened_at` and telemetry events
+ * whose `ts >= cycle.opened_at` are included — giving the analyst a clean,
+ * bounded window for the current cycle.
+ *
+ * When no cycle has ever been opened (absent file), all available history is
+ * returned (the baseline behaviour preserved by AC4).
  *
  * @throws {MalformedExecutionManifestError} When a `done/` manifest fails
  *   schema validation. A corrupt done/ manifest is a hard stop — unlike
@@ -62,16 +71,37 @@ const TELEMETRY_FILE_REGEX = /\.jsonl$/;
  */
 export async function gatherRetroInputs(opts) {
     const { targetRepoRoot, fireCountConfig } = opts;
-    const doneManifests = await gatherDoneManifests(targetRepoRoot);
-    const telemetrySummary = await gatherTelemetry(targetRepoRoot);
+    // Resolve the cycle boundary.
+    // `cycleOpenedAt` in opts overrides the file read (test seam).
+    // `null` = no cycle (full history).
+    let cycleOpenedAt;
+    if (opts.cycleOpenedAt !== undefined) {
+        // Caller explicitly provided an override (including null = no cycle).
+        cycleOpenedAt = opts.cycleOpenedAt;
+    }
+    else {
+        // Read from disk.
+        const cycleState = await readCycleState(targetRepoRoot);
+        cycleOpenedAt = cycleState !== null ? cycleState.opened_at : null;
+    }
+    const allDoneManifests = await gatherDoneManifests(targetRepoRoot);
+    const allTelemetry = await gatherTelemetry(targetRepoRoot);
     const priorProposals = await gatherPriorProposals(targetRepoRoot);
     const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
+    // Apply cycle-boundary filtering when a cycle is active.
+    const doneManifests = filterManifestsByCycle(allDoneManifests, cycleOpenedAt);
+    const telemetrySummary = filterTelemetryByCycle(allTelemetry, cycleOpenedAt);
+    // Build the windowing seam for the fire-count helper — mirrors the same
+    // boundary used above so the promotion/retirement signals are consistent.
+    const windowing = cycleOpenedAt !== null
+        ? buildCycleWindowingSeam(cycleOpenedAt)
+        : SINGLE_WINDOW_SEAM;
     // Compute fire-count signal for the analyst. Only available when the registry
     // exists; null in the 6a phase.
     let fireCountSignal = null;
     if (ruleRegistry !== null) {
         const registryTyped = ruleRegistry;
-        const result = computeFailureClassFireCounts({ doneManifests, telemetrySummary, ruleRegistry: registryTyped }, fireCountConfig);
+        const result = computeFailureClassFireCounts({ doneManifests, telemetrySummary, ruleRegistry: registryTyped }, fireCountConfig, windowing);
         fireCountSignal = {
             promotionCandidates: result.promotionCandidates,
             retirementCandidates: result.retirementCandidates,
@@ -81,6 +111,49 @@ export async function gatherRetroInputs(opts) {
     // Only friction that recurs at threshold (count >= 2) is surfaced.
     const recurringFriction = computeRecurringFriction(telemetrySummary.events);
     return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction };
+}
+// ---------------------------------------------------------------------------
+// Cycle-boundary filtering
+// ---------------------------------------------------------------------------
+/**
+ * Filter done manifests to those whose `completed_at` is at or after
+ * `openedAt`. Manifests with no `completed_at` (written before this feature
+ * landed) are EXCLUDED from the cycle window — we cannot know when they were
+ * completed.
+ *
+ * When `openedAt` is null, returns the full list unchanged (baseline).
+ */
+function filterManifestsByCycle(manifests, openedAt) {
+    if (openedAt === null) {
+        return manifests;
+    }
+    return manifests.filter((m) => m.completed_at !== undefined && m.completed_at >= openedAt);
+}
+/**
+ * Filter a telemetry summary to events whose `ts` is at or after `openedAt`.
+ * The `skipped_count` is preserved from the original summary (not re-counted).
+ *
+ * When `openedAt` is null, returns the original summary unchanged (baseline).
+ */
+function filterTelemetryByCycle(summary, openedAt) {
+    if (openedAt === null) {
+        return summary;
+    }
+    return {
+        events: summary.events.filter((e) => e.ts >= openedAt),
+        skipped_count: summary.skipped_count,
+    };
+}
+/**
+ * Build a `WindowingSeam` that filters by the cycle's `opened_at` timestamp.
+ * Used by the fire-count helper so promotion/retirement signals are cycle-scoped.
+ */
+function buildCycleWindowingSeam(openedAt) {
+    return {
+        filterManifests: (manifests) => manifests.filter((m) => m.completed_at !== undefined && m.completed_at >= openedAt),
+        filterEvents: (events) => events.filter((e) => e.ts >= openedAt),
+        isQuietEnoughForRetirement: (fireCount, relaxFloor) => fireCount < relaxFloor,
+    };
 }
 // ---------------------------------------------------------------------------
 // done/ manifests

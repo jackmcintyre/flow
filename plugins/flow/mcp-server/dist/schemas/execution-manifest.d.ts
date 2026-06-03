@@ -124,6 +124,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strict>>>;
     failure_class: z.ZodOptional<z.ZodString>;
     duration_seconds: z.ZodOptional<z.ZodNumber>;
+    completed_at: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**

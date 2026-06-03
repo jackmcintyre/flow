@@ -57,6 +57,8 @@ export declare function completeStory(opts: {
     ref: string;
     sessionUlid: string;
     role?: string;
+    /** Optional clock override — test seam for deterministic timestamps. */
+    now?: () => Date;
 }): Promise<{
     ref: string;
     absPath: string;

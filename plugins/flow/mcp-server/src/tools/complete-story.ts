@@ -80,8 +80,10 @@ export async function completeStory(opts: {
   ref: string;
   sessionUlid: string;
   role?: string;
+  /** Optional clock override — test seam for deterministic timestamps. */
+  now?: () => Date;
 }): Promise<{ ref: string; absPath: string }> {
-  const { targetRepoRoot, ref, sessionUlid, role = "orchestrator" } = opts;
+  const { targetRepoRoot, ref, sessionUlid, role = "orchestrator", now = () => new Date() } = opts;
 
   const stateRoot = path.join(targetRepoRoot, ".flow", "state");
   const absInProgressPath = path.join(stateRoot, "in-progress", `${ref}.yaml`);
@@ -133,10 +135,13 @@ export async function completeStory(opts: {
   });
 
   // Step 5: Field rewrite.
-  // Set status to "done". Preserve claimed_by verbatim for retros.
+  // Set status to "done". Preserve claimed_by verbatim for retros. Stamp
+  // completed_at so cycle-boundary filtering (Story 6.12) can gate the retro
+  // window correctly.
   const updatedManifest = {
     ...manifest,
     status: "done" as const,
+    completed_at: now().toISOString(),
     // claimed_by is already present and preserved by the spread above.
   };
   const reparsed = parseExecutionManifest(updatedManifest, {

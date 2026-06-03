@@ -110,9 +110,25 @@ export interface GatherRetroInputsOptions {
      * defaults (promotionThreshold=3, retirementWindows=5, relaxFloor=1).
      */
     fireCountConfig?: FireCountConfig;
+    /**
+     * Optional cycle opened_at timestamp override — test seam.
+     * When provided, acts as the lower bound for filtering done manifests
+     * (by `completed_at`) and telemetry events (by `ts`).
+     * When absent, the cycle state is read from `.flow/cycle-state.json`.
+     * Pass `null` explicitly to force the no-cycle baseline (full history).
+     */
+    cycleOpenedAt?: string | null;
 }
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.
+ *
+ * When a cycle is active (`.flow/cycle-state.json` present), only done
+ * manifests whose `completed_at >= cycle.opened_at` and telemetry events
+ * whose `ts >= cycle.opened_at` are included — giving the analyst a clean,
+ * bounded window for the current cycle.
+ *
+ * When no cycle has ever been opened (absent file), all available history is
+ * returned (the baseline behaviour preserved by AC4).
  *
  * @throws {MalformedExecutionManifestError} When a `done/` manifest fails
  *   schema validation. A corrupt done/ manifest is a hard stop — unlike

@@ -344,6 +344,22 @@ export const ExecutionManifestSchema = z
      * Added in Story 6.1 AC4.
      */
     duration_seconds: z.number().int().nonnegative().optional(),
+    /**
+     * ISO-8601 UTC timestamp at which `completeStory` moved this manifest
+     * from `in-progress/` to `done/`. Stamped by `completeStory` on the
+     * `in-progress → done` transition (Story 6.12 cycle-boundary feature).
+     *
+     * Optional and additive: existing `done/` manifests written before this
+     * field existed parse cleanly and are treated as having an unknown
+     * completion time (filtered OUT of a cycle window when the cycle is active,
+     * unless no cycle has ever been opened — in which case all history is
+     * included). Added in the cycle-boundary story.
+     */
+    completed_at: z
+        .string()
+        .datetime({ offset: false })
+        .refine((s) => s.endsWith("Z"), "must be UTC")
+        .optional(),
 })
     .strict();
 /**

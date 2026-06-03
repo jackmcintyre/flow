@@ -6,6 +6,7 @@ import {
   StandardsDocMissingError,
 } from "../errors.js";
 import { getPluginVersion } from "../lib/plugin-version.js";
+import { readCycleState } from "../lib/cycle-state.js";
 import {
   StatusReportSchema,
   type StatusReport,
@@ -89,12 +90,18 @@ export async function getStatus(opts: GetStatusOptions): Promise<StatusReport> {
     }
   }
 
+  // Read the active cycle state. Absent = no cycle has ever been opened;
+  // present = report the cycle ULID. Errors reading the cycle-state file
+  // propagate (a corrupt cycle-state.json is a bug, not a recoverable state).
+  const cycleState = await readCycleState(workspace.targetRepoRoot);
+  const cycle: StatusReport["cycle"] = cycleState !== null ? cycleState.cycle_id : "none";
+
   const report: StatusReport = {
     pluginVersion,
     targetRepoRoot: workspace.targetRepoRoot,
     adapter: adapterReport,
     standards: standardsReport,
-    cycle: "none",
+    cycle,
   };
 
   return StatusReportSchema.parse(report);

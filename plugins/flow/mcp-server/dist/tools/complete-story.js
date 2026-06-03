@@ -67,7 +67,7 @@ function stripUndefined(obj) {
  *   different filesystems (EXDEV).
  */
 export async function completeStory(opts) {
-    const { targetRepoRoot, ref, sessionUlid, role = "orchestrator" } = opts;
+    const { targetRepoRoot, ref, sessionUlid, role = "orchestrator", now = () => new Date() } = opts;
     const stateRoot = path.join(targetRepoRoot, ".flow", "state");
     const absInProgressPath = path.join(stateRoot, "in-progress", `${ref}.yaml`);
     const absDonePath = path.join(stateRoot, "done", `${ref}.yaml`);
@@ -113,10 +113,13 @@ export async function completeStory(opts) {
         to: "done",
     });
     // Step 5: Field rewrite.
-    // Set status to "done". Preserve claimed_by verbatim for retros.
+    // Set status to "done". Preserve claimed_by verbatim for retros. Stamp
+    // completed_at so cycle-boundary filtering (Story 6.12) can gate the retro
+    // window correctly.
     const updatedManifest = {
         ...manifest,
         status: "done",
+        completed_at: now().toISOString(),
         // claimed_by is already present and preserved by the spread above.
     };
     const reparsed = parseExecutionManifest(updatedManifest, {

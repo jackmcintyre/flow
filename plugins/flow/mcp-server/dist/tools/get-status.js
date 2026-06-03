@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { StaleWorkspaceConfigError, StandardsDocMalformedError, StandardsDocMissingError, } from "../errors.js";
 import { getPluginVersion } from "../lib/plugin-version.js";
+import { readCycleState } from "../lib/cycle-state.js";
 import { StatusReportSchema, } from "../schemas/status-report.js";
 import { lookupStandards } from "../state/lookup-standards.js";
 import { validateActiveAdapter } from "../state/validate-active-adapter.js";
@@ -71,12 +72,17 @@ export async function getStatus(opts) {
             throw err;
         }
     }
+    // Read the active cycle state. Absent = no cycle has ever been opened;
+    // present = report the cycle ULID. Errors reading the cycle-state file
+    // propagate (a corrupt cycle-state.json is a bug, not a recoverable state).
+    const cycleState = await readCycleState(workspace.targetRepoRoot);
+    const cycle = cycleState !== null ? cycleState.cycle_id : "none";
     const report = {
         pluginVersion,
         targetRepoRoot: workspace.targetRepoRoot,
         adapter: adapterReport,
         standards: standardsReport,
-        cycle: "none",
+        cycle,
     };
     return StatusReportSchema.parse(report);
 }

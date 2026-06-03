@@ -55,6 +55,7 @@ import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
+import { openCycle } from "./open-cycle.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2377,6 +2378,56 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — openCycle: open a new work
+  // cycle. Mints a new cycle ULID, optionally archives the prior cycle's
+  // done manifests + proposals + telemetry summary, writes the new cycle
+  // state to .flow/cycle-state.json, and emits a cycle.opened telemetry event.
+  // After this call, getStatus shows the new cycle ULID and gatherRetroInputs
+  // scopes itself to only done manifests and telemetry events after opened_at.
+  server.registerTool({
+    name: "openCycle",
+    description:
+      "Open a new work cycle (Story native:01KT484NY4HCBPBTT6VEY1Q0CS). " +
+      "Mints a fresh cycle ULID, archives the prior cycle (if active) to " +
+      ".flow/cycle-archive/<prior-cycle-id>-<iso>.yaml, writes the new cycle " +
+      "state to .flow/cycle-state.json (atomic rename), and emits a cycle.opened " +
+      "telemetry event. After this call: getStatus shows the new cycle ULID " +
+      "(not 'none'); gatherRetroInputs filters done manifests to those with " +
+      "completed_at >= opened_at and telemetry events to those with ts >= opened_at, " +
+      "so the retro reasons only over the current cycle. " +
+      "Returns { ok: true, cycleId, openedAt, archivedPriorCycleId }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await openCycle(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

@@ -365,6 +365,32 @@ export const AgentFrictionEventSchema = TelemetryEventBase.extend({
     })
         .strict(),
 }).strict();
+/**
+ * `cycle.opened` — emitted by `openCycle` when a new work cycle is opened
+ * (Story native:01KT484NY4HCBPBTT6VEY1Q0CS — cycle-boundary feature).
+ *
+ * Exactly ONE event per `openCycle` call; NONE on the read-only `getStatus`
+ * path. The event records the new cycle's ULID and whether a prior cycle was
+ * archived (so downstream analytics can identify cycle transitions).
+ *
+ * - `cycle_id`       — the freshly-minted ULID for the new cycle. Also
+ *                      mirrored into the envelope `story_id` is NOT used here
+ *                      (a cycle is not a story).
+ * - `prior_cycle_id` — the ULID of the prior cycle if one was active, or
+ *                      `null` when this is the first cycle ever.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export const CycleOpenedEventSchema = TelemetryEventBase.extend({
+    type: z.literal("cycle.opened"),
+    data: z
+        .object({
+        cycle_id: z.string().min(1),
+        prior_cycle_id: z.string().min(1).nullable(),
+    })
+        .strict(),
+}).strict();
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
     AgentInvokeEventSchema,
     TelemetryInvalidEventSchema,
@@ -379,4 +405,5 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
     QualityAdjudicatedEventSchema,
     SkillInvokeEventSchema,
     AgentFrictionEventSchema,
+    CycleOpenedEventSchema,
 ]);

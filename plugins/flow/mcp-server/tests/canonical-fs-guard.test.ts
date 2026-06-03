@@ -113,6 +113,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // across two refs in one session. Test file only; the production writer routes
   // its single dev-outcome write through atomicWriteFile (managed-fs).
   path.join(SRC_DIR, "lib", "__tests__", "read-dev-outcome-file.test.ts"),
+  // Story native:01KT484NY4HCBPBTT6VEY1Q0CS: cycle-boundary tests seed done-manifest
+  // YAML, telemetry JSONL, and cycle-state.json fixtures directly to tmpdir via
+  // raw fs.writeFile/appendFile. Test file only; the production openCycle routes
+  // all its writes through atomicWriteFile (managed-fs) and logTelemetryEvent.
+  path.join(SRC_DIR, "tools", "__tests__", "cycle-boundary.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

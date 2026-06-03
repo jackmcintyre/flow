@@ -749,7 +749,8 @@ describe("AC5(j) — MCP tool registration smoke", () => {
         // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
         // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
         // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
-        expect(registeredTools.length).toBe(47);
+        // native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
+        expect(registeredTools.length).toBe(48);
     });
 });
 // ---------------------------------------------------------------------------

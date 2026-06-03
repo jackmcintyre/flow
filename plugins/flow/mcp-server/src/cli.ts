@@ -57,6 +57,7 @@ import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./tools/record-agent-friction.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
+import { openCycle } from "./tools/open-cycle.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -118,6 +119,10 @@ const TOOLS: Record<string, ToolFn> = {
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
   // calls this instead of the previously hard-coded lensRoles block.
   resolveLensRoles,
+  // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — openCycle: open a new work cycle on
+  // the no-MCP drain/gate path (skills + drain workflows can call this without a
+  // persistent MCP server). Returns { ok, cycleId, openedAt, archivedPriorCycleId }.
+  openCycle,
 };
 
 function emit(obj: unknown): void {

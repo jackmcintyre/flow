@@ -509,7 +509,9 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("resolveLensRoles");
             // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
             expect(toolNames).toContain("recordAgentFriction");
-            expect(toolNames.length).toBe(47);
+            // native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
+            expect(toolNames).toContain("openCycle");
+            expect(toolNames.length).toBe(48);
         }
         finally {
             await client.close();
