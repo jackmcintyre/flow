@@ -163,6 +163,7 @@ export const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
             "skill-supersede",
             "skill-retire",
             "team-change",
+            "persona-append",
         ]),
         applied_sha: z.string().min(1),
         idempotency_key: z.string().min(1),

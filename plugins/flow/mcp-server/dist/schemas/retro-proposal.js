@@ -225,13 +225,31 @@ export const TeamChangeProposalSchema = ProposalBase.extend({
     })
         .strict(),
 }).strict();
+/**
+ * `persona-append` — append a durable lesson to a hired role's Knowledge section.
+ *
+ * When applied via the `/accept-proposal` gate, the handler reads the role's
+ * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a new
+ * bullet to the `## Knowledge` section, and re-serialises the full file.
+ *
+ * `target_role` reuses `RolePathSchema` (kebab-cased role name matching the
+ * catalogue convention). `lesson` is the verbatim text of the bullet to append
+ * (the handler prepends `- `).
+ *
+ * (Story 6.9 — persona-knowledge write-back keystone)
+ */
+export const PersonaAppendProposalSchema = ProposalBase.extend({
+    type: z.literal("persona-append"),
+    target_role: RolePathSchema,
+    lesson: z.string().min(1),
+}).strict();
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 /**
- * The closed set of seven proposal-type literals. Exported as a tuple so
+ * The closed set of eight proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding an eighth variant requires a
+ * grown (the AC2 invariant). Adding a ninth variant requires a
  * coordinated schema-change story.
  */
 export const RETRO_PROPOSAL_TYPES = [
@@ -242,9 +260,10 @@ export const RETRO_PROPOSAL_TYPES = [
     "skill-supersede",
     "skill-retire",
     "team-change",
+    "persona-append",
 ];
 /**
- * The full retro-proposal discriminated union. AC2: exactly seven
+ * The full retro-proposal discriminated union. AC2: exactly eight
  * variants, closed enum, no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
@@ -255,6 +274,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
     SkillSupersedeProposalSchema,
     SkillRetireProposalSchema,
     TeamChangeProposalSchema,
+    PersonaAppendProposalSchema,
 ]);
 /**
  * File-level wrapper schema (AC7).

@@ -30,6 +30,7 @@
 import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
 import { makeRuleRetirementApplyHandler } from "./apply-rule-retirement.js";
 import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
+import { makePersonaAppendHandler } from "./apply-persona-append.js";
 /**
  * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
  * `rule` handler and Story 6.7 the `skill-*` handlers. Every OTHER kind still
@@ -42,10 +43,10 @@ import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
  *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *   - `persona-append`                                → Story 6.9
  *
  * Still fail closed (no handler) until their story registers them:
  *   - `team-change`                                   → Story 6.10
- *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
  * It is intentionally a fresh map (not a shared mutable singleton) per import so
  * a test that mutates a registry never leaks into production; the `rule` handler
@@ -64,13 +65,15 @@ export function createProductionRegistry() {
     for (const handler of createSkillProposalHandlers()) {
         registry.set(handler.type, handler);
     }
+    // Story 6.9 — persona-append handler.
+    registry.set("persona-append", makePersonaAppendHandler());
     return registry;
 }
 /**
- * Maps each proposal kind to the story that will ship its apply handler. Used
- * to build an actionable `ProposalKindNotApplicableYetError` message. Closed
- * over the seven retro-proposal kinds; a new kind would require a schema-change
- * story that also extends this map.
+ * Maps each proposal kind to the story that shipped (or will ship) its apply
+ * handler. Used to build an actionable `ProposalKindNotApplicableYetError`
+ * message. Closed over the eight retro-proposal kinds; a new kind would
+ * require a schema-change story that also extends this map.
  */
 export const KIND_TO_STORY = {
     rule: "Story 6.5",
@@ -83,4 +86,5 @@ export const KIND_TO_STORY = {
     "skill-supersede": "Story 6.7",
     "skill-retire": "Story 6.7",
     "team-change": "Story 6.10",
+    "persona-append": "Story 6.9",
 };

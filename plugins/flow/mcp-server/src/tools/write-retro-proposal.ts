@@ -319,6 +319,11 @@ function renderProposalFields(
           `[${proposal.predicted_impact.affected_failure_classes.join(", ")}]`,
         ],
       ];
+    case "persona-append":
+      return [
+        ["target_role", proposal.target_role],
+        ["lesson", proposal.lesson],
+      ];
   }
 }
 

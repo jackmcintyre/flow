@@ -227,14 +227,40 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 /**
- * The closed set of seven proposal-type literals. Exported as a tuple so
+ * `persona-append` — append a durable lesson to a hired role's Knowledge section.
+ *
+ * When applied via the `/accept-proposal` gate, the handler reads the role's
+ * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a new
+ * bullet to the `## Knowledge` section, and re-serialises the full file.
+ *
+ * `target_role` reuses `RolePathSchema` (kebab-cased role name matching the
+ * catalogue convention). `lesson` is the verbatim text of the bullet to append
+ * (the handler prepends `- `).
+ *
+ * (Story 6.9 — persona-knowledge write-back keystone)
+ */
+export declare const PersonaAppendProposalSchema: z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"persona-append">;
+    target_role: z.ZodString;
+    lesson: z.ZodString;
+}, z.core.$strict>;
+/**
+ * The closed set of eight proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding an eighth variant requires a
+ * grown (the AC2 invariant). Adding a ninth variant requires a
  * coordinated schema-change story.
  */
-export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change"];
+export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change", "persona-append"];
 /**
- * The full retro-proposal discriminated union. AC2: exactly seven
+ * The full retro-proposal discriminated union. AC2: exactly eight
  * variants, closed enum, no `z.string()` fallback.
  */
 export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -346,6 +372,18 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     predicted_impact: z.ZodObject<{
         affected_failure_classes: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"persona-append">;
+    target_role: z.ZodString;
+    lesson: z.ZodString;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
 /**
@@ -477,6 +515,18 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         predicted_impact: z.ZodObject<{
             affected_failure_classes: z.ZodArray<z.ZodString>;
         }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        id: z.ZodString;
+        created_at: z.ZodString;
+        rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
+        type: z.ZodLiteral<"persona-append">;
+        target_role: z.ZodString;
+        lesson: z.ZodString;
     }, z.core.$strict>], "type">>;
 }, z.core.$strict>;
 export type RetroProposalFile = z.infer<typeof RetroProposalFileSchema>;
