@@ -47,10 +47,13 @@ export interface OrphanedManifest {
    */
   hasOpenPR: boolean;
   /**
-   * PR number recovered from the orphan's (stale) session `dev-outcome.json`,
-   * or `null` if the dev never opened a PR (file absent) or the file is
-   * malformed. The autonomous drain uses this to resume at review WITHOUT
-   * re-running dev. Added in the crash-recovery change.
+   * PR number used to resume the orphan at review WITHOUT re-running dev.
+   * The recorded `dev-outcome.json` number wins when present; otherwise this
+   * falls back to the number of an open PR found on the orphan's branch by the
+   * `hasOpenPR` query, so a crash where the builder never recorded its PR (but a
+   * real open PR exists) resumes at review instead of rebuilding from scratch.
+   * `null` only when neither a recorded PR nor an open PR exists. Added in the
+   * crash-recovery change.
    */
   prNumber: number | null;
   /**
@@ -165,6 +168,12 @@ export async function scanOrphanedInProgress(
     // (same function /ship-story and /flow:start use for dev branches via pr-body.ts).
     // manifest.title is always present on valid in-progress manifests.
     let hasOpenPR = false;
+    // Capture the open PR's number from the SAME gh query so a story whose
+    // builder never recorded a dev-outcome.json can still resume at review
+    // against the real open PR (instead of being rebuilt from scratch). Reuse
+    // the existing query — do NOT add a second gh call. Stays null on any
+    // gh/network/parse error so the scan never throws.
+    let openPrNumber: number | null = null;
     try {
       const branch = buildBranchSlug({ ref: manifest.ref, title: manifest.title });
       const result = await execaImpl("gh", [
@@ -177,17 +186,24 @@ export async function scanOrphanedInProgress(
         "--json",
         "number",
       ]);
-      const parsed = JSON.parse(result.stdout || "[]") as unknown[];
+      const parsed = JSON.parse(result.stdout || "[]") as { number?: number }[];
       hasOpenPR = parsed.length > 0;
+      openPrNumber = parsed.length > 0 ? (parsed[0]?.number ?? null) : null;
     } catch {
       // Network, auth, or parse error — default to false (safe fallback to
       // blockOrphanNoTranscript behaviour). Do NOT throw.
       hasOpenPR = false;
+      openPrNumber = null;
     }
 
     // Recover the PR number (if any) from the stale session's dev-outcome.json
     // so the drain can resume at review without re-running dev. Defensive: a
     // malformed/absent outcome file must NOT abort the whole scan — treat as null.
+    //
+    // The recorded dev-outcome number always WINS when present (preserves the
+    // per-ref cross-attribution fix from native:01KT3YDHM10FPQ77N22BTJP9AF). The
+    // open-PR number is the fallback ONLY when the builder never recorded one —
+    // covering a crash where a real open PR exists but dev-outcome.json is absent.
     let prNumber: number | null = null;
     try {
       const outcome = await readDevOutcomeFile(
@@ -195,9 +211,9 @@ export async function scanOrphanedInProgress(
         staleUlid,
         manifest.ref,
       );
-      prNumber = outcome?.prNumber ?? null;
+      prNumber = outcome?.prNumber ?? openPrNumber;
     } catch {
-      prNumber = null;
+      prNumber = openPrNumber;
     }
 
     orphans.push({

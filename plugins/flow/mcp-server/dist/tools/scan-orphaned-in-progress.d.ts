@@ -39,10 +39,13 @@ export interface OrphanedManifest {
      */
     hasOpenPR: boolean;
     /**
-     * PR number recovered from the orphan's (stale) session `dev-outcome.json`,
-     * or `null` if the dev never opened a PR (file absent) or the file is
-     * malformed. The autonomous drain uses this to resume at review WITHOUT
-     * re-running dev. Added in the crash-recovery change.
+     * PR number used to resume the orphan at review WITHOUT re-running dev.
+     * The recorded `dev-outcome.json` number wins when present; otherwise this
+     * falls back to the number of an open PR found on the orphan's branch by the
+     * `hasOpenPR` query, so a crash where the builder never recorded its PR (but a
+     * real open PR exists) resumes at review instead of rebuilding from scratch.
+     * `null` only when neither a recorded PR nor an open PR exists. Added in the
+     * crash-recovery change.
      */
     prNumber: number | null;
     /**

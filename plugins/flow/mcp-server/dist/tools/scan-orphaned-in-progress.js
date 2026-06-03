@@ -104,6 +104,12 @@ export async function scanOrphanedInProgress(opts) {
         // (same function /ship-story and /flow:start use for dev branches via pr-body.ts).
         // manifest.title is always present on valid in-progress manifests.
         let hasOpenPR = false;
+        // Capture the open PR's number from the SAME gh query so a story whose
+        // builder never recorded a dev-outcome.json can still resume at review
+        // against the real open PR (instead of being rebuilt from scratch). Reuse
+        // the existing query — do NOT add a second gh call. Stays null on any
+        // gh/network/parse error so the scan never throws.
+        let openPrNumber = null;
         try {
             const branch = buildBranchSlug({ ref: manifest.ref, title: manifest.title });
             const result = await execaImpl("gh", [
@@ -118,22 +124,29 @@ export async function scanOrphanedInProgress(opts) {
             ]);
             const parsed = JSON.parse(result.stdout || "[]");
             hasOpenPR = parsed.length > 0;
+            openPrNumber = parsed.length > 0 ? (parsed[0]?.number ?? null) : null;
         }
         catch {
             // Network, auth, or parse error — default to false (safe fallback to
             // blockOrphanNoTranscript behaviour). Do NOT throw.
             hasOpenPR = false;
+            openPrNumber = null;
         }
         // Recover the PR number (if any) from the stale session's dev-outcome.json
         // so the drain can resume at review without re-running dev. Defensive: a
         // malformed/absent outcome file must NOT abort the whole scan — treat as null.
+        //
+        // The recorded dev-outcome number always WINS when present (preserves the
+        // per-ref cross-attribution fix from native:01KT3YDHM10FPQ77N22BTJP9AF). The
+        // open-PR number is the fallback ONLY when the builder never recorded one —
+        // covering a crash where a real open PR exists but dev-outcome.json is absent.
         let prNumber = null;
         try {
             const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid, manifest.ref);
-            prNumber = outcome?.prNumber ?? null;
+            prNumber = outcome?.prNumber ?? openPrNumber;
         }
         catch {
-            prNumber = null;
+            prNumber = openPrNumber;
         }
         orphans.push({
             ref: manifest.ref,
