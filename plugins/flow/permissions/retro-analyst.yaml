@@ -2,6 +2,7 @@ role: retro-analyst
 tools_allow:
   - Read
   - gatherRetroInputs
+  - getTeamSnapshot
   - writeRetroProposal
   - Task
   - heartbeat

@@ -113,6 +113,13 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // across two refs in one session. Test file only; the production writer routes
   // its single dev-outcome write through atomicWriteFile (managed-fs).
   path.join(SRC_DIR, "lib", "__tests__", "read-dev-outcome-file.test.ts"),
+  // Story native:01KT47PSWEBAX6QZB8SR8HDYBQ: retro-persona-append-proposals tests
+  // seed done/ manifest YAML and persona fixture files directly to tmpdir via raw
+  // fs.writeFile/mkdir to drive the gatherRetroInputs / getTeamSnapshot reads and the
+  // writeRetroProposal round-trip for persona-append proposals. Test file only; the
+  // production retro-analyst routes its single write through writeRetroProposal
+  // (writeManagedFile with MCP tool context) and performs no raw fs writes.
+  path.join(SRC_DIR, "tools", "__tests__", "retro-persona-append-proposals.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
