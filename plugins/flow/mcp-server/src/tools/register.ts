@@ -16,6 +16,7 @@ import {
   renderBacklogDashboard,
 } from "./render-backlog-dashboard.js";
 import { getStatus, renderStatus } from "./get-status.js";
+import { openCycle } from "./open-cycle.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
@@ -84,6 +85,55 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: renderStatus(report) }],
       };
+    },
+  });
+
+  // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — openCycle: open a new work cycle.
+  // Mints a cycle ULID, archives the prior cycle's record (done manifests, retro
+  // proposals, telemetry summary) under .flow/cycle-archive/ when one is active,
+  // overwrites .flow/cycle-state.json with the new cycle, and emits one
+  // cycle.opened telemetry event. After this, getStatus reports the new ULID and
+  // gatherRetroInputs scopes its bundle to work after opened_at.
+  server.registerTool({
+    name: "openCycle",
+    description:
+      "Open a new work cycle (Story native:01KT484NY4HCBPBTT6VEY1Q0CS). Mints a fresh " +
+      "cycle ULID, archives the prior cycle's record (done manifests, retro proposals, " +
+      "telemetry summary) under .flow/cycle-archive/<prior-ulid>-<iso>.yaml BEFORE the " +
+      "window resets when a cycle is active, overwrites .flow/cycle-state.json with the " +
+      "new cycle, and emits exactly one cycle.opened telemetry event. After it returns, " +
+      "getStatus reports the new ULID instead of 'none' and gatherRetroInputs scopes its " +
+      "bundle to work completed at or after the new cycle's opened_at. Returns " +
+      "{ cycleUlid, openedAt, priorCycleUlid, archivePath }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1).optional(),
+        })
+        .parse(args);
+      try {
+        const result = await openCycle(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 

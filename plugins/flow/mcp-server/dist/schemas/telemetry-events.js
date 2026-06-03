@@ -365,6 +365,33 @@ export const AgentFrictionEventSchema = TelemetryEventBase.extend({
     })
         .strict(),
 }).strict();
+/**
+ * `cycle.opened` — emitted by `openCycle` (Story native:01KT484NY4HCBPBTT6VEY1Q0CS)
+ * each time the operator opens a new work cycle. Exactly ONE event per open.
+ *
+ * - `cycle_ulid`        — the freshly-minted cycle identifier now active.
+ * - `prior_cycle_ulid`  — the cycle that was active immediately before this open,
+ *                         or `null` on the very first open (no prior cycle).
+ * - `archived`          — `true` iff a prior cycle's record was written to the
+ *                         cycle-archive before the window reset; `false` on the
+ *                         first open (nothing to archive).
+ *
+ * No body/diff/contents strings (NFR14) — only surfacing fields. The envelope
+ * `story_id` is intentionally NOT used here (a cycle is not a story); consumers
+ * join on `data.cycle_ulid`.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export const CycleOpenedEventSchema = TelemetryEventBase.extend({
+    type: z.literal("cycle.opened"),
+    data: z
+        .object({
+        cycle_ulid: z.string().min(1),
+        prior_cycle_ulid: z.string().min(1).nullable(),
+        archived: z.boolean(),
+    })
+        .strict(),
+}).strict();
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
     AgentInvokeEventSchema,
     TelemetryInvalidEventSchema,
@@ -379,4 +406,5 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
     QualityAdjudicatedEventSchema,
     SkillInvokeEventSchema,
     AgentFrictionEventSchema,
+    CycleOpenedEventSchema,
 ]);

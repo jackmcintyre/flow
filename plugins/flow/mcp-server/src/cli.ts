@@ -26,6 +26,8 @@
 
 import { DomainError } from "./errors.js";
 import { getStatus } from "./tools/get-status.js";
+import { openCycle } from "./tools/open-cycle.js";
+import { gatherRetroInputs } from "./tools/gather-retro-inputs.js";
 import { mintSessionUlid } from "./tools/mint-session-ulid.js";
 import { drainPhaseStart, drainPhaseDone } from "./tools/drain-phase-progress.js";
 import { scanSources } from "./tools/scan-sources.js";
@@ -65,6 +67,12 @@ type ToolFn = (args: any) => unknown | Promise<unknown>;
 
 const TOOLS: Record<string, ToolFn> = {
   getStatus,
+  // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — open a new work cycle. Exposed on
+  // the CLI seam so the drain / skill workflows can open a cycle without a
+  // persistent MCP session. `gatherRetroInputs` is registered alongside it so
+  // the no-MCP retro path can gather the (now cycle-scoped) bundle one-shot.
+  openCycle,
+  gatherRetroInputs,
   mintSessionUlid,
   drainPhaseStart,
   drainPhaseDone,
