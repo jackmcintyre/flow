@@ -246,7 +246,7 @@ describe("AC3(a) — hired team + seeded telemetry (Task 7.3)", () => {
     }
   });
 
-  it("(v) planner knowledge is [delta, gamma, beta] (reverse file order, last 3)", async () => {
+  it("(v) planner knowledge is [delta, gamma, beta] (reverse file order, last 3) — migrated as pattern entries", async () => {
     const snapshot = await getTeamSnapshot({
       targetRepoRoot: TMP_A,
       knowledgeLimit: 3,
@@ -254,7 +254,12 @@ describe("AC3(a) — hired team + seeded telemetry (Task 7.3)", () => {
     const planner = snapshot.roles.find((r) => r.role === "planner");
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
-      expect(planner.knowledge).toEqual(["delta", "gamma", "beta"]);
+      // Flat bullets are migrated to KnowledgeEntry with kind="pattern".
+      expect(planner.knowledge).toEqual([
+        { kind: "pattern", applies_when: "delta", detail: "delta" },
+        { kind: "pattern", applies_when: "gamma", detail: "gamma" },
+        { kind: "pattern", applies_when: "beta", detail: "beta" },
+      ]);
     }
   });
 
@@ -362,9 +367,9 @@ describe("AC3(a) — renderer byte-identical output (Task 7.5)", () => {
       `  domain:      ${domains["planner"]}`,
       "  fire count:  1",
       "  knowledge (last 3):",
-      "    - delta",
-      "    - gamma",
-      "    - beta",
+      "    - pattern | delta",
+      "    - pattern | gamma",
+      "    - pattern | beta",
       "",
       "retro-analyst",
       `  domain:      ${domains["retro-analyst"]}`,
@@ -683,12 +688,16 @@ describe("AC3(g) — reverse-order knowledge regression (Task 7.11)", () => {
     const planner = snapshot.roles.find((r) => r.role === "planner");
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
-      // Correct: reverse file order, last 3.
-      expect(planner.knowledge).toEqual(["delta", "gamma", "beta"]);
-      // Wrong: alphabetical order.
-      expect(planner.knowledge).not.toEqual(["alpha", "beta", "delta"]);
+      // Correct: reverse file order, last 3 — migrated flat bullets as pattern entries.
+      expect(planner.knowledge).toEqual([
+        { kind: "pattern", applies_when: "delta", detail: "delta" },
+        { kind: "pattern", applies_when: "gamma", detail: "gamma" },
+        { kind: "pattern", applies_when: "beta", detail: "beta" },
+      ]);
+      // Wrong: alphabetical order (the applies_when values would be sorted).
+      expect(planner.knowledge.map((e) => e.applies_when)).not.toEqual(["alpha", "beta", "delta"]);
       // Wrong: first-N file order.
-      expect(planner.knowledge).not.toEqual(["alpha", "beta", "gamma"]);
+      expect(planner.knowledge.map((e) => e.applies_when)).not.toEqual(["alpha", "beta", "gamma"]);
     }
   });
 });
@@ -777,20 +786,25 @@ describe("AC3(j) — knowledge entry stripping (Task 7.14)", () => {
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
       // Four top-level entries, reverse file order (limit=10 → no truncation).
+      // Flat bullets are migrated to KnowledgeEntry with kind="pattern".
       expect(planner.knowledge).toEqual([
-        "trailing-whitespace-entry",
-        "entry with sub-bullet",
-        "entry with continuation",
-        "entry-with-leading-spaces",
+        { kind: "pattern", applies_when: "trailing-whitespace-entry", detail: "trailing-whitespace-entry" },
+        { kind: "pattern", applies_when: "entry with sub-bullet", detail: "entry with sub-bullet" },
+        { kind: "pattern", applies_when: "entry with continuation", detail: "entry with continuation" },
+        { kind: "pattern", applies_when: "entry-with-leading-spaces", detail: "entry-with-leading-spaces" },
       ]);
     }
   });
 
-  it("extractKnowledgeEntries strips leading/trailing whitespace from bullet text", () => {
+  it("extractKnowledgeEntries strips leading/trailing whitespace from bullet text (migrated to pattern entries)", () => {
     const body = "-   padded   \n- normal\n  continuation\n- last";
     const result = extractKnowledgeEntries(body, 10);
-    // All three top-level bullets, reverse order.
-    expect(result).toEqual(["last", "normal", "padded"]);
+    // All three top-level bullets, reverse order — migrated as pattern KnowledgeEntry objects.
+    expect(result).toEqual([
+      { kind: "pattern", applies_when: "last", detail: "last" },
+      { kind: "pattern", applies_when: "normal", detail: "normal" },
+      { kind: "pattern", applies_when: "padded", detail: "padded" },
+    ]);
   });
 });
 

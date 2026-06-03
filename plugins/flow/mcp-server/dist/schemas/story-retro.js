@@ -69,6 +69,50 @@ export const LessonSchema = z
     }
 });
 /**
+ * Schema for a structured lesson entry stored in a role's Knowledge section.
+ *
+ * Reuses `LessonSchema`'s vocabulary (kind + failure_class) and extends it
+ * with provenance fields so `/flow:team` can show kind and source for every
+ * entry instead of undifferentiated bullet text.
+ *
+ * Fields:
+ *  - `id`          — ULID that uniquely identifies this lesson entry.
+ *  - `kind`        — Closed enum from `LESSON_KINDS` (pitfall|pattern|tool-quirk|discipline).
+ *  - `applies_when`— Short sentence describing when this lesson is relevant (shown in /flow:team).
+ *  - `detail`      — Full lesson text (the original lesson prose).
+ *  - `failure_class` — Required when `kind === "pitfall"` (mirrors LessonSchema contract).
+ *  - `source_ref`  — Optional story ref the lesson came from (e.g. `native:01KT...`).
+ *  - `source_pr`   — Optional PR URL for traceability.
+ *  - `learned_at`  — ISO-8601 UTC timestamp when the lesson was appended.
+ *
+ * `.strict()` rejects unknown keys.
+ */
+export const StructuredLessonSchema = z
+    .object({
+    id: z
+        .string()
+        .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "id must be a 26-char Crockford base32 ULID"),
+    kind: z.enum(LESSON_KINDS),
+    applies_when: z.string().min(1),
+    detail: z.string().min(1),
+    failure_class: z.string().min(1).optional(),
+    source_ref: z.string().min(1).optional(),
+    source_pr: z.string().min(1).optional(),
+    learned_at: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "learned_at must be ISO-8601 UTC (Z-suffixed)"),
+})
+    .strict()
+    .superRefine((lesson, ctx) => {
+    if (lesson.kind === "pitfall" && lesson.failure_class === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["failure_class"],
+            message: "failure_class is required when kind is 'pitfall'",
+        });
+    }
+});
+/**
  * Schema for the full retro payload accepted by `recordStoryRetro`.
  *
  * - `lessons` — array of `LessonSchema`, defaults to `[]`.

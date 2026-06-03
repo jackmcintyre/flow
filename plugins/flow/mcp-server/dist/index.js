@@ -35961,6 +35961,30 @@ var LessonSchema = external_exports.object({
     });
   }
 });
+var StructuredLessonSchema = external_exports.object({
+  id: external_exports.string().regex(
+    /^[0-9A-HJKMNP-TV-Z]{26}$/,
+    "id must be a 26-char Crockford base32 ULID"
+  ),
+  kind: external_exports.enum(LESSON_KINDS),
+  applies_when: external_exports.string().min(1),
+  detail: external_exports.string().min(1),
+  failure_class: external_exports.string().min(1).optional(),
+  source_ref: external_exports.string().min(1).optional(),
+  source_pr: external_exports.string().min(1).optional(),
+  learned_at: external_exports.string().regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
+    "learned_at must be ISO-8601 UTC (Z-suffixed)"
+  )
+}).strict().superRefine((lesson, ctx) => {
+  if (lesson.kind === "pitfall" && lesson.failure_class === void 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["failure_class"],
+      message: "failure_class is required when kind is 'pitfall'"
+    });
+  }
+});
 var StoryRetroPayloadSchema = external_exports.object({
   lessons: external_exports.array(LessonSchema).default([]),
   failure_class: external_exports.string().min(1).optional(),
@@ -37196,7 +37220,12 @@ var TeamChangeProposalSchema = ProposalBase.extend({
 var PersonaAppendProposalSchema = ProposalBase.extend({
   type: external_exports.literal("persona-append"),
   target_role: RolePathSchema,
-  lesson: external_exports.string().min(1)
+  lesson: external_exports.string().min(1),
+  // Optional structured fields — carried when the learning loop emits them.
+  kind: external_exports.enum(["pitfall", "pattern", "tool-quirk", "discipline"]).optional(),
+  applies_when: external_exports.string().min(1).optional(),
+  failure_class: external_exports.string().min(1).optional(),
+  source_ref: external_exports.string().min(1).optional()
 }).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
@@ -45661,9 +45690,9 @@ function createSkillProposalHandlers(deps = DEFAULT_DEPS) {
 }
 
 // src/lib/apply-persona-append.ts
-var import_yaml15 = __toESM(require_dist2(), 1);
 import { promises as fs17 } from "node:fs";
 import * as path25 from "node:path";
+var import_yaml15 = __toESM(require_dist2(), 1);
 var TOOL_NAME3 = "acceptProposal";
 function personaRelPath(targetRole) {
   return `team/${targetRole}/PERSONA.md`;
@@ -45726,13 +45755,32 @@ ${yamlBlock}
 
 ${sections.join("\n")}`;
 }
-function appendKnowledgeBullet(existingBody, lesson) {
-  const bullet = `- ${lesson}`;
+function serialiseStructuredLesson(lesson) {
+  const obj = {
+    id: lesson.id,
+    kind: lesson.kind,
+    applies_when: lesson.applies_when,
+    detail: lesson.detail,
+    learned_at: lesson.learned_at
+  };
+  if (lesson.failure_class !== void 0) {
+    obj["failure_class"] = lesson.failure_class;
+  }
+  if (lesson.source_ref !== void 0) {
+    obj["source_ref"] = lesson.source_ref;
+  }
+  if (lesson.source_pr !== void 0) {
+    obj["source_pr"] = lesson.source_pr;
+  }
+  return `<!-- lesson:json ${JSON.stringify(obj)} -->`;
+}
+function appendStructuredLesson(existingBody, lesson) {
+  const block = serialiseStructuredLesson(lesson);
   if (existingBody.trim() === "") {
-    return bullet;
+    return block;
   }
   return `${existingBody}
-${bullet}`;
+${block}`;
 }
 function makePersonaAppendHandler() {
   return {
@@ -45756,7 +45804,9 @@ function makePersonaAppendHandler() {
       lines.push(
         `Would append to ## Knowledge section of ${relPath}:`
       );
-      lines.push(`+   - ${proposal.lesson}`);
+      const kind = proposal.kind ?? "pattern";
+      const appliesWhen = proposal.applies_when ?? proposal.lesson;
+      lines.push(`+   <!-- lesson:json kind=${kind}, applies_when="${appliesWhen}" -->`);
       return lines.join("\n") + "\n";
     },
     async apply(proposal, ctx) {
@@ -45771,9 +45821,18 @@ function makePersonaAppendHandler() {
         });
       }
       const parsed = parsePersonaFile(raw, relPath);
-      const newKnowledgeBody = appendKnowledgeBullet(
+      const structuredLesson = {
+        id: ulid3(),
+        kind: proposal.kind ?? "pattern",
+        applies_when: proposal.applies_when ?? proposal.lesson,
+        detail: proposal.lesson,
+        learned_at: proposal.created_at,
+        ...proposal.failure_class !== void 0 ? { failure_class: proposal.failure_class } : {},
+        ...proposal.source_ref !== void 0 ? { source_ref: proposal.source_ref } : {}
+      };
+      const newKnowledgeBody = appendStructuredLesson(
         parsed.sections.Knowledge,
-        proposal.lesson
+        structuredLesson
       );
       const newContents = reconstructPersonaFile(parsed, newKnowledgeBody);
       await writeManagedFile({
@@ -48009,13 +48068,19 @@ function isEnoent7(err) {
 
 // src/schemas/team-snapshot.ts
 var KEBAB_ROLE_REGEX = /^[a-z0-9-]+$/;
+var KnowledgeEntrySchema = external_exports.object({
+  kind: external_exports.enum(LESSON_KINDS),
+  applies_when: external_exports.string().min(1),
+  detail: external_exports.string().min(1),
+  source_ref: external_exports.string().min(1).optional()
+}).strict();
 var TeamSnapshotRoleSchema = external_exports.discriminatedUnion("state", [
   external_exports.object({
     state: external_exports.literal("ok"),
     role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
     domain: external_exports.string().min(1),
     fireCount: external_exports.number().int().nonnegative(),
-    knowledge: external_exports.array(external_exports.string())
+    knowledge: external_exports.array(KnowledgeEntrySchema)
   }),
   external_exports.object({
     state: external_exports.literal("error"),
@@ -48105,15 +48170,42 @@ async function getTeamSnapshot(opts) {
     malformedTelemetryFiles: stats.malformedFiles
   });
 }
+var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX = " -->";
 function extractKnowledgeEntries(knowledgeBody, limit) {
-  const entries = [];
+  const structured = [];
+  const migrated = [];
   for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+      try {
+        const raw = JSON.parse(jsonStr);
+        if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
+          const obj = raw;
+          const entry = {
+            kind: obj["kind"],
+            applies_when: String(obj["applies_when"]),
+            detail: String(obj["detail"]),
+            ...typeof obj["source_ref"] === "string" && obj["source_ref"].length > 0 ? { source_ref: obj["source_ref"] } : {}
+          };
+          structured.push(entry);
+        }
+      } catch {
+      }
+      continue;
+    }
     const match = /^-\s+(.+?)\s*$/.exec(line);
     if (match) {
-      entries.push(match[1]);
+      migrated.push({
+        kind: "pattern",
+        applies_when: match[1],
+        detail: match[1]
+      });
     }
   }
-  return entries.slice(-limit).reverse();
+  const all = [...structured, ...migrated];
+  return all.slice(-limit).reverse();
 }
 function renderTeamSnapshot(snapshot) {
   const { roles, knowledgeLimit, malformedTelemetryLines, malformedTelemetryFiles } = snapshot;
@@ -48138,7 +48230,8 @@ function renderTeamSnapshot(snapshot) {
           lines.push("    (no entries)");
         } else {
           for (const entry of role.knowledge) {
-            lines.push(`    - ${entry}`);
+            const provenance = entry.source_ref != null ? ` [${entry.source_ref}]` : "";
+            lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
           }
         }
       }
