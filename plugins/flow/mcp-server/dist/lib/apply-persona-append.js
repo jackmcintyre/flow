@@ -35,6 +35,7 @@
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { ulid } from "ulid";
 import { stringify as yamlStringify } from "yaml";
 import { writeManagedFile } from "./managed-fs.js";
 import { parsePersonaFile } from "./persona-file.js";
@@ -123,16 +124,52 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
     return `---\n${yamlBlock}\n---\n\n${sections.join("\n")}`;
 }
 /**
- * Append a lesson bullet to a Knowledge section body. If the body is empty,
- * the result is `- <lesson>`; if non-empty, the bullet is appended on a new
- * line.
+ * Serialise a `StructuredLesson` as an inline HTML comment block so the
+ * Knowledge section stays human-readable while the structured data is
+ * unambiguously machine-parseable by `extractKnowledgeEntries`.
+ *
+ * Format:
+ *   <!-- lesson:json {"id":"...","kind":"...","applies_when":"...","detail":"...",...} -->
+ *
+ * Only fields with defined values are included in the JSON object.
  */
-function appendKnowledgeBullet(existingBody, lesson) {
-    const bullet = `- ${lesson}`;
-    if (existingBody.trim() === "") {
-        return bullet;
+function serialiseStructuredLesson(lesson) {
+    // Build a minimal JSON object — omit undefined optional fields.
+    // use_count and last_used_at are included so the parser can read them back
+    // for LRU ranking (Story native:01KT6QSW4W7SMAHAT4EAKCCC65).
+    const obj = {
+        id: lesson.id,
+        kind: lesson.kind,
+        applies_when: lesson.applies_when,
+        detail: lesson.detail,
+        learned_at: lesson.learned_at,
+        use_count: 0,
+        last_used_at: null,
+    };
+    if (lesson.failure_class !== undefined) {
+        obj["failure_class"] = lesson.failure_class;
     }
-    return `${existingBody}\n${bullet}`;
+    if (lesson.source_ref !== undefined) {
+        obj["source_ref"] = lesson.source_ref;
+    }
+    if (lesson.source_pr !== undefined) {
+        obj["source_pr"] = lesson.source_pr;
+    }
+    return `<!-- lesson:json ${JSON.stringify(obj)} -->`;
+}
+/**
+ * Append a structured lesson block to a Knowledge section body.
+ * If the body is empty, the result is the serialised block; if non-empty,
+ * the block is appended after a newline.
+ *
+ * Exported for unit testing.
+ */
+export function appendStructuredLesson(existingBody, lesson) {
+    const block = serialiseStructuredLesson(lesson);
+    if (existingBody.trim() === "") {
+        return block;
+    }
+    return `${existingBody}\n${block}`;
 }
 /**
  * Construct the `persona-append`-kind apply handler. The production registry
@@ -154,7 +191,9 @@ export function makePersonaAppendHandler() {
                 return lines.join("\n") + "\n";
             }
             lines.push(`Would append to ## Knowledge section of ${relPath}:`);
-            lines.push(`+   - ${proposal.lesson}`);
+            const kind = proposal.kind ?? "pattern";
+            const appliesWhen = proposal.applies_when ?? proposal.lesson;
+            lines.push(`+   <!-- lesson:json kind=${kind}, applies_when="${appliesWhen}" -->`);
             return lines.join("\n") + "\n";
         },
         async apply(proposal, ctx) {
@@ -170,8 +209,25 @@ export function makePersonaAppendHandler() {
             }
             // Parse to validate + extract sections.
             const parsed = parsePersonaFile(raw, relPath);
-            // Append the new bullet to the Knowledge body.
-            const newKnowledgeBody = appendKnowledgeBullet(parsed.sections.Knowledge, proposal.lesson);
+            // Build a StructuredLesson from the proposal fields.
+            // kind and applies_when are optional on the proposal (backward compat with
+            // proposals authored before Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4);
+            // fall back to "pattern" / lesson text when absent.
+            const structuredLesson = {
+                id: ulid(),
+                kind: proposal.kind ?? "pattern",
+                applies_when: proposal.applies_when ?? proposal.lesson,
+                detail: proposal.lesson,
+                learned_at: proposal.created_at,
+                ...(proposal.failure_class !== undefined
+                    ? { failure_class: proposal.failure_class }
+                    : {}),
+                ...(proposal.source_ref !== undefined
+                    ? { source_ref: proposal.source_ref }
+                    : {}),
+            };
+            // Append the structured lesson block to the Knowledge body.
+            const newKnowledgeBody = appendStructuredLesson(parsed.sections.Knowledge, structuredLesson);
             // Reconstruct the canonical file with the new Knowledge body.
             const newContents = reconstructPersonaFile(parsed, newKnowledgeBody);
             await writeManagedFile({

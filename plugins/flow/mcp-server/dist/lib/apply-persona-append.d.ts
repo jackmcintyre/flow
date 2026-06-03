@@ -34,6 +34,15 @@
  * (Story 6.9 — persona-knowledge write-back keystone)
  */
 import type { ProposalApplyHandler } from "./proposal-apply-registry.js";
+import type { StructuredLesson } from "../schemas/story-retro.js";
+/**
+ * Append a structured lesson block to a Knowledge section body.
+ * If the body is empty, the result is the serialised block; if non-empty,
+ * the block is appended after a newline.
+ *
+ * Exported for unit testing.
+ */
+export declare function appendStructuredLesson(existingBody: string, lesson: StructuredLesson): string;
 /**
  * Construct the `persona-append`-kind apply handler. The production registry
  * calls this with no args; seams are injectable for tests.

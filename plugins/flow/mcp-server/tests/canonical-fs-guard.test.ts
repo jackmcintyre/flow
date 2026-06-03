@@ -126,6 +126,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // production retro-analyst routes its single write through writeRetroProposal
   // (writeManagedFile with MCP tool context) and performs no raw fs writes.
   path.join(SRC_DIR, "tools", "__tests__", "retro-persona-append-proposals.test.ts"),
+  // Story native:01KT6QSW4W7SMAHAT4EAKCCC65: lesson-archive tests seed an existing
+  // archive JSON file directly to tmpdir via raw fs.writeFile/mkdir to drive the
+  // idempotency and read-path assertions. Test file only; the production
+  // appendArchivedLessons routes its write through atomicWriteFile (managed-fs).
+  path.join(SRC_DIR, "lib", "lesson-archive.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

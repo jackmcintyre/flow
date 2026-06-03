@@ -246,7 +246,7 @@ describe("AC3(a) — hired team + seeded telemetry (Task 7.3)", () => {
     }
   });
 
-  it("(v) planner knowledge is [delta, gamma, beta] (reverse file order, last 3)", async () => {
+  it("(v) planner knowledge is [delta, gamma, beta] (reverse file order, last 3) — migrated as pattern entries", async () => {
     const snapshot = await getTeamSnapshot({
       targetRepoRoot: TMP_A,
       knowledgeLimit: 3,
@@ -254,7 +254,12 @@ describe("AC3(a) — hired team + seeded telemetry (Task 7.3)", () => {
     const planner = snapshot.roles.find((r) => r.role === "planner");
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
-      expect(planner.knowledge).toEqual(["delta", "gamma", "beta"]);
+      // Flat bullets are migrated to KnowledgeEntry with kind="pattern".
+      expect(planner.knowledge).toEqual([
+        { kind: "pattern", applies_when: "delta", detail: "delta" },
+        { kind: "pattern", applies_when: "gamma", detail: "gamma" },
+        { kind: "pattern", applies_when: "beta", detail: "beta" },
+      ]);
     }
   });
 
@@ -362,9 +367,9 @@ describe("AC3(a) — renderer byte-identical output (Task 7.5)", () => {
       `  domain:      ${domains["planner"]}`,
       "  fire count:  1",
       "  knowledge (last 3):",
-      "    - delta",
-      "    - gamma",
-      "    - beta",
+      "    - pattern | delta",
+      "    - pattern | gamma",
+      "    - pattern | beta",
       "",
       "retro-analyst",
       `  domain:      ${domains["retro-analyst"]}`,
@@ -637,8 +642,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
       expect(toolNames).toContain(name);
     }
 
-    // Thirty-eight total — Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10); Story 3.5 added validatePlannerBacklog (11); Story 3.6 added markWithdrawn (12) and readBacklogInventory (13); Story 4.1 added claimStory (14) and completeStory (15); Story 4.2 added mintSessionUlid (16), listClaimableTodos (17), buildPersonaSpawnPrompt (18); Story 4.3 added runDevSession (19); Story 4.3b replaced runDevSession with claimNextStory (19), processDevTranscript (20), processReviewerTranscript (21); Story 4.4 added runDevTerminalAction (22); Story 4.6 added runReviewerSession (23); Story 4.6b added postReviewerComments (24); Story 4.8 added applyReviewerLabels (25); Story 4.12 added recordAgentInvoke (26) and recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31); Story 1.13 added createSmokeScratchRepo (32); Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38). De-cruft 2026-05-30: removed recordAgentInvoke (26) + recordPrCloseAction (27) (unwired dead code) = 36 total. Story 6.4 added acceptProposal = 37 total. Story 9.1 added markStoryReady = 38 total. Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel) = 40 total. Story 9.4 added adjudicateQualityLead (Quality Lead) = 41 total. Story 9.5 added getBacklogDashboard (backlog dashboard) = 42 total. Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry) = 44 total. Story 10.5 added bmadToNativeIngest (BMad → native ingest seam) = 45 total. FU2 added resolveLensRoles (deterministic lens→role binding) = 46 total. FU7 added recordAgentFriction (agent friction signal) = 47 total. Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary) = 48 total. Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture) = 49 total.
-    expect(result.tools.length).toBe(49);
+    // Thirty-eight total — Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10); Story 3.5 added validatePlannerBacklog (11); Story 3.6 added markWithdrawn (12) and readBacklogInventory (13); Story 4.1 added claimStory (14) and completeStory (15); Story 4.2 added mintSessionUlid (16), listClaimableTodos (17), buildPersonaSpawnPrompt (18); Story 4.3 added runDevSession (19); Story 4.3b replaced runDevSession with claimNextStory (19), processDevTranscript (20), processReviewerTranscript (21); Story 4.4 added runDevTerminalAction (22); Story 4.6 added runReviewerSession (23); Story 4.6b added postReviewerComments (24); Story 4.8 added applyReviewerLabels (25); Story 4.12 added recordAgentInvoke (26) and recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31); Story 1.13 added createSmokeScratchRepo (32); Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38). De-cruft 2026-05-30: removed recordAgentInvoke (26) + recordPrCloseAction (27) (unwired dead code) = 36 total. Story 6.4 added acceptProposal = 37 total. Story 9.1 added markStoryReady = 38 total. Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel) = 40 total. Story 9.4 added adjudicateQualityLead (Quality Lead) = 41 total. Story 9.5 added getBacklogDashboard (backlog dashboard) = 42 total. Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry) = 44 total. Story 10.5 added bmadToNativeIngest (BMad → native ingest seam) = 45 total. FU2 added resolveLensRoles (deterministic lens→role binding) = 46 total. FU7 added recordAgentFriction (agent friction signal) = 47 total. Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary) = 48 total. Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture) = 49 total. Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall) = 50 total.
+    expect(result.tools.length).toBe(50);
 
     await client.close();
     await server.close();
@@ -683,12 +688,16 @@ describe("AC3(g) — reverse-order knowledge regression (Task 7.11)", () => {
     const planner = snapshot.roles.find((r) => r.role === "planner");
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
-      // Correct: reverse file order, last 3.
-      expect(planner.knowledge).toEqual(["delta", "gamma", "beta"]);
-      // Wrong: alphabetical order.
-      expect(planner.knowledge).not.toEqual(["alpha", "beta", "delta"]);
+      // Correct: reverse file order, last 3 — migrated flat bullets as pattern entries.
+      expect(planner.knowledge).toEqual([
+        { kind: "pattern", applies_when: "delta", detail: "delta" },
+        { kind: "pattern", applies_when: "gamma", detail: "gamma" },
+        { kind: "pattern", applies_when: "beta", detail: "beta" },
+      ]);
+      // Wrong: alphabetical order (the applies_when values would be sorted).
+      expect(planner.knowledge.map((e) => e.applies_when)).not.toEqual(["alpha", "beta", "delta"]);
       // Wrong: first-N file order.
-      expect(planner.knowledge).not.toEqual(["alpha", "beta", "gamma"]);
+      expect(planner.knowledge.map((e) => e.applies_when)).not.toEqual(["alpha", "beta", "gamma"]);
     }
   });
 });
@@ -777,20 +786,25 @@ describe("AC3(j) — knowledge entry stripping (Task 7.14)", () => {
     expect(planner?.state).toBe("ok");
     if (planner?.state === "ok") {
       // Four top-level entries, reverse file order (limit=10 → no truncation).
+      // Flat bullets are migrated to KnowledgeEntry with kind="pattern".
       expect(planner.knowledge).toEqual([
-        "trailing-whitespace-entry",
-        "entry with sub-bullet",
-        "entry with continuation",
-        "entry-with-leading-spaces",
+        { kind: "pattern", applies_when: "trailing-whitespace-entry", detail: "trailing-whitespace-entry" },
+        { kind: "pattern", applies_when: "entry with sub-bullet", detail: "entry with sub-bullet" },
+        { kind: "pattern", applies_when: "entry with continuation", detail: "entry with continuation" },
+        { kind: "pattern", applies_when: "entry-with-leading-spaces", detail: "entry-with-leading-spaces" },
       ]);
     }
   });
 
-  it("extractKnowledgeEntries strips leading/trailing whitespace from bullet text", () => {
+  it("extractKnowledgeEntries strips leading/trailing whitespace from bullet text (migrated to pattern entries)", () => {
     const body = "-   padded   \n- normal\n  continuation\n- last";
     const result = extractKnowledgeEntries(body, 10);
-    // All three top-level bullets, reverse order.
-    expect(result).toEqual(["last", "normal", "padded"]);
+    // All three top-level bullets, reverse order — migrated as pattern KnowledgeEntry objects.
+    expect(result).toEqual([
+      { kind: "pattern", applies_when: "last", detail: "last" },
+      { kind: "pattern", applies_when: "normal", detail: "normal" },
+      { kind: "pattern", applies_when: "padded", detail: "padded" },
+    ]);
   });
 });
 

@@ -11,7 +11,7 @@
  *  - The MCP handler returns the rendered text (not JSON) so the skill body
  *    can print verbatim per Task 5.6 step 3.
  */
-import { type TeamSnapshot } from "../schemas/team-snapshot.js";
+import { type KnowledgeEntry, type TeamSnapshot } from "../schemas/team-snapshot.js";
 export interface GetTeamSnapshotOptions {
     targetRepoRoot: string;
     /** Defaults to 3 per FR108 ("recent persona-knowledge entries"). */
@@ -34,17 +34,27 @@ export interface GetTeamSnapshotOptions {
  */
 export declare function getTeamSnapshot(opts: GetTeamSnapshotOptions): Promise<TeamSnapshot>;
 /**
- * Extract top-level Markdown bullet entries from the `## Knowledge` body.
+ * Extract structured knowledge entries from the `## Knowledge` body.
  *
- * Rules (per AC specification / Task 4.4):
- *  - Only lines matching `/^-\s+(.+?)\s*$/` (top-level `^- `) are entries.
- *  - Indented bullets and continuation lines are skipped.
- *  - The leading `- ` and surrounding whitespace are stripped (capture group 1).
- *  - Returns the last `limit` entries in reverse file order (most-recent first).
+ * Two-pass algorithm (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4):
+ *
+ *  Pass 1 — structured blocks:
+ *    Lines matching `<!-- lesson:json {...} -->` are parsed as JSON. If
+ *    valid, they are included as `KnowledgeEntry` objects. Invalid JSON
+ *    is silently skipped (best-effort migration safety).
+ *
+ *  Pass 2 — flat-bullet migration:
+ *    Lines matching `/^-\s+(.+?)\s*$/` that are NOT lesson blocks are
+ *    migrated to `KnowledgeEntry` with `kind: "pattern"` and
+ *    `applies_when` equal to the bullet text (provenance unknown).
+ *
+ *  Order: structured entries are collected first (in file order), then
+ *  flat-bullet migrations. All entries are then taken as `slice(-limit)`
+ *  reversed (bottom-most = most recently appended = shown first).
  *
  * Exported for unit testing.
  */
-export declare function extractKnowledgeEntries(knowledgeBody: string, limit: number): string[];
+export declare function extractKnowledgeEntries(knowledgeBody: string, limit: number): KnowledgeEntry[];
 /**
  * Pure formatter — no IO, no clock. Produces the operator-facing text block
  * per AC1's deterministic shape. Returns a string with NO trailing newline.

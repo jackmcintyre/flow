@@ -122,29 +122,87 @@ export async function getTeamSnapshot(opts) {
     });
 }
 /**
- * Extract top-level Markdown bullet entries from the `## Knowledge` body.
+ * Sentinel prefix for structured lesson blocks embedded in the Knowledge section.
  *
- * Rules (per AC specification / Task 4.4):
- *  - Only lines matching `/^-\s+(.+?)\s*$/` (top-level `^- `) are entries.
- *  - Indented bullets and continuation lines are skipped.
- *  - The leading `- ` and surrounding whitespace are stripped (capture group 1).
- *  - Returns the last `limit` entries in reverse file order (most-recent first).
+ * Each structured lesson is serialised as:
+ *   <!-- lesson:json {"id":"...","kind":"...","applies_when":"...","detail":"...","failure_class":"...","source_ref":"...","source_pr":"...","learned_at":"..."} -->
+ *
+ * The comment wrapper keeps the file human-readable while being unambiguously
+ * distinguishable from legacy flat `- bullet` entries during migration parsing.
+ */
+const LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+const LESSON_BLOCK_SUFFIX = " -->";
+/**
+ * Extract structured knowledge entries from the `## Knowledge` body.
+ *
+ * Two-pass algorithm (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4):
+ *
+ *  Pass 1 — structured blocks:
+ *    Lines matching `<!-- lesson:json {...} -->` are parsed as JSON. If
+ *    valid, they are included as `KnowledgeEntry` objects. Invalid JSON
+ *    is silently skipped (best-effort migration safety).
+ *
+ *  Pass 2 — flat-bullet migration:
+ *    Lines matching `/^-\s+(.+?)\s*$/` that are NOT lesson blocks are
+ *    migrated to `KnowledgeEntry` with `kind: "pattern"` and
+ *    `applies_when` equal to the bullet text (provenance unknown).
+ *
+ *  Order: structured entries are collected first (in file order), then
+ *  flat-bullet migrations. All entries are then taken as `slice(-limit)`
+ *  reversed (bottom-most = most recently appended = shown first).
  *
  * Exported for unit testing.
  */
 export function extractKnowledgeEntries(knowledgeBody, limit) {
-    const entries = [];
+    const structured = [];
+    const migrated = [];
     for (const line of knowledgeBody.split("\n")) {
-        // Top-level bullet: must start at column 0 with `- ` (no leading whitespace).
-        // Capture the trimmed content after `- `.
+        const trimmed = line.trimStart();
+        // Structured lesson block: <!-- lesson:json {...} -->
+        if (trimmed.startsWith(LESSON_BLOCK_PREFIX) &&
+            trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+            const jsonStr = trimmed
+                .slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length)
+                .trim();
+            try {
+                const raw = JSON.parse(jsonStr);
+                if (raw !== null &&
+                    typeof raw === "object" &&
+                    "kind" in raw &&
+                    "applies_when" in raw &&
+                    "detail" in raw) {
+                    const obj = raw;
+                    const entry = {
+                        kind: obj["kind"],
+                        applies_when: String(obj["applies_when"]),
+                        detail: String(obj["detail"]),
+                        ...(typeof obj["source_ref"] === "string" && obj["source_ref"].length > 0
+                            ? { source_ref: obj["source_ref"] }
+                            : {}),
+                    };
+                    structured.push(entry);
+                }
+            }
+            catch {
+                // Invalid JSON in lesson block — skip silently (best-effort).
+            }
+            continue;
+        }
+        // Flat-bullet migration: top-level `- text` lines.
         const match = /^-\s+(.+?)\s*$/.exec(line);
         if (match) {
-            entries.push(match[1]);
+            migrated.push({
+                kind: "pattern",
+                applies_when: match[1],
+                detail: match[1],
+            });
         }
         // All other lines (blank, indented, continuation) are skipped.
     }
-    // Last `limit` entries, reversed (bottom-most first = most-recently-appended).
-    return entries.slice(-limit).reverse();
+    // Combine structured (first) then flat-migrated, take last `limit` in file order,
+    // then reverse so bottom-most (most-recently-appended) is first.
+    const all = [...structured, ...migrated];
+    return all.slice(-limit).reverse();
 }
 /**
  * Pure formatter — no IO, no clock. Produces the operator-facing text block
@@ -179,7 +237,9 @@ export function renderTeamSnapshot(snapshot) {
                 }
                 else {
                     for (const entry of role.knowledge) {
-                        lines.push(`    - ${entry}`);
+                        // Format: `kind | applies_when [source_ref]`
+                        const provenance = entry.source_ref != null ? ` [${entry.source_ref}]` : "";
+                        lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
                     }
                 }
             }

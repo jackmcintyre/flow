@@ -230,14 +230,21 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
  * `persona-append` — append a durable lesson to a hired role's Knowledge section.
  *
  * When applied via the `/accept-proposal` gate, the handler reads the role's
- * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a new
- * bullet to the `## Knowledge` section, and re-serialises the full file.
+ * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a
+ * structured lesson block to the `## Knowledge` section, and re-serialises
+ * the full file.
  *
  * `target_role` reuses `RolePathSchema` (kebab-cased role name matching the
- * catalogue convention). `lesson` is the verbatim text of the bullet to append
- * (the handler prepends `- `).
+ * catalogue convention). `lesson` is the verbatim lesson text.
+ *
+ * Optional structured fields (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4):
+ *  - `kind`         — lesson kind from LESSON_KINDS; defaults to "pattern" when absent.
+ *  - `applies_when` — short summary for /flow:team display; defaults to `lesson` text.
+ *  - `failure_class`— required when kind is "pitfall" (mirrors LessonSchema contract).
+ *  - `source_ref`   — optional story ref provenance.
  *
  * (Story 6.9 — persona-knowledge write-back keystone)
+ * (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4 — structured lesson storage)
  */
 export declare const PersonaAppendProposalSchema: z.ZodObject<{
     id: z.ZodString;
@@ -251,6 +258,15 @@ export declare const PersonaAppendProposalSchema: z.ZodObject<{
     type: z.ZodLiteral<"persona-append">;
     target_role: z.ZodString;
     lesson: z.ZodString;
+    kind: z.ZodOptional<z.ZodEnum<{
+        discipline: "discipline";
+        pattern: "pattern";
+        pitfall: "pitfall";
+        "tool-quirk": "tool-quirk";
+    }>>;
+    applies_when: z.ZodOptional<z.ZodString>;
+    failure_class: z.ZodOptional<z.ZodString>;
+    source_ref: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 /**
  * The closed set of eight proposal-type literals. Exported as a tuple so
@@ -384,6 +400,15 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"persona-append">;
     target_role: z.ZodString;
     lesson: z.ZodString;
+    kind: z.ZodOptional<z.ZodEnum<{
+        discipline: "discipline";
+        pattern: "pattern";
+        pitfall: "pitfall";
+        "tool-quirk": "tool-quirk";
+    }>>;
+    applies_when: z.ZodOptional<z.ZodString>;
+    failure_class: z.ZodOptional<z.ZodString>;
+    source_ref: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
 /**
@@ -527,6 +552,15 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         type: z.ZodLiteral<"persona-append">;
         target_role: z.ZodString;
         lesson: z.ZodString;
+        kind: z.ZodOptional<z.ZodEnum<{
+            discipline: "discipline";
+            pattern: "pattern";
+            pitfall: "pitfall";
+            "tool-quirk": "tool-quirk";
+        }>>;
+        applies_when: z.ZodOptional<z.ZodString>;
+        failure_class: z.ZodOptional<z.ZodString>;
+        source_ref: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "type">>;
 }, z.core.$strict>;
 export type RetroProposalFile = z.infer<typeof RetroProposalFileSchema>;
