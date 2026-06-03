@@ -53,6 +53,7 @@ export declare const RiskTierClassifierResultSchema: z.ZodObject<{
  * Consumed by `read-reviewer-result-file.ts` (Task 6).
  */
 export declare const RiskTierBlockSchema: z.ZodObject<{
+    matched_rule: z.ZodString;
     evidence: z.ZodObject<{
         paths: z.ZodArray<z.ZodString>;
         change_types: z.ZodArray<z.ZodEnum<{
@@ -68,7 +69,6 @@ export declare const RiskTierBlockSchema: z.ZodObject<{
         low: "low";
         medium: "medium";
     }>;
-    matched_rule: z.ZodString;
 }, z.core.$strict>;
 export type RiskTierClassifierResult = z.infer<typeof RiskTierClassifierResultSchema>;
 export type RiskTierBlock = z.infer<typeof RiskTierBlockSchema>;

@@ -407,6 +407,35 @@ export declare const AgentFrictionEventSchema: z.ZodObject<{
         observed: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `cycle.opened` — emitted by `openCycle` (Story native:01KT484NY4HCBPBTT6VEY1Q0CS)
+ * each time the operator opens a new work cycle. Exactly ONE event per open.
+ *
+ * - `cycle_ulid`        — the freshly-minted cycle identifier now active.
+ * - `prior_cycle_ulid`  — the cycle that was active immediately before this open,
+ *                         or `null` on the very first open (no prior cycle).
+ * - `archived`          — `true` iff a prior cycle's record was written to the
+ *                         cycle-archive before the window reset; `false` on the
+ *                         first open (nothing to archive).
+ *
+ * No body/diff/contents strings (NFR14) — only surfacing fields. The envelope
+ * `story_id` is intentionally NOT used here (a cycle is not a story); consumers
+ * join on `data.cycle_ulid`.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export declare const CycleOpenedEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"cycle.opened">;
+    data: z.ZodObject<{
+        cycle_ulid: z.ZodString;
+        prior_cycle_ulid: z.ZodNullable<z.ZodString>;
+        archived: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -595,6 +624,17 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         }>;
         expected: z.ZodString;
         observed: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"cycle.opened">;
+    data: z.ZodObject<{
+        cycle_ulid: z.ZodString;
+        prior_cycle_ulid: z.ZodNullable<z.ZodString>;
+        archived: z.ZodBoolean;
     }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

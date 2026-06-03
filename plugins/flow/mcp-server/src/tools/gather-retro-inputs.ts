@@ -19,15 +19,23 @@
  *     `parseExecutionManifest`. A malformed manifest propagates as
  *     `MalformedExecutionManifestError` (NOT swallowed) — a corrupt done/
  *     manifest is a hard stop, not a skippable line. `.snapshot.yaml`
- *     sidecars (Story 5.29) are excluded.
+ *     sidecars (Story 5.29) are excluded. When a work cycle is open (the
+ *     `.flow/cycle-state.json` file is present), this is scoped to manifests
+ *     completed at or after the cycle's `opened_at` instant — a manifest's
+ *     completion time is its file mtime (the done/ manifest is written by
+ *     `completeStory` at completion). Story native:01KT484NY4HCBPBTT6VEY1Q0CS.
  *
  *   - `telemetrySummary`: every event from `<targetRepoRoot>/.flow/telemetry/*.jsonl`
- *     in the **current cycle window** (v1: every `.jsonl` file present at
- *     gather time — cycle boundaries land in Story 6.12), parsed line-by-line
- *     through `TelemetryEventSchema`. Malformed lines (bad JSON or failed Zod)
- *     are skipped, COUNTED, and the count is returned as `skipped_count` so
- *     the analyst can flag corrupt logs without the run crashing. Files are
- *     read in alphabetical order; events preserve in-file line order.
+ *     in the **current cycle window**, parsed line-by-line through
+ *     `TelemetryEventSchema`. When a cycle is open, events are scoped to those
+ *     whose `ts` is at or after the cycle's `opened_at`; when no cycle has ever
+ *     been opened, every `.jsonl` event present at gather time is included
+ *     (the existing baseline). Malformed lines (bad JSON or failed Zod) are
+ *     skipped, COUNTED, and the count is returned as `skipped_count` so the
+ *     analyst can flag corrupt logs without the run crashing. Files are read in
+ *     alphabetical order; events preserve in-file line order. Story
+ *     native:01KT484NY4HCBPBTT6VEY1Q0CS (the cycle-boundary work deferred by
+ *     Story 6.12).
  *
  *   - `priorProposals`: `{ path, iso_timestamp }` for every existing
  *     `<targetRepoRoot>/.flow/retro-proposals/*.md`, sorted by ISO timestamp
@@ -48,6 +56,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
+import { readCycleState, type CycleState } from "../schemas/cycle-state.js";
 import {
   parseExecutionManifest,
   type ExecutionManifest,
@@ -130,6 +139,15 @@ export interface GatherRetroInputsOptions {
    * defaults (promotionThreshold=3, retirementWindows=5, relaxFloor=1).
    */
   fireCountConfig?: FireCountConfig;
+  /**
+   * Optional cycle-state override (Story native:01KT484NY4HCBPBTT6VEY1Q0CS).
+   *
+   * Test seam. When omitted, the tool reads `.flow/cycle-state.json` itself
+   * (production path). Pass `null` to force the no-cycle baseline (full
+   * history) regardless of any file on disk, or a `CycleState` to force a
+   * specific window. Production callers (the MCP/CLI handler) never pass this.
+   */
+  cycleState?: CycleState | null;
 }
 
 /**
@@ -144,8 +162,18 @@ export async function gatherRetroInputs(
 ): Promise<RetroInputs> {
   const { targetRepoRoot, fireCountConfig } = opts;
 
-  const doneManifests = await gatherDoneManifests(targetRepoRoot);
-  const telemetrySummary = await gatherTelemetry(targetRepoRoot);
+  // Resolve the cycle window. An explicit `cycleState` (the test seam) wins;
+  // otherwise read the on-disk cycle-state file. `null` ⇒ no boundary ⇒
+  // full-history baseline (Story native:01KT484NY4HCBPBTT6VEY1Q0CS / AC4). The
+  // boundary instant is the cycle's `opened_at`, parsed once into epoch millis.
+  const cycleState =
+    opts.cycleState !== undefined
+      ? opts.cycleState
+      : await readCycleState(targetRepoRoot);
+  const windowStartMs = cycleState ? Date.parse(cycleState.opened_at) : null;
+
+  const doneManifests = await gatherDoneManifests(targetRepoRoot, windowStartMs);
+  const telemetrySummary = await gatherTelemetry(targetRepoRoot, windowStartMs);
   const priorProposals = await gatherPriorProposals(targetRepoRoot);
   const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
 
@@ -179,9 +207,18 @@ export async function gatherRetroInputs(
  * Read every `.yaml` under `.flow/state/done/` (excluding `.snapshot.yaml`
  * sidecars), in alphabetical filename order, parsed via
  * `parseExecutionManifest`. Errors propagate.
+ *
+ * When `windowStartMs` is non-null (a cycle is open), a manifest is included
+ * only when its completion time is at or after the window start. A done/
+ * manifest carries no completion timestamp field, so its completion time is the
+ * file's mtime — `completeStory` writes the manifest into `done/` at completion,
+ * so the mtime is the completion instant. Manifests completed before the cycle
+ * opened are excluded (Story native:01KT484NY4HCBPBTT6VEY1Q0CS / AC2). When
+ * `windowStartMs` is `null` (no cycle), every manifest is included (baseline).
  */
 async function gatherDoneManifests(
   targetRepoRoot: string,
+  windowStartMs: number | null,
 ): Promise<ExecutionManifest[]> {
   const doneDir = path.join(targetRepoRoot, ".flow", "state", "done");
 
@@ -204,6 +241,17 @@ async function gatherDoneManifests(
   const manifests: ExecutionManifest[] = [];
   for (const file of manifestFiles) {
     const absPath = path.join(doneDir, file);
+
+    // Cycle scoping: skip manifests completed before the window opened. The
+    // completion instant is the file mtime (see fn JSDoc). The stat precedes
+    // the read so an out-of-window manifest is not even parsed.
+    if (windowStartMs !== null) {
+      const stat = await fs.stat(absPath);
+      if (stat.mtimeMs < windowStartMs) {
+        continue;
+      }
+    }
+
     const raw = await fs.readFile(absPath, "utf8");
     const parsed = yamlParse(raw) as unknown;
     // parseExecutionManifest throws MalformedExecutionManifestError on
@@ -222,9 +270,17 @@ async function gatherDoneManifests(
  * Read every `.jsonl` under `.flow/telemetry/` in alphabetical filename
  * order; parse each non-empty line through `TelemetryEventSchema`.
  * Malformed lines (bad JSON or failed Zod) are skipped and counted.
+ *
+ * When `windowStartMs` is non-null (a cycle is open), only events whose `ts` is
+ * at or after the window start are returned; events from before the cycle
+ * opened are excluded (NOT counted as skipped — they are valid, just
+ * out-of-window). When `windowStartMs` is `null` (no cycle), every valid event
+ * is returned (the existing baseline). Story
+ * native:01KT484NY4HCBPBTT6VEY1Q0CS / AC2 + AC4.
  */
 async function gatherTelemetry(
   targetRepoRoot: string,
+  windowStartMs: number | null,
 ): Promise<{ events: TelemetryEvent[]; skipped_count: number }> {
   const telemetryDir = path.join(targetRepoRoot, ".flow", "telemetry");
 
@@ -264,6 +320,13 @@ async function gatherTelemetry(
       const result = TelemetryEventSchema.safeParse(parsed);
       if (!result.success) {
         skipped_count++;
+        continue;
+      }
+
+      // Cycle scoping: drop events timestamped before the window opened. These
+      // are valid events outside the current cycle, NOT corrupt lines, so they
+      // do not increment skipped_count.
+      if (windowStartMs !== null && Date.parse(result.data.ts) < windowStartMs) {
         continue;
       }
 

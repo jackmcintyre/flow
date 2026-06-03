@@ -6,6 +6,7 @@ import {
   StandardsDocMissingError,
 } from "../errors.js";
 import { getPluginVersion } from "../lib/plugin-version.js";
+import { readCycleState } from "../schemas/cycle-state.js";
 import {
   StatusReportSchema,
   type StatusReport,
@@ -40,11 +41,15 @@ export interface GetStatusOptions {
  *  4. Lookup standards. `StandardsDocMissingError` → `standards.state =
  *     "missing"`; `StandardsDocMalformedError` → `standards.state =
  *     "malformed"` carrying `zodMessage`. Both are downgrades, not failures.
- *  5. Validate the assembled report against `StatusReportSchema` before
+ *  5. Read the cycle-state file. When a cycle is open, report its ULID;
+ *     when absent, report `"none"` (the existing baseline — Story
+ *     native:01KT484NY4HCBPBTT6VEY1Q0CS). `StatusReportSchema.cycle` already
+ *     accepts a ULID or `"none"`, so no schema change is needed.
+ *  6. Validate the assembled report against `StatusReportSchema` before
  *     returning — defends against future field drift.
  *
- * No cache, no telemetry, no direct IO. Every read goes through an
- * existing primitive.
+ * No cache, no telemetry. The only direct IO is the cycle-state read (a single
+ * small JSON file); everything else goes through an existing primitive.
  */
 export async function getStatus(opts: GetStatusOptions): Promise<StatusReport> {
   const pluginVersion = getPluginVersion();
@@ -89,12 +94,17 @@ export async function getStatus(opts: GetStatusOptions): Promise<StatusReport> {
     }
   }
 
+  // Read the open work cycle, if any. Absence ⇒ "none" (baseline behaviour); a
+  // present cycle-state file reports its ULID. A malformed file is a hard stop —
+  // it propagates so a corrupt boundary surfaces rather than being hidden.
+  const cycleState = await readCycleState(workspace.targetRepoRoot);
+
   const report: StatusReport = {
     pluginVersion,
     targetRepoRoot: workspace.targetRepoRoot,
     adapter: adapterReport,
     standards: standardsReport,
-    cycle: "none",
+    cycle: cycleState ? cycleState.cycle_ulid : "none",
   };
 
   return StatusReportSchema.parse(report);
