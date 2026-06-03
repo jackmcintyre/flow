@@ -57,6 +57,7 @@ import { type ExecutionManifest } from "../schemas/execution-manifest.js";
 import { type TelemetryEvent } from "../schemas/telemetry-events.js";
 import { type PromotionCandidate, type RetirementCandidate, type FireCountConfig } from "../lib/failure-class-fire-counts.js";
 import { type FrictionKind } from "./record-agent-friction.js";
+import { type SkillEffectivenessResult } from "./compute-skill-effectiveness.js";
 /**
  * One entry in the `recurringFriction` array — a friction kind that recurred
  * at or above the threshold (count >= 2) within the cycle.
@@ -110,6 +111,23 @@ export interface RetroInputs {
      * Story native:01KT2RAXBSQ91Y80Z51DD26KPX.
      */
     recurringFriction: RecurringFrictionEntry[];
+    /**
+     * Deterministic per-skill effectiveness signal computed by
+     * `computeSkillEffectiveness` (Story 6.8). `per_skill` maps each skill that
+     * fired in the cycle to its `invoke_count`, `useful_fire_count`, and
+     * `effectiveness_ratio` (useful fires / invocations). A skill that fired but
+     * never preceded a `READY FOR MERGE` verdict scores `effectiveness_ratio: 0`.
+     *
+     * The helper always returns a safe shape — `per_skill` is an empty map when
+     * no `skill.invoke` telemetry exists — so the retro never fails on an absent
+     * signal. The retro-analyst MUST cite `invoke_count` and `effectiveness_ratio`
+     * from `per_skill` when drafting skill-retire or skill-revise proposals — it
+     * MUST NOT recount invocations from raw telemetry, mirroring the
+     * `fireCountSignal` and `recurringFriction` disciplines.
+     *
+     * Story native:01KT49PKTMJPJM7WMCB67TA6EY.
+     */
+    skillEffectiveness: SkillEffectivenessResult;
 }
 export interface GatherRetroInputsOptions {
     /** Absolute path to the target repository root. */
