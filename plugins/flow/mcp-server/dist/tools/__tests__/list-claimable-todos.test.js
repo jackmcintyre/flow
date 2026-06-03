@@ -177,6 +177,23 @@ describe("listClaimableTodos", () => {
         expect(bmadCandidate.shortHandle).toBe("8.18");
         expect(bmadCandidate.shortHandle).not.toBe(bmadRef);
     });
+    it("(AC2) does not double-count a mid-build story's companion snapshot file", async () => {
+        // When a story is claimed, claim-story.ts writes a `<ref>.snapshot.yaml`
+        // sidecar alongside the real `<ref>.yaml` manifest in in-progress/. The
+        // snapshot is NOT a manifest and must not be counted as an in-progress story.
+        const ref1 = "native:01HZABC0000000000000000001";
+        const ref2 = "native:01HZABC0000000000000000002";
+        const inProgressDir = path.join(tmpRoot, ".flow", "state", "in-progress");
+        // Two real manifests.
+        await writeManifest(tmpRoot, "in-progress", ref1, makeManifest(ref1, { status: "in-progress" }));
+        await writeManifest(tmpRoot, "in-progress", ref2, makeManifest(ref2, { status: "in-progress" }));
+        // A companion snapshot sidecar for each (mirrors claim-time sidecar shape).
+        await atomicWriteFile(path.join(inProgressDir, `${ref1}.snapshot.yaml`), yamlStringify({ source_hash: "a".repeat(64) }, { lineWidth: 0 }));
+        await atomicWriteFile(path.join(inProgressDir, `${ref2}.snapshot.yaml`), yamlStringify({ source_hash: "a".repeat(64) }, { lineWidth: 0 }));
+        const result = await listClaimableTodos({ targetRepoRoot: tmpRoot });
+        // Two manifests + two snapshots on disk, but the count must be 2 — not 4.
+        expect(result.inProgressCount).toBe(2);
+    });
     it("does not include in-progress manifests in todos", async () => {
         const ref = "native:01HZABC0000000000000000001";
         // in-progress manifest has status: "in-progress", which isClaimable filters

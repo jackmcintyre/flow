@@ -149,7 +149,12 @@ export async function readBacklogInventory(
     }
 
     for (const filename of entries) {
-      if (!filename.endsWith(".yaml")) continue;
+      // Snapshot files (`<ref>.snapshot.yaml`, written alongside the real
+      // manifest when a story is claimed) are not execution manifests and have
+      // no top-level `ref` field, so feeding them to `parseExecutionManifest`
+      // throws `MalformedExecutionManifestError` and crashes the board. Exclude
+      // them here so only real manifests are parsed.
+      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
 
       const absPath = path.join(stateDir, filename);
       const rawText = await fs.readFile(absPath, "utf8");

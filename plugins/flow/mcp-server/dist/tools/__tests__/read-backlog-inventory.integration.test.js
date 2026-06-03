@@ -235,6 +235,33 @@ describe("readBacklogInventory (8) — Story 10.6 cutover: native reads ULID ref
     });
 });
 // ---------------------------------------------------------------------------
+// (AC1, this story) — a mid-build story's claim-time `<ref>.snapshot.yaml`
+// sidecar must NOT be parsed as a manifest. The sidecar has no top-level `ref`
+// field, so feeding it to `parseExecutionManifest` threw
+// MalformedExecutionManifestError and crashed the board. With the snapshot
+// excluded, the board renders, the mid-build story appears exactly once, and
+// the result is non-empty.
+// ---------------------------------------------------------------------------
+describe("readBacklogInventory (AC1) — mid-build snapshot sidecar does not crash the board", () => {
+    it("renders the full backlog with the mid-build story exactly once when a snapshot sidecar is present", async () => {
+        const root = await copyFixture(NATIVE_FIXTURE);
+        // The fixture has native:...002 in in-progress/. Drop a claim-time snapshot
+        // sidecar alongside it, mirroring what claim-story.ts writes on claim.
+        const inProgressRef = "native:01HZABC0000000000000000002";
+        const snapshotPath = path.join(root, ".flow", "state", "in-progress", `${inProgressRef}.snapshot.yaml`);
+        await atomicWriteFile(snapshotPath, yamlStringify({ source_hash: "a".repeat(64) }, { lineWidth: 0 }));
+        // Must not throw (pre-fix this raised MalformedExecutionManifestError).
+        const result = await readBacklogInventory({ targetRepoRoot: root });
+        // Board is rendered and non-empty.
+        expect(result.backlog_inventory.length).toBeGreaterThan(0);
+        // The mid-build story appears exactly once — the snapshot did not become a
+        // phantom second entry.
+        const matches = result.backlog_inventory.filter((e) => e.ref === inProgressRef);
+        expect(matches).toHaveLength(1);
+        expect(matches[0]?.state).toBe("in-progress");
+    });
+});
+// ---------------------------------------------------------------------------
 // (9) gate-1 spec-feed fix — `includeSpecText` enriches entries with the real
 // source markdown + persisted risk tier, and `ref` returns a single entry.
 // Without this the gate-1 judge workflow fed the lens judges an empty spec.

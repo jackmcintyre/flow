@@ -100,7 +100,10 @@ export async function listClaimableTodos(opts) {
     let inProgressCount = 0;
     try {
         const inProgressEntries = await fs.readdir(inProgressDir);
-        inProgressCount = inProgressEntries.filter((f) => f.endsWith(".yaml")).length;
+        // Exclude `<ref>.snapshot.yaml` companion files (written alongside the real
+        // manifest when a story is claimed) — they are not manifests, so counting
+        // them would double the reported in-progress count.
+        inProgressCount = inProgressEntries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).length;
     }
     catch (err) {
         if (!isEnoent(err)) {
