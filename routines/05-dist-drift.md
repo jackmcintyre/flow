@@ -9,8 +9,8 @@ model: claude-sonnet-4-6
 # dist/src drift guard
 
 Catches the exact CI failure CLAUDE.md warns about: someone edits
-`plugins/crew/mcp-server/src/` and forgets to rebuild and commit
-`plugins/crew/mcp-server/dist/`. CI catches it too, but this routine
+`plugins/flow/mcp-server/src/` and forgets to rebuild and commit
+`plugins/flow/mcp-server/dist/`. CI catches it too, but this routine
 catches it overnight so it doesn't block a teammate's PR.
 
 ---
@@ -30,20 +30,20 @@ build output exactly. Report if they drift.
 
 ## Steps
 
-1. **Install dependencies.** From `plugins/crew/` (the pnpm workspace
+1. **Install dependencies.** From `plugins/flow/` (the pnpm workspace
    root — there is no workspace at the repo root), run
    `pnpm install --frozen-lockfile`. If install fails, **open an issue**
    noting the failure — don't try to recover.
 
 2. **Capture the committed `dist/`.** Copy
-   `plugins/crew/mcp-server/dist/` to `/tmp/dist-committed/` so you can
+   `plugins/flow/mcp-server/dist/` to `/tmp/dist-committed/` so you can
    diff against it after rebuilding.
 
-3. **Build.** From `plugins/crew/`, run
-   `pnpm --filter @crew/mcp-server build`. If the build fails, **open
+3. **Build.** From `plugins/flow/`, run
+   `pnpm --filter @flow/mcp-server build`. If the build fails, **open
    an issue** with the build output and stop here.
 
-4. **Diff.** Compare the freshly built `plugins/crew/mcp-server/dist/`
+4. **Diff.** Compare the freshly built `plugins/flow/mcp-server/dist/`
    against `/tmp/dist-committed/`. Use `diff -r` for a recursive diff.
    Ignore timestamp-only or source-map-only differences if they are
    obviously not content changes (e.g., line numbers in `.js.map` files
@@ -82,11 +82,11 @@ build output exactly. Report if they drift.
 ## To fix locally
 
 ```bash
-cd plugins/crew
+cd plugins/flow
 pnpm install --frozen-lockfile
-pnpm --filter @crew/mcp-server build
+pnpm --filter @flow/mcp-server build
 cd ../..
-git add plugins/crew/mcp-server/dist
+git add plugins/flow/mcp-server/dist
 git commit -m "chore: rebuild mcp-server dist"
 ```
 ```

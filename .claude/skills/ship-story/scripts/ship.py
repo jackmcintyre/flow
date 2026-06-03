@@ -400,14 +400,14 @@ def _plugin_dir_hint(checkout_root: Path) -> dict:
     """Tell the operator how to load this checkout's plugin into Claude Code.
 
     Story 1.11 shipped a `pnpm dev:install` script that symlinks the worktree's
-    `plugins/crew/` into `~/.claude/plugins/cache/`. In practice that symlink
+    `plugins/flow/` into `~/.claude/plugins/cache/`. In practice that symlink
     fights Claude Code's plugin healer — the healer expects a directory-copy
     install, sees the symlink as corruption, and wipes the cache entry on
     startup. Epic 3 retro (2026-05-21) replaced the symlink approach with
     Anthropic's blessed dev workflow: `claude --plugin-dir <path>`, which
     loads the plugin for the session and survives restarts.
     """
-    plugin_path = checkout_root / "plugins" / "crew"
+    plugin_path = checkout_root / "plugins" / "flow"
     return {
         "invocation": f"claude --plugin-dir {plugin_path}",
         "plugin_dir": str(plugin_path),
