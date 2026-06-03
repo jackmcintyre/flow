@@ -46041,7 +46041,9 @@ async function listClaimableTodos(opts) {
   let inProgressCount = 0;
   try {
     const inProgressEntries = await fs20.readdir(inProgressDir);
-    inProgressCount = inProgressEntries.filter((f) => f.endsWith(".yaml")).length;
+    inProgressCount = inProgressEntries.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
+    ).length;
   } catch (err) {
     if (!isEnoent6(err)) {
       throw err;
@@ -47230,7 +47232,7 @@ async function readBacklogInventory(rawInput) {
       continue;
     }
     for (const filename of entries) {
-      if (!filename.endsWith(".yaml")) continue;
+      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
       const absPath = path31.join(stateDir, filename);
       const rawText = await fs24.readFile(absPath, "utf8");
       const parsed = (0, import_yaml19.parse)(rawText);
