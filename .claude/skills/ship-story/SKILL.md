@@ -64,11 +64,11 @@ If the process is not found (exit non-zero), do **not** halt — but pause and t
 >
 > Start it in a separate terminal:
 > ```sh
-> pnpm --dir plugins/crew/mcp-server build:watch
+> pnpm --dir plugins/flow/mcp-server build:watch
 > ```
 > Or from inside the mcp-server directory:
 > ```sh
-> cd plugins/crew/mcp-server && pnpm build:watch
+> cd plugins/flow/mcp-server && pnpm build:watch
 > ```
 > Reply **go** when it's running (or **skip** to proceed without it — fine if you're only editing SKILL.md files).
 
@@ -94,7 +94,7 @@ $SH record <story_key> resolved
 $SH worktree <story_key>
 ```
 
-Fails closed if path exists, branch exists, or origin/main can't be fetched. Returns JSON with `worktree` path, `branch`, and a `plugin_dir` block containing the exact `claude --plugin-dir <worktree>/plugins/crew` invocation the operator should use when any user-surface AC needs operator-smoke verification (Step 8.5). Epic 3 retro (2026-05-21) replaced the prior `pnpm dev:install` symlink approach — the symlink survived only the current session because Claude Code's plugin healer treats it as corruption and wipes the cache on restart. The `--plugin-dir` flag is Anthropic's blessed dev workflow ([anthropics/claude-code#17361](https://github.com/anthropics/claude-code/issues/17361), [#23819](https://github.com/anthropics/claude-code/issues/23819)) and survives restarts. All subsequent file/test/git ops happen inside the worktree.
+Fails closed if path exists, branch exists, or origin/main can't be fetched. Returns JSON with `worktree` path, `branch`, and a `plugin_dir` block containing the exact `claude --plugin-dir <worktree>/plugins/flow` invocation the operator should use when any user-surface AC needs operator-smoke verification (Step 8.5). Epic 3 retro (2026-05-21) replaced the prior `pnpm dev:install` symlink approach — the symlink survived only the current session because Claude Code's plugin healer treats it as corruption and wipes the cache on restart. The `--plugin-dir` flag is Anthropic's blessed dev workflow ([anthropics/claude-code#17361](https://github.com/anthropics/claude-code/issues/17361), [#23819](https://github.com/anthropics/claude-code/issues/23819)) and survives restarts. All subsequent file/test/git ops happen inside the worktree.
 
 ```bash
 $SH record <story_key> worktree_ready --data '{"path":"..."}'
@@ -126,15 +126,15 @@ Otherwise (the common case — no spec on disk), spawn ONE subagent with `model:
 >
 > **Behavioural contract section (user-surface stories only).** If `story_shape: user-surface`, the spec MUST include a "Behavioural contract" section listing prompt-level invariants in absolute modals (MUST / MUST NOT / NEVER). Additionally, at least one AC must be a deterministic content-structure check — e.g. "the catalogue file at path X contains substring Y" — rather than purely behavioural assertions. This is required because LLM outputs are non-deterministic; a structural anchor makes the AC verifiable without human judgment. (Epic 2 retro, #76.)
 >
-> **User-surface AC tagging (Story 1.8 convention).** Consult `plugins/crew/docs/user-surface-acs.md` for the canonical rules; the summary below is the contract. When drafting each AC, explicitly judge whether it names a user-invocable surface and emit the tag inline:
+> **User-surface AC tagging (Story 1.8 convention).** Consult `plugins/flow/docs/user-surface-acs.md` for the canonical rules; the summary below is the contract. When drafting each AC, explicitly judge whether it names a user-invocable surface and emit the tag inline:
 >
 > - Tag an AC `**AC<n> (user-surface):**` if and only if it references at least one of:
->   - (i) a slash command literal (e.g. `/crew:status`, `/ship-story`);
+>   - (i) a slash command literal (e.g. `/flow:status`, `/ship-story`);
 >   - (ii) a CLI command the operator types verbatim (e.g. `pnpm install`, `git clone`);
 >   - (iii) a file path the README/install docs instruct the user to copy or open by name;
 >   - (iv) any Claude Code UI element (TUI panel, toast, tab-complete, slash-command picker) the user is expected to observe.
 > - Otherwise tag it `**AC<n>:**` (no parenthetical).
-> - Do NOT ask the user — make the judgement yourself per the standing "no clarifying questions" rule. Where the judgement is non-obvious, add a one-line HTML comment under the AC explaining your reasoning, e.g. `<!-- user-surface: AC2 names the /crew:status slash command, rubric (i). -->`.
+> - Do NOT ask the user — make the judgement yourself per the standing "no clarifying questions" rule. Where the judgement is non-obvious, add a one-line HTML comment under the AC explaining your reasoning, e.g. `<!-- user-surface: AC2 names the /flow:status slash command, rubric (i). -->`.
 > - The numeric prefix (`AC1`, `AC2`, …) is canonical; the gate's regex is `^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`. ACs naming only internal functions, schemas, MCP tools, or implementation files are NOT `user-surface`.
 
 Verify `<worktree_path>/<spec_path>` exists. Then flip status inside the worktree and commit so the transition ships with the PR:
@@ -158,7 +158,7 @@ Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE s
 >
 > **In addition to the skill's own checks, verify that every example in the spec actually satisfies the rules it illustrates.** Examples: if the spec defines a commit-message regex AND gives a sample commit message, the sample must match the regex. If the spec defines a schema AND gives a sample event, the sample must validate. Flag any example-vs-rule contradiction as `fail` — these waste a full dev pass when the dev hits the contradiction at implementation time.
 >
-> **Also verify user-surface AC tagging.** Per `plugins/crew/docs/user-surface-acs.md`, every AC that names a slash command (e.g. `/crew:status`), a CLI invocation the operator types verbatim (e.g. `pnpm install`), a file the user is asked to copy or open by name (e.g. README install instructions), or any Claude Code UI element the user is expected to observe MUST carry the `(user-surface)` parenthetical immediately after the AC number (e.g. `**AC1 (user-surface):**`). Conversely, ACs that name only internal functions, schemas, MCP tools, or implementation files MUST NOT carry the tag. Flag any AC that appears mis-tagged as `fail` and name the AC index; the pre-PR gate uses these tags to decide which ACs need real-Claude-Code evidence before a PR opens.
+> **Also verify user-surface AC tagging.** Per `plugins/flow/docs/user-surface-acs.md`, every AC that names a slash command (e.g. `/flow:status`), a CLI invocation the operator types verbatim (e.g. `pnpm install`), a file the user is asked to copy or open by name (e.g. README install instructions), or any Claude Code UI element the user is expected to observe MUST carry the `(user-surface)` parenthetical immediately after the AC number (e.g. `**AC1 (user-surface):**`). Conversely, ACs that name only internal functions, schemas, MCP tools, or implementation files MUST NOT carry the tag. Flag any AC that appears mis-tagged as `fail` and name the AC index; the pre-PR gate uses these tags to decide which ACs need real-Claude-Code evidence before a PR opens.
 
 If verdict is `fail` → halt with `SPEC_VALIDATION_FAILED`, surface the report, and record:
 
@@ -293,11 +293,11 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
    ```
 2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, you (orchestrator) MUST set up the smoke environment for Jack — do not just ask him to "run it somewhere." The setup is small but specific:
 
-   **a. Mint a scratch target repo** with whatever `.crew/config.yaml` the AC needs. Example for `adapter: native`:
+   **a. Mint a scratch target repo** with whatever `.flow/config.yaml` the AC needs. Example for `adapter: native`:
    ```bash
-   SCRATCH=$(mktemp -d -t crew-smoke-XXXX)
-   mkdir -p "$SCRATCH/.crew"
-   printf 'adapter: native\n' > "$SCRATCH/.crew/config.yaml"
+   SCRATCH=$(mktemp -d -t flow-smoke-XXXX)
+   mkdir -p "$SCRATCH/.flow"
+   printf 'adapter: native\n' > "$SCRATCH/.flow/config.yaml"
    git -C "$SCRATCH" init -q
    # initial commit so HEAD resolves (avoids `git rev-parse failed` noise in the planner):
    git -C "$SCRATCH" commit --allow-empty -q -m 'init'
@@ -307,7 +307,7 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
    **b. Launch Claude Code against the worktree's plugin via `--plugin-dir`** — NOT via the dev-install symlink, NOT via `/plugin install`. The `--plugin-dir` flag is Anthropic's officially-blessed dev workflow (`Load a plugin from a directory or .zip for this session only`); it bypasses the marketplace cache that gets nuked on Claude Code restart. Give Jack the exact invocation:
    ```sh
    cd $SCRATCH
-   claude --plugin-dir /Users/jackmcintyre/projects/crew/.worktrees/<story_key>/plugins/crew
+   claude --plugin-dir /Users/jackmcintyre/projects/crew/.worktrees/<story_key>/plugins/flow
    ```
 
    **Do NOT recommend `pnpm dev:install` or symlink dancing here.** Story 1.11's symlink approach works once but gets deleted on every Claude Code restart by the plugin healer (it sees a symlink where it expects a directory-copy install and removes it). See `anthropics/claude-code` issues [#17361](https://github.com/anthropics/claude-code/issues/17361) and [#23819](https://github.com/anthropics/claude-code/issues/23819) for the underlying mechanism, and PR #94's retro comment for the trace.
@@ -439,7 +439,7 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    ```bash
    $SH cleanup <story_key>
    ```
-   This atomically does: verify PR is merged via `gh pr view`, **fetch + fast-forward local `main` FIRST** (so the Step 8 bookkeeping commit's `status: done` flip lands without colliding with a redundant local write — the race that surfaced cleaning up PR #122), then idempotent `status → done` (no-op verification under the post-2026-05-24 flow; write fallback for legacy stories shipped before bookkeeping commits existed), `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
+   This atomically does: verify PR is merged via `gh pr view`, **fetch + fast-forward local `main` FIRST** (so the Step 8 bookkeeping commit's `status: done` flip lands without colliding with a redundant local write — the race that surfaced cleaning up PR #122), then idempotent `status → done` (no-op verification under the post-2026-05-24 flow; write fallback for legacy stories shipped before bookkeeping commits existed), `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/flow dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
 
 3. **Report.** One line per story cleaned, plus any of the halt codes below.
 

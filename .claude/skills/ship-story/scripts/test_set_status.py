@@ -19,12 +19,12 @@ import ship  # noqa: E402
 SAMPLE = """\
 generated: 2026-05-19
 last_updated: '2026-05-30'
-project: crew
+project: flow
 development_status:
   epic-6: in-progress
   6-5b-regenerate-standards: ready-for-dev
   6-6-promotion-threshold: ready-for-dev  # waits on 6.5b merge
-  5-1-some-cancelled-story: cancelled  # /crew:start retired (#210); see SCP
+  5-1-some-cancelled-story: cancelled  # /flow:start retired (#210); see SCP
 """
 
 
@@ -40,7 +40,7 @@ def test_preserves_all_comments_and_changes_only_target(tmp_path):
     assert "  6-5b-regenerate-standards: done\n" in out
     # comments on OTHER lines survive verbatim
     assert "  6-6-promotion-threshold: ready-for-dev  # waits on 6.5b merge\n" in out
-    assert "  5-1-some-cancelled-story: cancelled  # /crew:start retired (#210); see SCP\n" in out
+    assert "  5-1-some-cancelled-story: cancelled  # /flow:start retired (#210); see SCP\n" in out
 
     today = ship.dt.date.today().isoformat()
     expected = SAMPLE.replace(
@@ -89,4 +89,4 @@ def test_cmd_set_status_end_to_end_preserves_comments(tmp_path, monkeypatch):
     out = f.read_text()
 
     assert "  6-5b-regenerate-standards: done\n" in out
-    assert "# /crew:start retired (#210); see SCP" in out
+    assert "# /flow:start retired (#210); see SCP" in out

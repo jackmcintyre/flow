@@ -3,13 +3,13 @@ coverage/
 *.log
 .DS_Store
 .sprint-orchestrator/
-.crew/
-.crew
-# Exception: the native adapter's test fixtures contain a fake `.crew/` tree
+.flow/
+.flow
+# Exception: the native adapter's test fixtures contain a fake `.flow/` tree
 # (committed test data, not a local backlog). Without this negation, `git add`
-# of a modified fixture under `.crew/` errors on the ignore rule.
-!plugins/crew/mcp-server/src/adapters/native/fixtures/**/.crew/
-!plugins/crew/mcp-server/src/adapters/native/fixtures/**/.crew/**
+# of a modified fixture under `.flow/` errors on the ignore rule.
+!plugins/flow/mcp-server/src/adapters/native/fixtures/**/.flow/
+!plugins/flow/mcp-server/src/adapters/native/fixtures/**/.flow/**
 __pycache__/
 *.pyc
 
@@ -18,8 +18,8 @@ _bmad/
 _bmad-output/
 # Exception: the BMad adapter's test fixtures contain a fake `_bmad-output/`
 # tree (committed test data, not local planning artefacts).
-!plugins/crew/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/
-!plugins/crew/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/**
+!plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/
+!plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/**
 .claude/skills/bmad-*/
 
 # ...but track the active planning artifacts (PRD, epics, architecture, etc.)

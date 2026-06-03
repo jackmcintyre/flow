@@ -37,9 +37,9 @@ docs *should* say.
 1. **Gather the docs to scan.** Read:
    - `CLAUDE.md` (top-level)
    - `README.md` (top-level)
-   - Every `*.md` file under `plugins/crew/` (recursive), including
-     `plugins/crew/docs/` and any subdirectories such as
-     `plugins/crew/docs/spikes/`.
+   - Every `*.md` file under `plugins/flow/` (recursive), including
+     `plugins/flow/docs/` and any subdirectories such as
+     `plugins/flow/docs/spikes/`.
    - `routines/README.md` and every file under `routines/`.
 
    If a path above doesn't exist, just skip it. Skip `node_modules/`,
@@ -47,7 +47,7 @@ docs *should* say.
 
 2. **For each doc, extract claims that are checkable.** Specifically:
    - **Path references.** Any string that looks like a file or directory
-     path (`plugins/crew/...`, `_bmad-output/...`, `docs/standards.md`,
+     path (`plugins/flow/...`, `_bmad-output/...`, `docs/standards.md`,
      etc.). Check `git ls-files` or filesystem to confirm it exists.
    - **Command / flag references.** Any `command --flag` or
      `/skill-name` reference. For shell commands, sanity-check by

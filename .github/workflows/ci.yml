@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "plugins/crew/**"
+      - "plugins/flow/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "plugins/crew/**"
+      - "plugins/flow/**"
       - ".github/workflows/ci.yml"
 
 permissions:
@@ -16,7 +16,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: plugins/crew
+    working-directory: plugins/flow
 
 jobs:
   build:
@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: plugins/crew/pnpm-lock.yaml
+          cache-dependency-path: plugins/flow/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Bloat gate — fail on dead files, unused exports, or unused deps (knip)
         run: pnpm knip

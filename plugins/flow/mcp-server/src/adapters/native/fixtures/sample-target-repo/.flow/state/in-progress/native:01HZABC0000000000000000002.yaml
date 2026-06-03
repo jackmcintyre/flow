@@ -1,0 +1,12 @@
+ref: "native:01HZABC0000000000000000002"
+status: to-do
+adapter: native
+source_path: .flow/native-stories/01HZABC0000000000000000002.md
+source_hash: c1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6c1b2
+depends_on: []
+acceptance_criteria:
+  - text: Given the in-progress feature is deployed, when a user accesses it, then it works.
+    kind: integration
+title: In-progress story two
+narrative: As a user, I want the in-progress feature so that I can use it.
+withdrawn: false

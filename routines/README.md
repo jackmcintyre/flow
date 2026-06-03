@@ -28,7 +28,7 @@ fixer that consumes a detector's issues and opens PRs to resolve them.
 | 1 | drift-digest      | Daily 08:30 Sydney | `drift-digest`    | Diffs merged PRs against epic acceptance criteria                                             |
 | 2 | backlog-readiness | Weekly Mon 09:30   | `backlog-ready`   | Checks the next epic is fully shaped before work starts                                       |
 | 3 | docs-freshness    | Weekly Mon 10:00   | `docs-freshness`  | Catches stale paths / claims in CLAUDE.md and top-level docs                                  |
-| 4 | platform-tracker  | Weekly Mon 10:30   | `platform-track`  | Watches Claude Code platform changes that affect crew                                         |
+| 4 | platform-tracker  | Weekly Mon 10:30   | `platform-track`  | Watches Claude Code platform changes that affect flow                                         |
 | 5 | dist-drift        | Daily 09:00 Sydney | `dist-drift`      | Catches built `dist/` drifting from `src/` overnight                                          |
 | 6 | issue-fixer-docs  | Daily 11:00 Sydney | `auto-fix` (PR)   | Picks up the oldest open `docs-freshness` issue and opens a PR fixing it (or comments if not) |
 
@@ -73,4 +73,4 @@ Today every routine targets `jackmcintyre/crew`. When the AI Engineering
 Team plugin starts being used against real downstream repos, several of
 these (especially #3 docs-freshness and #5 dist-drift) become candidates
 to fork per-target-repo. That's a future decision — for now they all
-watch crew itself.
+watch flow itself.

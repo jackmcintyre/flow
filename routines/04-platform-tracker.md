@@ -11,7 +11,7 @@ mcp_connections:
 # Claude Code platform tracker
 
 Watches Claude Code and the Claude Code plugin SDK for changes that
-could affect crew. Pulls the latest docs via Context7, diffs against a
+could affect flow. Pulls the latest docs via Context7, diffs against a
 tracked snapshot in `routines/snapshots/platform.md`, and surfaces any
 new plugin manifest fields, deprecated APIs, new MCP capabilities, or
 breaking changes.
@@ -33,7 +33,7 @@ available in your environment.
 ## Task
 
 Detect material changes in Claude Code's platform surface area since
-the last snapshot, and report ones that affect crew.
+the last snapshot, and report ones that affect flow.
 
 ## Steps
 
@@ -66,10 +66,10 @@ the last snapshot, and report ones that affect crew.
 4. **Diff.** Compare the previous snapshot (step 1) to the new one
    (step 3). Identify added, removed, and modified items. Classify
    each:
-   - **Breaking for crew** — would require a code change in
-     `plugins/crew/` to keep working.
-   - **Opportunity for crew** — new capability that could improve crew.
-   - **Informational** — change that doesn't affect crew today but is
+   - **Breaking for flow** — would require a code change in
+     `plugins/flow/` to keep working.
+   - **Opportunity for flow** — new capability that could improve flow.
+   - **Informational** — change that doesn't affect flow today but is
      worth knowing.
 
 5. **Decide whether to report.** If the snapshot is unchanged or only
@@ -89,19 +89,19 @@ the last snapshot, and report ones that affect crew.
    - **Title:** `Platform tracker — YYYY-MM-DD`
    - **Label:** `platform-track` (if the label doesn't exist, create
      it with colour `1D76DB` and description "Claude Code platform
-     changes affecting crew").
+     changes affecting flow").
    - **Body:** see structure below.
 
 ## Issue body structure
 
 ```
-## Breaking for crew
+## Breaking for flow
 
-<For each: what changed, where in the docs, what file(s) in `plugins/crew/` are affected, suggested action. Include source URL if Context7 returned one.>
+<For each: what changed, where in the docs, what file(s) in `plugins/flow/` are affected, suggested action. Include source URL if Context7 returned one.>
 
-## Opportunity for crew
+## Opportunity for flow
 
-<For each: what's new, what crew could use it for, rough effort level (small/medium/large), source URL.>
+<For each: what's new, what flow could use it for, rough effort level (small/medium/large), source URL.>
 
 ## Informational (no action)
 
