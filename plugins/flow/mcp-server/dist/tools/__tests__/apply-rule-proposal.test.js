@@ -89,6 +89,10 @@ function makeFakeGitCommit(sha = "aabbccddeeff00112233445566778899aabbccdd") {
     });
     return { impl, calls };
 }
+/** A fake `filterGitIgnoredPaths` that treats no paths as ignored (all are tracked). */
+const allTrackedFilter = (async (opts) => {
+    return [...opts.paths];
+});
 async function readTelemetryEvents() {
     const dir = path.join(tmpRoot, ".flow", "telemetry");
     let files;
@@ -281,6 +285,7 @@ describe("acceptProposal production gate — rule handler registered (AC4)", () 
             proposalId: ULID_PROP,
             confirm: true,
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: allTrackedFilter,
             now: () => FIXED_NOW,
         });
         expect(confirmed.status).toBe("applied");
@@ -326,6 +331,7 @@ describe("acceptProposal production gate — idempotent re-run (AC5)", () => {
             proposalId: ULID_PROP_2,
             confirm: true,
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: allTrackedFilter,
             now: () => FIXED_NOW,
         });
         expect(first.status).toBe("applied");
@@ -336,6 +342,7 @@ describe("acceptProposal production gate — idempotent re-run (AC5)", () => {
             proposalId: ULID_PROP_2,
             confirm: true,
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: allTrackedFilter,
             now: () => new Date("2099-01-01T00:00:00.000Z"),
         });
         expect(second.status).toBe("already-applied");

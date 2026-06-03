@@ -29,7 +29,7 @@ import {
   DisciplineRuleSchema,
 } from "../../schemas/discipline-rules.js";
 import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
-import type { gitCommit as gitCommitType } from "../../lib/git.js";
+import type { gitCommit as gitCommitType, filterGitIgnoredPaths as filterGitIgnoredPathsType } from "../../lib/git.js";
 import type { RetroProposal } from "../../schemas/retro-proposal.js";
 
 // ---------------------------------------------------------------------------
@@ -113,6 +113,11 @@ function makeFakeGitCommit(sha = "aabbccddeeff00112233445566778899aabbccdd") {
   }) as unknown as typeof gitCommitType;
   return { impl, calls };
 }
+
+/** A fake `filterGitIgnoredPaths` that treats no paths as ignored (all are tracked). */
+const allTrackedFilter = (async (opts: { targetRepoRoot: string; paths: readonly string[] }) => {
+  return [...opts.paths];
+}) as unknown as typeof filterGitIgnoredPathsType;
 
 async function readTelemetryEvents(): Promise<Array<Record<string, unknown>>> {
   const dir = path.join(tmpRoot, ".flow", "telemetry");
@@ -340,6 +345,7 @@ describe("acceptProposal production gate — rule handler registered (AC4)", () 
       proposalId: ULID_PROP,
       confirm: true,
       gitCommitImpl: git.impl,
+      filterGitIgnoredPathsImpl: allTrackedFilter,
       now: () => FIXED_NOW,
     });
     expect(confirmed.status).toBe("applied");
@@ -394,6 +400,7 @@ describe("acceptProposal production gate — idempotent re-run (AC5)", () => {
       proposalId: ULID_PROP_2,
       confirm: true,
       gitCommitImpl: git.impl,
+      filterGitIgnoredPathsImpl: allTrackedFilter,
       now: () => FIXED_NOW,
     });
     expect(first.status).toBe("applied");
@@ -405,6 +412,7 @@ describe("acceptProposal production gate — idempotent re-run (AC5)", () => {
       proposalId: ULID_PROP_2,
       confirm: true,
       gitCommitImpl: git.impl,
+      filterGitIgnoredPathsImpl: allTrackedFilter,
       now: () => new Date("2099-01-01T00:00:00.000Z"),
     });
 

@@ -351,3 +351,27 @@ export declare function checkSharedRootLeak(opts: {
     paths: string[];
     sharedRootPath: string;
 }>;
+/**
+ * Filter out git-ignored paths from a candidate list, returning only the
+ * subset that git WILL track (i.e. not ignored by any `.gitignore` rule).
+ *
+ * Uses `git check-ignore --stdin` to ask git which of the candidate paths
+ * are ignored. Any path NOT echoed back by check-ignore is a tracked path.
+ *
+ * When `paths` is empty, returns `[]` immediately (no subprocess spawn).
+ * Best-effort on a non-zero exit from `git check-ignore` itself — the tool
+ * exits non-zero (exit code 1) when NONE of the paths are ignored, which is
+ * not an error: we still return ALL paths in that case. Only an exit code >= 2
+ * (unexpected git failure) causes the error to be surfaced; even then, the
+ * error is re-thrown so callers can decide.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ *
+ * (Story native:01KT6QF3V113W7GTG69B2RPVH0 — accept-proposal git-ignored paths)
+ */
+export declare function filterGitIgnoredPaths(opts: {
+    targetRepoRoot: string;
+    paths: readonly string[];
+    execaImpl?: typeof defaultExeca;
+}): Promise<string[]>;

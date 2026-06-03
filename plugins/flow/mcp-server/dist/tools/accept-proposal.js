@@ -48,7 +48,7 @@
  */
 import { promises as fs } from "node:fs";
 import { stringify as yamlStringify } from "yaml";
-import { gitCommit } from "../lib/git.js";
+import { gitCommit, filterGitIgnoredPaths } from "../lib/git.js";
 import { logTelemetryEvent } from "../lib/logger.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { splitFrontmatter } from "../lib/markdown-frontmatter.js";
@@ -61,7 +61,7 @@ const DEFAULT_ROLE = "operator";
 // Implementation
 // ---------------------------------------------------------------------------
 export async function acceptProposal(opts) {
-    const { targetRepoRoot, proposalId, confirm = false, role = DEFAULT_ROLE, handlers = createProductionRegistry(), gitCommitImpl = gitCommit, now, } = opts;
+    const { targetRepoRoot, proposalId, confirm = false, role = DEFAULT_ROLE, handlers = createProductionRegistry(), gitCommitImpl = gitCommit, filterGitIgnoredPathsImpl = filterGitIgnoredPaths, now, } = opts;
     const clock = now ?? (() => new Date());
     // 1. Locate. Throws ProposalNotFoundError / AmbiguousProposalIdError /
     //    MalformedRetroProposalError verbatim.
@@ -97,12 +97,24 @@ export async function acceptProposal(opts) {
     }
     // 5. Confirm mode — apply, stamp, commit (single commit), telemetry. (AC3/AC5)
     const applyResult = await handler.apply(proposal, ctx);
+    // Filter the handler's changed paths: exclude git-ignored paths so we never
+    // try to commit a file git doesn't track (e.g. files under .gitignore'd dirs).
+    // The proposal file itself is always tracked (it lives under .flow/retro-proposals
+    // which is NOT ignored in this repo), so it is not filtered.
+    // (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC2)
+    const trackedHandlerPaths = await filterGitIgnoredPathsImpl({
+        targetRepoRoot,
+        paths: applyResult.changedPaths,
+    });
     // Capture pre-stamp bytes so a failed commit can be rolled back, leaving the
     // proposal un-stamped (atomicity: a stamp with no commit is un-repeatable).
     const preStampRaw = await fs.readFile(located.absPath, "utf8");
     const appliedAt = clock().toISOString();
     // Stamp the proposal file with the applied block (sha back-filled after the
     // commit — see module JSDoc). Write through the managed-fs guard.
+    // The stamp is written unconditionally here — BEFORE any git ops — so that
+    // a re-run (after a crash or all-ignored no-commit path) detects the stamp
+    // and exits as a no-op. (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC1)
     const stampedContents = stampProposalApplied(preStampRaw, located, appliedAt, proposal.id, "pending");
     await writeManagedFile({
         absPath: located.absPath,
@@ -110,12 +122,48 @@ export async function acceptProposal(opts) {
         targetRepoRoot,
         mcpToolContext: { toolName: TOOL_NAME, role },
     });
-    // Commit the handler's changed paths + the proposal file in a SINGLE commit
+    // When all handler paths are git-ignored and there are no tracked changes,
+    // skip the commit entirely — the disk write has already happened and the
+    // proposal is stamped. Use "no-commit" as the applied sha sentinel.
+    // (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC1/AC2)
+    if (trackedHandlerPaths.length === 0) {
+        const noCommitSha = "no-commit";
+        const finalContents = stampProposalApplied(preStampRaw, located, appliedAt, proposal.id, noCommitSha);
+        await writeManagedFile({
+            absPath: located.absPath,
+            contents: finalContents,
+            targetRepoRoot,
+            mcpToolContext: { toolName: TOOL_NAME, role },
+        });
+        await logTelemetryEvent({
+            targetRepoRoot,
+            event: {
+                type: "retro.proposal.applied",
+                session_id: proposal.id,
+                agent: role,
+                data: {
+                    id: proposal.id,
+                    proposal_type: proposal.type,
+                    applied_sha: noCommitSha,
+                    idempotency_key: proposal.id,
+                },
+            },
+            ...(now ? { now } : {}),
+        });
+        return {
+            status: "applied",
+            proposalId,
+            type: proposal.type,
+            appliedSha: noCommitSha,
+            idempotencyKey: proposal.id,
+        };
+    }
+    // Commit the tracked handler paths + the proposal file in a SINGLE commit
     // through the git wrapper (no direct shell git, no force/no-verify).
     let commitSha;
     try {
         const commitPaths = dedupePaths([
-            ...applyResult.changedPaths,
+            ...trackedHandlerPaths,
             located.relPath,
         ]);
         const result = await gitCommitImpl({
