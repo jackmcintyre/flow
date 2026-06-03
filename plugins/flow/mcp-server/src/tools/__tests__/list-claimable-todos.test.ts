@@ -184,6 +184,28 @@ describe("listClaimableTodos", () => {
     expect(result.todos).toEqual([]); // no to-do entries
   });
 
+  it("(snapshot) inProgressCount excludes <ref>.snapshot.yaml baselines — counts 2 not 4", async () => {
+    const ref1 = "native:01HZABC0000000000000000001";
+    const ref2 = "native:01HZABC0000000000000000002";
+    for (const ref of [ref1, ref2]) {
+      await writeManifest(
+        tmpRoot,
+        "in-progress",
+        ref,
+        makeManifest(ref, { status: "in-progress" }),
+      );
+      // The anti-tamper baseline written beside the manifest on claim. It has
+      // no top-level `ref`; counting it would double the in-progress total.
+      await atomicWriteFile(
+        path.join(tmpRoot, ".flow", "state", "in-progress", `${ref}.snapshot.yaml`),
+        "source_hash: " + "a".repeat(64) + "\ntitle: baseline\n",
+      );
+    }
+
+    const result = await listClaimableTodos({ targetRepoRoot: tmpRoot });
+    expect(result.inProgressCount).toBe(2);
+  });
+
   it("returns depsReady: true for a ref with no deps", async () => {
     const ref = "native:01HZABC0000000000000000001";
     await writeManifest(tmpRoot, "to-do", ref, makeManifest(ref, { depends_on: [] }));

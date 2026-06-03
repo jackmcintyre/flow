@@ -150,7 +150,12 @@ export async function listClaimableTodos(
   let inProgressCount = 0;
   try {
     const inProgressEntries = await fs.readdir(inProgressDir);
-    inProgressCount = inProgressEntries.filter((f) => f.endsWith(".yaml")).length;
+    // Exclude `<ref>.snapshot.yaml` anti-tamper baselines — they sit beside the
+    // real manifest in in-progress but are not stories, so counting them would
+    // double the in-progress total.
+    inProgressCount = inProgressEntries.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml"),
+    ).length;
   } catch (err) {
     if (!isEnoent(err)) {
       throw err;

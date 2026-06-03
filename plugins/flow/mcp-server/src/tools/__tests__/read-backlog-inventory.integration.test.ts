@@ -453,3 +453,63 @@ describe("readBacklogInventory (9) — includeSpecText + ref single-item fetch",
     expect(result.mode).toBe("re-open");
   });
 });
+
+// ---------------------------------------------------------------------------
+// (10) Snapshot-glob fix — a mid-build story writes a `<ref>.snapshot.yaml`
+// anti-tamper baseline beside its manifest in in-progress. That sidecar has no
+// top-level `ref`, so feeding it to `parseExecutionManifest` would throw and
+// crash the board. The scan must skip it: the inventory renders, and the
+// mid-build story appears exactly once.
+// ---------------------------------------------------------------------------
+
+describe("readBacklogInventory (10) — skips `<ref>.snapshot.yaml` baselines", () => {
+  const MID_BUILD_ULID = "01HZABC0000000000000000093";
+
+  async function buildMidBuildRepo(): Promise<string> {
+    const root = path.join(scratch, "mid-build-native");
+    await fs.mkdir(path.join(root, ".flow", "state", "in-progress"), {
+      recursive: true,
+    });
+    await atomicWriteFile(
+      path.join(root, ".flow", "config.yaml"),
+      "adapter: native\n",
+    );
+    const ref = `native:${MID_BUILD_ULID}`;
+    const manifest = {
+      ref,
+      status: "in-progress",
+      adapter: "native",
+      source_path: `.flow/native-stories/${MID_BUILD_ULID}.md`,
+      source_hash: "a".repeat(64),
+      depends_on: [],
+      acceptance_criteria: [
+        { text: "**Given** x **When** y **Then** z works.", kind: "integration" },
+      ],
+      title: "Mid-build story",
+      narrative: "As a user, I want the board to render mid-build.",
+      withdrawn: false,
+    };
+    await atomicWriteFile(
+      path.join(root, ".flow", "state", "in-progress", `${ref}.yaml`),
+      yamlStringify(manifest, { lineWidth: 0 }),
+    );
+    // The anti-tamper baseline written on claim — NOT a manifest (no `ref`).
+    await atomicWriteFile(
+      path.join(root, ".flow", "state", "in-progress", `${ref}.snapshot.yaml`),
+      "source_hash: " + "a".repeat(64) + "\ntitle: Mid-build story\n",
+    );
+    return root;
+  }
+
+  it("renders without crashing and the mid-build story appears exactly once", async () => {
+    const root = await buildMidBuildRepo();
+
+    const result = await readBacklogInventory({ targetRepoRoot: root });
+
+    const matches = result.backlog_inventory.filter(
+      (e) => e.ref === `native:${MID_BUILD_ULID}`,
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.state).toBe("in-progress");
+  });
+});

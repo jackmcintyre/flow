@@ -88,7 +88,10 @@ export async function readBacklogInventory(rawInput) {
             continue;
         }
         for (const filename of entries) {
-            if (!filename.endsWith(".yaml"))
+            // `<ref>.snapshot.yaml` is the anti-tamper baseline written alongside a
+            // claimed manifest — it is NOT an execution manifest (no top-level `ref`),
+            // so feeding it to `parseExecutionManifest` would throw and crash the board.
+            if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml"))
                 continue;
             const absPath = path.join(stateDir, filename);
             const rawText = await fs.readFile(absPath, "utf8");
