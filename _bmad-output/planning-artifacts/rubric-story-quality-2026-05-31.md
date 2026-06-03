@@ -52,13 +52,14 @@ Each lens: **what it asks**, **scoreable checks** (each independently pass/fail-
 
 ### 3.2 Verifiability  *[QA / Test]*  — **the deepest lens; this is where our scars live**
 
-**Asks:** Does each AC assert *observable behaviour*, such that the named check would genuinely fail if the behaviour were missing?
+**Asks:** Once the proposed work is built, could a correctly-written test be made to fail if the described behaviour were missing? Grade PINNABILITY-ONCE-BUILT — not whether the code or test already exists today.
 
 **Scoreable checks:**
-- Each AC asserts a behaviour, not the presence of a string. ("A string appears in a file" is an automatic fail unless the file's *existence/shape* is itself the user-facing contract.)
+- Each AC asserts a behaviour, not the presence of a string. ("A string appears in a file" is an automatic fail unless the file's *existence/shape* is itself the user-facing contract.) This is the canonical REAL FAIL.
 - The integration AC drives the **real** path end-to-end (real tool, real fixture state), not mocks of the thing under test.
-- The named test would **fail if the behaviour regressed** — i.e. it pins the behaviour, it doesn't just co-exist with it.
+- The named test would **fail before the proposed change and pass after it** — i.e. it pins the behaviour, it doesn't just co-exist with it. A check that would be met equally before and after the change pins nothing.
 - Setup → action → assertion on a concrete, inspectable outcome (git state, manifest contents, emitted event, returned value).
+- **The absence of not-yet-written code or tests is never a fail.** That is the normal, expected state of a plan. Net-new behaviour the plan proposes to build must not be faulted for not yet existing; it is sufficient that once built, a test *could* pin it.
 
 **PASS** — *Story 9.1 AC1:* "a vitest seeds two dependency-satisfied manifests — one not-ready, one ready — and asserts the claim entry point returns the ready one and never the not-ready one; then marks the not-ready item ready and asserts it now selects it." Real claim path, real fixtures, the assertion fails the instant the filter is wrong.
 **FAIL** — the bugfix-1 scar: `pattern: "status.*\"failed\""`. Matches "failed" anywhere — a comment, an error string, a doc-string. Green forever, proves nothing. The behaviour ("the write uses the failed status correctly") is never exercised.
