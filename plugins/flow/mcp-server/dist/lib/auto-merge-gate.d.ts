@@ -37,7 +37,7 @@ import type { AgreementMetricResult } from "../tools/compute-agreement.js";
  *
  * Story 4.10b (AC5c).
  */
-export type AutoMergeGateReason = "low-risk-met-threshold" | "low-risk-sub-threshold" | "low-risk-insufficient-data" | "low-risk-provisional-trust" | "medium-risk" | "high-risk" | "no-tier-no-signal" | "ci-not-green";
+export type AutoMergeGateReason = "low-risk-met-threshold" | "low-risk-sub-threshold" | "low-risk-insufficient-data" | "low-risk-provisional-trust" | "medium-risk" | "high-risk" | "no-tier-no-signal" | "ci-not-green" | "merge-failed";
 export interface DecideAutoMergeInput {
     /** The manifest's `risk_tier` field. May be `undefined` for legacy manifests. */
     risk_tier: "low" | "medium" | "high" | undefined;

@@ -17,6 +17,7 @@ const KNOWN_REASONS = [
   "high-risk",
   "no-tier-no-signal",
   "ci-not-green",
+  "merge-failed",
 ] as const;
 
 describe("explainGateReason", () => {

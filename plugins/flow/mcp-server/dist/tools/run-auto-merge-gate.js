@@ -37,7 +37,6 @@ import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { gh } from "../lib/gh.js";
-import { GhApiResponseShapeError } from "../errors.js";
 import { AutoMergeGateThresholdInvalidError } from "../errors.js";
 import { PluginSettingsSchema } from "../schemas/workspace-config.js";
 const AutoMergeGateReasonSchema = z.enum([
@@ -49,6 +48,7 @@ const AutoMergeGateReasonSchema = z.enum([
     "high-risk",
     "no-tier-no-signal",
     "ci-not-green",
+    "merge-failed",
 ]);
 /**
  * Result schema for `runAutoMergeGate`. `.strict()` at every level to reject
@@ -352,6 +352,53 @@ export async function runAutoMergeGate(opts) {
     // ------------------------------------------------------------------
     const permissions = await loadRolePermissions({ role, pluginRoot });
     // ------------------------------------------------------------------
+    // Best-effort `needs-human` labeller. Resolves owner/repo, then POSTs the
+    // label. NEVER throws: a thrown subprocess/parse error here would exit the gate
+    // non-zero, and the drain's one-shot seam courier can garble a failed command
+    // into a non-JSON relay — the 2026-06-03 PR #277 failure, where a bare
+    // `BLOCKED` token broke the gate seam so the story paused with a SyntaxError
+    // reason and no label. On any failure the label is skipped and the cause is
+    // returned as a note; the caller still emits a clean, schema-valid result
+    // (surfaced in `chatLog`, never silent).
+    // ------------------------------------------------------------------
+    const applyNeedsHumanLabel = async () => {
+        try {
+            const repoViewResult = await gh({
+                role,
+                permissions,
+                subcommand: "repo-view",
+                args: ["--json", "owner,name"],
+                execaImpl,
+                pluginRootOverride: pluginRoot,
+            });
+            const repoViewJson = JSON.parse(repoViewResult.stdout);
+            const owner = repoViewJson.owner?.login ?? "";
+            const repo = repoViewJson.name ?? "";
+            if (!owner || !repo) {
+                throw new Error("missing owner or repo in repo-view shape");
+            }
+            const labelsUrl = `/repos/${owner}/${repo}/issues/${opts.prNumber}/labels`;
+            const labelResult = await gh({
+                role,
+                permissions,
+                subcommand: "api",
+                args: [labelsUrl, "--method", "POST", "--input", "-"],
+                input: JSON.stringify({ labels: ["needs-human"] }),
+                execaImpl,
+                pluginRootOverride: pluginRoot,
+            });
+            const parsed = JSON.parse(labelResult.stdout);
+            if (!Array.isArray(parsed)) {
+                throw new Error(`expected array, got ${typeof parsed}`);
+            }
+            return { applied: ["needs-human"], note: null };
+        }
+        catch (cause) {
+            const msg = cause instanceof Error ? cause.message : String(cause);
+            return { applied: [], note: `needs-human label not applied: ${msg}` };
+        }
+    };
+    // ------------------------------------------------------------------
     // Step 8a: CI gate (Stage-2). Never auto-merge a PR whose CI is not green.
     // Only runs when the risk gate said auto-merge; polls GitHub checks and, on
     // failure or timeout, downgrades to pause-needs-human (reason ci-not-green) —
@@ -375,87 +422,80 @@ export async function runAutoMergeGate(opts) {
     }
     const chatLine = composeChatLine(decision, reason);
     // ------------------------------------------------------------------
-    // Step 9: Execute side-effect based on the (CI-gated) decision
+    // Step 9: Execute the side-effect for the (CI-gated) decision. Every branch
+    // returns a clean, schema-valid result and NEVER lets a subprocess failure
+    // throw out of the gate — a raw throw exits the process non-zero, and the
+    // drain's one-shot seam courier can relay a failed command as garbled non-JSON
+    // (the PR #277 `BLOCKED`-token seam break). An operational failure (merge
+    // refused, label API hiccup, missing permission) folds into pause-needs-human;
+    // the operator picks it up from the human-needed bucket with the cause in
+    // `chatLog`.
     // ------------------------------------------------------------------
     if (decision === "auto-merge") {
-        // Step 8: gh pr merge <prNumber> --squash --delete-branch
-        await gh({
-            role,
-            permissions,
-            subcommand: "pr-merge",
-            args: [String(opts.prNumber), "--squash", "--delete-branch"],
-            execaImpl,
-            pluginRootOverride: pluginRoot,
-        });
-        return AutoMergeGateResultSchema.parse({
-            decision,
-            reason,
-            risk_tier: risk_tier ?? null,
-            agreement_metric,
-            threshold_used,
-            merged: true,
-            labelsApplied: [],
-            dryRun: false,
-            prNumber: opts.prNumber,
-            chatLog: [...ciLog, chatLine],
-        });
-    }
-    else {
-        // Step 9: Resolve owner/repo then apply needs-human label
-        // 9a: gh repo view --json owner,name
-        const repoViewResult = await gh({
-            role,
-            permissions,
-            subcommand: "repo-view",
-            args: ["--json", "owner,name"],
-            execaImpl,
-            pluginRootOverride: pluginRoot,
-        });
-        let owner;
-        let repo;
         try {
-            const repoViewJson = JSON.parse(repoViewResult.stdout);
-            owner = repoViewJson.owner?.login ?? "";
-            repo = repoViewJson.name ?? "";
-            if (!owner || !repo) {
-                throw new Error("missing owner or repo in repo-view shape");
-            }
+            // gh pr merge <prNumber> --squash --delete-branch
+            await gh({
+                role,
+                permissions,
+                subcommand: "pr-merge",
+                args: [String(opts.prNumber), "--squash", "--delete-branch"],
+                execaImpl,
+                pluginRootOverride: pluginRoot,
+            });
+            return AutoMergeGateResultSchema.parse({
+                decision,
+                reason,
+                risk_tier: risk_tier ?? null,
+                agreement_metric,
+                threshold_used,
+                merged: true,
+                labelsApplied: [],
+                dryRun: false,
+                prNumber: opts.prNumber,
+                chatLog: [...ciLog, chatLine],
+            });
         }
-        catch (cause) {
-            throw new GhApiResponseShapeError({ subcommand: "repo-view", cause });
+        catch (mergeErr) {
+            // The merge did not complete (GitHub refused it, a recoverable gh error, a
+            // missing permission, a transient API failure). Fold into pause-needs-human
+            // so the gate's stdout stays JSON-only; a human completes the merge.
+            decision = "pause-needs-human";
+            reason = "merge-failed";
+            const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+            const { applied, note } = await applyNeedsHumanLabel();
+            const chatLog = [...ciLog, `auto-merge attempt failed: ${mergeMsg}`];
+            if (note)
+                chatLog.push(note);
+            chatLog.push(composeChatLine(decision, reason));
+            return AutoMergeGateResultSchema.parse({
+                decision,
+                reason,
+                risk_tier: risk_tier ?? null,
+                agreement_metric,
+                threshold_used,
+                merged: false,
+                labelsApplied: applied,
+                dryRun: false,
+                prNumber: opts.prNumber,
+                chatLog,
+            });
         }
-        // 9b: gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels
-        const labelsUrl = `/repos/${owner}/${repo}/issues/${opts.prNumber}/labels`;
-        const labelResult = await gh({
-            role,
-            permissions,
-            subcommand: "api",
-            args: [labelsUrl, "--method", "POST", "--input", "-"],
-            input: JSON.stringify({ labels: ["needs-human"] }),
-            execaImpl,
-            pluginRootOverride: pluginRoot,
-        });
-        // Parse response — labels endpoint returns the updated label list (array).
-        try {
-            const parsed = JSON.parse(labelResult.stdout);
-            if (!Array.isArray(parsed)) {
-                throw new Error(`expected array, got ${typeof parsed}`);
-            }
-        }
-        catch (cause) {
-            throw new GhApiResponseShapeError({ subcommand: "api", url: labelsUrl, cause });
-        }
-        return AutoMergeGateResultSchema.parse({
-            decision,
-            reason,
-            risk_tier: risk_tier ?? null,
-            agreement_metric,
-            threshold_used,
-            merged: false,
-            labelsApplied: ["needs-human"],
-            dryRun: false,
-            prNumber: opts.prNumber,
-            chatLog: [...ciLog, chatLine],
-        });
     }
+    // pause-needs-human: flag the PR for a human (best-effort label, never throws).
+    const { applied, note } = await applyNeedsHumanLabel();
+    const chatLog = [...ciLog, chatLine];
+    if (note)
+        chatLog.push(note);
+    return AutoMergeGateResultSchema.parse({
+        decision,
+        reason,
+        risk_tier: risk_tier ?? null,
+        agreement_metric,
+        threshold_used,
+        merged: false,
+        labelsApplied: applied,
+        dryRun: false,
+        prNumber: opts.prNumber,
+        chatLog,
+    });
 }

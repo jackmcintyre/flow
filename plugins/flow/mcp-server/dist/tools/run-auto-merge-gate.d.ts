@@ -54,6 +54,7 @@ export declare const AutoMergeGateResultSchema: z.ZodObject<{
         "low-risk-provisional-trust": "low-risk-provisional-trust";
         "low-risk-sub-threshold": "low-risk-sub-threshold";
         "medium-risk": "medium-risk";
+        "merge-failed": "merge-failed";
         "no-tier-no-signal": "no-tier-no-signal";
     }>;
     risk_tier: z.ZodNullable<z.ZodEnum<{

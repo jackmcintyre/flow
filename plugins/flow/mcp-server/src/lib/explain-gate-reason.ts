@@ -50,6 +50,9 @@ const GATE_REASON_EXPLANATIONS: Readonly<Record<string, string>> = {
 
   "ci-not-green":
     "Paused for a human: the risk gate cleared this change to auto-merge, but its CI checks did not go green within the wait window.",
+
+  "merge-failed":
+    "Paused for a human: the gate cleared this change to auto-merge, but the merge itself could not be completed, so it was handed to a human to finish.",
 } as const;
 
 /**

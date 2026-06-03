@@ -34,6 +34,7 @@ const GATE_REASON_EXPLANATIONS = {
     "high-risk": "Paused for a human: this is a high-risk change, which always waits for a human regardless of reviewer agreement.",
     "no-tier-no-signal": "Paused for a human: the change has no risk tier on its manifest, so the gate has no signal to act on and defers to a human.",
     "ci-not-green": "Paused for a human: the risk gate cleared this change to auto-merge, but its CI checks did not go green within the wait window.",
+    "merge-failed": "Paused for a human: the gate cleared this change to auto-merge, but the merge itself could not be completed, so it was handed to a human to finish.",
 };
 /**
  * Safe, non-empty generic fallback for any reason code that is not one of the
