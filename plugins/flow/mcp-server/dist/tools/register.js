@@ -5,6 +5,7 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
+import { recordReviewerLesson } from "./record-reviewer-lesson.js";
 import { writeRetroProposal } from "./write-retro-proposal.js";
 import { acceptProposal } from "./accept-proposal.js";
 import { gatherRetroInputs } from "./gather-retro-inputs.js";
@@ -853,6 +854,65 @@ export function registerAllTools(server) {
                 })
                     .parse(args);
                 const result = await recordStoryRetro(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({ error: err.name, message: err.message }),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — recordReviewerLesson: the
+    // learning-loop CAPTURE seam. The reviewer calls this at most once, AFTER its
+    // mandatory runReviewerSession call, ONLY when the review surfaced one reusable
+    // lesson. It validates the lesson against the existing LessonSchema and MERGES
+    // only the `lesson` field onto the per-ref reviewer-result.json (never clobbering
+    // the binding verdict). The drain then forwards that lesson onto the done
+    // manifest via recordStoryRetro before the merge gate runs.
+    server.registerTool({
+        name: "recordReviewerLesson",
+        description: "Merge one reusable retro lesson onto the per-ref reviewer-result.json " +
+            "(Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer). Call AFTER " +
+            "runReviewerSession, at most once, ONLY when the review taught a reusable lesson. " +
+            "Validates `lesson` against the existing LessonSchema (closed kind enum: pitfall|" +
+            "pattern|tool-quirk|discipline; pitfall requires failure_class). Merges only the " +
+            "lesson field — never clobbers recommendedVerdict, acResults, or any other field. " +
+            "Throws MalformedStoryRetroPayloadError on a bad lesson; ReviewerResultFileMissingError " +
+            "when no reviewer-result.json exists (runReviewerSession was not called first). " +
+            "Idempotent: merging the same lesson twice writes a byte-identical file.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                lesson: { type: "object" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],
+        },
+        handler: async (args) => {
+            try {
+                const parsed = z
+                    .object({
+                    targetRepoRoot: z.string().min(1),
+                    sessionUlid: z.string().min(1),
+                    ref: z.string().min(1),
+                    lesson: z.unknown(),
+                })
+                    .parse(args);
+                const result = await recordReviewerLesson(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

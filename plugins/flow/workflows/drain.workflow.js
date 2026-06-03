@@ -323,7 +323,12 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       `${reviewerPrompt}\n\n## How to run the review in this stateless run\n` +
         `Your FIRST and only mandatory action is to run EXACTLY this command (do not alter the path); it performs the three mandatory reads and writes the binding verdict to reviewer-result.json:\n` +
         `  node ${CLI} runReviewerSession --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, prNumber, role: 'generalist-reviewer' })}'\n` +
-        `Then summarise the result it prints for the operator. Do NOT merge, push, edit the PR, or write any \`.flow/state\` file yourself — runReviewerSession owns the verdict file.`,
+        `Then summarise the result it prints for the operator.\n\n` +
+        `## Optional: record ONE reusable lesson (learning loop)\n` +
+        `If — and ONLY if — this review surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runReviewerSession call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
+        `  node ${CLI} recordReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, lesson: { kind: '<kind>', text: '<one-line lesson text>' } })}'\n` +
+        `This is OPTIONAL and fail-soft: most reviews teach nothing reusable — in that case call nothing. Recording no lesson, or any failure of this command, must NEVER block or change the verdict, the build, or the merge. Do not invent a lesson just to fill the slot; one real lesson or none.\n\n` +
+        `Do NOT merge, push, or edit the PR yourself. Do NOT hand-edit any \`.flow/state\` file — the TOOLS own those writes (runReviewerSession owns the verdict file; recordReviewerLesson, the one exception above, owns the lesson write). Those two named commands are the only writes you make.`,
       { label: `rev:${ref}:${rw}${tag}`, phase: ph, model: execModel },
     )
     await progressDone(ref, 'review', reviewStartedAt)
@@ -343,6 +348,30 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // pause-needs-human (no agreement history yet) -> a human merges.
   if (verdict?.next === 'done-ready-for-merge') {
     completed.push(ref)
+
+    // FORWARD THE LESSON (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop
+    // producer, the keystone). The reviewer may have captured ONE reusable lesson
+    // onto the per-ref reviewer-result.json (via recordReviewerLesson). The manifest
+    // is already in done/ at this point (completeStory ran inside
+    // processReviewerTranscript), which is exactly what recordStoryRetro requires.
+    // Read the captured lesson, and if one is present, forward it onto the done
+    // manifest via recordStoryRetro so the retro analyst finally has a real,
+    // grounded, role-attributable signal to reason over.
+    //
+    // FAIL-SOFT by contract: BOTH seams use the retryable+swallow variant (as the
+    // friction + heartbeat seams do). A garbled relay, a missing/empty lesson, OR
+    // any thrown error is logged, swallowed, and the merge gate still runs — a
+    // forwarding failure must NEVER block the merge or leave a spurious lesson.
+    // recordStoryRetro is a deterministic idempotent shallow-overwrite, so a
+    // crash-resume re-forward of the same lesson writes a byte-identical manifest.
+    const lessonRead = await seam(`node ${CLI} readReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `lesson-read:${ref}`, true, true)
+    const lesson = lessonRead && !lessonRead._parseError ? lessonRead.lesson : null
+    if (lesson) {
+      const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: 'generalist-reviewer' })}'`, `lesson-forward:${ref}`, true, true)
+      if (fwd && !fwd._parseError) log(`${ref} forwarded reviewer lesson onto done manifest`)
+      else log(`${ref} lesson-forward did not confirm (swallowed) — merge proceeds`)
+    }
+
     // HEARTBEAT: bracket the gate phase (start → done with elapsed time).
     const gateStartedAt = await progressStart(ref, 'gate')
     const gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)

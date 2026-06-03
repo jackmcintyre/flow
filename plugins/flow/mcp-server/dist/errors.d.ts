@@ -820,6 +820,26 @@ export declare class ReviewerResultFileMalformedError extends DomainError {
     });
 }
 /**
+ * `recordReviewerLesson` was asked to merge a lesson onto a per-ref
+ * `reviewer-result.json` that does not exist (Story
+ * native:01KT6GSV8KTTKKHPRGEJWJAGZV). The file is written by `runReviewerSession`;
+ * its absence means the reviewer called `recordReviewerLesson` BEFORE (or without)
+ * its mandatory `runReviewerSession` call — a caller-order bug. The lesson capture
+ * is optional and fail-soft at the orchestration layer (the drain contains any
+ * failure so the merge still runs), but the tool itself fails loud so the bug is
+ * visible rather than silently dropping the lesson.
+ */
+export declare class ReviewerResultFileMissingError extends DomainError {
+    readonly path: string;
+    readonly ref: string;
+    readonly sessionUlid: string;
+    constructor(opts: {
+        path: string;
+        ref: string;
+        sessionUlid: string;
+    });
+}
+/**
  * A `gh api` subcommand returned a response body that could not be parsed
  * as JSON or did not match the expected shape. Raised by
  * `postReviewerComments` when `gh api .../reviews` returns non-JSON stdout

@@ -515,7 +515,8 @@ describe("AC4o — MCP tool registration smoke", () => {
         // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
         // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
         // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
-        expect(registeredTools.length).toBe(48);
+        // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
+        expect(registeredTools.length).toBe(49);
     });
 });
 // ---------------------------------------------------------------------------

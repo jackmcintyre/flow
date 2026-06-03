@@ -59,6 +59,9 @@ import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./tools/record-agent-friction.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
+import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
+import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
+import { recordStoryRetro } from "./tools/record-story-retro.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -126,6 +129,19 @@ const TOOLS: Record<string, ToolFn> = {
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
   // calls this instead of the previously hard-coded lensRoles block.
   resolveLensRoles,
+  // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer.
+  // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP drain-path
+  // seam-agent) calls it via `node dist/cli.js recordReviewerLesson --json` to
+  // merge one reusable lesson onto the per-ref reviewer-result.json.
+  // recordStoryRetro is the FORWARD seam: the drain reads that captured lesson and
+  // attaches it to the done manifest (`node dist/cli.js recordStoryRetro --json`)
+  // before the merge gate runs. readReviewerLesson is the read side of FORWARD —
+  // a thin read-only seam returning { lesson } off the reviewer-result.json so the
+  // drain knows whether (and what) to forward. All three must be on the CLI seam
+  // because the drain runs MCP-free.
+  recordReviewerLesson,
+  readReviewerLesson,
+  recordStoryRetro,
 };
 
 function emit(obj: unknown): void {
