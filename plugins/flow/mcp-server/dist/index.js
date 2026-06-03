@@ -2988,7 +2988,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve19.call(this, root, ref);
+      let _sch = resolve20.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3015,7 +3015,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve19(root, ref) {
+    function resolve20(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3646,7 +3646,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve19(baseURI, relativeURI, options) {
+    function resolve20(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3904,7 +3904,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve19,
+      resolve: resolve20,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -14314,12 +14314,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve19, reject) {
+        return new Promise(function(resolve20, reject) {
           isexe(path68, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve19(is);
+              resolve20(is);
             }
           });
         });
@@ -14385,27 +14385,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve19, reject) => {
+      const step = (i2) => new Promise((resolve20, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve19(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve20(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path68.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve19(subStep(p, i2, 0));
+        resolve20(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve19, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve20, reject) => {
         if (ii === pathExt.length)
-          return resolve19(step(i2 + 1));
+          return resolve20(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve19(p + ext);
+              return resolve20(p + ext);
           }
-          return resolve19(subStep(p, i2, ii + 1));
+          return resolve20(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -32581,12 +32581,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve19) => {
+    return new Promise((resolve20) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve19();
+        resolve20();
       } else {
-        this._stdout.once("drain", resolve19);
+        this._stdout.once("drain", resolve20);
       }
     });
   }
@@ -33184,7 +33184,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve19) => setTimeout(resolve19, pollInterval));
+        await new Promise((resolve20) => setTimeout(resolve20, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error51) {
@@ -33201,7 +33201,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve19, reject) => {
+    return new Promise((resolve20, reject) => {
       const earlyReject = (error51) => {
         reject(error51);
       };
@@ -33279,7 +33279,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve19(parseResult.data);
+            resolve20(parseResult.data);
           }
         } catch (error51) {
           reject(error51);
@@ -33540,12 +33540,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve19, reject) => {
+    return new Promise((resolve20, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve19, interval);
+      const timeoutId = setTimeout(resolve20, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -35291,6 +35291,19 @@ var RetirementWouldEmptyRegistryError = class extends DomainError {
       `rule-retirement refused: retiring rule '${opts.targetRuleId}' would leave the registry empty, producing an invalid docs/standards.md (minimum 1 criterion required). Add a replacement rule before retiring this one, or use 'relax' instead to demote it to advisory level. (Story 6.6 / FR64a)`
     );
     this.targetRuleId = opts.targetRuleId;
+  }
+};
+var PrePrLeakDetectedError = class extends DomainError {
+  leakedPaths;
+  sharedRootPath;
+  constructor(opts) {
+    const shown = opts.leakedPaths.slice(0, 5).join(", ");
+    const more = opts.leakedPaths.length > 5 ? `, +${opts.leakedPaths.length - 5} more` : "";
+    super(
+      `pre-PR leak gate stopped: the builder's edits reached the shared master copy (${opts.sharedRootPath}). ${opts.leakedPaths.length} leaked path(s): ${shown}${more}. NO pull request was opened. Cause: the builder wrote to absolute shared-copy paths instead of paths relative to its own work copy. Fix the build prompt to use relative paths and re-run. (Story native:01KT47430Q4C73K5E3ZECBSE5R)`
+    );
+    this.leakedPaths = [...opts.leakedPaths];
+    this.sharedRootPath = opts.sharedRootPath;
   }
 };
 var PrePrTestFailedError = class extends DomainError {
@@ -38523,8 +38536,8 @@ var disconnect = (anyProcess) => {
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve19, reject) => {
-    Object.assign(methods, { resolve: resolve19, reject });
+  const promise2 = new Promise((resolve20, reject) => {
+    Object.assign(methods, { resolve: resolve20, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -43166,11 +43179,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve19 = promise2.resolve.bind(promise2);
-  return { resolve: resolve19, promises };
+  const resolve20 = promise2.resolve.bind(promise2);
+  return { resolve: resolve20, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve19, promises }, subprocess) => {
-  resolve19();
+var waitForConcurrentStreams = async ({ resolve: resolve20, promises }, subprocess) => {
+  resolve20();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -43801,7 +43814,7 @@ function gitLockBackoffMs(attempt, random = Math.random) {
   return Math.floor(random() * window2);
 }
 function defaultGitLockSleep(ms) {
-  return new Promise((resolve19) => setTimeout(resolve19, ms));
+  return new Promise((resolve20) => setTimeout(resolve20, ms));
 }
 function isGitLockContention(value) {
   const stderr = typeof value === "string" ? value : String(
@@ -44022,6 +44035,26 @@ async function listDirtyPaths(opts) {
   return out.filter(
     (p) => !p.startsWith(".flow/state/") && p !== ".flow/state" && p !== ".flow"
   );
+}
+async function checkSharedRootLeak(opts) {
+  const { worktreeCwd, committedPaths, execaImpl } = opts;
+  const sharedRoot = await resolveSessionLedgerRoot({
+    cwd: worktreeCwd,
+    ...execaImpl ? { execaImpl } : {}
+  });
+  if (path14.resolve(sharedRoot) === path14.resolve(worktreeCwd)) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  if (committedPaths.length === 0) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  const dirtyInRoot = await listDirtyPaths({
+    cwd: sharedRoot,
+    ...execaImpl ? { execaImpl } : {}
+  });
+  const committedSet = new Set(committedPaths);
+  const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
+  return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
 
 // src/lib/logger.ts
@@ -49837,6 +49870,19 @@ async function runDevTerminalAction(opts) {
         stderr: testResult.stderr
       });
     }
+    if (useWorktree) {
+      const leakResult = await checkSharedRootLeak({
+        worktreeCwd: gitRoot,
+        committedPaths,
+        ...execaImpl ? { execaImpl } : {}
+      });
+      if (leakResult.leaked) {
+        throw new PrePrLeakDetectedError({
+          leakedPaths: leakResult.paths,
+          sharedRootPath: leakResult.sharedRootPath
+        });
+      }
+    }
     await gitPush({
       targetRepoRoot: gitRoot,
       branchName: branch,
@@ -51303,7 +51349,7 @@ async function waitForCiGreen(opts) {
     if (state === "green") return "green";
     if (state === "failed") return "failed";
     if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-    await new Promise((resolve19) => setTimeout(resolve19, CI_GATE_POLL_INTERVAL_MS));
+    await new Promise((resolve20) => setTimeout(resolve20, CI_GATE_POLL_INTERVAL_MS));
   }
 }
 async function runAutoMergeGate(opts) {

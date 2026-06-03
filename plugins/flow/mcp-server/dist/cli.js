@@ -9208,12 +9208,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve18, reject) {
+        return new Promise(function(resolve19, reject) {
           isexe(path57, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve18(is);
+              resolve19(is);
             }
           });
         });
@@ -9279,27 +9279,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve18, reject) => {
+      const step = (i2) => new Promise((resolve19, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve18(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve19(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path57.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve18(subStep(p, i2, 0));
+        resolve19(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve18, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve19, reject) => {
         if (ii === pathExt.length)
-          return resolve18(step(i2 + 1));
+          return resolve19(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve18(p + ext);
+              return resolve19(p + ext);
           }
-          return resolve18(subStep(p, i2, ii + 1));
+          return resolve19(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -10333,6 +10333,19 @@ var LensVerdictFileMalformedError = class extends DomainError {
     this.lens = opts.lens;
     this.path = opts.path;
     this.reason = opts.reason;
+  }
+};
+var PrePrLeakDetectedError = class extends DomainError {
+  leakedPaths;
+  sharedRootPath;
+  constructor(opts) {
+    const shown = opts.leakedPaths.slice(0, 5).join(", ");
+    const more = opts.leakedPaths.length > 5 ? `, +${opts.leakedPaths.length - 5} more` : "";
+    super(
+      `pre-PR leak gate stopped: the builder's edits reached the shared master copy (${opts.sharedRootPath}). ${opts.leakedPaths.length} leaked path(s): ${shown}${more}. NO pull request was opened. Cause: the builder wrote to absolute shared-copy paths instead of paths relative to its own work copy. Fix the build prompt to use relative paths and re-run. (Story native:01KT47430Q4C73K5E3ZECBSE5R)`
+    );
+    this.leakedPaths = [...opts.leakedPaths];
+    this.sharedRootPath = opts.sharedRootPath;
   }
 };
 var PrePrTestFailedError = class extends DomainError {
@@ -29459,8 +29472,8 @@ var disconnect = (anyProcess) => {
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve18, reject) => {
-    Object.assign(methods, { resolve: resolve18, reject });
+  const promise2 = new Promise((resolve19, reject) => {
+    Object.assign(methods, { resolve: resolve19, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -34102,11 +34115,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve18 = promise2.resolve.bind(promise2);
-  return { resolve: resolve18, promises };
+  const resolve19 = promise2.resolve.bind(promise2);
+  return { resolve: resolve19, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve18, promises }, subprocess) => {
-  resolve18();
+var waitForConcurrentStreams = async ({ resolve: resolve19, promises }, subprocess) => {
+  resolve19();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -34737,7 +34750,7 @@ function gitLockBackoffMs(attempt, random = Math.random) {
   return Math.floor(random() * window2);
 }
 function defaultGitLockSleep(ms) {
-  return new Promise((resolve18) => setTimeout(resolve18, ms));
+  return new Promise((resolve19) => setTimeout(resolve19, ms));
 }
 function isGitLockContention(value) {
   const stderr = typeof value === "string" ? value : String(
@@ -34960,6 +34973,26 @@ async function stashWorkingTree(opts) {
   const stderr = typeof result.stderr === "string" ? result.stderr : "";
   const stashed = exitCode === 0 && !/No local changes to save/i.test(stdout);
   return { stashed, stdout, stderr };
+}
+async function checkSharedRootLeak(opts) {
+  const { worktreeCwd, committedPaths, execaImpl } = opts;
+  const sharedRoot = await resolveSessionLedgerRoot({
+    cwd: worktreeCwd,
+    ...execaImpl ? { execaImpl } : {}
+  });
+  if (path19.resolve(sharedRoot) === path19.resolve(worktreeCwd)) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  if (committedPaths.length === 0) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  const dirtyInRoot = await listDirtyPaths({
+    cwd: sharedRoot,
+    ...execaImpl ? { execaImpl } : {}
+  });
+  const committedSet = new Set(committedPaths);
+  const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
+  return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
 
 // src/tools/create-smoke-scratch-repo.ts
@@ -37089,6 +37122,19 @@ async function runDevTerminalAction(opts) {
         stderr: testResult.stderr
       });
     }
+    if (useWorktree) {
+      const leakResult = await checkSharedRootLeak({
+        worktreeCwd: gitRoot,
+        committedPaths,
+        ...execaImpl ? { execaImpl } : {}
+      });
+      if (leakResult.leaked) {
+        throw new PrePrLeakDetectedError({
+          leakedPaths: leakResult.paths,
+          sharedRootPath: leakResult.sharedRootPath
+        });
+      }
+    }
     await gitPush({
       targetRepoRoot: gitRoot,
       branchName: branch,
@@ -38415,7 +38461,7 @@ async function waitForCiGreen(opts) {
     if (state === "green") return "green";
     if (state === "failed") return "failed";
     if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-    await new Promise((resolve18) => setTimeout(resolve18, CI_GATE_POLL_INTERVAL_MS));
+    await new Promise((resolve19) => setTimeout(resolve19, CI_GATE_POLL_INTERVAL_MS));
   }
 }
 async function runAutoMergeGate(opts) {

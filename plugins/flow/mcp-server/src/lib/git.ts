@@ -785,3 +785,67 @@ export async function stashWorkingTree(opts: {
   const stashed = exitCode === 0 && !/No local changes to save/i.test(stdout);
   return { stashed, stdout, stderr };
 }
+
+// ---------------------------------------------------------------------------
+// checkSharedRootLeak (Story native:01KT47430Q4C73K5E3ZECBSE5R — pre-PR leak gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-PR leak gate: check whether the builder's own committed edits escaped its
+ * worktree and dirtied the orchestrating shared master copy.
+ *
+ * In worktree-isolated mode the dev's `targetRepoRoot` (the worktree) is a
+ * SEPARATE working tree from the orchestrating checkout. A builder that edits
+ * via an ABSOLUTE shared-copy path bypasses the worktree boundary and dirties the
+ * orchestrating root instead of its own worktree. This check detects that by:
+ *
+ *   1. Resolving the orchestrating root from inside the worktree via
+ *      `resolveSessionLedgerRoot` (uses `git --git-common-dir`).
+ *   2. If the resolved root equals the worktree cwd (the builder is NOT running
+ *      inside a worktree — e.g. legacy `worktree: false` mode), there is nothing
+ *      to check; returns `{ leaked: false, paths: [] }`.
+ *   3. Otherwise calls `listDirtyPaths` on the orchestrating root, then intersects
+ *      the result with `committedPaths` — only paths the builder actually committed
+ *      count as a leak. Pre-existing stray edits in OTHER files are not the builder's
+ *      concern and are left untouched (the clean-root guard handles them separately).
+ *
+ * Returns `{ leaked: true, paths: [...] }` when the builder's own committed paths
+ * appear dirty in the shared root; `{ leaked: false, paths: [] }` when clean,
+ * when running in non-worktree mode, or when committedPaths is empty.
+ *
+ * Best-effort: any git failure degrades to `leaked: false` (never breaks the
+ * build). Only `run-dev-terminal-action.ts` should call this — the gate runs
+ * AFTER the build/test gates and BEFORE the push so no PR is ever opened on a
+ * leaking story.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ */
+export async function checkSharedRootLeak(opts: {
+  worktreeCwd: string;
+  /** The paths the builder committed — only these are tested for leakage. */
+  committedPaths: readonly string[];
+  execaImpl?: typeof defaultExeca;
+}): Promise<{ leaked: boolean; paths: string[]; sharedRootPath: string }> {
+  const { worktreeCwd, committedPaths, execaImpl } = opts;
+  const sharedRoot = await resolveSessionLedgerRoot({
+    cwd: worktreeCwd,
+    ...(execaImpl ? { execaImpl } : {}),
+  });
+  // Not inside a worktree — shared root equals the dev's cwd, no leak possible.
+  if (path.resolve(sharedRoot) === path.resolve(worktreeCwd)) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  if (committedPaths.length === 0) {
+    return { leaked: false, paths: [], sharedRootPath: sharedRoot };
+  }
+  const dirtyInRoot = await listDirtyPaths({
+    cwd: sharedRoot,
+    ...(execaImpl ? { execaImpl } : {}),
+  });
+  // Only flag paths that the builder actually committed — pre-existing stray edits
+  // in other files are the clean-root guard's domain, not this gate's.
+  const committedSet = new Set(committedPaths);
+  const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
+  return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
+}

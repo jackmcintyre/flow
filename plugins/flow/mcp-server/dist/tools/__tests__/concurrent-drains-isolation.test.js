@@ -30,7 +30,7 @@ import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { runDevTerminalAction } from "../run-dev-terminal-action.js";
 import { materialiseDevStoryWorktree, reapStaleDevStoryWorktrees, devStoryWorktreePath, } from "../../lib/dev-story-worktree.js";
-import { GhPrCreateFailedError } from "../../errors.js";
+import { GhPrCreateFailedError, PrePrLeakDetectedError } from "../../errors.js";
 // ---------------------------------------------------------------------------
 // Fixtures — two concurrent stories sharing one repo.
 // ---------------------------------------------------------------------------
@@ -236,6 +236,133 @@ describe("concurrent drains — AC3 (two concurrent devs produce two non-cross-c
         await expect(fs.access(path.join(ctx.repoRoot, STORY_A.ownFile))).rejects.toBeTruthy();
         await expect(fs.access(path.join(ctx.repoRoot, STORY_B.ownFile))).rejects.toBeTruthy();
         await Promise.all([a.cleanup(), b.cleanup()]);
+    });
+    /**
+     * AC1 same-file overlap case (Story native:01KT47430Q4C73K5E3ZECBSE5R):
+     *
+     * Two concurrent builders BOTH edit the same shared file (`src/shared-component.ts`).
+     * In correct worktree isolation each builder edits its OWN COPY of that file inside
+     * its own worktree; the shared master copy (the orchestrating checkout) is left
+     * untouched. Each story's PR carries only its own version of the shared file, not
+     * the sibling's, so the changes do not cross-contaminate.
+     *
+     * This test specifically exercises the collision path the original disjoint-file
+     * test (feature-a.ts/feature-b.ts) does NOT cover: both stories touching the same
+     * path. Isolation holds because the WORKTREE boundary keeps each builder's write
+     * inside its own working tree; the orchestrating root checkout is never touched.
+     */
+    it("AC1 (same-file overlap): each builder's PR carries only its own change to a shared file; shared master is untouched", async () => {
+        const SHARED_FILE = "src/shared-component.ts";
+        // Helper: run a dev flow where the story edits the shared file (not its own file).
+        async function runSharedFileDevFlow(story, execaImpl) {
+            const wt = await materialiseDevStoryWorktree({
+                targetRepoRoot: ctx.repoRoot,
+                sessionUlid: SESSION_ULID,
+                ref: story.ref,
+                base: "dev",
+                execaImpl: execaImpl,
+            });
+            // Each builder writes its OWN content to the SAME shared file path — but
+            // inside its own worktree, so the files are independent on disk.
+            await atomicWriteFile(path.join(wt.worktreePath, SHARED_FILE), `// Written by ${story.ref}\nexport const component = "${story.ref}";\n`);
+            try {
+                const result = await runDevTerminalAction({
+                    targetRepoRoot: wt.worktreePath,
+                    ref: story.ref,
+                    title: story.title,
+                    type: "feat",
+                    body: `Edit shared file for ${story.ref}.`,
+                    summary: `One-line summary for ${story.ref}.`,
+                    manifestPath: ctx.manifestPaths[story.ref],
+                    sessionUlid: SESSION_ULID,
+                    base: "dev",
+                    execaImpl: execaImpl,
+                });
+                return { worktreePath: wt.worktreePath, cleanup: wt.cleanup, result };
+            }
+            catch (error) {
+                return { worktreePath: wt.worktreePath, cleanup: wt.cleanup, error };
+            }
+        }
+        const prUrlForCwd = (cwd) => {
+            if (cwd.includes(STORY_A.ref))
+                return STORY_A.prUrl;
+            if (cwd.includes(STORY_B.ref))
+                return STORY_B.prUrl;
+            return "https://github.com/owner/repo/pull/1";
+        };
+        const spy = makeStubExeca({ prUrlForCwd });
+        // Run both builders concurrently — both editing the SAME file path.
+        const [a, b] = await Promise.all([
+            runSharedFileDevFlow(STORY_A, spy),
+            runSharedFileDevFlow(STORY_B, spy),
+        ]);
+        const resA = a.result;
+        const resB = b.result;
+        expect(resA.ok).toBe(true);
+        expect(resB.ok).toBe(true);
+        // Each branch in origin carries the shared file — but with its OWN story's content.
+        const filesA = await commitFiles(ctx.originDir, resA.branch);
+        const filesB = await commitFiles(ctx.originDir, resB.branch);
+        expect(filesA).toContain(SHARED_FILE);
+        expect(filesB).toContain(SHARED_FILE);
+        // The content in each branch is its OWN story's version, not the sibling's.
+        const contentA = await realExeca("git", ["-C", ctx.originDir, "show", `${resA.branch}:${SHARED_FILE}`], { reject: false });
+        const contentB = await realExeca("git", ["-C", ctx.originDir, "show", `${resB.branch}:${SHARED_FILE}`], { reject: false });
+        expect(contentA.stdout).toContain(STORY_A.ref);
+        expect(contentA.stdout).not.toContain(STORY_B.ref);
+        expect(contentB.stdout).toContain(STORY_B.ref);
+        expect(contentB.stdout).not.toContain(STORY_A.ref);
+        // The orchestrating checkout's master copy of the shared file is UNTOUCHED
+        // (does not exist — it was never in the initial commit).
+        await expect(fs.access(path.join(ctx.repoRoot, SHARED_FILE))).rejects.toBeTruthy();
+        await Promise.all([a.cleanup(), b.cleanup()]);
+    });
+    /**
+     * AC1 leak detection: a builder that DOES leak (writes to absolute shared-copy path)
+     * is caught by the pre-PR leak gate (PrePrLeakDetectedError) and no PR is opened.
+     * This verifies the deterministic safety net (AC2 behaviour surfaced from the
+     * concurrent-drain perspective).
+     */
+    it("AC1 (leak gate): a builder that dirtied the shared master copy is stopped BEFORE opening a PR", async () => {
+        // Materialise A's worktree.
+        const wt = await materialiseDevStoryWorktree({
+            targetRepoRoot: ctx.repoRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_A.ref,
+            base: "dev",
+        });
+        // Simulate a builder that leaked: write to the SHARED ROOT (not the worktree).
+        // This is exactly what a builder using an absolute shared-copy path would do.
+        const leakedFile = path.join(ctx.repoRoot, STORY_A.ownFile);
+        await atomicWriteFile(leakedFile, "leaked edit\n");
+        // Also write inside the worktree so the commit has something staged.
+        const worktreeFile = path.join(wt.worktreePath, STORY_A.ownFile);
+        await atomicWriteFile(worktreeFile, "worktree edit\n");
+        const prUrlForCwd = () => STORY_A.prUrl;
+        const spy = makeStubExeca({ prUrlForCwd });
+        const flowResult = await runDevTerminalAction({
+            targetRepoRoot: wt.worktreePath,
+            ref: STORY_A.ref,
+            title: STORY_A.title,
+            type: "feat",
+            body: "body",
+            summary: "summary",
+            manifestPath: ctx.manifestPaths[STORY_A.ref],
+            sessionUlid: SESSION_ULID,
+            base: "dev",
+            execaImpl: spy,
+        }).catch((e) => e);
+        // The pre-PR leak gate must have stopped with PrePrLeakDetectedError.
+        expect(flowResult).toBeInstanceOf(PrePrLeakDetectedError);
+        const err = flowResult;
+        expect(err.leakedPaths).toContain(STORY_A.ownFile);
+        // No PR was opened — gh was never called.
+        const ghCalls = spy.mock.calls.filter(([cmd]) => cmd === "gh");
+        expect(ghCalls).toHaveLength(0);
+        // Clean up leaked file so afterEach teardown does not fail.
+        await fs.rm(leakedFile, { force: true });
+        await wt.cleanup();
     });
 });
 describe("concurrent drains — AC4 (cleanup is concurrency- and crash-safe)", () => {

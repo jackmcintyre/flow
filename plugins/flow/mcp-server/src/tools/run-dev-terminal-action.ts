@@ -56,12 +56,14 @@ import {
   ConventionalCommitTypeUnknownError,
   GhPrCreateFailedError,
   PrePrBuildFailedError,
+  PrePrLeakDetectedError,
   PrePrTestFailedError,
 } from "../errors.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
 import {
+  checkSharedRootLeak,
   gitCommit,
   gitCreateBranch,
   gitFetch,
@@ -291,6 +293,32 @@ export async function runDevTerminalAction(opts: {
         stdout: testResult.stdout,
         stderr: testResult.stderr,
       });
+    }
+
+    // (viii-c) Pre-PR leak gate (Story native:01KT47430Q4C73K5E3ZECBSE5R). In
+    // worktree-isolated mode the dev's editing surface is its own worktree
+    // (`gitRoot`). A builder that writes to an ABSOLUTE shared-copy path escapes
+    // the worktree boundary and dirties the orchestrating root checkout instead;
+    // relative paths stay inside the worktree (probe-proven 2026-06-02). This gate
+    // runs AFTER the build/test gates and BEFORE the push: if the shared master copy
+    // is dirty, the story stops here with a readable reason and NO PR is ever opened.
+    // Structurally the same pre-PR throw as PrePrBuildFailedError (L267) /
+    // PrePrTestFailedError (L287): because the throw is before push + pr-create,
+    // neither the branch nor a PR ever reaches origin on a leaking story.
+    // Non-worktree mode (worktree:false) returns leaked:false immediately (the dev
+    // IS the shared root — no separate root to check).
+    if (useWorktree) {
+      const leakResult = await checkSharedRootLeak({
+        worktreeCwd: gitRoot,
+        committedPaths,
+        ...(execaImpl ? { execaImpl } : {}),
+      });
+      if (leakResult.leaked) {
+        throw new PrePrLeakDetectedError({
+          leakedPaths: leakResult.paths,
+          sharedRootPath: leakResult.sharedRootPath,
+        });
+      }
     }
 
     // (ix) Push.
