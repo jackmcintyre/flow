@@ -73,6 +73,14 @@ export const LessonSchema = z
   });
 
 /**
+ * Inferred type for a single retro lesson (the existing `LessonSchema` shape —
+ * NOT a new lesson type). Exported so the learning-loop producer
+ * (`recordReviewerLesson`, the reviewer-result projection) can type the lesson
+ * it captures off the one canonical schema.
+ */
+export type Lesson = z.infer<typeof LessonSchema>;
+
+/**
  * Schema for the full retro payload accepted by `recordStoryRetro`.
  *
  * - `lessons` — array of `LessonSchema`, defaults to `[]`.

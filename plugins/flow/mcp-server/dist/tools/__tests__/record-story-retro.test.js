@@ -279,4 +279,39 @@ describe("recordStoryRetro (e) — idempotency: identical payload → byte-ident
         const secondBytes = await fs.readFile(absPath);
         expect(secondBytes.equals(firstBytes)).toBe(true);
     });
+    // AC3 — the learning-loop FORWARD shape: the drain forwards a single reviewer
+    // lesson as `{ lessons: [lesson] }`. A crash-resume re-forwards the SAME lesson;
+    // the done manifest must be left byte-identical so a resume never duplicates or
+    // corrupts the lesson (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV AC3).
+    it("re-forwarding the same reviewer lesson onto a done manifest is byte-identical (crash-resume safe)", async () => {
+        const absPath = await seedManifest(stateRoot, "done", REF);
+        // The exact payload shape the drain's FORWARD step builds from a captured
+        // reviewer lesson: a single-element lessons[] carrying the reviewer's lesson.
+        const lesson = {
+            kind: "pitfall",
+            text: "Prose mandates to record a lesson do not hold under load — use a tool seam.",
+            failure_class: "prose-mandate-drift",
+        };
+        const forwardPayload = { lessons: [lesson] };
+        // First forward (the normal merge-time path).
+        await recordStoryRetro({
+            targetRepoRoot: root,
+            ref: REF,
+            payload: forwardPayload,
+            role: "generalist-reviewer",
+        });
+        const firstBytes = await fs.readFile(absPath);
+        // Second forward (the crash-resume re-run of the SAME lesson).
+        await recordStoryRetro({
+            targetRepoRoot: root,
+            ref: REF,
+            payload: forwardPayload,
+            role: "generalist-reviewer",
+        });
+        const secondBytes = await fs.readFile(absPath);
+        expect(secondBytes.equals(firstBytes)).toBe(true);
+        // And the forwarded lesson is exactly what landed — no duplication, no drift.
+        const parsedYaml = yamlParse(await fs.readFile(absPath, "utf8"));
+        expect(parsedYaml["lessons"]).toEqual([lesson]);
+    });
 });

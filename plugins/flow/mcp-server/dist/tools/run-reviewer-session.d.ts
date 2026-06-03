@@ -34,6 +34,7 @@ import { execa as defaultExeca } from "execa";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
 import type { RiskTierBlock } from "./classify-risk-tier.js";
+import type { Lesson } from "../schemas/story-retro.js";
 export type AcResult = {
     index: number;
     tag: string | null;
@@ -109,6 +110,18 @@ export interface ReviewerResultFileShape {
      * to render the evidence block and stamp the manifest.
      */
     riskTier?: RiskTierBlock;
+    /**
+     * One reusable retro lesson the reviewer surfaced during review
+     * (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer).
+     *
+     * Clean additive optional field. `runReviewerSession` NEVER writes it — it is
+     * merged in afterwards, only by `recordReviewerLesson`, which the reviewer
+     * calls at most once when (and only when) the review taught a reusable lesson.
+     * The drain then forwards this lesson onto the done manifest via
+     * `recordStoryRetro` before the merge gate runs. Typed from `LessonSchema`'s
+     * inferred type (the existing shape — no new lesson type is defined here).
+     */
+    lesson?: Lesson;
 }
 export interface RunReviewerSessionOptions {
     targetRepoRoot: string;

@@ -2,6 +2,7 @@ role: generalist-reviewer
 tools_allow:
   - runReviewerSession
   - recordStoryRetro
+  - recordReviewerLesson
 gh_allow:
   - pr-diff
   - pr-view
