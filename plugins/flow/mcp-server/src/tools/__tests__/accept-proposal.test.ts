@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import {
   AmbiguousProposalIdError,
+  ProposalCommitFailedError,
   ProposalKindNotApplicableYetError,
 } from "../../errors.js";
 import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
@@ -54,6 +55,16 @@ const ULID_MISSING = "01HZRETR0000000000000000Z9";
 const ISO = "2026-05-28T14:32:11.123Z";
 const ISO_2 = "2026-05-28T15:00:00.000Z";
 const FIXED_NOW = new Date("2026-05-31T10:00:00.000Z");
+
+/**
+ * The repo-relative path of the proposal RECORD file for a given ISO timestamp —
+ * matches `locateProposal`'s `relPath` (`path.relative(root, .flow/retro-proposals/<iso>.md)`).
+ * In a self-host repo where `.flow/` is gitignored this is one of the ignored
+ * paths, which is exactly the residual mixed-case bug under test.
+ */
+function proposalRel(iso: string): string {
+  return path.join(".flow", "retro-proposals", `${iso}.md`);
+}
 
 function ruleProposal(id: string): Record<string, unknown> {
   return {
@@ -419,13 +430,12 @@ describe("acceptProposal — confirmed apply (AC3, AC5)", () => {
     });
   });
 
-  it("leaves the proposal un-stamped and emits no telemetry when the commit fails", async () => {
+  it("keeps the applied stamp (uncommitted sentinel) + raises ProposalCommitFailedError when the commit fails, so a re-run is a no-op", async () => {
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
       isoTimestamp: ISO,
       proposals: [ruleProposal(ULID_RULE)],
     });
-    const before = await readProposalFile(ISO);
     const handler = makeFakeHandler({
       type: "rule",
       changedFileRel: "docs/discipline-rules.yaml",
@@ -438,6 +448,8 @@ describe("acceptProposal — confirmed apply (AC3, AC5)", () => {
     // No paths are ignored — we want the commit to be attempted (and fail).
     const filterIgnored = makeFakeFilterGitIgnoredPaths([]);
 
+    // The apply lands on disk + stamps, then the commit throws → a structured
+    // ProposalCommitFailedError that names the proposal id.
     await expect(
       acceptProposal({
         targetRepoRoot: tmpRoot,
@@ -448,15 +460,53 @@ describe("acceptProposal — confirmed apply (AC3, AC5)", () => {
         filterGitIgnoredPathsImpl: filterIgnored,
         now: () => FIXED_NOW,
       }),
-    ).rejects.toThrow("git commit boom");
+    ).rejects.toMatchObject({
+      name: "ProposalCommitFailedError",
+      proposalId: ULID_RULE,
+    });
 
-    // Stamp rolled back — proposal file byte-identical, no applied block.
+    // The handler change is on disk (it ran before the failed commit).
+    expect(
+      await fs.readFile(
+        path.join(tmpRoot, "docs", "discipline-rules.yaml"),
+        "utf8",
+      ),
+    ).toBe("rules: [x]\n");
+
+    // Stamp is KEPT — applied block present with the "uncommitted" sentinel sha
+    // (non-idempotent handlers must not re-apply, so the stamp is not rolled back).
     const after = await readProposalFile(ISO);
-    expect(after.raw).toBe(before.raw);
-    expect(after.file.proposals[0]!.applied).toBeUndefined();
+    expect(after.file.proposals[0]!.applied).toBeDefined();
+    expect(after.file.proposals[0]!.applied!.applied_sha).toBe("uncommitted");
+    expect(after.file.proposals[0]!.applied!.applied_at).toBe(
+      FIXED_NOW.toISOString(),
+    );
 
     // No telemetry on a failed commit.
     expect(await readTelemetryEvents()).toHaveLength(0);
+
+    // Re-run is a safe no-op: the idempotency check sees the stamp and returns
+    // already-applied without calling the handler or git again.
+    const second = await acceptProposal({
+      targetRepoRoot: tmpRoot,
+      proposalId: ULID_RULE,
+      confirm: true,
+      handlers: registryWith(handler),
+      gitCommitImpl: failingGit,
+      filterGitIgnoredPathsImpl: filterIgnored,
+      now: () => new Date("2099-01-01T00:00:00.000Z"),
+    });
+    expect(second.status).toBe("already-applied");
+    expect(handler.applyCalls).toBe(1);
+    expect(await readTelemetryEvents()).toHaveLength(0);
+    // The error message points the operator at committing manually.
+    const err = new ProposalCommitFailedError({
+      proposalId: ULID_RULE,
+      paths: ["docs/discipline-rules.yaml"],
+      underlyingMessage: "git commit boom",
+    });
+    expect(err.message).toContain("Commit the change by hand");
+    expect(err.message).toContain("docs/discipline-rules.yaml");
   });
 });
 
@@ -604,8 +654,13 @@ describe("acceptProposal — git-ignored target files (AC1 new)", () => {
       diff: "d",
     });
     const git = makeFakeGitCommit();
-    // All handler paths are ignored — no tracked paths to commit.
-    const filterIgnored = makeFakeFilterGitIgnoredPaths(["ignored-output/rules.yaml"]);
+    // The handler path AND the proposal record file are both ignored (the
+    // self-host shape where all of .flow/ is gitignored) — no tracked paths to
+    // commit, so the no-commit branch fires.
+    const filterIgnored = makeFakeFilterGitIgnoredPaths([
+      "ignored-output/rules.yaml",
+      proposalRel(ISO),
+    ]);
 
     const result = await acceptProposal({
       targetRepoRoot: tmpRoot,
@@ -728,6 +783,53 @@ describe("acceptProposal — mixed tracked and ignored paths (AC2 new)", () => {
     const after = await readProposalFile(ISO);
     expect(after.file.proposals[0]!.applied?.applied_sha).toBe(
       "cafebabe0000000000000000000000000000cafe",
+    );
+  });
+
+  it("commits only the tracked handler path, filtering out the IGNORED proposal record file (self-host mixed case)", async () => {
+    await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO,
+      proposals: [ruleProposal(ULID_RULE)],
+    });
+
+    const trackedRel = "docs/tracked-rules.yaml";
+    const handler = makeFakeHandler({
+      type: "rule",
+      changedFileRel: trackedRel,
+      changedFileContents: "rules:\n  - r\n",
+      diff: "d",
+    });
+    const git = makeFakeGitCommit("0badf00d0000000000000000000000000000beef");
+    // The handler path is tracked, but the proposal RECORD file is ignored —
+    // the residual bug: previously the record file was appended to the commit
+    // unfiltered and `git add <ignored>` would reject it.
+    const filterIgnored = makeFakeFilterGitIgnoredPaths([proposalRel(ISO)]);
+
+    const result = await acceptProposal({
+      targetRepoRoot: tmpRoot,
+      proposalId: ULID_RULE,
+      confirm: true,
+      handlers: registryWith(handler),
+      gitCommitImpl: git.impl,
+      filterGitIgnoredPathsImpl: filterIgnored,
+      now: () => FIXED_NOW,
+    });
+
+    expect(result.status).toBe("applied");
+
+    // Exactly one commit, carrying ONLY the tracked handler path.
+    expect(git.calls).toHaveLength(1);
+    const committed = git.calls[0]!;
+    expect(committed.paths).toContain(trackedRel);
+    // git never received the ignored record file.
+    expect(committed.paths.some((p) => p.endsWith(`${ISO}.md`))).toBe(false);
+    expect(committed.paths).not.toContain(proposalRel(ISO));
+
+    // Proposal is still stamped with the real commit sha.
+    const after = await readProposalFile(ISO);
+    expect(after.file.proposals[0]!.applied?.applied_sha).toBe(
+      "0badf00d0000000000000000000000000000beef",
     );
   });
 
