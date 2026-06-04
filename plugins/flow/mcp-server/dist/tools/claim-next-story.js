@@ -23,6 +23,7 @@
 import * as path from "node:path";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { claimStory } from "./claim-story.js";
+import { areDependenciesMerged, } from "../lib/dep-merge-check.js";
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE = "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 /** Verbatim waiting-on-in-progress line — do not paraphrase. */
@@ -47,7 +48,30 @@ export async function claimNextStory(opts) {
     // satisfied is still NOT claimed until the operator marks it `ready: true`
     // via the markStoryReady tool (the /flow:ready skill). This is the single
     // chokepoint the drain hits, so the gate lives here in the claim entry point.
-    const eligible = todos.filter((c) => c.depsReady && c.ready);
+    const readyCandidates = todos.filter((c) => c.depsReady && c.ready);
+    // Build-blind merge gate: `depsReady` only proves a dependency reached `done/`,
+    // which happens on reviewer APPROVAL — BEFORE a medium/high-risk PR is merged
+    // by a human. Claiming a dependent now would cut its worktree from an
+    // `origin/main` that lacks the unmerged prerequisite, building it blind. So a
+    // candidate with dependencies is only truly claimable once EVERY dependency's
+    // PR is merged into the trunk. A dependency that is approved-but-not-merged
+    // simply parks the dependent for this pass (treated exactly like a not-yet-
+    // satisfied dep): the chain advances one merged layer at a time. Candidates
+    // with no dependencies skip the check (and any `gh` call) entirely.
+    const eligible = [];
+    for (const c of readyCandidates) {
+        if (c.depends_on.length === 0) {
+            eligible.push(c);
+            continue;
+        }
+        const allMerged = await areDependenciesMerged({
+            targetRepoRoot,
+            deps: c.depends_on,
+            ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
+        });
+        if (allMerged)
+            eligible.push(c);
+    }
     // Queue-drained check: no eligible candidates AND no in-progress.
     if (eligible.length === 0 && inProgressCount === 0) {
         chatLog.push(QUEUE_DRAINED_LINE);

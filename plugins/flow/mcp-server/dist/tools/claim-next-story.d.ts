@@ -20,6 +20,7 @@
  *
  * Story 4.3b Task 1.1–1.6.
  */
+import { type SingleDependencyMergedCheck } from "../lib/dep-merge-check.js";
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export declare const QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 /** Verbatim waiting-on-in-progress line — do not paraphrase. */
@@ -27,6 +28,12 @@ export declare const WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work 
 export interface ClaimNextStoryOptions {
     targetRepoRoot: string;
     sessionUlid: string;
+    /**
+     * Test seam for the build-blind merge gate — override the "is this dependency
+     * merged?" check. Production callers (the drain via the CLI seam, the MCP
+     * handler) omit it and the real GitHub-backed check runs.
+     */
+    isDependencyMerged?: SingleDependencyMergedCheck;
 }
 export type ClaimNextStoryResult = {
     next: "spawn-dev";
