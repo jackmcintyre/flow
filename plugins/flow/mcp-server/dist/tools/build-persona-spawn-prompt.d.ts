@@ -69,6 +69,10 @@ import type { PersonaFile } from "../schemas/persona.js";
 export interface BuildPersonaSpawnPromptOptions {
     targetRepoRoot: string;
     role: string;
+    /** Briefing budget — max number of lessons in the always-shown index. Default: 10. */
+    briefingBudget?: number;
+    /** Injectable clock seam (default: real Date). */
+    now?: () => Date;
 }
 export interface BuildPersonaSpawnPromptResult {
     systemPrompt: string;
@@ -79,6 +83,18 @@ export interface BuildPersonaSpawnPromptResult {
  * Reads the persona file at `<targetRepoRoot>/team/<role>/PERSONA.md`
  * exactly once per call, then concatenates the five sections plus the
  * locked-phrases sentinel block.
+ *
+ * Story native:01KT6QSW4W7SMAHAT4EAKCCC65 — briefing budget cap:
+ * Before assembling the prompt, the Knowledge section is ranked by
+ * `use_count` descending then `last_used_at` descending. If the number of
+ * structured lessons exceeds `briefingBudget` (default 10), overflow lessons
+ * are demoted to the role's archived lesson store (`team/<role>/_archived/`)
+ * and removed from the live Knowledge body. This keeps the always-shown index
+ * focused regardless of how many lessons the role has accumulated.
+ *
+ * The persona file is rewritten in-place (via `writeManagedFile`) when lessons
+ * are demoted. The rewrite is performed BEFORE assembling the prompt so the
+ * next call to `readPersona` will see the pruned Knowledge body.
  *
  * @throws {PersonaFileNotFoundError} When the persona file is absent.
  * @throws {PersonaFileMalformedError} When the persona file fails the parser.

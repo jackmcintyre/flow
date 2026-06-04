@@ -84,6 +84,13 @@ export const LessonSchema = z
  *  - `source_ref`  — Optional story ref the lesson came from (e.g. `native:01KT...`).
  *  - `source_pr`   — Optional PR URL for traceability.
  *  - `learned_at`  — ISO-8601 UTC timestamp when the lesson was appended.
+ *  - `use_count`   — Optional non-negative integer. Incremented by `recallLesson` each time
+ *                    an agent retrieves this lesson's full detail. Used by the briefing-budget
+ *                    ranker (Story native:01KT6QSW4W7SMAHAT4EAKCCC65) to keep frequently-used
+ *                    lessons in the always-shown index.
+ *  - `last_used_at`— Optional ISO-8601 UTC timestamp of the most recent `recallLesson` call.
+ *                    Secondary sort key in the briefing-budget ranker (most-recently-used first
+ *                    when use_count is equal).
  *
  * `.strict()` rejects unknown keys.
  */
@@ -101,6 +108,14 @@ export const StructuredLessonSchema = z
     learned_at: z
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "learned_at must be ISO-8601 UTC (Z-suffixed)"),
+    // Usage-tracking fields added by Story native:01KT6QSW4W7SMAHAT4EAKCCC65.
+    // Optional so old lessons without them remain valid; ranker treats absent
+    // fields as use_count=0 / last_used_at=epoch for ordering purposes.
+    use_count: z.number().int().nonnegative().optional(),
+    last_used_at: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "last_used_at must be ISO-8601 UTC (Z-suffixed)")
+        .optional(),
 })
     .strict()
     .superRefine((lesson, ctx) => {
