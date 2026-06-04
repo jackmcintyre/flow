@@ -133,6 +133,13 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // through renderGateWriteNativeStory (atomicWriteFile) and performs no raw fs
   // writes itself.
   path.join(SRC_DIR, "tools", "gather-retro-inputs.test.ts"),
+  // Story native:01KT7RQ447J3TRM2RZMGW7MCR3: audit-tool-reachability tests seed
+  // synthetic register.ts, cli.ts, SKILL.md, and workflow.js fixture files
+  // directly to tmpdir via raw fs.writeFile/mkdir to drive the audit-script
+  // parser functions in isolation. Test file only; the production audit script
+  // (scripts/audit-tool-reachability.mjs) is a read-only reporter that writes
+  // nothing — it performs zero fs writes itself.
+  path.join(SRC_DIR, "tools", "__tests__", "audit-tool-reachability.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
