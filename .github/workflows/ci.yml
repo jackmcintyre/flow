@@ -39,6 +39,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bloat gate — fail on dead files, unused exports, or unused deps (knip)
         run: pnpm knip
+      - name: Lint — fail on unused imports and unreachable code (oxlint)
+        run: pnpm lint
       - name: Typecheck — fail on unused locals, parameters, and type errors
         run: pnpm typecheck
       - run: pnpm build
