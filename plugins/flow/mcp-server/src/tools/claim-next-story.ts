@@ -28,6 +28,10 @@ import {
   areDependenciesMerged,
   type SingleDependencyMergedCheck,
 } from "../lib/dep-merge-check.js";
+import {
+  loadOverlapUniverse,
+  findOverlapBlockers,
+} from "../lib/cited-source-overlap.js";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE =
@@ -85,27 +89,55 @@ export async function claimNextStory(
   // chokepoint the drain hits, so the gate lives here in the claim entry point.
   const readyCandidates = todos.filter((c) => c.depsReady && c.ready);
 
-  // Build-blind merge gate: `depsReady` only proves a dependency reached `done/`,
-  // which happens on reviewer APPROVAL — BEFORE a medium/high-risk PR is merged
-  // by a human. Claiming a dependent now would cut its worktree from an
-  // `origin/main` that lacks the unmerged prerequisite, building it blind. So a
-  // candidate with dependencies is only truly claimable once EVERY dependency's
-  // PR is merged into the trunk. A dependency that is approved-but-not-merged
-  // simply parks the dependent for this pass (treated exactly like a not-yet-
-  // satisfied dep): the chain advances one merged layer at a time. Candidates
-  // with no dependencies skip the check (and any `gh` call) entirely.
+  // Two gates park a candidate that would otherwise build BLIND to a change it
+  // shares ground with. Both reduce to the same GitHub-backed "is this PR
+  // merged?" check (`areDependenciesMerged`); a story reaches `done/` on
+  // reviewer APPROVAL, before a medium/high-risk PR is human-merged, so `done/`
+  // alone is not proof the change is on the trunk.
+  //
+  //  (1) Declared-dependency gate (#294): a candidate with `depends_on` is only
+  //      claimable once EVERY declared dependency's PR is merged. Until then its
+  //      worktree (cut from `origin/main`) would lack the prerequisite.
+  //
+  //  (2) Cited-source overlap gate: two stories with NO declared edge still
+  //      collide if they edit the same file. We treat an overlapping
+  //      `cited_sources` entry as an implicit dependency — a candidate is parked
+  //      while any EARLIER-ordered story citing the same file is still in flight
+  //      (`to-do`/`in-progress` → never merged → always blocks) or approved but
+  //      not yet merged (`done/` → verified via the merge check). The later
+  //      story then builds on top of the earlier one instead of blind. See
+  //      `cited-source-overlap.ts` (the #300/#301 silent-integration-bug fix).
+  //
+  // Candidates with no dependencies AND no cited-source overlap skip every `gh`
+  // call. The overlap universe is loaded once per pass (in-memory matching).
+  const overlapUniverse =
+    readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
+
   const eligible: typeof readyCandidates = [];
   for (const c of readyCandidates) {
-    if (c.depends_on.length === 0) {
-      eligible.push(c);
-      continue;
+    // (1) declared dependencies
+    if (c.depends_on.length > 0) {
+      const allMerged = await areDependenciesMerged({
+        targetRepoRoot,
+        deps: c.depends_on,
+        ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
+      });
+      if (!allMerged) continue;
     }
-    const allMerged = await areDependenciesMerged({
-      targetRepoRoot,
-      deps: c.depends_on,
-      ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
-    });
-    if (allMerged) eligible.push(c);
+
+    // (2) cited-source overlap
+    const { pendingRefs, doneRefs } = findOverlapBlockers(overlapUniverse, c.ref);
+    if (pendingRefs.length > 0) continue; // earlier overlapping story still in flight
+    if (doneRefs.length > 0) {
+      const overlapMerged = await areDependenciesMerged({
+        targetRepoRoot,
+        deps: doneRefs,
+        ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
+      });
+      if (!overlapMerged) continue; // earlier overlapping story approved but not merged
+    }
+
+    eligible.push(c);
   }
 
   // Queue-drained check: no eligible candidates AND no in-progress.
