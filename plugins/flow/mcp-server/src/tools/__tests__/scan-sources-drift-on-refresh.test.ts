@@ -319,7 +319,7 @@ describe("scan-sources-drift-on-refresh (c) — symmetric drift on refresh", () 
     // Seed workspace: story has bmad:5.2 in its ## Dependencies section
     // (so story.depends_on = ["bmad:5.2"]).
     const originalBody = makeStoryBody({ depsSection: ["bmad:5.2"] });
-    const { storyAbsPath, toDoManifestAbsPath, blockedDir } = await buildWorkspace(
+    const { storyAbsPath, toDoManifestAbsPath: _toDoManifestAbsPath, blockedDir } = await buildWorkspace(
       root,
       originalBody,
     );

@@ -29,7 +29,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import {
-  ProposalNotFoundError,
   AmbiguousProposalIdError,
   ProposalKindNotApplicableYetError,
 } from "../../errors.js";

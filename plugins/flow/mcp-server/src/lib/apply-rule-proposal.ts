@@ -151,7 +151,7 @@ function buildRuleFromProposal(
 async function renderRuleDiff(
   proposal: Extract<RetroProposal, { type: "rule" }>,
   ctx: HandlerContext,
-  seams: Required<RuleApplyHandlerSeams>,
+  _seams: Required<RuleApplyHandlerSeams>,
 ): Promise<string> {
   const raw = await readRegistryRaw(ctx.targetRepoRoot);
   const { data } = parseRuleRegistry(raw, REGISTRY_REL_PATH);

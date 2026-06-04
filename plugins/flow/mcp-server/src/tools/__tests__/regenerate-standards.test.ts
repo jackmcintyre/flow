@@ -34,7 +34,6 @@ import {
 import {
   StandardsCapExceededError,
   DomainError,
-  StandardsDocMissingError,
 } from "../../errors.js";
 import { StandardsDocSchema } from "../../schemas/standards-doc.js";
 import { parseStandardsDoc } from "../../validators/standards-doc.js";

@@ -51,7 +51,6 @@ import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
 import type { RiskTierBlock } from "./classify-risk-tier.js";
 import type { Lesson } from "../schemas/story-retro.js";
-import type { execa } from "execa";
 
 // ---------------------------------------------------------------------------
 // Types

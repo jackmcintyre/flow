@@ -203,7 +203,7 @@ async function runDrain(opts: {
     return { _unstubbed: label };
   };
 
-  const agent = async (prompt: string, agentOpts: { label?: string; schema?: unknown } = {}) => {
+  const agent = async (_prompt: string, agentOpts: { label?: string; schema?: unknown } = {}) => {
     const label = agentOpts.label ?? "";
     const isSeam = Boolean(agentOpts.schema);
     calls.push({ label, isSeam });

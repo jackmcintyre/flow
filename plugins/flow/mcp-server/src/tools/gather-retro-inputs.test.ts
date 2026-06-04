@@ -108,15 +108,6 @@ async function listNativeStories(tmpRoot: string): Promise<string[]> {
   }
 }
 
-/**
- * Read and return a backlog manifest YAML as a parsed object. Helper for AC3.
- */
-async function readManifestYaml(absPath: string): Promise<Record<string, unknown>> {
-  const raw = await fs.readFile(absPath, "utf8");
-  const { parse } = await import("yaml");
-  return parse(raw) as Record<string, unknown>;
-}
-
 // ---------------------------------------------------------------------------
 // AC1: Integration — recurring pitfall failure_class triggers a hardening draft
 // ---------------------------------------------------------------------------

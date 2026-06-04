@@ -35,7 +35,6 @@ import { parse as yamlParse } from "yaml";
 import { WrongAdapterError } from "../../errors.js";
 import { markWithdrawn } from "../../tools/mark-withdrawn.js";
 import { writeNativeStory } from "../../tools/write-native-story.js";
-import { scanSources } from "../../tools/scan-sources.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

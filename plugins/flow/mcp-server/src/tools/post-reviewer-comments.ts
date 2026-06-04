@@ -40,7 +40,6 @@ import { findHunkLineForPath } from "../lib/find-hunk-line.js";
 import { GhApiResponseShapeError, ReviewerResultMissingStandardsVersionError } from "../errors.js";
 import { logTelemetryEvent } from "../lib/logger.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
-import type { execa } from "execa";
 import type { RiskTierBlock } from "./classify-risk-tier.js";
 
 // ---------------------------------------------------------------------------

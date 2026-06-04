@@ -91,9 +91,6 @@ const { deriveSourceBaseline: realDeriveSourceBaseline } = await vi.importActual
 const STORY_REF = "native:01J9P0K2N3MZX0YV4S5RTQ4GHI";
 const SESSION_ULID = "01HZSESSION00000000000003";
 const HANDOFF_PHRASE = `Handoff to reviewer — story ${STORY_REF} ready for review.`;
-const READY_FOR_MERGE = `**Verdict: READY FOR MERGE**`;
-const NEEDS_CHANGES = `**Verdict: NEEDS CHANGES** [2 issues]`;
-const BLOCKED_VERDICT = `**Verdict: BLOCKED**`;
 // Story 4.6: happy-path transcripts must include a GitHub PR URL for prNumber extraction.
 const FIXTURE_PR_URL = "https://github.com/test-org/test-repo/pull/99";
 import type { ReviewerResultFileShape } from "../run-reviewer-session.js";

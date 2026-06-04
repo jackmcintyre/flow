@@ -40,7 +40,6 @@ import type { AgreementMetricResult } from "../compute-agreement.js";
 import { AutoMergeGateThresholdInvalidError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
-import type { RolePermissions } from "../../schemas/role-permissions.js";
 import type { ReviewerResultFileShape } from "../../lib/read-reviewer-result-file.js";
 
 // ---------------------------------------------------------------------------
@@ -124,36 +123,6 @@ async function writeJSONL(
 ): Promise<void> {
   const lines = events.map((e) => JSON.stringify(e));
   await fs.writeFile(path.join(telemetryDir, filename), lines.join("\n") + "\n");
-}
-
-/**
- * Seed N fully-resolved verdict pairs with a target agreement ratio.
- *
- * @param telemetryDir - Directory to write the JSONL file into.
- * @param count - Number of resolved pairs (window size).
- * @param agreedCount - How many pairs should agree (agree = READY + merged OR NEEDS + closed).
- */
-async function seedVerdictPairs(
-  telemetryDir: string,
-  count: number,
-  agreedCount: number,
-): Promise<void> {
-  const events: object[] = [];
-  for (let i = 0; i < count; i++) {
-    const ts = makeTs(i * 1000);
-    const session_id = `gate-sess-${String(i).padStart(4, "0")}`;
-    const pr_number = 9000 + i;
-    // First `agreedCount` pairs agree; rest disagree
-    const agree = i < agreedCount;
-    const verdict = agree ? ("READY FOR MERGE" as const) : ("NEEDS CHANGES" as const);
-    const mergeAction = agree ? ("merged" as const) : ("merged" as const); // disagree for NEEDS CHANGES + merged
-    // For agreement: READY FOR MERGE + merged = agree; NEEDS CHANGES + merged = disagree
-    const v = makeVerdictEvent({ ts, session_id, pr_number, verdict });
-    const ma = makeMergeActionEvent({ ts, session_id, pr_number, merge_action: mergeAction, resolved_at: ts });
-    events.push(v, ma);
-  }
-  await fs.mkdir(telemetryDir, { recursive: true });
-  await writeJSONL(telemetryDir, "gate-verdicts.jsonl", events);
 }
 
 /**
@@ -284,7 +253,7 @@ function makeFakeExeca(routes: Array<{
 }
 
 /** Fake execa that handles repo-view + api-labels (pause branch) */
-function makePauseExeca(labelsOnCall?: (input: string | undefined, args: string[]) => void) {
+function makePauseExeca(_labelsOnCall?: (input: string | undefined, args: string[]) => void) {
   return makeFakeExeca([
     {
       match: (cmd, args) => cmd === "gh" && args[0] === "repo" && args[1] === "view",

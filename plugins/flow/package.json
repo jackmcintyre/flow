@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
     "knip": "knip --no-progress",
     "dev:install": "./scripts/dev-install.sh"
   },

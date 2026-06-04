@@ -98,5 +98,6 @@ type _PersonaSupersetsCatalogue = _CatalogueShape extends Omit<
 >
   ? true
   : false;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Compile-time structural check: PersonaFrontmatter must be a superset of CatalogueRoleSchema.
 const _supersetCheck: _PersonaSupersetsCatalogue = true;
+void _supersetCheck;

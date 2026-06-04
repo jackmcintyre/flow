@@ -35982,7 +35982,7 @@ function makeSkillCreateHandler(deps) {
     }
   };
 }
-function makeSkillReviseHandler(deps) {
+function makeSkillReviseHandler(_deps) {
   return {
     type: "skill-revise",
     async previewDiff(proposal, ctx) {
@@ -46082,7 +46082,7 @@ function buildRuleFromProposal(proposal, seams) {
   };
   return DisciplineRuleSchema.parse(candidate);
 }
-async function renderRuleDiff(proposal, ctx, seams) {
+async function renderRuleDiff(proposal, ctx, _seams) {
   const raw = await readRegistryRaw(ctx.targetRepoRoot);
   const { data } = parseRuleRegistry(raw, REGISTRY_REL_PATH);
   const existingIdx = data.rules.findIndex(
@@ -50036,7 +50036,7 @@ function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
 }
 async function scanSources(opts) {
   const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
-  const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
+  const { activeAdapter, activeAdapterName, targetRepoRoot } = workspace;
   const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
   const sourceStories = await activeAdapter.listSourceStories();
   const result = {

@@ -28902,7 +28902,7 @@ function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
 }
 async function scanSources(opts) {
   const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
-  const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
+  const { activeAdapter, activeAdapterName, targetRepoRoot } = workspace;
   const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
   const sourceStories = await activeAdapter.listSourceStories();
   const result = {
