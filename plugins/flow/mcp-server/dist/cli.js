@@ -36936,6 +36936,33 @@ async function buildPersonaSpawnPrompt(opts) {
   const systemPrompt = assemblePrompt(persona);
   return { systemPrompt };
 }
+var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX = " -->";
+function buildKnowledgeIndex(knowledgeBody) {
+  const lines = [];
+  for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+      try {
+        const raw = JSON.parse(jsonStr);
+        if (raw !== null && typeof raw === "object" && "id" in raw && "kind" in raw && "applies_when" in raw) {
+          const obj = raw;
+          const id = String(obj["id"]);
+          const kind = String(obj["kind"]);
+          const trigger = String(obj["applies_when"]);
+          lines.push(`[${id}] ${kind} \u2014 ${trigger}`);
+        }
+      } catch {
+      }
+      continue;
+    }
+    if (/^-\s+(.+?)\s*$/.test(line)) {
+      lines.push(line);
+    }
+  }
+  return lines.join("\n");
+}
 function assemblePrompt(persona) {
   const displayName = toDisplayName2(persona.role);
   const lockedPhraseLines = [];
@@ -36954,6 +36981,7 @@ function assemblePrompt(persona) {
       );
     }
   }
+  const knowledgeIndex = buildKnowledgeIndex(persona.sections["Knowledge"]);
   const parts = [
     `# ${displayName} \u2014 Persona`,
     ``,
@@ -36975,7 +37003,7 @@ function assemblePrompt(persona) {
     ``,
     `## Knowledge`,
     ``,
-    persona.sections["Knowledge"],
+    knowledgeIndex,
     ``,
     `## Locked phrases (do not paraphrase)`,
     ...lockedPhraseLines
@@ -39652,15 +39680,15 @@ async function getTeamSnapshot(opts) {
     malformedTelemetryFiles: stats.malformedFiles
   });
 }
-var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
-var LESSON_BLOCK_SUFFIX = " -->";
+var LESSON_BLOCK_PREFIX2 = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX2 = " -->";
 function extractKnowledgeEntries(knowledgeBody, limit) {
   const structured = [];
   const migrated = [];
   for (const line of knowledgeBody.split("\n")) {
     const trimmed = line.trimStart();
-    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
-      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX2) && trimmed.endsWith(LESSON_BLOCK_SUFFIX2)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX2.length, trimmed.length - LESSON_BLOCK_SUFFIX2.length).trim();
       try {
         const raw = JSON.parse(jsonStr);
         if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
@@ -40737,6 +40765,59 @@ async function recordStoryRetro(opts) {
   return { ref, absPath: absDonePath };
 }
 
+// src/tools/recall-lesson.ts
+var LESSON_BLOCK_PREFIX3 = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX3 = " -->";
+async function recallLesson(opts) {
+  const { targetRepoRoot, role, id } = opts;
+  const persona = await readPersona({ targetRepoRoot, role });
+  const hit = findLessonById(persona.sections["Knowledge"], id);
+  if (hit === null) {
+    return { found: false, lesson: null };
+  }
+  return { found: true, lesson: hit };
+}
+function findLessonById(knowledgeBody, id) {
+  for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith(LESSON_BLOCK_PREFIX3) || !trimmed.endsWith(LESSON_BLOCK_SUFFIX3)) {
+      continue;
+    }
+    const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX3.length, trimmed.length - LESSON_BLOCK_SUFFIX3.length).trim();
+    let raw;
+    try {
+      raw = JSON.parse(jsonStr);
+    } catch {
+      continue;
+    }
+    if (raw === null || typeof raw !== "object" || !("id" in raw) || raw["id"] !== id) {
+      continue;
+    }
+    const obj = raw;
+    if (typeof obj["id"] !== "string" || typeof obj["kind"] !== "string" || typeof obj["applies_when"] !== "string" || typeof obj["detail"] !== "string" || typeof obj["learned_at"] !== "string") {
+      continue;
+    }
+    const hit = {
+      id: obj["id"],
+      kind: obj["kind"],
+      applies_when: obj["applies_when"],
+      detail: obj["detail"],
+      learned_at: obj["learned_at"]
+    };
+    if (typeof obj["failure_class"] === "string") {
+      hit.failure_class = obj["failure_class"];
+    }
+    if (typeof obj["source_ref"] === "string") {
+      hit.source_ref = obj["source_ref"];
+    }
+    if (typeof obj["source_pr"] === "string") {
+      hit.source_pr = obj["source_pr"];
+    }
+    return hit;
+  }
+  return null;
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -40811,7 +40892,11 @@ var TOOLS = {
   // because the drain runs MCP-free.
   recordReviewerLesson,
   readReviewerLesson,
-  recordStoryRetro
+  recordStoryRetro,
+  // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
+  // buildPersonaSpawnPrompt now emits a one-line index; agents call this
+  // to retrieve the full detail body of a specific lesson by id.
+  recallLesson
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");
