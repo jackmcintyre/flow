@@ -64,6 +64,41 @@ export declare const LessonSchema: z.ZodObject<{
  */
 export type Lesson = z.infer<typeof LessonSchema>;
 /**
+ * Schema for a structured lesson entry stored in a role's Knowledge section.
+ *
+ * Reuses `LessonSchema`'s vocabulary (kind + failure_class) and extends it
+ * with provenance fields so `/flow:team` can show kind and source for every
+ * entry instead of undifferentiated bullet text.
+ *
+ * Fields:
+ *  - `id`          — ULID that uniquely identifies this lesson entry.
+ *  - `kind`        — Closed enum from `LESSON_KINDS` (pitfall|pattern|tool-quirk|discipline).
+ *  - `applies_when`— Short sentence describing when this lesson is relevant (shown in /flow:team).
+ *  - `detail`      — Full lesson text (the original lesson prose).
+ *  - `failure_class` — Required when `kind === "pitfall"` (mirrors LessonSchema contract).
+ *  - `source_ref`  — Optional story ref the lesson came from (e.g. `native:01KT...`).
+ *  - `source_pr`   — Optional PR URL for traceability.
+ *  - `learned_at`  — ISO-8601 UTC timestamp when the lesson was appended.
+ *
+ * `.strict()` rejects unknown keys.
+ */
+export declare const StructuredLessonSchema: z.ZodObject<{
+    id: z.ZodString;
+    kind: z.ZodEnum<{
+        discipline: "discipline";
+        pattern: "pattern";
+        pitfall: "pitfall";
+        "tool-quirk": "tool-quirk";
+    }>;
+    applies_when: z.ZodString;
+    detail: z.ZodString;
+    failure_class: z.ZodOptional<z.ZodString>;
+    source_ref: z.ZodOptional<z.ZodString>;
+    source_pr: z.ZodOptional<z.ZodString>;
+    learned_at: z.ZodString;
+}, z.core.$strict>;
+export type StructuredLesson = z.infer<typeof StructuredLessonSchema>;
+/**
  * Schema for the full retro payload accepted by `recordStoryRetro`.
  *
  * - `lessons` — array of `LessonSchema`, defaults to `[]`.

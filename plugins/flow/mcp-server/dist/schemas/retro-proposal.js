@@ -229,19 +229,31 @@ export const TeamChangeProposalSchema = ProposalBase.extend({
  * `persona-append` — append a durable lesson to a hired role's Knowledge section.
  *
  * When applied via the `/accept-proposal` gate, the handler reads the role's
- * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a new
- * bullet to the `## Knowledge` section, and re-serialises the full file.
+ * persona file (`team/<target_role>/PERSONA.md`), appends the lesson as a
+ * structured lesson block to the `## Knowledge` section, and re-serialises
+ * the full file.
  *
  * `target_role` reuses `RolePathSchema` (kebab-cased role name matching the
- * catalogue convention). `lesson` is the verbatim text of the bullet to append
- * (the handler prepends `- `).
+ * catalogue convention). `lesson` is the verbatim lesson text.
+ *
+ * Optional structured fields (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4):
+ *  - `kind`         — lesson kind from LESSON_KINDS; defaults to "pattern" when absent.
+ *  - `applies_when` — short summary for /flow:team display; defaults to `lesson` text.
+ *  - `failure_class`— required when kind is "pitfall" (mirrors LessonSchema contract).
+ *  - `source_ref`   — optional story ref provenance.
  *
  * (Story 6.9 — persona-knowledge write-back keystone)
+ * (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4 — structured lesson storage)
  */
 export const PersonaAppendProposalSchema = ProposalBase.extend({
     type: z.literal("persona-append"),
     target_role: RolePathSchema,
     lesson: z.string().min(1),
+    // Optional structured fields — carried when the learning loop emits them.
+    kind: z.enum(["pitfall", "pattern", "tool-quirk", "discipline"]).optional(),
+    applies_when: z.string().min(1).optional(),
+    failure_class: z.string().min(1).optional(),
+    source_ref: z.string().min(1).optional(),
 }).strict();
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper

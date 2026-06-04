@@ -395,11 +395,13 @@ describe("persona-append — confirmed apply (AC1)", () => {
 
     expect(result.status).toBe("applied");
 
-    // Persona file now contains the new bullet in Knowledge section.
+    // Persona file now contains the structured lesson block in Knowledge section.
     const personaAbs = path.join(tmpRoot, "team", ROLE, "PERSONA.md");
     const contents = await fs.readFile(personaAbs, "utf8");
     expect(contents).toContain(`## Knowledge`);
-    expect(contents).toContain(`- ${LESSON}`);
+    // Structured lesson block is present (lesson text in detail field).
+    expect(contents).toContain(`<!-- lesson:json`);
+    expect(contents).toContain(LESSON);
 
     // Original sections preserved.
     expect(contents).toContain(`## Domain`);
@@ -430,9 +432,11 @@ describe("persona-append — confirmed apply (AC1)", () => {
     const personaAbs = path.join(tmpRoot, "team", ROLE, "PERSONA.md");
     const contents = await fs.readFile(personaAbs, "utf8");
 
-    // Both bullets are present.
+    // Both lessons are present: the old flat bullet and the new structured block.
     expect(contents).toContain(`- Existing lesson one.`);
-    expect(contents).toContain(`- ${LESSON}`);
+    // New lesson is stored as a structured lesson block.
+    expect(contents).toContain(`<!-- lesson:json`);
+    expect(contents).toContain(LESSON);
   });
 
   it("only modifies the target role's persona file (no other persona changed)", async () => {
