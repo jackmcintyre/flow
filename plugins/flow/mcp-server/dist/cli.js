@@ -26558,7 +26558,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "skill-supersede",
       "skill-retire",
       "team-change",
-      "persona-append"
+      "persona-append",
+      "promote-lesson-to-skill"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -36530,9 +36531,11 @@ function parsePersonaFile(raw, sourcePath) {
     });
   }
   const sections = extractSections2(body);
+  const skillsBody = extractOptionalSkillsSection(body);
   return {
     ...result.data,
     sections,
+    skillsBody,
     sourcePath
   };
 }
@@ -36619,6 +36622,27 @@ function extractSections2(body) {
     filtered[required2] = out[required2] ?? "";
   }
   return filtered;
+}
+function extractOptionalSkillsSection(body) {
+  const lines = body.split("\n");
+  let inSkills = false;
+  const bodyLines = [];
+  for (const line of lines) {
+    if (/^##\s+Skills\s*$/.test(line) && !line.startsWith("###")) {
+      inSkills = true;
+      continue;
+    }
+    if (inSkills) {
+      if (/^##\s+/.test(line) && !line.startsWith("###")) {
+        break;
+      }
+      bodyLines.push(line);
+    }
+  }
+  if (!inSkills) {
+    return "";
+  }
+  return bodyLines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
 }
 function formatZodIssues4(issues) {
   const first = issues[0];
@@ -36941,6 +36965,55 @@ function isEnoent5(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
+// src/lib/apply-promote-lesson-to-skill.ts
+var import_yaml13 = __toESM(require_dist(), 1);
+
+// src/lib/apply-skill-proposal.ts
+var import_yaml12 = __toESM(require_dist(), 1);
+
+// src/schemas/skill-frontmatter.ts
+var SemverSchema = external_exports.string().regex(/^\d+\.\d+\.\d+$/, "must be semver 'x.y.z'");
+var SkillFrontmatterSchema = external_exports.object({
+  name: external_exports.string().min(1),
+  description: external_exports.string().min(1),
+  allowed_tools: external_exports.array(external_exports.string()),
+  version: SemverSchema,
+  introduced_at: external_exports.string().min(1),
+  source_lesson_refs: external_exports.array(external_exports.string()),
+  supersedes: external_exports.string().optional(),
+  retired_at: external_exports.string().optional()
+}).strict();
+
+// src/lib/apply-promote-lesson-to-skill.ts
+var SKILL_REF_BLOCK_PREFIX = "<!-- skill:ref ";
+var SKILL_REF_BLOCK_SUFFIX = " -->";
+function extractSkillRefs(skillsBody) {
+  const refs = [];
+  for (const line of skillsBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith(SKILL_REF_BLOCK_PREFIX) || !trimmed.endsWith(SKILL_REF_BLOCK_SUFFIX)) {
+      continue;
+    }
+    const jsonStr = trimmed.slice(SKILL_REF_BLOCK_PREFIX.length, trimmed.length - SKILL_REF_BLOCK_SUFFIX.length).trim();
+    let raw;
+    try {
+      raw = JSON.parse(jsonStr);
+    } catch {
+      continue;
+    }
+    if (raw === null || typeof raw !== "object" || typeof raw["name"] !== "string" || typeof raw["skill_path"] !== "string" || typeof raw["when_to_use"] !== "string") {
+      continue;
+    }
+    const obj = raw;
+    refs.push({
+      name: obj["name"],
+      skill_path: obj["skill_path"],
+      when_to_use: obj["when_to_use"]
+    });
+  }
+  return refs;
+}
+
 // src/lib/lesson-archive.ts
 import * as path33 from "node:path";
 import { promises as fs21 } from "node:fs";
@@ -37110,7 +37183,7 @@ async function findArchivedLessonById(targetRepoRoot, role, id) {
 }
 
 // src/tools/build-persona-spawn-prompt.ts
-var import_yaml12 = __toESM(require_dist(), 1);
+var import_yaml14 = __toESM(require_dist(), 1);
 var TOOL_NAME = "buildPersonaSpawnPrompt";
 async function buildPersonaSpawnPrompt(opts) {
   const {
@@ -37153,7 +37226,7 @@ function reconstructPersonaFileWithKnowledge(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml12.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml14.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -37181,6 +37254,12 @@ function reconstructPersonaFileWithKnowledge(parsed, newKnowledgeBody) {
   ];
   if (newKnowledgeBody.length > 0) {
     sections.push(newKnowledgeBody);
+    sections.push(``);
+  }
+  if (parsed.skillsBody.length > 0) {
+    sections.push(`## Skills`);
+    sections.push(``);
+    sections.push(parsed.skillsBody);
     sections.push(``);
   }
   return `---
@@ -37216,6 +37295,13 @@ function buildKnowledgeIndex(knowledgeBody) {
   }
   return lines.join("\n");
 }
+function buildSkillsIndex(skillsBody) {
+  if (!skillsBody || skillsBody.trim() === "") {
+    return "";
+  }
+  const refs = extractSkillRefs(skillsBody);
+  return refs.map((ref) => `[${ref.name}] ${ref.when_to_use}`).join("\n");
+}
 function assemblePrompt(persona) {
   const displayName = toDisplayName2(persona.role);
   const lockedPhraseLines = [];
@@ -37235,6 +37321,7 @@ function assemblePrompt(persona) {
     }
   }
   const knowledgeIndex = buildKnowledgeIndex(persona.sections["Knowledge"]);
+  const skillsIndex = buildSkillsIndex(persona.skillsBody);
   const parts = [
     `# ${displayName} \u2014 Persona`,
     ``,
@@ -37257,10 +37344,16 @@ function assemblePrompt(persona) {
     `## Knowledge`,
     ``,
     knowledgeIndex,
-    ``,
-    `## Locked phrases (do not paraphrase)`,
-    ...lockedPhraseLines
+    ``
   ];
+  if (skillsIndex.length > 0) {
+    parts.push(`## Skills`);
+    parts.push(``);
+    parts.push(skillsIndex);
+    parts.push(``);
+  }
+  parts.push(`## Locked phrases (do not paraphrase)`);
+  parts.push(...lockedPhraseLines);
   return parts.join("\n");
 }
 function toDisplayName2(role) {
@@ -37270,7 +37363,7 @@ function toDisplayName2(role) {
 }
 
 // src/tools/list-claimable-todos.ts
-var import_yaml13 = __toESM(require_dist(), 1);
+var import_yaml15 = __toESM(require_dist(), 1);
 import { promises as fs23 } from "node:fs";
 import * as path35 from "node:path";
 
@@ -37314,7 +37407,7 @@ async function listClaimableTodos(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml13.parse)(raw);
+    const parsed = (0, import_yaml15.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!isClaimable(manifest)) {
       continue;
@@ -37362,7 +37455,7 @@ function isEnoent6(err) {
 import * as path38 from "node:path";
 
 // src/tools/claim-story.ts
-var import_yaml14 = __toESM(require_dist(), 1);
+var import_yaml16 = __toESM(require_dist(), 1);
 import { promises as fs24 } from "node:fs";
 import * as path36 from "node:path";
 function stripUndefined2(obj) {
@@ -37399,7 +37492,7 @@ async function claimStory(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml14.parse)(rawText);
+  const parsed = (0, import_yaml16.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: absToDoPath });
   const missingDeps = [];
   for (const dep of manifest.depends_on) {
@@ -37432,7 +37525,7 @@ async function claimStory(opts) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absInProgressPath
   });
-  const yamlText = (0, import_yaml14.stringify)(
+  const yamlText = (0, import_yaml16.stringify)(
     stripUndefined2(reparsed),
     { lineWidth: 0 }
   );
@@ -37449,7 +37542,7 @@ async function claimStory(opts) {
 // src/lib/dep-merge-check.ts
 import { promises as fs25 } from "node:fs";
 import * as path37 from "node:path";
-var import_yaml15 = __toESM(require_dist(), 1);
+var import_yaml17 = __toESM(require_dist(), 1);
 
 // src/lib/pr-body.ts
 function buildBranchSlug(opts) {
@@ -37549,7 +37642,7 @@ async function areDependenciesMerged(opts) {
     }
     let title;
     try {
-      const manifest = parseExecutionManifest((0, import_yaml15.parse)(raw), { absPath: depPath });
+      const manifest = parseExecutionManifest((0, import_yaml17.parse)(raw), { absPath: depPath });
       title = manifest.title;
     } catch {
       seen.set(dep, false);
@@ -37643,15 +37736,15 @@ function parseHandoff(transcript, expectedRef) {
 }
 
 // src/lib/manifest-io.ts
-var import_yaml16 = __toESM(require_dist(), 1);
+var import_yaml18 = __toESM(require_dist(), 1);
 import { promises as fs26 } from "node:fs";
 async function readManifest(absPath) {
   const raw = await fs26.readFile(absPath, "utf8");
-  const parsed = (0, import_yaml16.parse)(raw);
+  const parsed = (0, import_yaml18.parse)(raw);
   return parseExecutionManifest(parsed, { absPath });
 }
 async function writeManifest(absPath, manifest) {
-  const yaml = (0, import_yaml16.stringify)(manifest, { lineWidth: 0 });
+  const yaml = (0, import_yaml18.stringify)(manifest, { lineWidth: 0 });
   await atomicWriteFile(absPath, yaml);
 }
 
@@ -37920,7 +38013,7 @@ async function extractAcsFromSpec(specPath) {
 }
 
 // src/lib/gh-error-map.ts
-var import_yaml17 = __toESM(require_dist(), 1);
+var import_yaml19 = __toESM(require_dist(), 1);
 import { promises as fs30 } from "node:fs";
 import * as path42 from "node:path";
 
@@ -37938,7 +38031,7 @@ var GhErrorMapSchema = external_exports.object({
 var cache = /* @__PURE__ */ new Map();
 async function parseGhErrorMap(filePath) {
   const raw = await fs30.readFile(filePath, "utf8");
-  const parsed = (0, import_yaml17.parse)(raw);
+  const parsed = (0, import_yaml19.parse)(raw);
   const result = GhErrorMapSchema.safeParse(parsed);
   if (!result.success) {
     const firstIssue = result.error.issues[0];
@@ -38046,7 +38139,7 @@ async function gh(opts) {
 }
 
 // src/state/load-role-permissions.ts
-var import_yaml18 = __toESM(require_dist(), 1);
+var import_yaml20 = __toESM(require_dist(), 1);
 import { promises as fs31 } from "node:fs";
 import * as path43 from "node:path";
 
@@ -38078,7 +38171,7 @@ async function loadRolePermissions(opts) {
   }
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml18.parse)(raw);
+    parsedYaml = (0, import_yaml20.parse)(raw);
   } catch (err) {
     throw new RolePermissionsMalformedError({
       specPath,
@@ -39115,7 +39208,7 @@ The AC declared \`artifact: ${ac.artifactPath}\` but the file does not exist on 
 }
 
 // src/tools/complete-story.ts
-var import_yaml19 = __toESM(require_dist(), 1);
+var import_yaml21 = __toESM(require_dist(), 1);
 import { promises as fs34 } from "node:fs";
 import * as path49 from "node:path";
 function stripUndefined3(obj) {
@@ -39143,7 +39236,7 @@ async function completeStory(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml19.parse)(rawText);
+  const parsed = (0, import_yaml21.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: absInProgressPath });
   if (manifest.claimed_by !== sessionUlid) {
     throw new WrongClaimantError({
@@ -39166,7 +39259,7 @@ async function completeStory(opts) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absDonePath
   });
-  const yamlText = (0, import_yaml19.stringify)(
+  const yamlText = (0, import_yaml21.stringify)(
     stripUndefined3(reparsed),
     { lineWidth: 0 }
   );
@@ -39287,7 +39380,7 @@ async function applyReviewerLabels(opts) {
 // src/tools/run-auto-merge-gate.ts
 import * as path51 from "node:path";
 import { promises as fs36 } from "node:fs";
-var import_yaml20 = __toESM(require_dist(), 1);
+var import_yaml22 = __toESM(require_dist(), 1);
 
 // src/lib/auto-merge-gate.ts
 function decideAutoMerge(input) {
@@ -39501,7 +39594,7 @@ async function loadWorkspaceConfig(targetRepoRoot) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml20.parse)(raw);
+  const parsed = (0, import_yaml22.parse)(raw);
   if (parsed === null || parsed === void 0 || typeof parsed !== "object" || !("plugin" in parsed)) {
     return PluginSettingsSchema.parse({});
   }
@@ -40115,7 +40208,7 @@ async function processReviewerYield(opts) {
 }
 
 // src/tools/scan-orphaned-in-progress.ts
-var import_yaml21 = __toESM(require_dist(), 1);
+var import_yaml23 = __toESM(require_dist(), 1);
 import { promises as fs40 } from "node:fs";
 import * as path55 from "node:path";
 async function scanOrphanedInProgress(opts) {
@@ -40145,7 +40238,7 @@ async function scanOrphanedInProgress(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml21.parse)(raw);
+    const parsed = (0, import_yaml23.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!manifest.claimed_by) {
       continue;
@@ -40366,12 +40459,12 @@ async function reapStaleWorktrees(opts) {
 }
 
 // src/tools/mark-story-ready.ts
-var import_yaml23 = __toESM(require_dist(), 1);
+var import_yaml25 = __toESM(require_dist(), 1);
 import { promises as fs42 } from "node:fs";
 import * as path59 from "node:path";
 
 // src/tools/mark-withdrawn.ts
-var import_yaml22 = __toESM(require_dist(), 1);
+var import_yaml24 = __toESM(require_dist(), 1);
 var MarkWithdrawnInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -40382,7 +40475,7 @@ function stripUndefined4(obj) {
   );
 }
 function serialiseManifest(manifest) {
-  return (0, import_yaml22.stringify)(
+  return (0, import_yaml24.stringify)(
     stripUndefined4(manifest),
     { lineWidth: 0 }
   );
@@ -40425,7 +40518,7 @@ async function markStoryReady(rawInput) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
   }
   const rawText = await fs42.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml23.parse)(rawText);
+  const parsed = (0, import_yaml25.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "withdrawn" });
@@ -40950,7 +41043,7 @@ async function readReviewerLesson(opts) {
 }
 
 // src/tools/record-story-retro.ts
-var import_yaml24 = __toESM(require_dist(), 1);
+var import_yaml26 = __toESM(require_dist(), 1);
 import { promises as fs46 } from "node:fs";
 import * as path64 from "node:path";
 var NON_DONE_STATES = ["in-progress", "to-do", "blocked"];
@@ -41005,7 +41098,7 @@ async function recordStoryRetro(opts) {
     duration_seconds: retro.duration_seconds
   };
   const reparsed = parseExecutionManifest(merged, { absPath: absDonePath });
-  const yamlText = (0, import_yaml24.stringify)(
+  const yamlText = (0, import_yaml26.stringify)(
     stripUndefined5(reparsed),
     { lineWidth: 0 }
   );
@@ -41021,7 +41114,7 @@ async function recordStoryRetro(opts) {
 // src/tools/recall-lesson.ts
 import * as path65 from "node:path";
 import { promises as fs47 } from "node:fs";
-var import_yaml25 = __toESM(require_dist(), 1);
+var import_yaml27 = __toESM(require_dist(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
 var TOOL_NAME2 = "recallLesson";
@@ -41173,7 +41266,7 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml25.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml27.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");

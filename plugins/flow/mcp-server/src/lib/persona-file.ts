@@ -93,9 +93,13 @@ export function parsePersonaFile(raw: string, sourcePath: string): PersonaFile {
 
   const sections = extractSections(body);
 
+  // Extract the optional ## Skills section (Story native:01KT6RHQ1K4KQMASAXNEK6MY7E).
+  const skillsBody = extractOptionalSkillsSection(body);
+
   return {
     ...result.data,
     sections: sections as Record<RequiredPersonaSection, string>,
+    skillsBody,
     sourcePath,
   };
 }
@@ -236,6 +240,41 @@ function extractSections(
     filtered[required] = out[required] ?? "";
   }
   return filtered;
+}
+
+/**
+ * Extract the optional `## Skills` section body from a persona file body.
+ * Returns an empty string when the section is absent.
+ *
+ * Scans line-by-line: starts collecting after the `## Skills` heading and
+ * stops at the next `##`-level heading. The result is trimmed of leading and
+ * trailing blank lines (matches the Knowledge section extraction convention).
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — skill references live here.
+ */
+function extractOptionalSkillsSection(body: string): string {
+  const lines = body.split("\n");
+  let inSkills = false;
+  const bodyLines: string[] = [];
+
+  for (const line of lines) {
+    if (/^##\s+Skills\s*$/.test(line) && !line.startsWith("###")) {
+      inSkills = true;
+      continue;
+    }
+    if (inSkills) {
+      if (/^##\s+/.test(line) && !line.startsWith("###")) {
+        break;
+      }
+      bodyLines.push(line);
+    }
+  }
+
+  if (!inSkills) {
+    return "";
+  }
+
+  return bodyLines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
 }
 
 function formatZodIssues(issues: z.ZodIssue[]): string {

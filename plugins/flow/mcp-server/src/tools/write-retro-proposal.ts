@@ -492,6 +492,18 @@ function renderProposalFields(
       }
       return fields;
     }
+    case "promote-lesson-to-skill":
+      return [
+        ["target_role", proposal.target_role],
+        ["lesson_id", proposal.lesson_id],
+        ["proposed_skill_path", proposal.proposed_skill_path],
+        ["skill_description", proposal.skill_description],
+        [
+          "skill_body",
+          `(${proposal.skill_body.split("\n").length} lines — see frontmatter)`,
+        ],
+        ["when_to_use", proposal.when_to_use],
+      ];
   }
 }
 

@@ -336,14 +336,50 @@ export const PersonaAppendProposalSchema = ProposalBase.extend({
   durability_recommendation: DurabilityRecommendationSchema.optional(),
 }).strict();
 
+/**
+ * `promote-lesson-to-skill` — promote a lesson from a role's Knowledge section
+ * into a standalone skill file so that multiple roles can share the same know-how.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *  1. Creates a new skill file at `proposed_skill_path` (reuses the skill-create
+ *     path; fails with SkillAlreadyExistsError if the path is already occupied).
+ *  2. Appends a skill reference entry to the originating role's `## Skills` section
+ *     in PERSONA.md (name + `when_to_use` one-liner).
+ *
+ * Fields:
+ *  - `target_role`          — the originating role whose Knowledge section supplied
+ *                              this lesson (kebab-cased, matches the catalogue convention).
+ *  - `lesson_id`            — the ULID of the structured lesson block in the role's
+ *                              `## Knowledge` section to promote (provides provenance).
+ *  - `proposed_skill_path`  — repo-relative path for the new skill file under
+ *                              `.flow/skills/` (path-traversal rejected by
+ *                              PathInsideRepoSchema).
+ *  - `skill_description`    — operator-readable one-liner for the skill's frontmatter
+ *                              `description` field.
+ *  - `skill_body`           — the full Markdown body of the skill file.
+ *  - `when_to_use`          — the one-line reference text appended to the originating
+ *                              role's `## Skills` section (name + trigger).
+ *
+ * (Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote reusable lesson to shared skill)
+ */
+export const PromoteLessonToSkillProposalSchema = ProposalBase.extend({
+  type: z.literal("promote-lesson-to-skill"),
+  target_role: RolePathSchema,
+  lesson_id: z.string().min(1),
+  proposed_skill_path: PathInsideRepoSchema,
+  skill_description: z.string().min(1),
+  skill_body: z.string().min(1),
+  when_to_use: z.string().min(1),
+}).strict();
+
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 
 /**
- * The closed set of eight proposal-type literals. Exported as a tuple so
+ * The closed set of nine proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a ninth variant requires a
+ * grown (the AC2 invariant). Adding a tenth variant requires a
  * coordinated schema-change story.
  */
 export const RETRO_PROPOSAL_TYPES = [
@@ -355,10 +391,11 @@ export const RETRO_PROPOSAL_TYPES = [
   "skill-retire",
   "team-change",
   "persona-append",
+  "promote-lesson-to-skill",
 ] as const;
 
 /**
- * The full retro-proposal discriminated union. AC2: exactly eight
+ * The full retro-proposal discriminated union. AC2: exactly nine
  * variants, closed enum, no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
@@ -370,6 +407,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
   SkillRetireProposalSchema,
   TeamChangeProposalSchema,
   PersonaAppendProposalSchema,
+  PromoteLessonToSkillProposalSchema,
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;

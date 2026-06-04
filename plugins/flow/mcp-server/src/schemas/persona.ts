@@ -73,9 +73,17 @@ export type RequiredPersonaSection = (typeof REQUIRED_PERSONA_SECTIONS)[number];
  * what matters; the `Knowledge` body is the only extra field. The
  * `sourcePath` is stamped on by the parser; it is NOT part of the
  * on-disk contract.
+ *
+ * `skillsBody` is the optional `## Skills` section body (Story
+ * native:01KT6RHQ1K4KQMASAXNEK6MY7E). When the section is absent the
+ * field is an empty string. The section is written by the
+ * `promote-lesson-to-skill` apply handler and rendered as one-line skill
+ * reference entries by `buildPersonaSpawnPrompt`.
  */
 export type PersonaFile = PersonaFrontmatter & {
   sections: Record<RequiredPersonaSection, string>;
+  /** Body of the optional `## Skills` section; empty string when absent. */
+  skillsBody: string;
   sourcePath: string;
 };
 

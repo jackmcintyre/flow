@@ -33,6 +33,7 @@ import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
 import { makeRuleRetirementApplyHandler } from "./apply-rule-retirement.js";
 import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
 import { makePersonaAppendHandler } from "./apply-persona-append.js";
+import { makePromoteLessonToSkillHandler } from "./apply-promote-lesson-to-skill.js";
 
 /**
  * Context threaded into a handler's `previewDiff`/`apply` calls. The gate owns
@@ -126,13 +127,15 @@ export function createProductionRegistry(): ProposalApplyRegistry {
   }
   // Story 6.9 — persona-append handler.
   registry.set("persona-append", makePersonaAppendHandler());
+  // Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote-lesson-to-skill handler.
+  registry.set("promote-lesson-to-skill", makePromoteLessonToSkillHandler({ now: () => new Date() }));
   return registry;
 }
 
 /**
  * Maps each proposal kind to the story that shipped (or will ship) its apply
  * handler. Used to build an actionable `ProposalKindNotApplicableYetError`
- * message. Closed over the eight retro-proposal kinds; a new kind would
+ * message. Closed over the nine retro-proposal kinds; a new kind would
  * require a schema-change story that also extends this map.
  */
 export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
@@ -147,4 +150,5 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   "skill-retire": "Story 6.7",
   "team-change": "Story 6.10",
   "persona-append": "Story 6.9",
+  "promote-lesson-to-skill": "Story native:01KT6RHQ1K4KQMASAXNEK6MY7E",
 };

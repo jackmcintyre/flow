@@ -328,14 +328,57 @@ export declare const PersonaAppendProposalSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 /**
- * The closed set of eight proposal-type literals. Exported as a tuple so
+ * `promote-lesson-to-skill` — promote a lesson from a role's Knowledge section
+ * into a standalone skill file so that multiple roles can share the same know-how.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *  1. Creates a new skill file at `proposed_skill_path` (reuses the skill-create
+ *     path; fails with SkillAlreadyExistsError if the path is already occupied).
+ *  2. Appends a skill reference entry to the originating role's `## Skills` section
+ *     in PERSONA.md (name + `when_to_use` one-liner).
+ *
+ * Fields:
+ *  - `target_role`          — the originating role whose Knowledge section supplied
+ *                              this lesson (kebab-cased, matches the catalogue convention).
+ *  - `lesson_id`            — the ULID of the structured lesson block in the role's
+ *                              `## Knowledge` section to promote (provides provenance).
+ *  - `proposed_skill_path`  — repo-relative path for the new skill file under
+ *                              `.flow/skills/` (path-traversal rejected by
+ *                              PathInsideRepoSchema).
+ *  - `skill_description`    — operator-readable one-liner for the skill's frontmatter
+ *                              `description` field.
+ *  - `skill_body`           — the full Markdown body of the skill file.
+ *  - `when_to_use`          — the one-line reference text appended to the originating
+ *                              role's `## Skills` section (name + trigger).
+ *
+ * (Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote reusable lesson to shared skill)
+ */
+export declare const PromoteLessonToSkillProposalSchema: z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"promote-lesson-to-skill">;
+    target_role: z.ZodString;
+    lesson_id: z.ZodString;
+    proposed_skill_path: z.ZodString;
+    skill_description: z.ZodString;
+    skill_body: z.ZodString;
+    when_to_use: z.ZodString;
+}, z.core.$strict>;
+/**
+ * The closed set of nine proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a ninth variant requires a
+ * grown (the AC2 invariant). Adding a tenth variant requires a
  * coordinated schema-change story.
  */
-export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change", "persona-append"];
+export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change", "persona-append", "promote-lesson-to-skill"];
 /**
- * The full retro-proposal discriminated union. AC2: exactly eight
+ * The full retro-proposal discriminated union. AC2: exactly nine
  * variants, closed enum, no `z.string()` fallback.
  */
 export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -481,6 +524,22 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>;
         reason: z.ZodString;
     }, z.core.$strict>>;
+}, z.core.$strict>, z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"promote-lesson-to-skill">;
+    target_role: z.ZodString;
+    lesson_id: z.ZodString;
+    proposed_skill_path: z.ZodString;
+    skill_description: z.ZodString;
+    skill_body: z.ZodString;
+    when_to_use: z.ZodString;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
 /**
@@ -646,6 +705,22 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
             }>;
             reason: z.ZodString;
         }, z.core.$strict>>;
+    }, z.core.$strict>, z.ZodObject<{
+        id: z.ZodString;
+        created_at: z.ZodString;
+        rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
+        type: z.ZodLiteral<"promote-lesson-to-skill">;
+        target_role: z.ZodString;
+        lesson_id: z.ZodString;
+        proposed_skill_path: z.ZodString;
+        skill_description: z.ZodString;
+        skill_body: z.ZodString;
+        when_to_use: z.ZodString;
     }, z.core.$strict>], "type">>;
 }, z.core.$strict>;
 export type RetroProposalFile = z.infer<typeof RetroProposalFileSchema>;
