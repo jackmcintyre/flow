@@ -424,7 +424,7 @@ export async function scanSources(opts: {
 }): Promise<ScanResult> {
   // Step 1: Resolve the workspace. Throws on misconfiguration.
   const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
-  const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
+  const { activeAdapter, activeAdapterName, targetRepoRoot } = workspace;
 
   // Story 10.4 — plugin root for the author-time risk classifier's spec lookup.
   const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();

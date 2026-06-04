@@ -448,7 +448,6 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       // Step 5: applyReviewerLabels — assert two sequential label calls
       // (5a, 5b): captured input fields on the gh api stub
       // -----------------------------------------------------------------------
-      const labelsUrl = `/repos/jackmcintyre/crew/issues/${prNumber}/labels`;
       const LABELS_URL_PATTERN = /\/labels$/;
 
       const capturedInputs: string[] = [];

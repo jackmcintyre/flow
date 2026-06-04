@@ -30,7 +30,7 @@ import {
   type JudgeDraft,
 } from "../judge-panel.js";
 import { resolveLensRoles } from "../resolve-lens-roles.js";
-import { LENS_NAMES, type LensName } from "../../schemas/lens-verdict.js";
+import { LENS_NAMES } from "../../schemas/lens-verdict.js";
 import { LensJudgeUnavailableError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { PanelVerdictSchema } from "../../schemas/lens-verdict.js";

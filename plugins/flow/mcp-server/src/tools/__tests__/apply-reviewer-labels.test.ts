@@ -22,7 +22,7 @@ import { applyReviewerLabels } from "../apply-reviewer-labels.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
-import { GhRecoverableError, GhApiResponseShapeError, GhSubcommandDeniedError } from "../../errors.js";
+import { GhRecoverableError, GhSubcommandDeniedError } from "../../errors.js";
 import { makeGhExecaStub } from "../../__tests__/test-helpers/gh-execa-stub.js";
 import { loadRolePermissions } from "../../state/load-role-permissions.js";
 import { gh } from "../../lib/gh.js";
@@ -35,7 +35,6 @@ import type { ReviewerResultFileShape } from "../run-reviewer-session.js";
 const SESSION_ULID = "01HZTEST4_8_INTEGRATION0000";
 const STORY_REF = "native:01HZTEST00000000000000000";
 const PR_NUMBER = 42;
-const LABELS_URL = `/repos/jackmcintyre/crew/issues/${PR_NUMBER}/labels`;
 const LABELS_URL_PATTERN = /\/labels$/;
 
 // Default label response (array shape per GH API spec)

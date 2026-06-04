@@ -53,7 +53,6 @@ import { gh } from "../lib/gh.js";
 import { AutoMergeGateThresholdInvalidError } from "../errors.js";
 import { PluginSettingsSchema } from "../schemas/workspace-config.js";
 import type { PluginSettings } from "../schemas/workspace-config.js";
-import type { execa } from "execa";
 
 // ---------------------------------------------------------------------------
 // Output schema & type

@@ -19,9 +19,6 @@ import {
   computeFailureClassFireCounts,
   resolveFireCountConfig,
   SINGLE_WINDOW_SEAM,
-  DEFAULT_PROMOTION_THRESHOLD,
-  DEFAULT_RETIREMENT_WINDOWS,
-  DEFAULT_RELAX_FLOOR,
 } from "../failure-class-fire-counts.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 import type { TelemetryEvent } from "../../schemas/telemetry-events.js";
@@ -34,7 +31,6 @@ import type { DisciplineRule } from "../../schemas/discipline-rules.js";
 
 // These are the documented defaults from the helper module.
 const PROMO_THRESHOLD = 3;   // DEFAULT_PROMOTION_THRESHOLD
-const RELAX_FLOOR = 1;       // DEFAULT_RELAX_FLOOR
 
 // ---------------------------------------------------------------------------
 // Fixtures: minimal manifest + telemetry constructors

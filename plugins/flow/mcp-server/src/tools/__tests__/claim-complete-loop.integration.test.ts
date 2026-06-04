@@ -28,7 +28,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import {
@@ -104,10 +103,6 @@ function makeStoryContent(title: string, depRefs: string[]): string {
       depsSection,
     ].join("\n")
   );
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
 }
 
 // ---------------------------------------------------------------------------

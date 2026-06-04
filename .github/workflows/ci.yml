@@ -39,6 +39,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bloat gate — fail on dead files, unused exports, or unused deps (knip)
         run: pnpm knip
+      - name: Typecheck — fail on unused locals, parameters, and type errors
+        run: pnpm typecheck
       - run: pnpm build
       - name: Auto-commit rebuilt dist if dirty (PR only)
         if: github.event_name == 'pull_request'

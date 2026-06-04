@@ -40,7 +40,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { gatherRetroInputs } from "../gather-retro-inputs.js";
@@ -52,16 +51,6 @@ import {
   parseRetroProposalFile,
   RETRO_PROPOSAL_TYPES,
 } from "../../schemas/retro-proposal.js";
-
-// ---------------------------------------------------------------------------
-// Resolve the real plugin root from this file's location (same pattern as
-// retro-skill.test.ts):
-//   plugins/flow/                       <-- REAL_PLUGIN_ROOT
-//     mcp-server/src/tools/__tests__/   <-- HERE
-// ---------------------------------------------------------------------------
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REAL_PLUGIN_ROOT = path.resolve(HERE, "..", "..", "..", "..");
 
 // ---------------------------------------------------------------------------
 // Constants

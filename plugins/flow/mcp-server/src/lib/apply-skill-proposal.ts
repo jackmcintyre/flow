@@ -281,7 +281,7 @@ function makeSkillCreateHandler(deps: SkillHandlerDeps): ProposalApplyHandler {
 // Handler: skill-revise (AC2)
 // ---------------------------------------------------------------------------
 
-function makeSkillReviseHandler(deps: SkillHandlerDeps): ProposalApplyHandler {
+function makeSkillReviseHandler(_deps: SkillHandlerDeps): ProposalApplyHandler {
   return {
     type: "skill-revise",
     async previewDiff(proposal, ctx): Promise<string> {

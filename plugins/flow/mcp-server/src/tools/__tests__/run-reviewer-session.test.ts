@@ -33,11 +33,9 @@ import {
 } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import {
-  reviewerResultFilePath,
   sanitiseRefForPathSegment,
 } from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
-import type { execa } from "execa";
 import type { ReviewerResultFileShape } from "../run-reviewer-session.js";
 
 // ---------------------------------------------------------------------------
@@ -130,15 +128,6 @@ const FIXTURE_VITEST_TEST = `import { describe, it, expect } from "vitest";
 describe("fixture", () => {
   it("fixture passing test", () => {
     expect(true).toBe(true);
-  });
-});
-`;
-
-const FIXTURE_VITEST_FAILING_TEST = `import { describe, it, expect } from "vitest";
-
-describe("fixture", () => {
-  it("fixture passing test", () => {
-    expect(true).toBe(false);
   });
 });
 `;

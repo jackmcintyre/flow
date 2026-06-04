@@ -31,7 +31,6 @@ import { gh } from "../lib/gh.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { GhApiResponseShapeError } from "../errors.js";
-import type { execa } from "execa";
 
 // ---------------------------------------------------------------------------
 // Types

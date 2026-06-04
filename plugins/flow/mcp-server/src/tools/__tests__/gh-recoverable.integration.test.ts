@@ -33,7 +33,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { gh } from "../../lib/gh.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
-import { GhRecoverableError, GhPrCreateFailedError } from "../../errors.js";
+import { GhRecoverableError } from "../../errors.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import type { RolePermissions } from "../../schemas/role-permissions.js";
 
@@ -230,17 +230,6 @@ async function assertManifestInInProgress() {
 // ---------------------------------------------------------------------------
 // Helper: make gh stub
 // ---------------------------------------------------------------------------
-
-function makeGhStub(exitCode: number, stderr: string, stdout = "") {
-  return async (cmd: string, args: string[]) => {
-    if (cmd === "gh") {
-      return { stdout, stderr, exitCode };
-    }
-    // delegate real git
-    const r = await realExeca(cmd, args, { reject: false });
-    return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.exitCode ?? 0 };
-  };
-}
 
 // ---------------------------------------------------------------------------
 // AC3b — defer class
