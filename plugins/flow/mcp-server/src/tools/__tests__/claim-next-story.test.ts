@@ -49,7 +49,7 @@ const SESSION_ULID = "01HZSESSION00000000000099";
 
 function makeTodoManifest(
   ref: string,
-  opts: { depends_on?: string[]; ready?: boolean } = {},
+  opts: { depends_on?: string[]; ready?: boolean; cited_sources?: string[] } = {},
 ): ExecutionManifest {
   return {
     ref,
@@ -66,10 +66,14 @@ function makeTodoManifest(
     // ready so the pre-existing claim/branch tests still exercise their paths;
     // the readiness-brake tests below set `ready: false` explicitly.
     ready: opts.ready ?? true,
+    ...(opts.cited_sources ? { cited_sources: opts.cited_sources } : {}),
   };
 }
 
-function makeInProgressManifest(ref: string): ExecutionManifest {
+function makeInProgressManifest(
+  ref: string,
+  opts: { cited_sources?: string[] } = {},
+): ExecutionManifest {
   return {
     ref,
     status: "in-progress",
@@ -83,6 +87,7 @@ function makeInProgressManifest(ref: string): ExecutionManifest {
     withdrawn: false,
     ready: true,
     claimed_by: SESSION_ULID,
+    ...(opts.cited_sources ? { cited_sources: opts.cited_sources } : {}),
   };
 }
 
@@ -108,7 +113,10 @@ async function seedInProgressStory(manifest: ExecutionManifest): Promise<void> {
   );
 }
 
-async function seedDoneStory(ref: string): Promise<void> {
+async function seedDoneStory(
+  ref: string,
+  opts: { cited_sources?: string[] } = {},
+): Promise<void> {
   // A minimal done manifest for dependency satisfaction checks.
   const manifest: ExecutionManifest = {
     ref,
@@ -122,6 +130,7 @@ async function seedDoneStory(ref: string): Promise<void> {
     narrative: "As a dev, I want to test.",
     withdrawn: false,
     ready: true,
+    ...(opts.cited_sources ? { cited_sources: opts.cited_sources } : {}),
   };
   await atomicWriteFile(
     path.join(doneDir, `${ref}.yaml`),
@@ -498,5 +507,136 @@ describe("Story 10.6 AC1 — board + claim operate on native state after the fli
     });
     expect(result.next).toBe("queue-drained");
     expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cited-source overlap gate — undeclared siblings that edit the same file are
+// serialized: the later-ordered story waits until the earlier one's PR merges,
+// so it builds on top instead of blind (the #300/#301 silent-integration bug,
+// where both stories cited build-persona-spawn-prompt.ts with no declared edge).
+// ---------------------------------------------------------------------------
+
+describe("cited-source overlap gate", () => {
+  const SHARED = "plugins/flow/mcp-server/src/tools/build-persona-spawn-prompt.ts";
+  const OTHER = "plugins/flow/mcp-server/src/tools/some-unrelated-file.ts";
+
+  it("parks the later story while an earlier overlapping story is in done/ but NOT merged", async () => {
+    // A (earlier ref) is approved into done/ but its PR is unmerged; B (later
+    // ref) cites the same file with no declared dependency. B must NOT be
+    // claimed — it would build from a main lacking A's change and collide.
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false, // A's PR not merged
+    });
+
+    // Nothing else claimable, nothing in-progress → queue-drained; B stays put.
+    expect(result.next).toBe("queue-drained");
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  it("claims the later story once the earlier overlapping done/ story IS merged", async () => {
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => true, // A's PR merged → B may build on top
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
+  });
+
+  it("does NOT block the EARLIER story on a later overlapping unmerged story (asymmetric → no deadlock)", async () => {
+    // B (later ref) is the unmerged done story; A (earlier ref) cites the same
+    // file. A goes first regardless of B — only the later story ever waits.
+    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false,
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_A);
+  });
+
+  it("parks the to-do story while an earlier overlapping story is in-progress", async () => {
+    await seedInProgressStory(
+      makeInProgressManifest(STORY_REF_A, { cited_sources: [SHARED] }),
+    );
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+
+    // The earlier overlapping story is in-progress → B waits.
+    expect(result.next).toBe("waiting-on-in-progress");
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  it("does NOT serialize stories whose cited files do not overlap", async () => {
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [OTHER] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false, // A unmerged, but no shared file
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
+  });
+
+  it("does not gate a candidate that declares no cited_sources", async () => {
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    // B cites nothing — it cannot overlap, so it is claimable regardless of A.
+    await seedTodoStory(makeTodoManifest(STORY_REF_B));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false,
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
+  });
+
+  it("an unblessed earlier overlapping to-do story does not stall a blessed later one", async () => {
+    // A (earlier) overlaps B but is unblessed → it may never ship, so it must
+    // not block B. B is claimed.
+    await seedTodoStory(
+      makeTodoManifest(STORY_REF_A, { ready: false, cited_sources: [SHARED] }),
+    );
+    await seedTodoStory(
+      makeTodoManifest(STORY_REF_B, { ready: true, cited_sources: [SHARED] }),
+    );
+
+    const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
   });
 });
