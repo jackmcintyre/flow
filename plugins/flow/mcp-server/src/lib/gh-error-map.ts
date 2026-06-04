@@ -118,7 +118,7 @@ export async function parseGhErrorMap(filePath: string): Promise<ParsedGhErrorMa
     let compiled: RegExp;
     try {
       compiled = new RegExp(entry.stderr_regex);
-    } catch (e) {
+    } catch {
       throw new MalformedGhErrorMapError({
         filePath,
         reason: "stderr_regex did not compile",

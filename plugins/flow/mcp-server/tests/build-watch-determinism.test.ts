@@ -261,6 +261,7 @@ describe("Story 5.28 — AC1: zero-new-deps static check", () => {
     "@types/node": "^22.10.0",
     "@types/picomatch": "^4.0.3",
     "esbuild": "^0.28.0",
+    "oxlint": "^1.68.0",
     "remark-parse": "11.0.0",
     "typescript": "^5.7.0",
     "unified": "11.0.5",

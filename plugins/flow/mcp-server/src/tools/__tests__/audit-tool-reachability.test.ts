@@ -27,7 +27,6 @@ import {
   parseSkillAllowedTools,
   parseWorkflowSeamCalls,
   parseCliToolsMap,
-  parsePeerImports,
   buildReachabilityReport,
   DYNAMIC_TOOL_ALLOWLIST,
 } from "../../../scripts/audit-tool-reachability.mjs";
