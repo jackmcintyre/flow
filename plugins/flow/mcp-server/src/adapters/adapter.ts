@@ -170,7 +170,7 @@ export type SourceStory = {
   source_hash: string;
 };
 
-export type ChangeEvent =
+type ChangeEvent =
   | { kind: "added"; ref: string }
   | { kind: "edited"; ref: string; new_hash: string }
   | { kind: "removed"; ref: string };

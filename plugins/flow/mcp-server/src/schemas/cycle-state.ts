@@ -34,7 +34,7 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
  *                    opened. This is the window boundary: the retro includes
  *                    work completed at or after this instant.
  */
-export const CycleStateSchema = z
+const CycleStateSchema = z
   .object({
     cycle_ulid: z.string().regex(ULID_REGEX),
     opened_at: z

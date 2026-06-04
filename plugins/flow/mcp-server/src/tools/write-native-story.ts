@@ -15,7 +15,7 @@ import { resolveDisciplinePaths } from "../validators/discipline-resolvability.j
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
  * body shape (Story 3.4 Task 4.1).
  */
-export const WriteNativeStoryInputSchema = z.object({
+const WriteNativeStoryInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   title: z.string().min(1),
   /**
@@ -126,7 +126,7 @@ const DEFAULT_RISK_REASONING =
  * `narrative_struct`, so the render here is the single source of the round-trip
  * contract.
  */
-export function renderNarrativeSentence(narrative: WriteNativeStoryInput["narrative"]): string {
+function renderNarrativeSentence(narrative: WriteNativeStoryInput["narrative"]): string {
   return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
 }
 
@@ -141,7 +141,7 @@ export function renderNarrativeSentence(narrative: WriteNativeStoryInput["narrat
  *   5. `## Implementation Notes` (omitted if empty/absent)
  *   6. `## Dependencies`
  */
-export function renderNativeStoryBody(input: WriteNativeStoryInput): string {
+function renderNativeStoryBody(input: WriteNativeStoryInput): string {
   const lines: string[] = [`# ${input.title}`, ""];
 
   // ## Narrative — the canonical "As a … I want … so that …" sentence (10.2).
@@ -357,7 +357,7 @@ export async function renderGateWriteNativeStory(
  * Used both in `renderNativeStoryBody` and in `inputToSourceStory` so the
  * discipline-gate candidate sees the same rendered text the file will contain.
  */
-export function renderImplementationNotesBody(input: WriteNativeStoryInput): string {
+function renderImplementationNotesBody(input: WriteNativeStoryInput): string {
   const parts: string[] = [];
   if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
     parts.push(input.implementation_notes.trim());

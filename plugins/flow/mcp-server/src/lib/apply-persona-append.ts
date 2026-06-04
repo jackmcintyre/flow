@@ -209,10 +209,8 @@ function serialiseStructuredLesson(lesson: StructuredLesson): string {
  * Append a structured lesson block to a Knowledge section body.
  * If the body is empty, the result is the serialised block; if non-empty,
  * the block is appended after a newline.
- *
- * Exported for unit testing.
  */
-export function appendStructuredLesson(
+function appendStructuredLesson(
   existingBody: string,
   lesson: StructuredLesson,
 ): string {

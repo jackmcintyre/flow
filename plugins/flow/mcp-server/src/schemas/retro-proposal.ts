@@ -108,7 +108,7 @@ const PathInsideRepoSchema = z
  * other variant. The block is OPTIONAL on the base: existing proposal files
  * written before Story 6.4 (no `applied` key) still parse cleanly.
  */
-export const AppliedBlockSchema = z
+const AppliedBlockSchema = z
   .object({
     applied_at: IsoTimestampSchema,
     applied_sha: z.string().min(1),
@@ -139,7 +139,7 @@ const ProposalBase = z.object({
  * `rule` — propose a new operator-readable rule.
  * (Story 6.3 AC3 / FR59)
  */
-export const RuleProposalSchema = ProposalBase.extend({
+const RuleProposalSchema = ProposalBase.extend({
   type: z.literal("rule"),
   text: z.string().min(1),
   target_failure_class: z.string().min(1),
@@ -150,7 +150,7 @@ export const RuleProposalSchema = ProposalBase.extend({
  * `rule-retirement` — propose retiring or relaxing an existing rule.
  * (Story 6.3 AC6 / FR64a)
  */
-export const RuleRetirementProposalSchema = ProposalBase.extend({
+const RuleRetirementProposalSchema = ProposalBase.extend({
   type: z.literal("rule-retirement"),
   target_rule_id: UlidSchema,
   fire_count_over_window: z.number().int().nonnegative(),
@@ -175,7 +175,7 @@ const SkillCreateBody = {
  * `skill-create` — propose a new skill (frontmatter + body).
  * (Story 6.3 AC4 / FR59)
  */
-export const SkillCreateProposalSchema = ProposalBase.extend({
+const SkillCreateProposalSchema = ProposalBase.extend({
   type: z.literal("skill-create"),
   ...SkillCreateBody,
 }).strict();
@@ -184,7 +184,7 @@ export const SkillCreateProposalSchema = ProposalBase.extend({
  * `skill-revise` — propose revising an existing skill's body.
  * (Story 6.3 AC6 / Architecture §Skill calibration loop)
  */
-export const SkillReviseProposalSchema = ProposalBase.extend({
+const SkillReviseProposalSchema = ProposalBase.extend({
   type: z.literal("skill-revise"),
   target_skill_path: PathInsideRepoSchema,
   revised_body: z.string().min(1),
@@ -206,7 +206,7 @@ export const SkillReviseProposalSchema = ProposalBase.extend({
  *
  * (Story 6.3 AC6 / Architecture §Skill calibration loop)
  */
-export const SkillSupersedeProposalSchema = ProposalBase.extend({
+const SkillSupersedeProposalSchema = ProposalBase.extend({
   type: z.literal("skill-supersede"),
   superseded_skill_path: PathInsideRepoSchema,
   replacement: z.object(SkillCreateBody).strict(),
@@ -223,7 +223,7 @@ export const SkillSupersedeProposalSchema = ProposalBase.extend({
  *
  * (Story 6.3 AC6)
  */
-export const SkillRetireProposalSchema = ProposalBase.extend({
+const SkillRetireProposalSchema = ProposalBase.extend({
   type: z.literal("skill-retire"),
   target_skill_path: PathInsideRepoSchema,
   last_invoked_at: IsoTimestampSchema.nullable(),
@@ -236,7 +236,7 @@ export const SkillRetireProposalSchema = ProposalBase.extend({
  * impact has no observable signal at apply time and is therefore not a
  * meaningful proposal. (Story 6.3 AC5 / FR106)
  */
-export const TeamChangeProposalSchema = ProposalBase.extend({
+const TeamChangeProposalSchema = ProposalBase.extend({
   type: z.literal("team-change"),
   action: z.enum(["hire", "unhire"]),
   target_role: RolePathSchema,
@@ -262,7 +262,7 @@ export const TeamChangeProposalSchema = ProposalBase.extend({
  *  - `role_count`  — distinct roles in which the lesson was observed.
  *  - `story_count` — distinct stories in which the lesson was observed.
  */
-export const DurabilityRoutingContextSchema = z
+const DurabilityRoutingContextSchema = z
   .object({
     recurrence: z.number().int().min(1),
     role_count: z.number().int().min(1).optional(),
@@ -282,7 +282,7 @@ export type DurabilityRoutingContext = z.infer<
  *
  * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD)
  */
-export const DurabilityRecommendationSchema = z
+const DurabilityRecommendationSchema = z
   .object({
     recommendation: z.enum(["note", "skill", "code"]),
     reason: z.string().min(1),
@@ -322,7 +322,7 @@ export type DurabilityRecommendation = z.infer<
  * (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4 — structured lesson storage)
  * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD — durability routing)
  */
-export const PersonaAppendProposalSchema = ProposalBase.extend({
+const PersonaAppendProposalSchema = ProposalBase.extend({
   type: z.literal("persona-append"),
   target_role: RolePathSchema,
   lesson: z.string().min(1),
@@ -362,7 +362,7 @@ export const PersonaAppendProposalSchema = ProposalBase.extend({
  *
  * (Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote reusable lesson to shared skill)
  */
-export const PromoteLessonToSkillProposalSchema = ProposalBase.extend({
+const PromoteLessonToSkillProposalSchema = ProposalBase.extend({
   type: z.literal("promote-lesson-to-skill"),
   target_role: RolePathSchema,
   lesson_id: z.string().min(1),

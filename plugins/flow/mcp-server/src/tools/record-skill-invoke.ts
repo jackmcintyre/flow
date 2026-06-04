@@ -35,7 +35,7 @@ import { MalformedSkillInvokeInputError } from "../errors.js";
  * same closed-enum shape the union enforces (single source of truth — a drift
  * here would be a bug). `.strict()` is inherited from the source schema.
  */
-export const SkillInvokeDataSchema = SkillInvokeEventSchema.shape.data;
+const SkillInvokeDataSchema = SkillInvokeEventSchema.shape.data;
 
 export interface RecordSkillInvokeOptions {
   /** Absolute path to the target repository root. */

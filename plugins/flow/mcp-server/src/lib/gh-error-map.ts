@@ -34,7 +34,7 @@ import { MalformedGhErrorMapError } from "../errors.js";
  * The `stderr_regex` field is the compiled `RegExp` instance (if present),
  * NOT the source string — callers do not recompile.
  */
-export interface ParsedGhErrorMapEntry {
+interface ParsedGhErrorMapEntry {
   exit_code: number;
   stderr_regex?: RegExp;
   class: "defer" | "retry" | "needs-human";

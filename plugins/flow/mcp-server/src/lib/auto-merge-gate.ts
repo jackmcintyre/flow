@@ -43,7 +43,7 @@ import type { AgreementMetricResult } from "../tools/compute-agreement.js";
  *
  * Story 4.10b (AC5c).
  */
-export type AutoMergeGateReason =
+type AutoMergeGateReason =
   | "low-risk-met-threshold"
   | "low-risk-sub-threshold"
   | "low-risk-insufficient-data"

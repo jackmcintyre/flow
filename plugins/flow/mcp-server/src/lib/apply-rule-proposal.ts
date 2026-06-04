@@ -71,7 +71,7 @@ import {
 } from "../schemas/discipline-rules.js";
 
 /** The single repo-relative registry path this handler writes. */
-export const REGISTRY_REL_PATH = "docs/discipline-rules.yaml";
+const REGISTRY_REL_PATH = "docs/discipline-rules.yaml";
 
 /** Tool name threaded into the managed-fs role-trace for the registry write. */
 const TOOL_NAME = "acceptProposal";

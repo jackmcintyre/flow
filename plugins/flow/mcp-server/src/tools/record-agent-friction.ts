@@ -27,7 +27,7 @@ import { z } from "zod";
 import { logTelemetryEvent } from "../lib/logger.js";
 
 /** Closed enum of recognised agent friction categories (mirrors the Zod schema). */
-export const FRICTION_KINDS = [
+const FRICTION_KINDS = [
   "empty-input",
   "missing-cited-source",
   "forced-fallback",

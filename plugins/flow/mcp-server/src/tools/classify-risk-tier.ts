@@ -99,7 +99,7 @@ export interface ClassifyRiskTierOptions {
  *
  * @internal
  */
-export function pathsContributingToChangeTypes(
+function pathsContributingToChangeTypes(
   changedPaths: string[],
   changeTypes: ChangeType[],
 ): string[] {

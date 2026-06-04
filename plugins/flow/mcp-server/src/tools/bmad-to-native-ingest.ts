@@ -53,7 +53,7 @@ import {
   type WriteNativeStoryInput,
 } from "./write-native-story.js";
 
-export const BmadToNativeIngestInputSchema = z.object({
+const BmadToNativeIngestInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   /**
    * Session id for the per-story `draft.authored` telemetry envelope. Optional —
@@ -107,7 +107,7 @@ const EnrichedDraftSchema = z.object({
  * (AC4). A source ref with no supplied draft (the model judged it un-enrichable)
  * is surfaced in the fix-up report, never silently dropped (AC1).
  */
-export const BmadToNativeIngestToolInputSchema = BmadToNativeIngestInputSchema.extend({
+const BmadToNativeIngestToolInputSchema = BmadToNativeIngestInputSchema.extend({
   drafts: z.record(z.string(), EnrichedDraftSchema),
 });
 
@@ -136,14 +136,14 @@ export type BmadEnricher = (
 ) => EnrichedDraft | Promise<EnrichedDraft>;
 
 /** A single emitted (written) native story. */
-export type IngestWritten = {
+type IngestWritten = {
   source_ref: string;
   native_ref: string;
   path: string;
 };
 
 /** A BMad story that could not be enriched to clear Tier-0 — surfaced, not dropped. */
-export type IngestNeedsFixUp = {
+type IngestNeedsFixUp = {
   source_ref: string;
   /** Tier-0 violation codes that blocked the write (e.g. `missing-cited-sources`). */
   failed_checks: string[];
@@ -151,7 +151,7 @@ export type IngestNeedsFixUp = {
 };
 
 /** A BMad story already ingested on a prior run — deduped by provenance, not re-written. */
-export type IngestSkipped = {
+type IngestSkipped = {
   source_ref: string;
   /** The existing native story that already carries this source ref as provenance. */
   existing_native_path: string;

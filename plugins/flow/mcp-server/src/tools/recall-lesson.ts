@@ -63,7 +63,7 @@ export interface RecallLessonOptions {
   now?: () => Date;
 }
 
-export interface RecallLessonHit {
+interface RecallLessonHit {
   id: string;
   kind: StructuredLesson["kind"];
   applies_when: string;
@@ -279,9 +279,8 @@ export function findLessonById(
  *
  * If the lesson id is not found, the body is returned unchanged.
  *
- * Exported for unit testing.
  */
-export function updateLessonInBody(
+function updateLessonInBody(
   body: string,
   updatedLesson: ParsedLesson,
 ): string {

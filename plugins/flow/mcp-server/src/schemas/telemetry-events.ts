@@ -24,7 +24,7 @@ import { z } from "zod";
  *   and the RolePermissions role regex from Story 1.4).
  * - `story_id`: optional opaque identifier (typically `<adapter>:<source-id>`).
  */
-export const TelemetryEventBase = z
+const TelemetryEventBase = z
   .object({
     ts: z
       .string()
@@ -43,7 +43,7 @@ export const TelemetryEventBase = z
  * `agent.invoke` — per-agent-invocation telemetry (FR65). Carries
  * runtime and (optionally) token counts. No string payloads (NFR14).
  */
-export const AgentInvokeEventSchema = TelemetryEventBase.extend({
+const AgentInvokeEventSchema = TelemetryEventBase.extend({
   type: z.literal("agent.invoke"),
   data: z
     .object({
@@ -159,7 +159,7 @@ export const YieldHandoffEventSchema = TelemetryEventBase.extend({
  *
  * No body/diff/contents strings (NFR14) — only surfacing fields.
  */
-export const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
+const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
   type: z.literal("retro.proposal.applied"),
   data: z
     .object({
@@ -197,7 +197,7 @@ export const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
  * Added additively to the discriminated union; `.strict()` posture preserved
  * (no body/diff/contents strings — NFR14).
  */
-export const BacklogReadinessChangedEventSchema = TelemetryEventBase.extend({
+const BacklogReadinessChangedEventSchema = TelemetryEventBase.extend({
   type: z.literal("backlog.readiness_changed"),
   data: z
     .object({
@@ -223,7 +223,7 @@ export const BacklogReadinessChangedEventSchema = TelemetryEventBase.extend({
  * Added additively to the discriminated union; `.strict()` posture preserved
  * (no body/diff/contents strings — NFR14).
  */
-export const DraftAuthoredEventSchema = TelemetryEventBase.extend({
+const DraftAuthoredEventSchema = TelemetryEventBase.extend({
   type: z.literal("draft.authored"),
   data: z
     .object({
@@ -256,7 +256,7 @@ export const DraftAuthoredEventSchema = TelemetryEventBase.extend({
  * Added additively to the discriminated union; `.strict()` posture preserved
  * (no body/diff/contents strings — NFR14, no per-lens `missed` strings leaked).
  */
-export const PanelGradedEventSchema = TelemetryEventBase.extend({
+const PanelGradedEventSchema = TelemetryEventBase.extend({
   type: z.literal("panel.graded"),
   data: z
     .object({
@@ -292,7 +292,7 @@ export const PanelGradedEventSchema = TelemetryEventBase.extend({
  *
  * Added additively to the discriminated union; `.strict()` posture preserved.
  */
-export const QualityAdjudicatedEventSchema = TelemetryEventBase.extend({
+const QualityAdjudicatedEventSchema = TelemetryEventBase.extend({
   type: z.literal("quality.adjudicated"),
   data: z
     .object({
@@ -367,7 +367,7 @@ export const SkillInvokeEventSchema = TelemetryEventBase.extend({
  *
  * Added additively to the discriminated union; `.strict()` posture preserved.
  */
-export const AgentFrictionEventSchema = TelemetryEventBase.extend({
+const AgentFrictionEventSchema = TelemetryEventBase.extend({
   type: z.literal("agent.friction"),
   data: z
     .object({
@@ -400,7 +400,7 @@ export const AgentFrictionEventSchema = TelemetryEventBase.extend({
  *
  * Added additively to the discriminated union; `.strict()` posture preserved.
  */
-export const CycleOpenedEventSchema = TelemetryEventBase.extend({
+const CycleOpenedEventSchema = TelemetryEventBase.extend({
   type: z.literal("cycle.opened"),
   data: z
     .object({

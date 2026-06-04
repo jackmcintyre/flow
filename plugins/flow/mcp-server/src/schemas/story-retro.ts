@@ -160,7 +160,7 @@ export type StructuredLesson = z.infer<typeof StructuredLessonSchema>;
  *
  * `.strict()` rejects unknown keys.
  */
-export const StoryRetroPayloadSchema = z
+const StoryRetroPayloadSchema = z
   .object({
     lessons: z.array(LessonSchema).default([]),
     failure_class: z.string().min(1).optional(),

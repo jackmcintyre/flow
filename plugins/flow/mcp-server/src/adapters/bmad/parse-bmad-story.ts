@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { MalformedBmadStoryError } from "../../errors.js";
 import type { AC, SourceStory } from "../adapter.js";
-import { mapBmadStatusToExecution, type BmadStatus } from "./map-bmad-status.js";
+import type { BmadStatus } from "./map-bmad-status.js";
 
 /**
  * Pure BMad story parser — no I/O. The caller (the adapter's
@@ -82,9 +82,7 @@ export function parseBmadStory(absPath: string, fileContents: string): SourceSto
       reason: "no 'Status: <value>' line found between H1 and the first section heading",
     });
   }
-  // Validate against the known vocabulary. mapBmadStatusToExecution
-  // returns null only when we want the caller to skip; an unknown
-  // string returns undefined to signal "throw".
+  // Validate against the known vocabulary. An unknown status value signals "throw".
   if (!isKnownBmadStatus(statusValue)) {
     throw new MalformedBmadStoryError({
       path: absPath,
@@ -176,8 +174,6 @@ function isKnownBmadStatus(s: string): s is BmadStatus {
   );
 }
 
-// Re-export the execution mapping so the adapter has a single import surface.
-export { mapBmadStatusToExecution };
 
 type Section = { name: string; bodyLines: string[] };
 

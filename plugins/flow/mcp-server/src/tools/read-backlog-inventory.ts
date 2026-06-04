@@ -26,7 +26,7 @@ import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { STATE_NAMES, type StateName } from "../state/manifest-state-machine.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 
-export const ReadBacklogInventoryInputSchema = z.object({
+const ReadBacklogInventoryInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   /**
    * Optional single-item filter. When set, only the entry whose `ref` matches
@@ -46,7 +46,7 @@ export const ReadBacklogInventoryInputSchema = z.object({
 });
 
 /** State values for backlog inventory entries. Extends StateName with the native-source-only sentinel. */
-export type InventoryState = StateName | "native-source-only";
+type InventoryState = StateName | "native-source-only";
 
 /** A single entry in the backlog inventory. */
 export interface BacklogInventoryEntry {

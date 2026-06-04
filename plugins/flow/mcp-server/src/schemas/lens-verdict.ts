@@ -34,7 +34,7 @@ export const LENS_NAMES = [
   "considered",
 ] as const;
 
-export const LensNameSchema = z.enum(LENS_NAMES);
+const LensNameSchema = z.enum(LENS_NAMES);
 export type LensName = z.infer<typeof LensNameSchema>;
 
 /**

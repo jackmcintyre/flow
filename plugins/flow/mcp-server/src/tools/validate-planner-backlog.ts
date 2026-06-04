@@ -31,7 +31,7 @@ import {
 // Input schema
 // ---------------------------------------------------------------------------
 
-export const PendingStoryInputSchema = z.object({
+const PendingStoryInputSchema = z.object({
   title: z.string().min(1),
   narrative: z.string().min(1),
   acceptance_criteria: z
@@ -53,9 +53,9 @@ export const PendingStoryInputSchema = z.object({
   state_mutating: z.union([z.boolean(), z.literal("auto")]),
 });
 
-export type PendingStoryInput = z.infer<typeof PendingStoryInputSchema>;
+type PendingStoryInput = z.infer<typeof PendingStoryInputSchema>;
 
-export const ValidatePlannerBacklogInputSchema = z.object({
+const ValidatePlannerBacklogInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   pendingStories: z.array(PendingStoryInputSchema).min(1, {
     message:

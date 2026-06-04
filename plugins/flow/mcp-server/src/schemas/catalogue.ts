@@ -49,7 +49,7 @@ export const CatalogueRoleSchema = z
   })
   .strict();
 
-export type CatalogueRoleFrontmatter = z.infer<typeof CatalogueRoleSchema>;
+type CatalogueRoleFrontmatter = z.infer<typeof CatalogueRoleSchema>;
 
 /**
  * The four required `##` section names in a catalogue file body, in

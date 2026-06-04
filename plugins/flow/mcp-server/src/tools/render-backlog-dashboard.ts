@@ -31,7 +31,7 @@ import { shortHandle } from "../lib/short-handle.js";
  * One row of the dashboard snapshot — a backlog item with its epic, state, and
  * the two operator-facing booleans the cockpit surfaces.
  */
-export interface BacklogDashboardEntry {
+interface BacklogDashboardEntry {
   ref: string;
   title: string;
   /** Epic key derived from the ref (`bmad:9.5` → `"9"`); `null` when the ref carries no epic (e.g. a native ULID). */

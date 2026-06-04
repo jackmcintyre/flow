@@ -7,9 +7,9 @@ import {
   BmadAdapter,
   configureBmadAdapter,
   resetBmadAdapter,
-  parseBmadStory,
-  reconcileStatus,
 } from "../src/adapters/bmad/index.js";
+import { parseBmadStory } from "../src/adapters/bmad/parse-bmad-story.js";
+import { reconcileStatus } from "../src/adapters/bmad/map-bmad-status.js";
 import {
   MalformedBmadStoryError,
   UnknownBmadRefError,

@@ -27,10 +27,10 @@
  */
 
 /** Ref pattern for native adapter: `native:<ULID>` (Crockford Base32 26 chars). */
-export const NATIVE_REF_RE = /^native:[0-9A-HJKMNP-TV-Z]{26}$/;
+const NATIVE_REF_RE = /^native:[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** Ref pattern for BMad adapter: `bmad:<epic>.<story>` e.g. `bmad:5.10`. */
-export const BMAD_REF_RE = /^bmad:\d+\.\d+$/;
+const BMAD_REF_RE = /^bmad:\d+\.\d+$/;
 
 /** Numeric story-id pattern used in blockquote convention: `5.10`, `1.2`, etc. */
 const NUMERIC_STORY_ID_RE = /^\d+\.\d+$/;

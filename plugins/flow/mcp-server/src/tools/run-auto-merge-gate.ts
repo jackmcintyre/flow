@@ -58,8 +58,6 @@ import type { PluginSettings } from "../schemas/workspace-config.js";
 // Output schema & type
 // ---------------------------------------------------------------------------
 
-import type { AutoMergeGateReason } from "../lib/auto-merge-gate.js";
-
 const AutoMergeGateReasonSchema = z.enum([
   "low-risk-met-threshold",
   "low-risk-sub-threshold",
@@ -97,8 +95,6 @@ export const AutoMergeGateResultSchema = z
 
 export type AutoMergeGateResult = z.infer<typeof AutoMergeGateResultSchema>;
 
-// Re-export the reason type for downstream consumers.
-export type { AutoMergeGateReason };
 
 // ---------------------------------------------------------------------------
 // Options
@@ -169,7 +165,7 @@ export interface RunAutoMergeGateOptions {
  *
  * @internal — exposed via `loadWorkspaceConfigImpl` test seam.
  */
-export async function loadWorkspaceConfig(targetRepoRoot: string): Promise<PluginSettings> {
+async function loadWorkspaceConfig(targetRepoRoot: string): Promise<PluginSettings> {
   const configPath = path.join(targetRepoRoot, ".flow", "config.yaml");
   let raw: string;
   try {
@@ -199,7 +195,7 @@ export async function loadWorkspaceConfig(targetRepoRoot: string): Promise<Plugi
 // ---------------------------------------------------------------------------
 
 /** Outcome of the CI gate poll. */
-export type CiGateState = "green" | "failed" | "pending-timeout";
+type CiGateState = "green" | "failed" | "pending-timeout";
 
 const CI_GATE_TIMEOUT_MS = 300_000; // 5 min — covers the ~90s build with headroom
 const CI_GATE_POLL_INTERVAL_MS = 15_000;

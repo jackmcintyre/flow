@@ -11,10 +11,7 @@
  */
 
 import { BranchSlugUnrenderableError } from "../errors.js";
-import { CONVENTIONAL_COMMIT_TYPES } from "./git.js";
 import { shortHandle } from "./short-handle.js";
-
-export { CONVENTIONAL_COMMIT_TYPES };
 
 // ---------------------------------------------------------------------------
 // buildBranchSlug

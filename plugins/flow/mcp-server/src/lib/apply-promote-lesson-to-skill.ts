@@ -59,8 +59,8 @@ import type { RetroProposal } from "../schemas/retro-proposal.js";
 const TOOL_NAME = "acceptProposal";
 
 /** The prefix/suffix that delineate a skill-ref block (machine-parseable). */
-export const SKILL_REF_BLOCK_PREFIX = "<!-- skill:ref ";
-export const SKILL_REF_BLOCK_SUFFIX = " -->";
+const SKILL_REF_BLOCK_PREFIX = "<!-- skill:ref ";
+const SKILL_REF_BLOCK_SUFFIX = " -->";
 
 /**
  * A parsed skill reference as it appears in a persona's `## Skills` section.
@@ -136,9 +136,8 @@ export function extractSkillRefs(skillsBody: string): SkillRef[] {
  * If the body is empty, the result is the serialised block; if non-empty,
  * the block is appended after a newline.
  *
- * Exported for unit testing.
  */
-export function appendSkillRef(existingBody: string, ref: SkillRef): string {
+function appendSkillRef(existingBody: string, ref: SkillRef): string {
   const block = serialiseSkillRef(ref);
   if (existingBody.trim() === "") {
     return block;

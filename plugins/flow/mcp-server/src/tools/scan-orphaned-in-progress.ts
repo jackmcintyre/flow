@@ -26,7 +26,7 @@ import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { buildBranchSlug } from "../lib/pr-body.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
 
-export interface OrphanedManifest {
+interface OrphanedManifest {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
   ref: string;
   /** Story title from the manifest — needed by the drain to re-run the dev phase. */

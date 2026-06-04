@@ -98,12 +98,12 @@ export interface FireCountConfig {
   relaxFloor?: number;
 }
 
-/** Resolved defaults — exported for tests and documentation; never magic numbers in the logic below. */
-export const DEFAULT_PROMOTION_THRESHOLD = 3;
+/** Resolved defaults — never magic numbers in the logic below. */
+const DEFAULT_PROMOTION_THRESHOLD = 3;
 /** @see FireCountConfig.retirementWindows */
-export const DEFAULT_RETIREMENT_WINDOWS = 5; // M; used as documentation, enforced by 6.12
+const DEFAULT_RETIREMENT_WINDOWS = 5; // M; used as documentation, enforced by 6.12
 /** @see FireCountConfig.relaxFloor */
-export const DEFAULT_RELAX_FLOOR = 1; // 0 fires → retire; ≥1 → relax (unless ≥ promotionThreshold)
+const DEFAULT_RELAX_FLOOR = 1; // 0 fires → retire; ≥1 → relax (unless ≥ promotionThreshold)
 
 export function resolveFireCountConfig(config: FireCountConfig = {}): Required<FireCountConfig> {
   return {
@@ -165,7 +165,7 @@ export const SINGLE_WINDOW_SEAM: WindowingSeam = {
 /**
  * Per-failure-class aggregation returned by the helper.
  */
-export interface FailureClassEntry {
+interface FailureClassEntry {
   /** Total fire count over the evaluated window. */
   fireCount: number;
   /**

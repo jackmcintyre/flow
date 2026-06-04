@@ -40,7 +40,7 @@ import {
 import { STATE_NAMES, type StateName } from "../state/manifest-state-machine.js";
 import { serialiseManifest } from "./mark-withdrawn.js";
 
-export const MarkStoryReadyInputSchema = z.object({
+const MarkStoryReadyInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   ref: z.string().min(1),
   ready: z.boolean(),

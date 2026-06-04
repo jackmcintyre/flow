@@ -3,18 +3,13 @@ import * as path from "node:path";
 import { z } from "zod";
 import {
   AmbiguousBmadRefError,
-  MalformedBmadStoryError,
   UnknownBmadRefError,
 } from "../../errors.js";
 import type { DisciplineViolation, PlanningAdapter, SourceStory } from "../adapter.js";
 import { validateStoryAgainstDiscipline } from "../../validators/planning-discipline.js";
 import { parseBmadStory } from "./parse-bmad-story.js";
 import {
-  mapBmadStatusToExecution,
-  reconcileStatus,
   type BmadStatus,
-  type ExecutionState,
-  type ReconciliationOutcome,
 } from "./map-bmad-status.js";
 
 /**
@@ -297,15 +292,6 @@ export const BmadAdapter: PlanningAdapter = {
   },
 };
 
-// Re-exports — the test suite and downstream consumers import these via
-// the adapter's index module for a single entry point per adapter
-// (Task 9.2).
-export {
-  parseBmadStory,
-  mapBmadStatusToExecution,
-  reconcileStatus,
-  MalformedBmadStoryError,
-  UnknownBmadRefError,
-  AmbiguousBmadRefError,
-};
-export type { BmadStatus, ExecutionState, ReconciliationOutcome };
+// Note: parseBmadStory, mapBmadStatusToExecution, reconcileStatus, and the
+// error/type re-exports below were removed — all callers import directly from
+// their canonical source files, not via this barrel.
