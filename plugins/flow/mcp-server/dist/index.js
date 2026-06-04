@@ -37228,14 +37228,38 @@ function parseRetroProposalFile(input) {
 }
 
 // src/tools/write-retro-proposal.ts
+function routeLessonDurability(input) {
+  const { lesson, recurrence, roleCount = 1, storyCount = 1 } = input;
+  if ((lesson.kind === "pitfall" || lesson.kind === "tool-quirk") && lesson.failure_class !== void 0 && recurrence > 1) {
+    return {
+      tier: "code",
+      reason: "This failure has a stable mechanical shape and keeps recurring \u2014 a guard makes it impossible"
+    };
+  }
+  if (lesson.kind === "pattern" && (roleCount > 1 || storyCount > 1) && recurrence > 1) {
+    return {
+      tier: "skill",
+      reason: "This procedure is useful across multiple roles or stories \u2014 a shared skill makes it reusable"
+    };
+  }
+  return {
+    tier: "note",
+    reason: "This is a one-off judgment call \u2014 a note is the right home"
+  };
+}
 async function writeRetroProposal(opts) {
   const {
     targetRepoRoot,
     isoTimestamp,
     proposals,
     cycleWindow = null,
-    role = "retro-analyst"
+    role = "retro-analyst",
+    lessonRoutings = []
   } = opts;
+  const routedLessons = lessonRoutings.map((input) => ({
+    lessonText: input.lesson.text,
+    recommendation: routeLessonDurability(input)
+  }));
   const fileShape = parseRetroProposalFile({
     iso_timestamp: isoTimestamp,
     cycle_window: cycleWindow,
@@ -37256,18 +37280,18 @@ async function writeRetroProposal(opts) {
   if (exists) {
     throw new RetroProposalAlreadyExistsError({ absPath, isoTimestamp });
   }
-  const contents = renderProposalMarkdown(fileShape);
+  const contents = renderProposalMarkdown(fileShape, routedLessons);
   await writeManagedFile({
     absPath,
     contents,
     targetRepoRoot,
     mcpToolContext: { toolName: "writeRetroProposal", role }
   });
-  return { absPath, proposalCount: fileShape.proposals.length };
+  return { absPath, proposalCount: fileShape.proposals.length, routedLessons };
 }
-function renderProposalMarkdown(fileShape) {
+function renderProposalMarkdown(fileShape, routedLessons) {
   const fm = renderFrontmatter(fileShape);
-  const body = renderBody(fileShape);
+  const body = renderBody(fileShape, routedLessons);
   return `---
 ${fm}---
 
@@ -37283,7 +37307,7 @@ function renderFrontmatter(fileShape) {
     { lineWidth: 0 }
   );
 }
-function renderBody(fileShape) {
+function renderBody(fileShape, routedLessons) {
   const { iso_timestamp, cycle_window, proposals } = fileShape;
   const lines = [];
   lines.push(`# Retro proposals \u2014 ${iso_timestamp}`);
@@ -37310,6 +37334,17 @@ function renderBody(fileShape) {
       }
       lines.push("");
     });
+  }
+  if (routedLessons.length > 0) {
+    lines.push("## Durability recommendations");
+    lines.push("");
+    for (const routed of routedLessons) {
+      lines.push(`**Lesson:** ${routed.lessonText}`);
+      lines.push(
+        `**Durability recommendation:** ${routed.recommendation.tier} \u2014 ${routed.recommendation.reason}`
+      );
+      lines.push("");
+    }
   }
   return lines.join("\n");
 }

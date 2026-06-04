@@ -34,6 +34,14 @@
  * MUST round-trip cleanly. Epic 6b's `/accept-proposal` reads the
  * frontmatter, not the body.
  *
+ * **Durability routing (Story DR1 / native:01KT6RH6XJFE2E09WMEHJ03JBD).**
+ * Each recurring lesson may carry a `durability_recommendation` of
+ * `'note' | 'skill' | 'code'` with a plain-language reason. The routing
+ * heuristic is in `routeLessonDurability` (exported for unit tests). When
+ * `lessonRoutings` is provided, the rendered body appends a
+ * "**Durability recommendation:**" line to each matching lesson block and
+ * the structured recommendations are returned in the call result.
+ *
  * FR58 — single proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md`.
  * FR59 — seven typed proposal variants.
  */
@@ -44,11 +52,59 @@ import { RetroProposalAlreadyExistsError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { RetroProposalFileSchema, parseRetroProposalFile, } from "../schemas/retro-proposal.js";
 /**
+ * Route a lesson to its durability tier using the routing heuristic.
+ *
+ * Routing table (evaluated top-to-bottom; first match wins):
+ *
+ * 1. `kind in ['pitfall', 'tool-quirk'] AND failure_class present AND recurrence > 1`
+ *    → `'code'` — "This failure has a stable mechanical shape and keeps recurring — a guard makes it impossible"
+ *
+ * 2. `kind == 'pattern' AND (roleCount > 1 OR storyCount > 1) AND recurrence > 1`
+ *    → `'skill'` — "This procedure is useful across multiple roles or stories — a shared skill makes it reusable"
+ *
+ * 3. otherwise
+ *    → `'note'` — "This is a one-off judgment call — a note is the right home"
+ *
+ * This function is deterministic and has no side effects — it reads the input
+ * fields and returns a recommendation.
+ *
+ * @param input - The routing input (lesson + recurrence counts).
+ * @returns A `DurabilityRecommendation` carrying the tier and plain-language reason.
+ */
+export function routeLessonDurability(input) {
+    const { lesson, recurrence, roleCount = 1, storyCount = 1 } = input;
+    // Rule 1: pitfall or tool-quirk with a stable failure class that has recurred.
+    if ((lesson.kind === "pitfall" || lesson.kind === "tool-quirk") &&
+        lesson.failure_class !== undefined &&
+        recurrence > 1) {
+        return {
+            tier: "code",
+            reason: "This failure has a stable mechanical shape and keeps recurring — a guard makes it impossible",
+        };
+    }
+    // Rule 2: cross-role or cross-story pattern that has recurred.
+    if (lesson.kind === "pattern" &&
+        (roleCount > 1 || storyCount > 1) &&
+        recurrence > 1) {
+        return {
+            tier: "skill",
+            reason: "This procedure is useful across multiple roles or stories — a shared skill makes it reusable",
+        };
+    }
+    // Rule 3: all other cases — keep as a note.
+    return {
+        tier: "note",
+        reason: "This is a one-off judgment call — a note is the right home",
+    };
+}
+/**
  * Write a retro-proposal markdown file. See module JSDoc for full
  * behaviour.
  *
- * @returns `{ absPath, proposalCount }` — the absolute path of the
- *   written file and the count of proposals serialised into it.
+ * @returns `{ absPath, proposalCount, routedLessons }` — the absolute path
+ *   of the written file, the count of proposals serialised into it, and
+ *   (when `lessonRoutings` was provided) the structured durability
+ *   recommendations for each lesson.
  *
  * @throws {MalformedRetroProposalError} When `isoTimestamp` is malformed
  *   (non-ISO-8601 / non-UTC), when any proposal fails its variant's
@@ -62,7 +118,12 @@ import { RetroProposalFileSchema, parseRetroProposalFile, } from "../schemas/ret
  *   registered MCP handler).
  */
 export async function writeRetroProposal(opts) {
-    const { targetRepoRoot, isoTimestamp, proposals, cycleWindow = null, role = "retro-analyst", } = opts;
+    const { targetRepoRoot, isoTimestamp, proposals, cycleWindow = null, role = "retro-analyst", lessonRoutings = [], } = opts;
+    // Compute durability recommendations for each lesson routing input.
+    const routedLessons = lessonRoutings.map((input) => ({
+        lessonText: input.lesson.text,
+        recommendation: routeLessonDurability(input),
+    }));
     // Step 1 + 2: Validate via the canonical parser. The wrapper schema
     // validates `iso_timestamp` (defends against path-traversal in the
     // filename component) AND each proposal in `proposals` via the
@@ -96,14 +157,14 @@ export async function writeRetroProposal(opts) {
     }
     // Step 5: Render + write. The frontmatter is the source of truth;
     // the body is operator-readable scaffolding.
-    const contents = renderProposalMarkdown(fileShape);
+    const contents = renderProposalMarkdown(fileShape, routedLessons);
     await writeManagedFile({
         absPath,
         contents,
         targetRepoRoot,
         mcpToolContext: { toolName: "writeRetroProposal", role },
     });
-    return { absPath, proposalCount: fileShape.proposals.length };
+    return { absPath, proposalCount: fileShape.proposals.length, routedLessons };
 }
 // ---------------------------------------------------------------------------
 // Rendering — frontmatter + body
@@ -126,13 +187,16 @@ export async function writeRetroProposal(opts) {
  *
  *     ## Proposal 2 — ...
  *
+ *     ## Durability recommendations
+ *     (when lessonRoutings was provided)
+ *
  * Empty-proposals special case: when `fileShape.proposals` is empty, the
  * body is just the header lines plus a single paragraph:
  *   "No proposals produced this cycle."
  */
-function renderProposalMarkdown(fileShape) {
+function renderProposalMarkdown(fileShape, routedLessons) {
     const fm = renderFrontmatter(fileShape);
-    const body = renderBody(fileShape);
+    const body = renderBody(fileShape, routedLessons);
     return `---\n${fm}---\n\n${body}`;
 }
 /**
@@ -153,9 +217,11 @@ function renderFrontmatter(fileShape) {
 /**
  * Render the operator-readable Markdown body. Header lines first,
  * then one H2 section per proposal (or the "No proposals" sentence
- * when the array is empty).
+ * when the array is empty). When `routedLessons` is non-empty, appends
+ * a "## Durability recommendations" section listing each lesson's
+ * routing decision and plain-language reason.
  */
-function renderBody(fileShape) {
+function renderBody(fileShape, routedLessons) {
     const { iso_timestamp, cycle_window, proposals } = fileShape;
     const lines = [];
     lines.push(`# Retro proposals — ${iso_timestamp}`);
@@ -184,6 +250,18 @@ function renderBody(fileShape) {
             }
             lines.push("");
         });
+    }
+    // Durability recommendations section (Story DR1 / native:01KT6RH6XJFE2E09WMEHJ03JBD).
+    // Appended when the caller provided lesson routing inputs — gives the operator
+    // a plain-language steer on how to make each lesson durable.
+    if (routedLessons.length > 0) {
+        lines.push("## Durability recommendations");
+        lines.push("");
+        for (const routed of routedLessons) {
+            lines.push(`**Lesson:** ${routed.lessonText}`);
+            lines.push(`**Durability recommendation:** ${routed.recommendation.tier} — ${routed.recommendation.reason}`);
+            lines.push("");
+        }
     }
     return lines.join("\n");
 }
