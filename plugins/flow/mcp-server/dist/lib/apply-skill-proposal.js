@@ -152,8 +152,11 @@ async function writeManaged(ctx, relPath, contents) {
  * Write a brand-new skill file. Throws `SkillAlreadyExistsError` BEFORE any
  * write when a file already exists at the proposed path (no overwrite).
  * Returns the repo-relative path written.
+ *
+ * Exported so `makePromoteLessonToSkillHandler` (apply-promote-lesson-to-skill.ts)
+ * can reuse the creation logic without duplicating it.
  */
-async function writeNewSkill(ctx, opts) {
+export async function writeNewSkill(ctx, opts) {
     const abs = path.join(ctx.targetRepoRoot, opts.proposedPath);
     const rel = relPosix(ctx.targetRepoRoot, abs);
     if (await fileExists(abs)) {

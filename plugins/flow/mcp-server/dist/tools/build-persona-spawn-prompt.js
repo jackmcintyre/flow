@@ -66,6 +66,7 @@
  * Story 4.2 Task 4.1–4.5.
  */
 import { readPersona } from "./read-persona.js";
+import { extractSkillRefs } from "../lib/apply-promote-lesson-to-skill.js";
 /**
  * Assemble the system prompt for a dev-subagent spawn.
  *
@@ -141,6 +142,27 @@ export function buildKnowledgeIndex(knowledgeBody) {
     return lines.join("\n");
 }
 /**
+ * Render a compact one-line skill index from a `## Skills` section body.
+ *
+ * For each `<!-- skill:ref {...} -->` block a summary line is produced:
+ *   `[<skill-name>] <when_to_use>`
+ *
+ * Returns an empty string when the body is empty or has no parseable blocks.
+ * The full skill body is available on demand via reading the skill file at
+ * `skill_path` (on-demand recall, analogous to `recallLesson`).
+ *
+ * Exported for unit testing.
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E.
+ */
+export function buildSkillsIndex(skillsBody) {
+    if (!skillsBody || skillsBody.trim() === "") {
+        return "";
+    }
+    const refs = extractSkillRefs(skillsBody);
+    return refs.map((ref) => `[${ref.name}] ${ref.when_to_use}`).join("\n");
+}
+/**
  * Pure assembler — no IO. Exported for unit testing.
  *
  * Composition order (load-bearing — pins the architecture decision from
@@ -163,6 +185,12 @@ export function buildKnowledgeIndex(knowledgeBody) {
  * is replaced with a compact one-line index (`[id] kind — applies_when` per
  * structured lesson) via `buildKnowledgeIndex`. Full lesson text is available
  * on demand via `recallLesson`.
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E: A `## Skills` section is appended
+ * after `## Knowledge` when the persona has promoted skills. Each skill
+ * reference is rendered as one line: `[<skill-name>] <when_to_use>`. The full
+ * skill body is available on demand via reading the skill file at the
+ * `skill_path` stored in the reference block.
  */
 export function assemblePrompt(persona) {
     const displayName = toDisplayName(persona.role);
@@ -183,6 +211,8 @@ export function assemblePrompt(persona) {
     }
     // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — compact knowledge index.
     const knowledgeIndex = buildKnowledgeIndex(persona.sections["Knowledge"]);
+    // Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — skill references index.
+    const skillsIndex = buildSkillsIndex(persona.skillsBody);
     const parts = [
         `# ${displayName} — Persona`,
         ``,
@@ -206,9 +236,16 @@ export function assemblePrompt(persona) {
         ``,
         knowledgeIndex,
         ``,
-        `## Locked phrases (do not paraphrase)`,
-        ...lockedPhraseLines,
     ];
+    // Append ## Skills only when the persona has at least one skill reference.
+    if (skillsIndex.length > 0) {
+        parts.push(`## Skills`);
+        parts.push(``);
+        parts.push(skillsIndex);
+        parts.push(``);
+    }
+    parts.push(`## Locked phrases (do not paraphrase)`);
+    parts.push(...lockedPhraseLines);
     return parts.join("\n");
 }
 function toDisplayName(role) {

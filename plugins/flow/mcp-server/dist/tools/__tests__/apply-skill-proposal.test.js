@@ -14,14 +14,18 @@
  * Test conventions mirror `accept-proposal.test.ts`: tmpRoot, seed proposals via
  * `writeRetroProposal`, inject the git seam, read telemetry from
  * `.flow/telemetry/*.jsonl`.
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — AC1 coverage for the
+ * `promote-lesson-to-skill` handler (see end of file).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
-import { SkillAlreadyExistsError, SkillNotFoundError, } from "../../errors.js";
+import { SkillAlreadyExistsError, SkillNotFoundError, PersonaFileNotFoundError, } from "../../errors.js";
 import { bumpVersion, createSkillProposalHandlers, } from "../../lib/apply-skill-proposal.js";
+import { makePromoteLessonToSkillHandler, extractSkillRefs, extractSkillsSection, } from "../../lib/apply-promote-lesson-to-skill.js";
 import { SkillFrontmatterSchema } from "../../schemas/skill-frontmatter.js";
 import { createProductionRegistry, } from "../../lib/proposal-apply-registry.js";
 import { writeRetroProposal } from "../write-retro-proposal.js";
@@ -490,5 +494,233 @@ describe("createProductionRegistry registers the four skill-* handlers (AC6)", (
             expect(handler, `${kind} must resolve to a handler`).toBeDefined();
             expect(handler.type).toBe(kind);
         }
+    });
+});
+// ---------------------------------------------------------------------------
+// Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote-lesson-to-skill handler (AC1)
+// ---------------------------------------------------------------------------
+/**
+ * Minimal valid PERSONA.md fixture for the promote-lesson-to-skill tests.
+ * The Knowledge section holds one structured lesson.
+ */
+const LESSON_ID = "01KT6RHQ1FXTR000000000AAAA";
+const FIXTURE_PERSONA_MD = `---
+role: generalist-dev
+domain: "feature implementation in a story scope"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+  - Task
+gh_allow:
+  - pr-create
+  - pr-view
+  - pr-comment
+locked_phrases:
+  handoff: "Handoff to reviewer — story <story-id> ready for review."
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "2026-01-01T00:00:00.000Z"
+catalogue_version: "0.1.0"
+---
+
+# Generalist Dev
+
+## Domain
+
+Implements one story at a time end-to-end.
+
+## Mandate
+
+- Implement the story.
+
+## Out of mandate
+
+- Reviewing the PR.
+
+## Prompt
+
+You are the generalist dev.
+
+## Knowledge
+
+<!-- lesson:json {"id":"${LESSON_ID}","kind":"pattern","applies_when":"When building a feature","detail":"Always write tests first before the implementation.","learned_at":"2026-06-01T00:00:00.000Z"} -->
+`;
+async function seedPersona(root, role, content) {
+    const dir = path.join(root, "team", role);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "PERSONA.md"), content, "utf8");
+}
+async function readPersonaRaw(root, role) {
+    return fs.readFile(path.join(root, "team", role, "PERSONA.md"), "utf8");
+}
+function promoteLessonProposal() {
+    return {
+        type: "promote-lesson-to-skill",
+        id: "01KT6RHQ1PRMT000000000AA01",
+        created_at: ISO,
+        rationale: "This lesson is reusable across roles.",
+        target_role: "generalist-dev",
+        lesson_id: LESSON_ID,
+        proposed_skill_path: ".flow/skills/write-tests-first.md",
+        skill_description: "Always write tests before implementation",
+        skill_body: "# Write Tests First\n\nAlways write the test before implementing the feature.",
+        when_to_use: "When building any new feature to ensure test coverage",
+    };
+}
+describe("promote-lesson-to-skill handler (AC1 — Story native:01KT6RHQ1K4KQMASAXNEK6MY7E)", () => {
+    it("creates the skill file and appends a skill reference to the role's ## Skills section", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        const result = await handler.apply(promoteLessonProposal(), ctxOf(tmpRoot));
+        const skillRel = ".flow/skills/write-tests-first.md";
+        const personaRel = "team/generalist-dev/PERSONA.md";
+        // Both paths are returned in changedPaths.
+        expect(result.changedPaths).toContain(skillRel);
+        expect(result.changedPaths).toContain(personaRel);
+        expect(result.changedPaths).toHaveLength(2);
+        // Skill file was created.
+        expect(await exists(tmpRoot, skillRel)).toBe(true);
+        const { frontmatter, body } = await readSkill(tmpRoot, skillRel);
+        expect(frontmatter.name).toBe("write-tests-first");
+        expect(frontmatter.description).toBe("Always write tests before implementation");
+        expect(frontmatter.version).toBe("0.1.0");
+        expect(frontmatter.introduced_at).toBe(FIXED_NOW_ISO);
+        expect(frontmatter.source_lesson_refs).toContain(LESSON_ID);
+        expect(body).toBe("# Write Tests First\n\nAlways write the test before implementing the feature.");
+        // Persona was updated with a ## Skills section containing the skill reference.
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaRaw).toContain("## Skills");
+        expect(personaRaw).toContain("skill:ref");
+        expect(personaRaw).toContain("write-tests-first");
+        expect(personaRaw).toContain("When building any new feature to ensure test coverage");
+        // The skill reference parses cleanly.
+        const skillsBody = extractSkillsSection(personaRaw);
+        const refs = extractSkillRefs(skillsBody);
+        expect(refs).toHaveLength(1);
+        expect(refs[0].name).toBe("write-tests-first");
+        expect(refs[0].skill_path).toBe(skillRel);
+        expect(refs[0].when_to_use).toBe("When building any new feature to ensure test coverage");
+    });
+    it("preview renders a diff without writing the skill file or updating the persona", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        const diff = await handler.previewDiff(promoteLessonProposal(), ctxOf(tmpRoot));
+        expect(diff).toContain("promote-lesson-to-skill");
+        expect(diff).toContain("write-tests-first.md");
+        expect(diff).toContain("skill:ref");
+        // No skill file written (preview is read-only).
+        expect(await exists(tmpRoot, ".flow/skills/write-tests-first.md")).toBe(false);
+        // Persona file unchanged (no Skills section added).
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaRaw).not.toContain("## Skills");
+    });
+    it("throws PersonaFileNotFoundError with no mutation when the persona is absent", async () => {
+        // No persona seeded.
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        await expect(handler.apply(promoteLessonProposal(), ctxOf(tmpRoot))).rejects.toBeInstanceOf(PersonaFileNotFoundError);
+        // No skill file written: the handler reads + validates the persona FIRST before
+        // creating the skill, so a missing persona throws before any skill write.
+        expect(await exists(tmpRoot, ".flow/skills/write-tests-first.md")).toBe(false);
+    });
+    it("throws SkillAlreadyExistsError with no persona update when the skill path is occupied", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        // Pre-create the skill file at the proposed path.
+        await seedSkill(tmpRoot, { relPath: ".flow/skills/write-tests-first.md" });
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        await expect(handler.apply(promoteLessonProposal(), ctxOf(tmpRoot))).rejects.toBeInstanceOf(SkillAlreadyExistsError);
+        // Persona was NOT modified (skill creation failed before persona write).
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaRaw).not.toContain("## Skills");
+    });
+    it("appends a second skill reference to a persona that already has a ## Skills section", async () => {
+        // Seed the persona once, apply the handler to create the first skill reference.
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        await handler.apply(promoteLessonProposal(), ctxOf(tmpRoot));
+        // Now apply a SECOND promote proposal for a different skill.
+        const secondProposal = {
+            type: "promote-lesson-to-skill",
+            id: "01KT6RHQ1PRMT000000000AA02",
+            created_at: ISO,
+            rationale: "Another reusable lesson.",
+            target_role: "generalist-dev",
+            lesson_id: "01KT6RHQ1FXTR000000000AAAB",
+            proposed_skill_path: ".flow/skills/another-skill.md",
+            skill_description: "Another reusable skill",
+            skill_body: "# Another Skill\n\nDo the other thing.",
+            when_to_use: "When the other situation arises",
+        };
+        await handler.apply(secondProposal, ctxOf(tmpRoot));
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        const skillsBody = extractSkillsSection(personaRaw);
+        const refs = extractSkillRefs(skillsBody);
+        // Both skill references are present.
+        expect(refs).toHaveLength(2);
+        const names = refs.map((r) => r.name);
+        expect(names).toContain("write-tests-first");
+        expect(names).toContain("another-skill");
+    });
+    it("the originating role's persona shows a one-line reference (skill name + when_to_use) not the full inline body", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = makePromoteLessonToSkillHandler({ now: () => FIXED_NOW });
+        await handler.apply(promoteLessonProposal(), ctxOf(tmpRoot));
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        // The full skill body should NOT be inlined in the persona.
+        expect(personaRaw).not.toContain("Always write the test before implementing the feature.");
+        // But the reference IS present.
+        expect(personaRaw).toContain("write-tests-first");
+        expect(personaRaw).toContain("When building any new feature to ensure test coverage");
+    });
+});
+describe("promote-lesson-to-skill end-to-end via acceptProposal gate (AC1 integration)", () => {
+    it("confirm applies + commits skill + persona + proposal in a single commit; preview is a no-op", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        await writeRetroProposal({
+            targetRepoRoot: tmpRoot,
+            isoTimestamp: ISO,
+            proposals: [promoteLessonProposal()],
+        });
+        const git = makeFakeGitCommit("cc00dd11ee22ff3344556677889900aabbccddee");
+        // Preview — no write.
+        const preview = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: promoteLessonProposal().id,
+            gitCommitImpl: git.impl,
+            now: () => FIXED_NOW,
+        });
+        expect(preview.status).toBe("preview");
+        expect(git.calls).toHaveLength(0);
+        expect(await exists(tmpRoot, ".flow/skills/write-tests-first.md")).toBe(false);
+        // Confirm.
+        const applied = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: promoteLessonProposal().id,
+            confirm: true,
+            gitCommitImpl: git.impl,
+            now: () => FIXED_NOW,
+        });
+        expect(applied.status).toBe("applied");
+        // Skill file written.
+        expect(await exists(tmpRoot, ".flow/skills/write-tests-first.md")).toBe(true);
+        // Exactly one commit carrying the skill file + persona file + proposal file.
+        expect(git.calls).toHaveLength(1);
+        const committed = git.calls[0];
+        expect(committed.paths).toContain(".flow/skills/write-tests-first.md");
+        expect(committed.paths).toContain("team/generalist-dev/PERSONA.md");
+        expect(committed.paths.some((p) => p.endsWith(`${ISO}.md`))).toBe(true);
+        // Persona updated with skill reference.
+        const personaRaw = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaRaw).toContain("## Skills");
+        expect(personaRaw).toContain("write-tests-first");
+    });
+});
+describe("createProductionRegistry registers promote-lesson-to-skill handler (AC1 registry)", () => {
+    it("promote-lesson-to-skill resolves to a handler in the production registry", () => {
+        const registry = createProductionRegistry();
+        const handler = registry.get("promote-lesson-to-skill");
+        expect(handler).toBeDefined();
+        expect(handler.type).toBe("promote-lesson-to-skill");
     });
 });

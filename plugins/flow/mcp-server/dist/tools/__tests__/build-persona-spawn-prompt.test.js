@@ -18,8 +18,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { PersonaFileNotFoundError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { buildPersonaSpawnPrompt, assemblePrompt, buildKnowledgeIndex, } from "../build-persona-spawn-prompt.js";
+import { buildPersonaSpawnPrompt, assemblePrompt, buildKnowledgeIndex, buildSkillsIndex, } from "../build-persona-spawn-prompt.js";
 import { parsePersonaFile } from "../../lib/persona-file.js";
+import { serialiseSkillRef } from "../../lib/apply-promote-lesson-to-skill.js";
 let tmpRoot;
 // ---------------------------------------------------------------------------
 // Fixture persona file content
@@ -260,5 +261,224 @@ describe("assemblePrompt (pure unit)", () => {
         const substituteLines = prompt.split("\n").filter((l) => l.startsWith("Substitute <") && l.includes("with the live value"));
         // Only yield (<role>) and verdict (<SENTINEL>) should have substitution lines.
         expect(substituteLines.length).toBe(2);
+    });
+});
+// ---------------------------------------------------------------------------
+// Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — AC2 and AC3
+// Skill references: one-line entry in briefing, full body not inlined,
+// on-demand recall returns full body, second role also shows the reference.
+// ---------------------------------------------------------------------------
+const SKILL_REF_NAME = "write-tests-first";
+const SKILL_REF_PATH = ".flow/skills/write-tests-first.md";
+const SKILL_WHEN_TO_USE = "When building any new feature to ensure test coverage";
+const SKILL_FULL_BODY = "# Write Tests First\n\nAlways write the test before implementing the feature.\n\nThis is the full skill body which should NOT appear in the briefing.";
+/**
+ * Build a FIXTURE_PERSONA_MD variant with a ## Skills section containing
+ * one skill reference.
+ */
+function buildPersonaMdWithSkillRef() {
+    const skillRefBlock = serialiseSkillRef({
+        name: SKILL_REF_NAME,
+        skill_path: SKILL_REF_PATH,
+        when_to_use: SKILL_WHEN_TO_USE,
+    });
+    return `---
+role: generalist-dev
+domain: "feature implementation in a story scope"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+  - Task
+gh_allow:
+  - pr-create
+  - pr-view
+  - pr-comment
+locked_phrases:
+  handoff: "Handoff to reviewer — story <story-id> ready for review."
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "${FIXED_HIRED_AT}"
+catalogue_version: "${FIXED_VERSION}"
+---
+
+# Generalist Dev
+
+## Domain
+
+Implements one story at a time end-to-end: claim, code, test, open PR, hand off to reviewer.
+
+## Mandate
+
+- Claim a story from the ready queue, work it in an isolated worktree.
+- Implement against the AC, write tests, run the project's build/test gates green before opening a PR.
+- Open the PR with the locked handoff phrase so the reviewer is woken.
+
+## Out of mandate
+
+- Reviewing the PR — yield to generalist-reviewer.
+- Shaping the source story — yield to planner if the story is under-specified.
+
+## Prompt
+
+You are the generalist dev. You implement one story at a time, end-to-end, against the AC.
+
+## Knowledge
+
+<!-- lesson:json {"id":"01KT6QEWY794ZY0DH6JHQFWG6V","kind":"pitfall","applies_when":"When deploying without running tests first","detail":"Always run the full test suite before opening a PR — deploy-without-test PRs caused 3 rollbacks in a row.","failure_class":"deploy-skip-test","source_ref":"native:01KT0001","learned_at":"2026-06-01T00:00:00.000Z"} -->
+
+## Skills
+
+${skillRefBlock}
+`;
+}
+describe("buildSkillsIndex (pure unit — AC2/AC3)", () => {
+    it("renders each skill ref as a one-line entry: [name] when_to_use", () => {
+        const skillRefBlock = serialiseSkillRef({
+            name: SKILL_REF_NAME,
+            skill_path: SKILL_REF_PATH,
+            when_to_use: SKILL_WHEN_TO_USE,
+        });
+        const index = buildSkillsIndex(skillRefBlock);
+        expect(index).toBe(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+    });
+    it("returns empty string for an empty skills body", () => {
+        expect(buildSkillsIndex("")).toBe("");
+        expect(buildSkillsIndex("   ")).toBe("");
+    });
+    it("returns one line per skill reference", () => {
+        const blocks = [
+            serialiseSkillRef({ name: "skill-a", skill_path: ".flow/skills/skill-a.md", when_to_use: "When A" }),
+            serialiseSkillRef({ name: "skill-b", skill_path: ".flow/skills/skill-b.md", when_to_use: "When B" }),
+        ].join("\n");
+        const index = buildSkillsIndex(blocks);
+        const lines = index.split("\n").filter((l) => l.trim().length > 0);
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toBe("[skill-a] When A");
+        expect(lines[1]).toBe("[skill-b] When B");
+    });
+});
+describe("assemblePrompt — skill reference rendering (AC2/AC3)", () => {
+    it("(AC2/AC3) includes a ## Skills section with one-line entries when the persona has skill references", () => {
+        const personaMd = buildPersonaMdWithSkillRef();
+        const parsed = parsePersonaFile(personaMd, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(parsed);
+        expect(prompt).toContain("## Skills");
+        expect(prompt).toContain(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+    });
+    it("(AC2) the full skill body does NOT appear in the briefing — only the one-line reference", () => {
+        const personaMd = buildPersonaMdWithSkillRef();
+        const parsed = parsePersonaFile(personaMd, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(parsed);
+        // The one-line reference IS present.
+        expect(prompt).toContain(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+        // The full skill body is NOT embedded in the briefing.
+        expect(prompt).not.toContain("Always write the test before implementing the feature.");
+    });
+    it("(AC3) ## Skills section is absent from the briefing when the persona has no skill references", () => {
+        // FIXTURE_PERSONA_MD has no ## Skills section.
+        const parsed = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(parsed);
+        expect(prompt).not.toContain("## Skills");
+    });
+    it("(AC3) ## Skills appears AFTER ## Knowledge in the section order", () => {
+        const personaMd = buildPersonaMdWithSkillRef();
+        const parsed = parsePersonaFile(personaMd, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(parsed);
+        const knowledgeIdx = prompt.indexOf("## Knowledge");
+        const skillsIdx = prompt.indexOf("## Skills");
+        expect(knowledgeIdx).toBeGreaterThan(-1);
+        expect(skillsIdx).toBeGreaterThan(-1);
+        expect(skillsIdx).toBeGreaterThan(knowledgeIdx);
+    });
+});
+describe("buildPersonaSpawnPrompt — skill references (AC2/AC3 integration)", () => {
+    it("(AC2/AC3) spawned briefing contains a one-line skill entry and omits the full skill body", async () => {
+        const dir = await makePersonaDir(tmpRoot, "generalist-dev");
+        await writePersonaFile(dir, buildPersonaMdWithSkillRef());
+        // Seed the skill file (it exists on disk — on-demand recall reads it).
+        const skillDir = path.join(tmpRoot, ".flow", "skills");
+        await fs.mkdir(skillDir, { recursive: true });
+        await atomicWriteFile(path.join(skillDir, "write-tests-first.md"), `---\nname: write-tests-first\ndescription: "Write tests first"\nallowed_tools: []\nversion: 0.1.0\nintroduced_at: 2026-06-01T00:00:00.000Z\nsource_lesson_refs: []\n---\n\n${SKILL_FULL_BODY}\n`);
+        const { systemPrompt } = await buildPersonaSpawnPrompt({
+            targetRepoRoot: tmpRoot,
+            role: "generalist-dev",
+        });
+        // ## Skills section is present.
+        expect(systemPrompt).toContain("## Skills");
+        // One-line entry is present.
+        expect(systemPrompt).toContain(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+        // Full skill body is NOT inlined — only available via on-demand recall.
+        expect(systemPrompt).not.toContain("This is the full skill body which should NOT appear in the briefing.");
+    });
+    it("(AC2) a second role referencing the same skill also shows the one-line entry in its briefing", async () => {
+        const skillRefBlock = serialiseSkillRef({
+            name: SKILL_REF_NAME,
+            skill_path: SKILL_REF_PATH,
+            when_to_use: SKILL_WHEN_TO_USE,
+        });
+        // Build a second-role persona (generalist-reviewer) that references the same skill.
+        const reviewerPersonaMd = `---
+role: generalist-reviewer
+domain: "code review in a story scope"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Bash
+gh_allow:
+  - pr-view
+  - pr-comment
+locked_phrases:
+  handoff: "Handoff to dev — story <story-id> changes requested."
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "${FIXED_HIRED_AT}"
+catalogue_version: "${FIXED_VERSION}"
+---
+
+# Generalist Reviewer
+
+## Domain
+
+Reviews code.
+
+## Mandate
+
+- Review the PR.
+
+## Out of mandate
+
+- Implementing code.
+
+## Prompt
+
+You are the generalist reviewer.
+
+## Knowledge
+
+## Skills
+
+${skillRefBlock}
+`;
+        // Write both personas.
+        const devDir = await makePersonaDir(tmpRoot, "generalist-dev");
+        await writePersonaFile(devDir, buildPersonaMdWithSkillRef());
+        const reviewerDir = await makePersonaDir(tmpRoot, "generalist-reviewer");
+        await writePersonaFile(reviewerDir, reviewerPersonaMd);
+        // Both spawned briefings contain the same one-line skill entry.
+        const { systemPrompt: devPrompt } = await buildPersonaSpawnPrompt({
+            targetRepoRoot: tmpRoot,
+            role: "generalist-dev",
+        });
+        const { systemPrompt: reviewerPrompt } = await buildPersonaSpawnPrompt({
+            targetRepoRoot: tmpRoot,
+            role: "generalist-reviewer",
+        });
+        expect(devPrompt).toContain(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+        expect(reviewerPrompt).toContain(`[${SKILL_REF_NAME}] ${SKILL_WHEN_TO_USE}`);
+        // Neither briefing inlines the full skill body.
+        expect(devPrompt).not.toContain("Always write the test before implementing the feature.");
+        expect(reviewerPrompt).not.toContain("Always write the test before implementing the feature.");
     });
 });

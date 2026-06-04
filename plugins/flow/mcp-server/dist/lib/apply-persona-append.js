@@ -76,6 +76,11 @@ async function readPersonaRaw(targetRepoRoot, relPath) {
  *
  * This deliberately reconstructs the canonical file from parsed sections —
  * never regex-substituting the raw string — to avoid byte-mangling.
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E: The optional `## Skills` section
+ * is preserved verbatim from `parsed.skillsBody` (empty string when absent,
+ * which suppresses the section entirely so round-trips stay identical to the
+ * pre-Skills-section era).
  */
 function reconstructPersonaFile(parsed, newKnowledgeBody) {
     // Mirror renderPersonaFile's canonical key order.
@@ -119,6 +124,13 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
     ];
     if (newKnowledgeBody.length > 0) {
         sections.push(newKnowledgeBody);
+        sections.push(``);
+    }
+    // Preserve the optional ## Skills section if it was present in the parsed file.
+    if (parsed.skillsBody.length > 0) {
+        sections.push(`## Skills`);
+        sections.push(``);
+        sections.push(parsed.skillsBody);
         sections.push(``);
     }
     return `---\n${yamlBlock}\n---\n\n${sections.join("\n")}`;

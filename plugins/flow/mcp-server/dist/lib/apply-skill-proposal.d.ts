@@ -27,7 +27,7 @@
  *
  * (Story 6.7 — FR63, Architecture §Skill calibration loop)
  */
-import type { ProposalApplyHandler } from "./proposal-apply-registry.js";
+import type { HandlerContext, ProposalApplyHandler } from "./proposal-apply-registry.js";
 /**
  * Bump a semver `x.y.z` per the `version_bump` rule:
  *   - `patch` → `x.y.(z+1)`
@@ -37,6 +37,22 @@ import type { ProposalApplyHandler } from "./proposal-apply-registry.js";
  * (the frontmatter schema guarantees the shape, but the helper is defensive).
  */
 export declare function bumpVersion(version: string, bump: "patch" | "minor"): string;
+/**
+ * Write a brand-new skill file. Throws `SkillAlreadyExistsError` BEFORE any
+ * write when a file already exists at the proposed path (no overwrite).
+ * Returns the repo-relative path written.
+ *
+ * Exported so `makePromoteLessonToSkillHandler` (apply-promote-lesson-to-skill.ts)
+ * can reuse the creation logic without duplicating it.
+ */
+export declare function writeNewSkill(ctx: HandlerContext, opts: {
+    proposedPath: string;
+    description: string;
+    body: string;
+    sourceLessonRefs: string[];
+    introducedAt: string;
+    supersedes?: string;
+}): Promise<string>;
 export interface SkillHandlerDeps {
     /** Returns the current instant; the source of `introduced_at` / `retired_at`. */
     now: () => Date;

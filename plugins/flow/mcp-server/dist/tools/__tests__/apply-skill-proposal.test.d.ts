@@ -14,5 +14,8 @@
  * Test conventions mirror `accept-proposal.test.ts`: tmpRoot, seed proposals via
  * `writeRetroProposal`, inject the git seam, read telemetry from
  * `.flow/telemetry/*.jsonl`.
+ *
+ * Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — AC1 coverage for the
+ * `promote-lesson-to-skill` handler (see end of file).
  */
 export {};
