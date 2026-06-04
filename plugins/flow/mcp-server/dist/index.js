@@ -52957,6 +52957,7 @@ async function scanOrphanedInProgress(opts) {
       }
     }
     let hasOpenPR = false;
+    let openPrNumber = null;
     try {
       const branch = buildBranchSlug({ ref: manifest.ref, title: manifest.title });
       const result = await execaImpl("gh", [
@@ -52971,8 +52972,10 @@ async function scanOrphanedInProgress(opts) {
       ]);
       const parsed2 = JSON.parse(result.stdout || "[]");
       hasOpenPR = parsed2.length > 0;
+      openPrNumber = parsed2.length > 0 ? parsed2[0]?.number ?? null : null;
     } catch {
       hasOpenPR = false;
+      openPrNumber = null;
     }
     let prNumber = null;
     try {
@@ -52981,9 +52984,9 @@ async function scanOrphanedInProgress(opts) {
         staleUlid,
         manifest.ref
       );
-      prNumber = outcome?.prNumber ?? null;
+      prNumber = outcome?.prNumber ?? openPrNumber;
     } catch {
-      prNumber = null;
+      prNumber = openPrNumber;
     }
     orphans.push({
       ref: manifest.ref,

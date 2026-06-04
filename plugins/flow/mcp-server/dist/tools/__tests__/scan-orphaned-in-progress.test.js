@@ -157,6 +157,83 @@ describe("scanOrphanedInProgress — crash-recovery fields", () => {
     });
 });
 // ---------------------------------------------------------------------------
+// Crash-recovery: open-PR fallback for prNumber (story
+// native:01KT6NH8PXYN0ZRRYHCYRXV4F2).
+//
+// A story can crash mid-flight with a real open PR on its branch yet NO
+// recorded dev-outcome.json (a flaky build gate, or a manually-opened PR). The
+// scan reuses the open-PR number it already fetches as the fallback for
+// prNumber so the flow resumes that story at review instead of rebuilding it.
+// The recorded dev-outcome number still wins when present; neither present ->
+// null (rebuild as before).
+// ---------------------------------------------------------------------------
+describe("scanOrphanedInProgress — open-PR fallback for prNumber", () => {
+    // Test seam: a gh mock that reports an open PR with the given number for the
+    // `gh pr list --head <branch> --state open --json number` query.
+    function openPrExeca(number) {
+        return (async () => ({ stdout: JSON.stringify([{ number }]) }));
+    }
+    // A gh mock that reports NO open PR.
+    const noOpenPrExeca = (async () => ({ stdout: "[]" }));
+    it("recovers prNumber from the open PR when there is no dev-outcome.json (AC1)", async () => {
+        const ref = "native:01JVWX2STALE0000000000011";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        // No dev-outcome.json seeded — the builder never recorded a PR.
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+            execaImpl: openPrExeca(77),
+        });
+        expect(result.orphans).toHaveLength(1);
+        // The story resumes at review against the real open PR, not a rebuild.
+        expect(result.orphans[0].prNumber).toBe(77);
+        expect(result.orphans[0].hasOpenPR).toBe(true);
+    });
+    it("keeps the recorded dev-outcome number even when an open PR reports a different number (AC2)", async () => {
+        const ref = "native:01JVWX2STALE0000000000012";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        // The builder DID record a PR; gh reports a different open-PR number.
+        await seedDevOutcome(tmpDir, STALE_ULID_A, ref, 42);
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+            execaImpl: openPrExeca(99),
+        });
+        expect(result.orphans).toHaveLength(1);
+        // The recorded number wins unchanged.
+        expect(result.orphans[0].prNumber).toBe(42);
+    });
+    it("recovers prNumber: null when there is neither a recorded PR nor an open PR (AC2)", async () => {
+        const ref = "native:01JVWX2STALE0000000000013";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        // No dev-outcome.json and no open PR.
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+            execaImpl: noOpenPrExeca,
+        });
+        expect(result.orphans).toHaveLength(1);
+        // Neither source present -> null, so the flow rebuilds it as before.
+        expect(result.orphans[0].prNumber).toBeNull();
+        expect(result.orphans[0].hasOpenPR).toBe(false);
+    });
+    it("stays null (never throws) when the gh query errors and there is no dev-outcome (fail-safe)", async () => {
+        const ref = "native:01JVWX2STALE0000000000014";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        const erroringExeca = (async () => {
+            throw new Error("gh: network error");
+        });
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+            execaImpl: erroringExeca,
+        });
+        expect(result.orphans).toHaveLength(1);
+        expect(result.orphans[0].prNumber).toBeNull();
+        expect(result.orphans[0].hasOpenPR).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
 // AC1 (story native:01KT3YDHM10FPQ77N22BTJP9AF): a crash-recovery scan must
 // never cross-attribute a sibling's PR. Two stories built concurrently in ONE
 // drain run share a single session ULID; before the per-ref fix they wrote to
