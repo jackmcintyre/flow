@@ -227,6 +227,43 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 /**
+ * Durability routing context — the raw inputs the retro-analyst provides so
+ * `writeRetroProposal` can apply the deterministic routing heuristic
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD).
+ *
+ * All three fields are optional: when absent the heuristic falls back to
+ * 'note' (the safest default). When present, the writer uses them to route
+ * the lesson and stores the computed recommendation in `durability_recommendation`.
+ *
+ *  - `recurrence`  — how many times this lesson has appeared across done/
+ *    manifests (1 = first time, 2+ = repeated).
+ *  - `role_count`  — distinct roles in which the lesson was observed.
+ *  - `story_count` — distinct stories in which the lesson was observed.
+ */
+export declare const DurabilityRoutingContextSchema: z.ZodObject<{
+    recurrence: z.ZodNumber;
+    role_count: z.ZodOptional<z.ZodNumber>;
+    story_count: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strict>;
+export type DurabilityRoutingContext = z.infer<typeof DurabilityRoutingContextSchema>;
+/**
+ * The computed durability recommendation — written into the frontmatter by
+ * `writeRetroProposal` so the on-disk artifact is self-describing and
+ * round-trips cleanly at apply time. Operators see the plain-language reason
+ * in the body; the structured `recommendation` field supports tooling.
+ *
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD)
+ */
+export declare const DurabilityRecommendationSchema: z.ZodObject<{
+    recommendation: z.ZodEnum<{
+        code: "code";
+        note: "note";
+        skill: "skill";
+    }>;
+    reason: z.ZodString;
+}, z.core.$strict>;
+export type DurabilityRecommendation = z.infer<typeof DurabilityRecommendationSchema>;
+/**
  * `persona-append` — append a durable lesson to a hired role's Knowledge section.
  *
  * When applied via the `/accept-proposal` gate, the handler reads the role's
@@ -243,8 +280,17 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
  *  - `failure_class`— required when kind is "pitfall" (mirrors LessonSchema contract).
  *  - `source_ref`   — optional story ref provenance.
  *
+ * Routing context fields (Story native:01KT6RH6XJFE2E09WMEHJ03JBD):
+ *  - `routing_context` — recurrence/role_count/story_count inputs; when present,
+ *    `writeRetroProposal` runs the durability heuristic and stores the result in
+ *    `durability_recommendation` in the on-disk frontmatter.
+ *  - `durability_recommendation` — the computed recommendation (note|skill|code)
+ *    with a plain-language reason. Set by `writeRetroProposal`; do not pre-fill
+ *    unless you are a deterministic tool (the writer owns this field).
+ *
  * (Story 6.9 — persona-knowledge write-back keystone)
  * (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4 — structured lesson storage)
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD — durability routing)
  */
 export declare const PersonaAppendProposalSchema: z.ZodObject<{
     id: z.ZodString;
@@ -267,6 +313,19 @@ export declare const PersonaAppendProposalSchema: z.ZodObject<{
     applies_when: z.ZodOptional<z.ZodString>;
     failure_class: z.ZodOptional<z.ZodString>;
     source_ref: z.ZodOptional<z.ZodString>;
+    routing_context: z.ZodOptional<z.ZodObject<{
+        recurrence: z.ZodNumber;
+        role_count: z.ZodOptional<z.ZodNumber>;
+        story_count: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    durability_recommendation: z.ZodOptional<z.ZodObject<{
+        recommendation: z.ZodEnum<{
+            code: "code";
+            note: "note";
+            skill: "skill";
+        }>;
+        reason: z.ZodString;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 /**
  * The closed set of eight proposal-type literals. Exported as a tuple so
@@ -409,6 +468,19 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     applies_when: z.ZodOptional<z.ZodString>;
     failure_class: z.ZodOptional<z.ZodString>;
     source_ref: z.ZodOptional<z.ZodString>;
+    routing_context: z.ZodOptional<z.ZodObject<{
+        recurrence: z.ZodNumber;
+        role_count: z.ZodOptional<z.ZodNumber>;
+        story_count: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    durability_recommendation: z.ZodOptional<z.ZodObject<{
+        recommendation: z.ZodEnum<{
+            code: "code";
+            note: "note";
+            skill: "skill";
+        }>;
+        reason: z.ZodString;
+    }, z.core.$strict>>;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
 /**
@@ -561,6 +633,19 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         applies_when: z.ZodOptional<z.ZodString>;
         failure_class: z.ZodOptional<z.ZodString>;
         source_ref: z.ZodOptional<z.ZodString>;
+        routing_context: z.ZodOptional<z.ZodObject<{
+            recurrence: z.ZodNumber;
+            role_count: z.ZodOptional<z.ZodNumber>;
+            story_count: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>;
+        durability_recommendation: z.ZodOptional<z.ZodObject<{
+            recommendation: z.ZodEnum<{
+                code: "code";
+                note: "note";
+                skill: "skill";
+            }>;
+            reason: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>], "type">>;
 }, z.core.$strict>;
 export type RetroProposalFile = z.infer<typeof RetroProposalFileSchema>;

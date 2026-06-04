@@ -37245,6 +37245,15 @@ var TeamChangeProposalSchema = ProposalBase.extend({
     affected_failure_classes: external_exports.array(external_exports.string().min(1)).min(1)
   }).strict()
 }).strict();
+var DurabilityRoutingContextSchema = external_exports.object({
+  recurrence: external_exports.number().int().min(1),
+  role_count: external_exports.number().int().min(1).optional(),
+  story_count: external_exports.number().int().min(1).optional()
+}).strict();
+var DurabilityRecommendationSchema = external_exports.object({
+  recommendation: external_exports.enum(["note", "skill", "code"]),
+  reason: external_exports.string().min(1)
+}).strict();
 var PersonaAppendProposalSchema = ProposalBase.extend({
   type: external_exports.literal("persona-append"),
   target_role: RolePathSchema,
@@ -37253,7 +37262,10 @@ var PersonaAppendProposalSchema = ProposalBase.extend({
   kind: external_exports.enum(["pitfall", "pattern", "tool-quirk", "discipline"]).optional(),
   applies_when: external_exports.string().min(1).optional(),
   failure_class: external_exports.string().min(1).optional(),
-  source_ref: external_exports.string().min(1).optional()
+  source_ref: external_exports.string().min(1).optional(),
+  // Durability routing — Story native:01KT6RH6XJFE2E09WMEHJ03JBD.
+  routing_context: DurabilityRoutingContextSchema.optional(),
+  durability_recommendation: DurabilityRecommendationSchema.optional()
 }).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
@@ -37293,7 +37305,7 @@ async function writeRetroProposal(opts) {
     cycleWindow = null,
     role = "retro-analyst"
   } = opts;
-  const fileShape = parseRetroProposalFile({
+  let fileShape = parseRetroProposalFile({
     iso_timestamp: isoTimestamp,
     cycle_window: cycleWindow,
     proposals
@@ -37313,6 +37325,34 @@ async function writeRetroProposal(opts) {
   if (exists) {
     throw new RetroProposalAlreadyExistsError({ absPath, isoTimestamp });
   }
+  const durabilityRecommendations = [];
+  const enrichedProposals = fileShape.proposals.map(
+    (proposal) => {
+      if (proposal.type !== "persona-append") return proposal;
+      if (proposal.durability_recommendation) {
+        durabilityRecommendations.push({
+          proposalId: proposal.id,
+          recommendation: proposal.durability_recommendation.recommendation,
+          reason: proposal.durability_recommendation.reason
+        });
+        return proposal;
+      }
+      if (!proposal.routing_context) return proposal;
+      const rec = routeDurability(proposal.kind, proposal.failure_class, proposal.routing_context);
+      if (!rec) return proposal;
+      durabilityRecommendations.push({
+        proposalId: proposal.id,
+        recommendation: rec.recommendation,
+        reason: rec.reason
+      });
+      return { ...proposal, durability_recommendation: rec };
+    }
+  );
+  fileShape = parseRetroProposalFile({
+    iso_timestamp: isoTimestamp,
+    cycle_window: cycleWindow,
+    proposals: enrichedProposals
+  });
   const contents = renderProposalMarkdown(fileShape);
   await writeManagedFile({
     absPath,
@@ -37320,7 +37360,26 @@ async function writeRetroProposal(opts) {
     targetRepoRoot,
     mcpToolContext: { toolName: "writeRetroProposal", role }
   });
-  return { absPath, proposalCount: fileShape.proposals.length };
+  return {
+    absPath,
+    proposalCount: fileShape.proposals.length,
+    durabilityRecommendations
+  };
+}
+var DURABILITY_REASONS = {
+  code: "This failure has a stable mechanical shape and keeps recurring \u2014 a guard makes it impossible",
+  skill: "This procedure is useful across multiple roles or stories \u2014 a shared skill makes it reusable",
+  note: "This is a one-off judgment call \u2014 a note is the right home"
+};
+function routeDurability(kind, failureClass, ctx) {
+  const { recurrence, role_count, story_count } = ctx;
+  if ((kind === "pitfall" || kind === "tool-quirk") && failureClass !== void 0 && failureClass.length > 0 && recurrence > 1) {
+    return { recommendation: "code", reason: DURABILITY_REASONS.code };
+  }
+  if (kind === "pattern" && (role_count !== void 0 && role_count > 1 || story_count !== void 0 && story_count > 1) && recurrence > 1) {
+    return { recommendation: "skill", reason: DURABILITY_REASONS.skill };
+  }
+  return { recommendation: "note", reason: DURABILITY_REASONS.note };
 }
 function renderProposalMarkdown(fileShape) {
   const fm = renderFrontmatter(fileShape);
@@ -37433,11 +37492,20 @@ function renderProposalFields(proposal) {
           `[${proposal.predicted_impact.affected_failure_classes.join(", ")}]`
         ]
       ];
-    case "persona-append":
-      return [
+    case "persona-append": {
+      const fields = [
         ["target_role", proposal.target_role],
         ["lesson", proposal.lesson]
       ];
+      if (proposal.durability_recommendation) {
+        const { recommendation, reason } = proposal.durability_recommendation;
+        fields.push([
+          "Durability recommendation",
+          `${recommendation} \u2014 ${reason}`
+        ]);
+      }
+      return fields;
+    }
   }
 }
 
