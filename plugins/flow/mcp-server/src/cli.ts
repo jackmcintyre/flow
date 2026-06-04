@@ -62,6 +62,7 @@ import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
 import { recordStoryRetro } from "./tools/record-story-retro.js";
+import { recallLesson } from "./tools/recall-lesson.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -142,6 +143,10 @@ const TOOLS: Record<string, ToolFn> = {
   recordReviewerLesson,
   readReviewerLesson,
   recordStoryRetro,
+  // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
+  // buildPersonaSpawnPrompt now emits a one-line index; agents call this
+  // to retrieve the full detail body of a specific lesson by id.
+  recallLesson,
 };
 
 function emit(obj: unknown): void {

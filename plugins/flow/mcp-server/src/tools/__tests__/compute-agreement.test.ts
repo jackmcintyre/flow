@@ -614,7 +614,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
     // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
     // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
-    expect(registeredTools.length).toBe(49);
+    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
+    expect(registeredTools.length).toBe(50);
   });
 });
 

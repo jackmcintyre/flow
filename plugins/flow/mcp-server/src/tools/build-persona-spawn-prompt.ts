@@ -35,6 +35,18 @@
  * after `## Knowledge`. This is the single source where locked-phrase strings
  * cross from frontmatter into LLM-readable text (Story 4.2 Task 4.3).
  *
+ * Story native:01KT6QEWY794ZY0DH6JHQFWG6V — compact knowledge index:
+ * Instead of embedding the full text of every structured lesson in the
+ * `## Knowledge` section, only a one-line summary index is rendered:
+ *
+ *   `[<id>] <kind> — <applies_when>`
+ *
+ * This keeps briefings lightweight regardless of how many lessons the role
+ * has accumulated. An agent can call `recallLesson({ targetRepoRoot, role,
+ * id })` to retrieve the full `detail` body of any lesson it needs. Flat
+ * (non-structured) bullet entries that survived migration are included verbatim
+ * (they have no id and thus cannot be recalled individually).
+ *
  * Centralising assembly here means a future persona-format change updates one
  * place. The `/flow:start` skill calls this once per spawn; the tool internally
  * calls `readPersona` once per invocation. On a subsequent claim within the
@@ -89,6 +101,72 @@ export async function buildPersonaSpawnPrompt(
   return { systemPrompt };
 }
 
+/** Sentinel constants for structured lesson blocks (mirrors get-team-snapshot.ts). */
+const LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+const LESSON_BLOCK_SUFFIX = " -->";
+
+/**
+ * Render a compact one-line knowledge index from the raw `## Knowledge` body.
+ *
+ * For each structured lesson block (`<!-- lesson:json {...} -->`) a summary line
+ * is produced: `[<id>] <kind> — <applies_when>`
+ *
+ * This keeps the index lightweight (one line per lesson) while preserving the
+ * id so the agent can call `recallLesson` to retrieve the full detail.
+ *
+ * Flat bullet entries (`- text`) that survived migration are included verbatim —
+ * they have no id and cannot be recalled individually.
+ *
+ * Lines that are neither structured blocks nor top-level bullets are skipped
+ * (blank lines, continuation text, etc.).
+ *
+ * Exported for unit testing.
+ */
+export function buildKnowledgeIndex(knowledgeBody: string): string {
+  const lines: string[] = [];
+
+  for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+
+    // Structured lesson block.
+    if (
+      trimmed.startsWith(LESSON_BLOCK_PREFIX) &&
+      trimmed.endsWith(LESSON_BLOCK_SUFFIX)
+    ) {
+      const jsonStr = trimmed
+        .slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length)
+        .trim();
+      try {
+        const raw = JSON.parse(jsonStr) as unknown;
+        if (
+          raw !== null &&
+          typeof raw === "object" &&
+          "id" in raw &&
+          "kind" in raw &&
+          "applies_when" in raw
+        ) {
+          const obj = raw as Record<string, unknown>;
+          const id = String(obj["id"]);
+          const kind = String(obj["kind"]);
+          const trigger = String(obj["applies_when"]);
+          lines.push(`[${id}] ${kind} — ${trigger}`);
+        }
+      } catch {
+        // Invalid JSON in lesson block — skip silently (mirrors extractKnowledgeEntries).
+      }
+      continue;
+    }
+
+    // Flat-bullet migration entry — include verbatim.
+    if (/^-\s+(.+?)\s*$/.test(line)) {
+      lines.push(line);
+    }
+    // All other lines (blank, continuation, etc.) are skipped.
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Pure assembler — no IO. Exported for unit testing.
  *
@@ -107,6 +185,11 @@ export async function buildPersonaSpawnPrompt(
  * Story 4.3 Task 5: For each locked phrase that contains a `<...>` token,
  * an additional substitution-instruction line is appended so the LLM knows
  * to substitute the live value from its initial context before emission.
+ *
+ * Story native:01KT6QEWY794ZY0DH6JHQFWG6V: The `## Knowledge` section body
+ * is replaced with a compact one-line index (`[id] kind — applies_when` per
+ * structured lesson) via `buildKnowledgeIndex`. Full lesson text is available
+ * on demand via `recallLesson`.
  */
 export function assemblePrompt(persona: PersonaFile): string {
   const displayName = toDisplayName(persona.role);
@@ -129,6 +212,9 @@ export function assemblePrompt(persona: PersonaFile): string {
     }
   }
 
+  // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — compact knowledge index.
+  const knowledgeIndex = buildKnowledgeIndex(persona.sections["Knowledge"]);
+
   const parts: string[] = [
     `# ${displayName} — Persona`,
     ``,
@@ -150,7 +236,7 @@ export function assemblePrompt(persona: PersonaFile): string {
     ``,
     `## Knowledge`,
     ``,
-    persona.sections["Knowledge"],
+    knowledgeIndex,
     ``,
     `## Locked phrases (do not paraphrase)`,
     ...lockedPhraseLines,

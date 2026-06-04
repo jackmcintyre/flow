@@ -18,7 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { PersonaFileNotFoundError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { buildPersonaSpawnPrompt, assemblePrompt } from "../build-persona-spawn-prompt.js";
+import { buildPersonaSpawnPrompt, assemblePrompt, buildKnowledgeIndex, } from "../build-persona-spawn-prompt.js";
 import { parsePersonaFile } from "../../lib/persona-file.js";
 let tmpRoot;
 // ---------------------------------------------------------------------------
@@ -70,7 +70,8 @@ You are the generalist dev. You implement one story at a time, end-to-end, again
 
 ## Knowledge
 
-Accumulated knowledge goes here.
+- migrate flat bullets verbatim
+<!-- lesson:json {"id":"01KT6QEWY794ZY0DH6JHQFWG6V","kind":"pitfall","applies_when":"When deploying without running tests first","detail":"Always run the full test suite before opening a PR — deploy-without-test PRs caused 3 rollbacks in a row.","failure_class":"deploy-skip-test","source_ref":"native:01KT0001","learned_at":"2026-06-01T00:00:00.000Z"} -->
 `;
 async function makePersonaDir(root, role) {
     const dir = path.join(root, "team", role);
@@ -177,13 +178,53 @@ describe("assemblePrompt (pure unit)", () => {
             prev = idx;
         }
     });
-    it("includes section body content verbatim", () => {
+    it("includes section body content verbatim for non-knowledge sections", () => {
         const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
         const prompt = assemblePrompt(mockPersona);
         expect(prompt).toContain("Implements one story at a time end-to-end");
         expect(prompt).toContain("Claim a story from the ready queue");
         expect(prompt).toContain("You are the generalist dev.");
-        expect(prompt).toContain("Accumulated knowledge goes here.");
+        // Knowledge section is now a compact index — full lesson text is NOT embedded.
+        // Instead the one-line summary appears.
+        expect(prompt).toContain("[01KT6QEWY794ZY0DH6JHQFWG6V] pitfall — When deploying without running tests first");
+        // Flat bullets are included verbatim.
+        expect(prompt).toContain("- migrate flat bullets verbatim");
+        // Full detail text is NOT in the briefing.
+        expect(prompt).not.toContain("Always run the full test suite before opening a PR");
+    });
+    // ---------------------------------------------------------------------------
+    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — AC1: one-line index in briefing
+    // ---------------------------------------------------------------------------
+    it("(AC1) knowledge section contains a one-line summary entry per lesson (id, kind, trigger)", () => {
+        const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(mockPersona);
+        // The structured lesson should appear as [id] kind — applies_when.
+        expect(prompt).toContain("[01KT6QEWY794ZY0DH6JHQFWG6V] pitfall — When deploying without running tests first");
+        // Full lesson detail must NOT be embedded.
+        expect(prompt).not.toContain("Always run the full test suite before opening a PR");
+    });
+    // ---------------------------------------------------------------------------
+    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — AC3: size grows by one line per lesson
+    // ---------------------------------------------------------------------------
+    it("(AC3) with ten lessons the knowledge section grows by one summary line per lesson, not the full body", () => {
+        // Build a knowledge body with 10 structured lessons.
+        const lessons = [];
+        for (let i = 0; i < 10; i++) {
+            const id = `01KT0000000000000000000${String(i).padStart(3, "0")}`;
+            lessons.push(`<!-- lesson:json {"id":"${id}","kind":"pattern","applies_when":"When rule ${i} applies","detail":"${"x".repeat(500)} — full text for lesson ${i}","learned_at":"2026-06-01T00:00:00.000Z"} -->`);
+        }
+        const knowledgeBody = lessons.join("\n");
+        const index = buildKnowledgeIndex(knowledgeBody);
+        const indexLines = index.split("\n").filter((l) => l.trim().length > 0);
+        // Exactly 10 lines in the index — one per lesson.
+        expect(indexLines).toHaveLength(10);
+        // Each line is the compact summary, NOT the full detail.
+        for (let i = 0; i < 10; i++) {
+            expect(indexLines[i]).toMatch(/^\[01KT/);
+            expect(indexLines[i]).toContain("pattern — When rule");
+            // Full 500-char detail must NOT appear in any index line.
+            expect(indexLines[i]).not.toContain("x".repeat(500));
+        }
     });
     // ---------------------------------------------------------------------------
     // Story 4.3 Task 5.2 — per-token substitution instruction assertions

@@ -50,6 +50,7 @@ import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
+import { recallLesson } from "./recall-lesson.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -2421,6 +2422,59 @@ export function registerAllTools(server) {
                 .parse(args);
             try {
                 const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — recallLesson: on-demand full-body
+    // retrieval of a single structured lesson from a role's Knowledge section.
+    //
+    // The companion to buildPersonaSpawnPrompt's one-line index. After briefing,
+    // an agent sees only `[<id>] <kind> — <applies_when>` per lesson; when it
+    // needs the full detail of a specific lesson it calls this tool with the id.
+    // Returns { found: true, lesson: { id, kind, applies_when, detail, ... } }
+    // or { found: false, lesson: null } on a soft miss (lesson pruned / stale id).
+    // Throws PersonaFileNotFoundError when the persona file is absent.
+    server.registerTool({
+        name: "recallLesson",
+        description: "Retrieve the full body of one structured lesson from a role's ## Knowledge section by id " +
+            "(Story native:01KT6QEWY794ZY0DH6JHQFWG6V). The agent's briefing contains a compact " +
+            "one-line index (`[id] kind — applies_when`); call this with the id to get the full " +
+            "lesson detail, kind, failure_class, source_ref, source_pr, and learned_at. " +
+            "Returns { found: true, lesson: {...} } when found, or { found: false, lesson: null } " +
+            "when the id is unknown (soft miss — never throws on a missing lesson). " +
+            "Throws PersonaFileNotFoundError when team/<role>/PERSONA.md is absent. " +
+            "Read-only: never mutates state.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                role: { type: "string" },
+                id: { type: "string" },
+            },
+            required: ["targetRepoRoot", "role", "id"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                role: z.string().min(1),
+                id: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await recallLesson(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };
