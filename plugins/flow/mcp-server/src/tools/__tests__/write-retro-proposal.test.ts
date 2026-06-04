@@ -27,7 +27,11 @@ import {
   RetroProposalAlreadyExistsError,
 } from "../../errors.js";
 import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
-import { writeRetroProposal } from "../write-retro-proposal.js";
+import {
+  writeRetroProposal,
+  routeDurability,
+  DURABILITY_REASONS,
+} from "../write-retro-proposal.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -385,5 +389,252 @@ describe("writeRetroProposal — byte-stable rendering", () => {
       await fs.rm(tmpA, { recursive: true, force: true });
       await fs.rm(tmpB, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// routeDurability unit tests (AC2, AC3, AC4)
+// ---------------------------------------------------------------------------
+
+describe("routeDurability — AC2: pitfall/tool-quirk + failure_class + recurrence>1 → code", () => {
+  it("pitfall kind with failure_class and recurrence 2 → code", () => {
+    const result = routeDurability("pitfall", "handoff-grammar", {
+      recurrence: 2,
+    });
+    expect(result.recommendation).toBe("code");
+    expect(result.reason).toBe(DURABILITY_REASONS.code);
+  });
+
+  it("tool-quirk kind with failure_class and recurrence 3 → code", () => {
+    const result = routeDurability("tool-quirk", "mcp-timeout", {
+      recurrence: 3,
+    });
+    expect(result.recommendation).toBe("code");
+    expect(result.reason).toBe(DURABILITY_REASONS.code);
+  });
+
+  it("pitfall with failure_class but recurrence = 1 → note (not code; needs >1)", () => {
+    const result = routeDurability("pitfall", "handoff-grammar", {
+      recurrence: 1,
+    });
+    expect(result.recommendation).toBe("note");
+  });
+
+  it("pitfall WITHOUT failure_class and recurrence 2 → note (failure_class required for code)", () => {
+    const result = routeDurability("pitfall", undefined, { recurrence: 2 });
+    expect(result.recommendation).toBe("note");
+  });
+
+  it("pitfall with empty failure_class and recurrence 2 → note", () => {
+    // empty string should not trigger code route
+    const result = routeDurability("pitfall", "", { recurrence: 2 });
+    expect(result.recommendation).toBe("note");
+  });
+});
+
+describe("routeDurability — AC3: pattern + multi-role/story + recurrence>1 → skill", () => {
+  it("pattern kind with role_count 2 and recurrence 2 → skill", () => {
+    const result = routeDurability("pattern", undefined, {
+      recurrence: 2,
+      role_count: 2,
+    });
+    expect(result.recommendation).toBe("skill");
+    expect(result.reason).toBe(DURABILITY_REASONS.skill);
+  });
+
+  it("pattern kind with story_count 3 and recurrence 2 → skill", () => {
+    const result = routeDurability("pattern", undefined, {
+      recurrence: 2,
+      story_count: 3,
+    });
+    expect(result.recommendation).toBe("skill");
+    expect(result.reason).toBe(DURABILITY_REASONS.skill);
+  });
+
+  it("pattern kind with role_count 1 and story_count 1, recurrence 2 → note (needs >1 spread)", () => {
+    const result = routeDurability("pattern", undefined, {
+      recurrence: 2,
+      role_count: 1,
+      story_count: 1,
+    });
+    expect(result.recommendation).toBe("note");
+  });
+
+  it("pattern kind with role_count 2 but recurrence = 1 → note (needs recurrence >1)", () => {
+    const result = routeDurability("pattern", undefined, {
+      recurrence: 1,
+      role_count: 2,
+    });
+    expect(result.recommendation).toBe("note");
+  });
+
+  it("discipline kind with role_count 2 and recurrence 2 → note (only pattern triggers skill)", () => {
+    const result = routeDurability("discipline", undefined, {
+      recurrence: 2,
+      role_count: 2,
+    });
+    expect(result.recommendation).toBe("note");
+  });
+});
+
+describe("routeDurability — AC4: observed once / judgment-shaped → note", () => {
+  it("any kind with recurrence 1 and no failure_class → note", () => {
+    for (const kind of ["pitfall", "pattern", "tool-quirk", "discipline"] as const) {
+      const result = routeDurability(kind, undefined, { recurrence: 1 });
+      expect(result.recommendation).toBe("note");
+      expect(result.reason).toBe(DURABILITY_REASONS.note);
+    }
+  });
+
+  it("undefined kind with recurrence 1 → note", () => {
+    const result = routeDurability(undefined, undefined, { recurrence: 1 });
+    expect(result.recommendation).toBe("note");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeRetroProposal integration: durability recommendation in proposal
+// (AC1 — recurring lesson carries recommendation in body and return value)
+// ---------------------------------------------------------------------------
+
+describe("writeRetroProposal — durability recommendation integration (AC1)", () => {
+  const PERSONA_ULID = "01HZPERS0000000000000000PA";
+  const ISO2 = "2026-06-04T10:00:00.000Z";
+
+  it("persona-append with routing_context gets durability_recommendation in frontmatter, body, and return value", async () => {
+    const personaProposal = {
+      type: "persona-append",
+      id: PERSONA_ULID,
+      created_at: ISO2,
+      rationale: "Dev forgot to emit the locked phrase twice in a row.",
+      target_role: "generalist-dev",
+      lesson: "Always emit the locked handoff phrase as the final line.",
+      kind: "pitfall",
+      failure_class: "handoff-grammar",
+      routing_context: {
+        recurrence: 2,
+      },
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO2,
+      proposals: [personaProposal],
+    });
+
+    // Return value carries the recommendation.
+    expect(result.durabilityRecommendations).toHaveLength(1);
+    const rec = result.durabilityRecommendations[0]!;
+    expect(rec.proposalId).toBe(PERSONA_ULID);
+    expect(rec.recommendation).toBe("code");
+    expect(rec.reason).toBe(DURABILITY_REASONS.code);
+
+    // Read back and verify frontmatter round-trips with durability_recommendation.
+    const { frontmatter, body } = await readWrittenFile(result.absPath);
+    const parsed = parseRetroProposalFile(yamlParse(frontmatter));
+    const storedProposal = parsed.proposals[0]!;
+    expect(storedProposal.type).toBe("persona-append");
+    if (storedProposal.type === "persona-append") {
+      expect(storedProposal.durability_recommendation).toEqual({
+        recommendation: "code",
+        reason: DURABILITY_REASONS.code,
+      });
+    }
+
+    // Body shows the durability recommendation line.
+    expect(body).toContain("**Durability recommendation:** code —");
+    expect(body).toContain(DURABILITY_REASONS.code);
+  });
+
+  it("persona-append with routing_context for skill route appears correctly", async () => {
+    const personaProposal = {
+      type: "persona-append",
+      id: PERSONA_ULID,
+      created_at: ISO2,
+      rationale: "Multiple roles run the same pre-flight checklist manually.",
+      target_role: "generalist-dev",
+      lesson: "Run the pre-flight checklist before every story claim.",
+      kind: "pattern",
+      routing_context: {
+        recurrence: 3,
+        role_count: 2,
+      },
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO2,
+      proposals: [personaProposal],
+    });
+
+    expect(result.durabilityRecommendations[0]!.recommendation).toBe("skill");
+
+    const { body } = await readWrittenFile(result.absPath);
+    expect(body).toContain("**Durability recommendation:** skill —");
+  });
+
+  it("persona-append with routing_context recurrence=1 gets note recommendation", async () => {
+    const personaProposal = {
+      type: "persona-append",
+      id: PERSONA_ULID,
+      created_at: ISO2,
+      rationale: "One-off edge case seen once.",
+      target_role: "generalist-dev",
+      lesson: "Check edge case X when Y applies.",
+      kind: "discipline",
+      routing_context: {
+        recurrence: 1,
+      },
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO2,
+      proposals: [personaProposal],
+    });
+
+    expect(result.durabilityRecommendations[0]!.recommendation).toBe("note");
+
+    const { body } = await readWrittenFile(result.absPath);
+    expect(body).toContain("**Durability recommendation:** note —");
+  });
+
+  it("persona-append WITHOUT routing_context gets no durability_recommendation", async () => {
+    const personaProposal = {
+      type: "persona-append",
+      id: PERSONA_ULID,
+      created_at: ISO2,
+      rationale: "A lesson with no routing context.",
+      target_role: "generalist-dev",
+      lesson: "Some lesson.",
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO2,
+      proposals: [personaProposal],
+    });
+
+    // No routing context → no recommendation in return value or frontmatter.
+    expect(result.durabilityRecommendations).toHaveLength(0);
+
+    const { frontmatter, body } = await readWrittenFile(result.absPath);
+    const parsed = parseRetroProposalFile(yamlParse(frontmatter));
+    const storedProposal = parsed.proposals[0]!;
+    if (storedProposal.type === "persona-append") {
+      expect(storedProposal.durability_recommendation).toBeUndefined();
+    }
+
+    expect(body).not.toContain("Durability recommendation");
+  });
+
+  it("non-persona-append proposals produce no durability recommendations", async () => {
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO2,
+      proposals: [RULE_PROPOSAL, SKILL_CREATE_PROPOSAL, TEAM_CHANGE_PROPOSAL],
+    });
+
+    expect(result.durabilityRecommendations).toHaveLength(0);
   });
 });

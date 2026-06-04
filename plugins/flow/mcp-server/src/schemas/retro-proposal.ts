@@ -249,6 +249,51 @@ export const TeamChangeProposalSchema = ProposalBase.extend({
 }).strict();
 
 /**
+ * Durability routing context — the raw inputs the retro-analyst provides so
+ * `writeRetroProposal` can apply the deterministic routing heuristic
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD).
+ *
+ * All three fields are optional: when absent the heuristic falls back to
+ * 'note' (the safest default). When present, the writer uses them to route
+ * the lesson and stores the computed recommendation in `durability_recommendation`.
+ *
+ *  - `recurrence`  — how many times this lesson has appeared across done/
+ *    manifests (1 = first time, 2+ = repeated).
+ *  - `role_count`  — distinct roles in which the lesson was observed.
+ *  - `story_count` — distinct stories in which the lesson was observed.
+ */
+export const DurabilityRoutingContextSchema = z
+  .object({
+    recurrence: z.number().int().min(1),
+    role_count: z.number().int().min(1).optional(),
+    story_count: z.number().int().min(1).optional(),
+  })
+  .strict();
+
+export type DurabilityRoutingContext = z.infer<
+  typeof DurabilityRoutingContextSchema
+>;
+
+/**
+ * The computed durability recommendation — written into the frontmatter by
+ * `writeRetroProposal` so the on-disk artifact is self-describing and
+ * round-trips cleanly at apply time. Operators see the plain-language reason
+ * in the body; the structured `recommendation` field supports tooling.
+ *
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD)
+ */
+export const DurabilityRecommendationSchema = z
+  .object({
+    recommendation: z.enum(["note", "skill", "code"]),
+    reason: z.string().min(1),
+  })
+  .strict();
+
+export type DurabilityRecommendation = z.infer<
+  typeof DurabilityRecommendationSchema
+>;
+
+/**
  * `persona-append` — append a durable lesson to a hired role's Knowledge section.
  *
  * When applied via the `/accept-proposal` gate, the handler reads the role's
@@ -265,8 +310,17 @@ export const TeamChangeProposalSchema = ProposalBase.extend({
  *  - `failure_class`— required when kind is "pitfall" (mirrors LessonSchema contract).
  *  - `source_ref`   — optional story ref provenance.
  *
+ * Routing context fields (Story native:01KT6RH6XJFE2E09WMEHJ03JBD):
+ *  - `routing_context` — recurrence/role_count/story_count inputs; when present,
+ *    `writeRetroProposal` runs the durability heuristic and stores the result in
+ *    `durability_recommendation` in the on-disk frontmatter.
+ *  - `durability_recommendation` — the computed recommendation (note|skill|code)
+ *    with a plain-language reason. Set by `writeRetroProposal`; do not pre-fill
+ *    unless you are a deterministic tool (the writer owns this field).
+ *
  * (Story 6.9 — persona-knowledge write-back keystone)
  * (Story native:01KT6Q8PSDZQKM57VFRHFJ3RP4 — structured lesson storage)
+ * (Story native:01KT6RH6XJFE2E09WMEHJ03JBD — durability routing)
  */
 export const PersonaAppendProposalSchema = ProposalBase.extend({
   type: z.literal("persona-append"),
@@ -277,6 +331,9 @@ export const PersonaAppendProposalSchema = ProposalBase.extend({
   applies_when: z.string().min(1).optional(),
   failure_class: z.string().min(1).optional(),
   source_ref: z.string().min(1).optional(),
+  // Durability routing — Story native:01KT6RH6XJFE2E09WMEHJ03JBD.
+  routing_context: DurabilityRoutingContextSchema.optional(),
+  durability_recommendation: DurabilityRecommendationSchema.optional(),
 }).strict();
 
 // ---------------------------------------------------------------------------
