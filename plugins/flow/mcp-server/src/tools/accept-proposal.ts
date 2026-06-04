@@ -38,8 +38,11 @@
  * cannot name its own sha before it exists, the stamp is written, committed,
  * and then the on-disk file is re-stamped with the real sha (a managed write of
  * the canonical proposal file — NOT a second story commit). If the commit
- * throws, the stamp write is rolled back to the pre-stamp bytes so a re-run is
- * clean (a stamp with no commit would make a real change un-repeatable).
+ * throws, the stamp is KEPT (re-stamped with an "uncommitted" sentinel sha) and
+ * a `ProposalCommitFailedError` is raised: the handler change has already landed
+ * on disk and many handlers are non-idempotent, so a re-run after a rolled-back
+ * stamp would double-apply — keeping the stamp makes the re-run a safe
+ * already-applied no-op while the operator commits the change by hand.
  * Telemetry is emitted only AFTER a successful commit.
  *
  * **`idempotency_key`** is the proposal's stable `id` (a ULID). The AC4 re-run
@@ -54,7 +57,10 @@ import { logTelemetryEvent } from "../lib/logger.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { splitFrontmatter } from "../lib/markdown-frontmatter.js";
 import { locateProposal, type LocatedProposal } from "../lib/locate-proposal.js";
-import { ProposalKindNotApplicableYetError } from "../errors.js";
+import {
+  ProposalCommitFailedError,
+  ProposalKindNotApplicableYetError,
+} from "../errors.js";
 import {
   createProductionRegistry,
   KIND_TO_STORY,
@@ -182,18 +188,24 @@ export async function acceptProposal(
   // 5. Confirm mode — apply, stamp, commit (single commit), telemetry. (AC3/AC5)
   const applyResult = await handler.apply(proposal, ctx);
 
-  // Filter the handler's changed paths: exclude git-ignored paths so we never
-  // try to commit a file git doesn't track (e.g. files under .gitignore'd dirs).
-  // The proposal file itself is always tracked (it lives under .flow/retro-proposals
-  // which is NOT ignored in this repo), so it is not filtered.
-  // (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC2)
-  const trackedHandlerPaths = await filterGitIgnoredPathsImpl({
+  // Filter the handler's changed paths AND the proposal record file: exclude
+  // git-ignored paths so we never try to `git add` a file git won't track. In a
+  // normal user project the proposal file under .flow/retro-proposals is tracked
+  // and committed alongside the handler paths; in a self-host repo where .flow/
+  // is gitignored it is filtered out and only the tracked handler paths (if any)
+  // are committed. Filtering the record file here closes the MIXED case — a
+  // tracked handler path + an ignored record file — which previously appended the
+  // record file to the commit unfiltered and made `git add` throw.
+  // (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC2 + residual mixed-case fix)
+  const trackedPaths = await filterGitIgnoredPathsImpl({
     targetRepoRoot,
-    paths: applyResult.changedPaths,
+    paths: dedupePaths([...applyResult.changedPaths, located.relPath]),
   });
 
-  // Capture pre-stamp bytes so a failed commit can be rolled back, leaving the
-  // proposal un-stamped (atomicity: a stamp with no commit is un-repeatable).
+  // Capture the pre-stamp bytes as the pristine base for (re-)rendering the
+  // stamp: the "pending" write below, the no-commit sentinel, the post-commit
+  // sha back-fill, and the keep-stamp "uncommitted" commit-failure path all
+  // stamp from these same bytes (never a re-read of an already-stamped file).
   const preStampRaw = await fs.readFile(located.absPath, "utf8");
   const appliedAt = clock().toISOString();
 
@@ -216,11 +228,12 @@ export async function acceptProposal(
     mcpToolContext: { toolName: TOOL_NAME, role },
   });
 
-  // When all handler paths are git-ignored and there are no tracked changes,
-  // skip the commit entirely — the disk write has already happened and the
-  // proposal is stamped. Use "no-commit" as the applied sha sentinel.
+  // When every path (handler paths + the proposal record file) is git-ignored
+  // and there are no tracked changes, skip the commit entirely — the disk write
+  // has already happened and the proposal is stamped. Use "no-commit" as the
+  // applied sha sentinel.
   // (Story native:01KT6QF3V113W7GTG69B2RPVH0 — AC1/AC2)
-  if (trackedHandlerPaths.length === 0) {
+  if (trackedPaths.length === 0) {
     const noCommitSha = "no-commit";
     const finalContents = stampProposalApplied(
       preStampRaw,
@@ -261,14 +274,12 @@ export async function acceptProposal(
     };
   }
 
-  // Commit the tracked handler paths + the proposal file in a SINGLE commit
-  // through the git wrapper (no direct shell git, no force/no-verify).
+  // Commit the tracked paths (handler paths + the proposal file, minus any git
+  // ignores) in a SINGLE commit through the git wrapper (no direct shell git, no
+  // force/no-verify).
+  const commitPaths = trackedPaths;
   let commitSha: string;
   try {
-    const commitPaths = dedupePaths([
-      ...trackedHandlerPaths,
-      located.relPath,
-    ]);
     const result = await gitCommitImpl({
       targetRepoRoot,
       paths: commitPaths,
@@ -278,16 +289,32 @@ export async function acceptProposal(
     });
     commitSha = result.commitSha;
   } catch (err) {
-    // Commit failed — roll the stamp back so a re-run is clean (no half-applied
-    // stamp). The handler's working-tree changes are left for operator
-    // recovery; the proposal is NOT marked applied, and NO telemetry is emitted.
+    // Commit failed AFTER the handler change landed on disk and the proposal was
+    // stamped. Do NOT roll the stamp back: many handlers (e.g. persona-append)
+    // are non-idempotent, so re-running after a rolled-back stamp would
+    // DOUBLE-APPLY the on-disk change. Instead KEEP the stamp — re-stamped with
+    // an "uncommitted" sentinel sha for an honest record — so a re-run is a safe
+    // already-applied no-op, and surface the failure so the operator can commit
+    // the change by hand. NO telemetry on a failed commit.
+    // (Operator decision 2026-06-05: keep-stamp + commit-manually.)
+    const uncommittedContents = stampProposalApplied(
+      preStampRaw,
+      located,
+      appliedAt,
+      proposal.id,
+      "uncommitted",
+    );
     await writeManagedFile({
       absPath: located.absPath,
-      contents: preStampRaw,
+      contents: uncommittedContents,
       targetRepoRoot,
       mcpToolContext: { toolName: TOOL_NAME, role },
     });
-    throw err;
+    throw new ProposalCommitFailedError({
+      proposalId: proposal.id,
+      paths: commitPaths,
+      underlyingMessage: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Back-fill the real commit sha into the on-disk stamp so the persisted block

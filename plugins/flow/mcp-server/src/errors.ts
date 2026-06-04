@@ -1764,6 +1764,41 @@ export class ProposalKindNotApplicableYetError extends DomainError {
 }
 
 /**
+ * `acceptProposal` applied the handler's change to disk and stamped the proposal
+ * `applied`, but the single commit that should have carried both FAILED. The
+ * stamp is deliberately KEPT (re-stamped with an "uncommitted" sentinel sha),
+ * not rolled back: the handler change has already landed on disk, and many
+ * handlers (e.g. persona-append) are non-idempotent, so a re-run after a
+ * rolled-back stamp would DOUBLE-APPLY. Keeping the stamp makes a re-run a safe
+ * already-applied no-op; the operator must commit the listed paths by hand.
+ *
+ * (Story native:01KT6QF3V113W7GTG69B2RPVH0 residual — mixed tracked/ignored
+ *  commit; operator decision 2026-06-05: keep-stamp + commit-manually.)
+ */
+export class ProposalCommitFailedError extends DomainError {
+  readonly proposalId: string;
+  readonly paths: readonly string[];
+  readonly underlyingMessage: string;
+
+  constructor(opts: {
+    proposalId: string;
+    paths: readonly string[];
+    underlyingMessage: string;
+  }) {
+    super(
+      `accept-proposal applied and stamped proposal '${opts.proposalId}' on disk, ` +
+        `but the commit failed: ${opts.underlyingMessage}. The applied stamp was ` +
+        `KEPT so a re-run is a safe no-op (already-applied) — do NOT re-run to ` +
+        `"fix" it. Commit the change by hand: ` +
+        `${opts.paths.length > 0 ? opts.paths.join(", ") : "(no tracked paths)"}.`,
+    );
+    this.proposalId = opts.proposalId;
+    this.paths = [...opts.paths];
+    this.underlyingMessage = opts.underlyingMessage;
+  }
+}
+
+/**
  * `writeRetroProposal` refused to overwrite an existing proposal file —
  * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
  * A collision means the caller (the retro-analyst subagent) re-used a

@@ -35165,6 +35165,19 @@ var ProposalKindNotApplicableYetError = class extends DomainError {
     this.story = opts.story;
   }
 };
+var ProposalCommitFailedError = class extends DomainError {
+  proposalId;
+  paths;
+  underlyingMessage;
+  constructor(opts) {
+    super(
+      `accept-proposal applied and stamped proposal '${opts.proposalId}' on disk, but the commit failed: ${opts.underlyingMessage}. The applied stamp was KEPT so a re-run is a safe no-op (already-applied) \u2014 do NOT re-run to "fix" it. Commit the change by hand: ${opts.paths.length > 0 ? opts.paths.join(", ") : "(no tracked paths)"}.`
+    );
+    this.proposalId = opts.proposalId;
+    this.paths = [...opts.paths];
+    this.underlyingMessage = opts.underlyingMessage;
+  }
+};
 var RetroProposalAlreadyExistsError = class extends DomainError {
   absPath;
   isoTimestamp;
@@ -46585,9 +46598,9 @@ async function acceptProposal(opts) {
     return { status: "preview", proposalId, type: proposal.type, diff };
   }
   const applyResult = await handler.apply(proposal, ctx);
-  const trackedHandlerPaths = await filterGitIgnoredPathsImpl({
+  const trackedPaths = await filterGitIgnoredPathsImpl({
     targetRepoRoot,
-    paths: applyResult.changedPaths
+    paths: dedupePaths([...applyResult.changedPaths, located.relPath])
   });
   const preStampRaw = await fs21.readFile(located.absPath, "utf8");
   const appliedAt = clock().toISOString();
@@ -46604,7 +46617,7 @@ async function acceptProposal(opts) {
     targetRepoRoot,
     mcpToolContext: { toolName: TOOL_NAME6, role }
   });
-  if (trackedHandlerPaths.length === 0) {
+  if (trackedPaths.length === 0) {
     const noCommitSha = "no-commit";
     const finalContents2 = stampProposalApplied(
       preStampRaw,
@@ -46642,12 +46655,9 @@ async function acceptProposal(opts) {
       idempotencyKey: proposal.id
     };
   }
+  const commitPaths = trackedPaths;
   let commitSha;
   try {
-    const commitPaths = dedupePaths([
-      ...trackedHandlerPaths,
-      located.relPath
-    ]);
     const result = await gitCommitImpl({
       targetRepoRoot,
       paths: commitPaths,
@@ -46657,13 +46667,24 @@ async function acceptProposal(opts) {
     });
     commitSha = result.commitSha;
   } catch (err) {
+    const uncommittedContents = stampProposalApplied(
+      preStampRaw,
+      located,
+      appliedAt,
+      proposal.id,
+      "uncommitted"
+    );
     await writeManagedFile({
       absPath: located.absPath,
-      contents: preStampRaw,
+      contents: uncommittedContents,
       targetRepoRoot,
       mcpToolContext: { toolName: TOOL_NAME6, role }
     });
-    throw err;
+    throw new ProposalCommitFailedError({
+      proposalId: proposal.id,
+      paths: commitPaths,
+      underlyingMessage: err instanceof Error ? err.message : String(err)
+    });
   }
   const finalContents = stampProposalApplied(
     preStampRaw,
