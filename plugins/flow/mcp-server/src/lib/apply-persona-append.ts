@@ -159,16 +159,27 @@ function reconstructPersonaFile(
  *   <!-- lesson:json {"id":"...","kind":"...","applies_when":"...","detail":"...",...} -->
  *
  * Only fields with defined values are included in the JSON object.
+ *
+ * Usage-tracking fields (`use_count`, `last_used_at`) are initialised to their
+ * zero-state values (`use_count: 0`) when a new lesson is first appended. The
+ * `last_used_at` field is omitted until the lesson is first recalled. This
+ * ensures the briefing-budget ranker (Story native:01KT6QSW4W7SMAHAT4EAKCCC65)
+ * can treat newly-appended lessons uniformly without a separate migration step.
  */
 function serialiseStructuredLesson(lesson: StructuredLesson): string {
   // Build a minimal JSON object — omit undefined optional fields.
-  const obj: Record<string, string> = {
+  const obj: Record<string, string | number> = {
     id: lesson.id,
     kind: lesson.kind,
     applies_when: lesson.applies_when,
     detail: lesson.detail,
     learned_at: lesson.learned_at,
+    // Initialise usage-tracking fields so the ranker can sort deterministically.
+    use_count: lesson.use_count ?? 0,
   };
+  if (lesson.last_used_at !== undefined) {
+    obj["last_used_at"] = lesson.last_used_at;
+  }
   if (lesson.failure_class !== undefined) {
     obj["failure_class"] = lesson.failure_class;
   }
