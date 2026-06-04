@@ -411,7 +411,6 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
-export type PromoteLessonToSkillProposal = z.infer<typeof PromoteLessonToSkillProposalSchema>;
 
 /**
  * File-level wrapper schema (AC7).

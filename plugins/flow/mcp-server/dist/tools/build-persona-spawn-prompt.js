@@ -65,8 +65,16 @@
  * Architecture §MCP Tool Naming — camelCase verb-noun: `buildPersonaSpawnPrompt`.
  * Story 4.2 Task 4.1–4.5.
  */
+import * as path from "node:path";
+import { promises as fs } from "node:fs";
 import { readPersona } from "./read-persona.js";
 import { extractSkillRefs } from "../lib/apply-promote-lesson-to-skill.js";
+import { parsePersonaFile } from "../lib/persona-file.js";
+import { writeManagedFile } from "../lib/managed-fs.js";
+import { rankLessons, rebuildBodyWithTopLessons, archiveLessons, DEFAULT_BRIEFING_BUDGET, } from "../lib/lesson-archive.js";
+import { stringify as yamlStringify } from "yaml";
+/** Tool name threaded into managed-fs for persona + archive writes. */
+const TOOL_NAME = "buildPersonaSpawnPrompt";
 /**
  * Assemble the system prompt for a dev-subagent spawn.
  *
@@ -74,15 +82,112 @@ import { extractSkillRefs } from "../lib/apply-promote-lesson-to-skill.js";
  * exactly once per call, then concatenates the five sections plus the
  * locked-phrases sentinel block.
  *
+ * Story native:01KT6QSW4W7SMAHAT4EAKCCC65 — briefing budget cap:
+ * Before assembling the prompt, the Knowledge section is ranked by
+ * `use_count` descending then `last_used_at` descending. If the number of
+ * structured lessons exceeds `briefingBudget` (default 10), overflow lessons
+ * are demoted to the role's archived lesson store (`team/<role>/_archived/`)
+ * and removed from the live Knowledge body. This keeps the always-shown index
+ * focused regardless of how many lessons the role has accumulated.
+ *
+ * The persona file is rewritten in-place (via `writeManagedFile`) when lessons
+ * are demoted. The rewrite is performed BEFORE assembling the prompt so the
+ * next call to `readPersona` will see the pruned Knowledge body.
+ *
  * @throws {PersonaFileNotFoundError} When the persona file is absent.
  * @throws {PersonaFileMalformedError} When the persona file fails the parser.
  */
 export async function buildPersonaSpawnPrompt(opts) {
-    const { targetRepoRoot, role } = opts;
+    const { targetRepoRoot, role, briefingBudget = DEFAULT_BRIEFING_BUDGET, now = () => new Date(), } = opts;
     // One read per call — this is the assembly contract.
     const persona = await readPersona({ targetRepoRoot, role });
+    // --- Briefing budget cap ---
+    const knowledgeBody = persona.sections["Knowledge"];
+    const { topLessons, overflow } = rankLessons(knowledgeBody, briefingBudget);
+    if (overflow.length > 0) {
+        // 1. Archive overflow lessons to `team/<role>/_archived/<id>.json`.
+        await archiveLessons(targetRepoRoot, role, overflow, now);
+        // 2. Rebuild the Knowledge body in ranked order with only the top lessons.
+        //    This also sorts the remaining lessons by use_count/last_used_at so the
+        //    always-shown index satisfies the "ordered by use-count descending and
+        //    most-recent first" requirement from AC1.
+        const rankedBody = rebuildBodyWithTopLessons(knowledgeBody, topLessons);
+        // 3. Rewrite the persona file with the ranked+pruned Knowledge body.
+        const personaPath = path.join(targetRepoRoot, "team", role, "PERSONA.md");
+        const rawPersona = await fs.readFile(personaPath, "utf8");
+        const parsed = parsePersonaFile(rawPersona, personaPath);
+        const newContents = reconstructPersonaFileWithKnowledge(parsed, rankedBody);
+        await writeManagedFile({
+            absPath: personaPath,
+            contents: newContents,
+            targetRepoRoot,
+            mcpToolContext: { toolName: TOOL_NAME, role },
+        });
+        // Re-read the persona after the rewrite to get the pruned Knowledge section.
+        const updatedPersona = await readPersona({ targetRepoRoot, role });
+        const systemPrompt = assemblePrompt(updatedPersona);
+        return { systemPrompt };
+    }
     const systemPrompt = assemblePrompt(persona);
     return { systemPrompt };
+}
+/**
+ * Reconstruct the full persona file from parsed sections, replacing the
+ * Knowledge body with `newKnowledgeBody`. Mirrors `reconstructPersonaFile`
+ * in `apply-persona-append.ts` — kept local to avoid circular imports.
+ */
+function reconstructPersonaFileWithKnowledge(parsed, newKnowledgeBody) {
+    const frontmatter = {
+        role: parsed.role,
+        domain: parsed.domain,
+        model_tier: parsed.model_tier,
+        tools_allow: [...parsed.tools_allow],
+        gh_allow: [...parsed.gh_allow],
+        locked_phrases: { ...parsed.locked_phrases },
+        hired_at: parsed.hired_at,
+        catalogue_version: parsed.catalogue_version,
+    };
+    const yamlBlock = yamlStringify(frontmatter).replace(/\n$/, "");
+    const h1 = parsed.role
+        .split("-")
+        .map((part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1))
+        .join(" ");
+    const sections = [
+        `# ${h1}`,
+        ``,
+        `## Domain`,
+        ``,
+        parsed.sections.Domain,
+        ``,
+        `## Mandate`,
+        ``,
+        parsed.sections.Mandate,
+        ``,
+        `## Out of mandate`,
+        ``,
+        parsed.sections["Out of mandate"],
+        ``,
+        `## Prompt`,
+        ``,
+        parsed.sections.Prompt,
+        ``,
+        `## Knowledge`,
+        ``,
+    ];
+    if (newKnowledgeBody.length > 0) {
+        sections.push(newKnowledgeBody);
+        sections.push(``);
+    }
+    // Preserve the optional ## Skills section if it was present in the parsed file.
+    // (Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — without this, the briefing-budget
+    // rewrite would silently drop a role's promoted skills.)
+    if (parsed.skillsBody.length > 0) {
+        sections.push(`## Skills`);
+        sections.push(``);
+        sections.push(parsed.skillsBody);
+        sections.push(``);
+    }
+    return `---\n${yamlBlock}\n---\n\n${sections.join("\n")}`;
 }
 /** Sentinel constants for structured lesson blocks (mirrors get-team-snapshot.ts). */
 const LESSON_BLOCK_PREFIX = "<!-- lesson:json ";

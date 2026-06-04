@@ -79,6 +79,13 @@ export type Lesson = z.infer<typeof LessonSchema>;
  *  - `source_ref`  — Optional story ref the lesson came from (e.g. `native:01KT...`).
  *  - `source_pr`   — Optional PR URL for traceability.
  *  - `learned_at`  — ISO-8601 UTC timestamp when the lesson was appended.
+ *  - `use_count`   — Optional non-negative integer. Incremented by `recallLesson` each time
+ *                    an agent retrieves this lesson's full detail. Used by the briefing-budget
+ *                    ranker (Story native:01KT6QSW4W7SMAHAT4EAKCCC65) to keep frequently-used
+ *                    lessons in the always-shown index.
+ *  - `last_used_at`— Optional ISO-8601 UTC timestamp of the most recent `recallLesson` call.
+ *                    Secondary sort key in the briefing-budget ranker (most-recently-used first
+ *                    when use_count is equal).
  *
  * `.strict()` rejects unknown keys.
  */
@@ -96,6 +103,8 @@ export declare const StructuredLessonSchema: z.ZodObject<{
     source_ref: z.ZodOptional<z.ZodString>;
     source_pr: z.ZodOptional<z.ZodString>;
     learned_at: z.ZodString;
+    use_count: z.ZodOptional<z.ZodNumber>;
+    last_used_at: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type StructuredLesson = z.infer<typeof StructuredLessonSchema>;
 /**

@@ -542,7 +542,6 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     when_to_use: z.ZodString;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
-export type PromoteLessonToSkillProposal = z.infer<typeof PromoteLessonToSkillProposalSchema>;
 /**
  * File-level wrapper schema (AC7).
  *
