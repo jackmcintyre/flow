@@ -103,6 +103,7 @@ export type ProposalApplyRegistry = Map<
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *   - `persona-append`                                → Story 6.9
+ *   - `lesson-to-skill`                               → Story DR2
  *
  * Still fail closed (no handler) until their story registers them:
  *   - `team-change`                                   → Story 6.10
@@ -132,7 +133,7 @@ export function createProductionRegistry(): ProposalApplyRegistry {
 /**
  * Maps each proposal kind to the story that shipped (or will ship) its apply
  * handler. Used to build an actionable `ProposalKindNotApplicableYetError`
- * message. Closed over the eight retro-proposal kinds; a new kind would
+ * message. Closed over the nine retro-proposal kinds; a new kind would
  * require a schema-change story that also extends this map.
  */
 export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
@@ -147,4 +148,5 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   "skill-retire": "Story 6.7",
   "team-change": "Story 6.10",
   "persona-append": "Story 6.9",
+  "lesson-to-skill": "Story DR2",
 };

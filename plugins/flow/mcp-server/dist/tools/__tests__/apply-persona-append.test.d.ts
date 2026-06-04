@@ -14,7 +14,7 @@
  *
  * AC4 (unit): `persona-append` is present in `RETRO_PROPOSAL_TYPES` (the
  *   discriminated union), the production registry registers it, and the
- *   type-count assertion passes at 8.
+ *   type-count assertion passes at 9.
  *
  * Fixture approach: seed a minimal persona in a temp dir using `atomicWriteFile`
  * (the same pattern as build-persona-spawn-prompt.test.ts), then call

@@ -34,6 +34,7 @@ import { SkillAlreadyExistsError, SkillNotFoundError } from "../errors.js";
 import { writeManagedFile } from "./managed-fs.js";
 import { splitFrontmatter } from "./markdown-frontmatter.js";
 import { SkillFrontmatterSchema, } from "../schemas/skill-frontmatter.js";
+import { applySkillReferenceToPersona } from "./apply-persona-append.js";
 const ACCEPT_TOOL_NAME = "acceptProposal";
 // ---------------------------------------------------------------------------
 // Pure helpers — version bump, name derivation, frontmatter render/read
@@ -370,14 +371,72 @@ function makeSkillRetireHandler(deps) {
         },
     };
 }
+// ---------------------------------------------------------------------------
+// Handler: lesson-to-skill (promote a lesson into a reusable skill)
+// ---------------------------------------------------------------------------
+/**
+ * Derive a skill's name from its repo-relative path (the basename minus `.md`).
+ * Intentionally mirrors `skillNameFromPath` (same logic; module-private alias).
+ */
+function skillName(relPath) {
+    return path.basename(relPath, ".md");
+}
+function makeLessonToSkillHandler(deps) {
+    return {
+        type: "lesson-to-skill",
+        async previewDiff(proposal, ctx) {
+            if (proposal.type !== "lesson-to-skill")
+                throw wrongKind(proposal.type);
+            const abs = path.join(ctx.targetRepoRoot, proposal.proposed_path);
+            const rel = relPosix(ctx.targetRepoRoot, abs);
+            const personaRel = `team/${proposal.source_role}/PERSONA.md`;
+            return [
+                `Promote lesson to skill (two effects):`,
+                ``,
+                `+ skill: ${rel}`,
+                `    description: ${proposal.frontmatter_description}`,
+                `    version: 0.1.0`,
+                ``,
+                `+ persona ref appended: ${personaRel}`,
+                `    entry: - ${skillName(rel)} (${rel}): ${proposal.when_to_use}`,
+                ``,
+                `--- skill body (${proposal.body.split("\n").length} lines) ---`,
+                proposal.body,
+            ].join("\n");
+        },
+        async apply(proposal, ctx) {
+            if (proposal.type !== "lesson-to-skill")
+                throw wrongKind(proposal.type);
+            // Effect 1: create the skill file.
+            const rel = await writeNewSkill(ctx, {
+                proposedPath: proposal.proposed_path,
+                description: proposal.frontmatter_description,
+                body: proposal.body,
+                sourceLessonRefs: lessonRefsFor(proposal),
+                introducedAt: deps.now().toISOString(),
+            });
+            // Effect 2: append skill-reference to the source role's persona.
+            const personaRel = await applySkillReferenceToPersona({
+                targetRepoRoot: ctx.targetRepoRoot,
+                role: proposal.source_role,
+                skillName: skillName(rel),
+                skillPath: rel,
+                whenToUse: proposal.when_to_use,
+                toolName: ACCEPT_TOOL_NAME,
+                actingRole: ctx.role,
+            });
+            return { changedPaths: [rel, personaRel] };
+        },
+    };
+}
 function wrongKind(kind) {
     return new Error(`apply-skill-proposal: handler invoked for the wrong kind '${kind}'`);
 }
 // ---------------------------------------------------------------------------
-// Public factory — the four handlers
+// Public factory — the five handlers
 // ---------------------------------------------------------------------------
 /**
- * Build the four `skill-*` apply handlers. The clock seam is injectable so
+ * Build the five `skill-*` apply handlers. The clock seam is injectable so
  * tests can assert `introduced_at` / `retired_at` deterministically; production
  * passes nothing and the real `Date` clock is used.
  */
@@ -387,5 +446,6 @@ export function createSkillProposalHandlers(deps = DEFAULT_DEPS) {
         makeSkillReviseHandler(deps),
         makeSkillSupersedeHandler(deps),
         makeSkillRetireHandler(deps),
+        makeLessonToSkillHandler(deps),
     ];
 }

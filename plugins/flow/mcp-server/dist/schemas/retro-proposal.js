@@ -243,14 +243,39 @@ export const PersonaAppendProposalSchema = ProposalBase.extend({
     target_role: RolePathSchema,
     lesson: z.string().min(1),
 }).strict();
+/**
+ * `lesson-to-skill` — promote a lesson from a role's Knowledge section into a
+ * standalone reusable skill that any role can reference.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *   1. Creates a skill file at `proposed_path` with the lesson content (reusing
+ *      the `skill-create` write path).
+ *   2. Appends a one-line skill-reference entry to the originating role's
+ *      `## Skills` section in `team/<source_role>/PERSONA.md` (name + when to
+ *      use it). If the `## Skills` section does not yet exist, it is added after
+ *      `## Knowledge`.
+ *
+ * `source_role` — the role whose persona carries the original lesson.
+ * `when_to_use` — a single-line description of when agents should apply this
+ *   skill (appears in the spawned-agent briefing alongside the skill name).
+ *
+ * (Story DR2 — lesson-to-skill promote gate)
+ */
+export const LessonToSkillProposalSchema = ProposalBase.extend({
+    type: z.literal("lesson-to-skill"),
+    source_role: RolePathSchema,
+    proposed_path: PathInsideRepoSchema,
+    frontmatter_description: z.string().min(1),
+    body: z.string().min(1),
+    when_to_use: z.string().min(1),
+}).strict();
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 /**
- * The closed set of eight proposal-type literals. Exported as a tuple so
+ * The closed set of nine proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a ninth variant requires a
- * coordinated schema-change story.
+ * grown. Adding a tenth variant requires a coordinated schema-change story.
  */
 export const RETRO_PROPOSAL_TYPES = [
     "rule",
@@ -261,10 +286,11 @@ export const RETRO_PROPOSAL_TYPES = [
     "skill-retire",
     "team-change",
     "persona-append",
+    "lesson-to-skill",
 ];
 /**
- * The full retro-proposal discriminated union. AC2: exactly eight
- * variants, closed enum, no `z.string()` fallback.
+ * The full retro-proposal discriminated union. Nine variants, closed enum,
+ * no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
     RuleProposalSchema,
@@ -275,6 +301,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
     SkillRetireProposalSchema,
     TeamChangeProposalSchema,
     PersonaAppendProposalSchema,
+    LessonToSkillProposalSchema,
 ]);
 /**
  * File-level wrapper schema (AC7).

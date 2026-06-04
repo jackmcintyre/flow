@@ -169,6 +169,7 @@ export declare const RetroProposalAppliedEventSchema: z.ZodObject<{
     data: z.ZodObject<{
         id: z.ZodString;
         proposal_type: z.ZodEnum<{
+            "lesson-to-skill": "lesson-to-skill";
             "persona-append": "persona-append";
             rule: "rule";
             "rule-retirement": "rule-retirement";
@@ -523,6 +524,7 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
     data: z.ZodObject<{
         id: z.ZodString;
         proposal_type: z.ZodEnum<{
+            "lesson-to-skill": "lesson-to-skill";
             "persona-append": "persona-append";
             rule: "rule";
             "rule-retirement": "rule-retirement";

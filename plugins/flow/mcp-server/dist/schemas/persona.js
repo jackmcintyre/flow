@@ -50,5 +50,12 @@ export const REQUIRED_PERSONA_SECTIONS = [
     "Prompt",
     "Knowledge",
 ];
+/**
+ * Optional `##` section names that may appear in a persona file AFTER the
+ * required sections. Currently only `Skills` — holds one-line skill-reference
+ * entries appended by the `lesson-to-skill` promote handler (DR2). The section
+ * is omitted from persona files that have no promoted skills.
+ */
+export const OPTIONAL_PERSONA_SECTIONS = ["Skills"];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _supersetCheck = true;

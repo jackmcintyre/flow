@@ -69,14 +69,20 @@ async function readPersonaRaw(targetRepoRoot, relPath) {
 }
 /**
  * Reconstruct the full persona file from parsed sections, replacing the
- * Knowledge body with `newKnowledgeBody`. The frontmatter key order is
- * preserved by feeding the same `PersonaFrontmatter` object insertion order
- * that `renderPersonaFile` uses.
+ * Knowledge body with `newKnowledgeBody` and optionally providing a new
+ * Skills section body. The frontmatter key order is preserved by feeding
+ * the same `PersonaFrontmatter` object insertion order that `renderPersonaFile`
+ * uses.
  *
  * This deliberately reconstructs the canonical file from parsed sections —
  * never regex-substituting the raw string — to avoid byte-mangling.
+ *
+ * If `newSkillsBody` is provided, the `## Skills` section is written after
+ * `## Knowledge`. If `newSkillsBody` is undefined, any existing `## Skills`
+ * body from the parsed file is preserved; if neither exists, the section is
+ * omitted.
  */
-function reconstructPersonaFile(parsed, newKnowledgeBody) {
+function reconstructPersonaFile(parsed, newKnowledgeBody, newSkillsBody) {
     // Mirror renderPersonaFile's canonical key order.
     const frontmatter = {
         role: parsed.role,
@@ -120,6 +126,16 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
         sections.push(newKnowledgeBody);
         sections.push(``);
     }
+    // Preserve or write the ## Skills section if we have content for it.
+    const skillsBody = newSkillsBody !== undefined
+        ? newSkillsBody
+        : (parsed.optionalSections["Skills"] ?? "");
+    if (skillsBody.length > 0) {
+        sections.push(`## Skills`);
+        sections.push(``);
+        sections.push(skillsBody);
+        sections.push(``);
+    }
     return `---\n${yamlBlock}\n---\n\n${sections.join("\n")}`;
 }
 /**
@@ -133,6 +149,56 @@ function appendKnowledgeBullet(existingBody, lesson) {
         return bullet;
     }
     return `${existingBody}\n${bullet}`;
+}
+/**
+ * Append a skill-reference line to the Skills section body.
+ *
+ * Each skill reference is formatted as:
+ *   `- <skillName> (<skillPath>): <whenToUse>`
+ *
+ * If the body is empty, the result is the single reference line; if non-empty,
+ * the line is appended after a newline.
+ */
+export function appendSkillReference(existingBody, skillName, skillPath, whenToUse) {
+    const line = `- ${skillName} (${skillPath}): ${whenToUse}`;
+    if (existingBody.trim() === "") {
+        return line;
+    }
+    return `${existingBody}\n${line}`;
+}
+/**
+ * Apply a skill-reference addition to a persona file in the target repo.
+ *
+ * Reads the persona file at `team/<role>/PERSONA.md`, appends a skill-reference
+ * entry to the `## Skills` section (creating the section after `## Knowledge`
+ * if it does not yet exist), and writes back via `writeManagedFile`.
+ *
+ * Returns the repo-relative persona path (for the caller's `changedPaths`).
+ *
+ * @throws {PersonaFileNotFoundError} When the persona file does not exist.
+ */
+export async function applySkillReferenceToPersona(opts) {
+    const { targetRepoRoot, role, skillName, skillPath, whenToUse, toolName, actingRole } = opts;
+    const relPath = personaRelPath(role);
+    const absPath = path.join(targetRepoRoot, relPath);
+    const raw = await readPersonaRaw(targetRepoRoot, relPath);
+    if (raw === null) {
+        throw new PersonaFileNotFoundError({
+            role,
+            personaPath: relPath,
+        });
+    }
+    const parsed = parsePersonaFile(raw, relPath);
+    const existingSkillsBody = parsed.optionalSections["Skills"] ?? "";
+    const newSkillsBody = appendSkillReference(existingSkillsBody, skillName, skillPath, whenToUse);
+    const newContents = reconstructPersonaFile(parsed, parsed.sections.Knowledge, newSkillsBody);
+    await writeManagedFile({
+        absPath,
+        contents: newContents,
+        targetRepoRoot,
+        mcpToolContext: { toolName, role: actingRole },
+    });
+    return relPath;
 }
 /**
  * Construct the `persona-append`-kind apply handler. The production registry

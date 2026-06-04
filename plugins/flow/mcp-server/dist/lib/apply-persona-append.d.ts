@@ -35,6 +35,36 @@
  */
 import type { ProposalApplyHandler } from "./proposal-apply-registry.js";
 /**
+ * Append a skill-reference line to the Skills section body.
+ *
+ * Each skill reference is formatted as:
+ *   `- <skillName> (<skillPath>): <whenToUse>`
+ *
+ * If the body is empty, the result is the single reference line; if non-empty,
+ * the line is appended after a newline.
+ */
+export declare function appendSkillReference(existingBody: string, skillName: string, skillPath: string, whenToUse: string): string;
+/**
+ * Apply a skill-reference addition to a persona file in the target repo.
+ *
+ * Reads the persona file at `team/<role>/PERSONA.md`, appends a skill-reference
+ * entry to the `## Skills` section (creating the section after `## Knowledge`
+ * if it does not yet exist), and writes back via `writeManagedFile`.
+ *
+ * Returns the repo-relative persona path (for the caller's `changedPaths`).
+ *
+ * @throws {PersonaFileNotFoundError} When the persona file does not exist.
+ */
+export declare function applySkillReferenceToPersona(opts: {
+    targetRepoRoot: string;
+    role: string;
+    skillName: string;
+    skillPath: string;
+    whenToUse: string;
+    toolName: string;
+    actingRole: string;
+}): Promise<string>;
+/**
  * Construct the `persona-append`-kind apply handler. The production registry
  * calls this with no args; seams are injectable for tests.
  */

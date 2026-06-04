@@ -26558,7 +26558,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "skill-supersede",
       "skill-retire",
       "team-change",
-      "persona-append"
+      "persona-append",
+      "lesson-to-skill"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -35919,6 +35920,7 @@ var REQUIRED_PERSONA_SECTIONS = [
   "Prompt",
   "Knowledge"
 ];
+var OPTIONAL_PERSONA_SECTIONS = ["Skills"];
 
 // src/lib/markdown-frontmatter.ts
 var import_yaml9 = __toESM(require_dist(), 1);
@@ -36056,9 +36058,11 @@ function parsePersonaFile(raw, sourcePath) {
     });
   }
   const sections = extractSections2(body);
+  const optionalSections = extractOptionalSections(body);
   return {
     ...result.data,
     sections,
+    optionalSections,
     sourcePath
   };
 }
@@ -36145,6 +36149,35 @@ function extractSections2(body) {
     filtered[required2] = out[required2] ?? "";
   }
   return filtered;
+}
+function extractOptionalSections(body) {
+  const lines = body.split("\n");
+  const out = {};
+  let currentHeading = null;
+  let currentBody = [];
+  const flush = () => {
+    if (currentHeading !== null) {
+      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+    }
+  };
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      flush();
+      currentHeading = match[1].trim();
+      currentBody = [];
+    } else if (currentHeading !== null) {
+      currentBody.push(line);
+    }
+  }
+  flush();
+  const result = {};
+  for (const optional2 of OPTIONAL_PERSONA_SECTIONS) {
+    if (out[optional2] !== void 0) {
+      result[optional2] = out[optional2];
+    }
+  }
+  return result;
 }
 function formatZodIssues4(issues) {
   const first = issues[0];
@@ -36709,10 +36742,17 @@ function assemblePrompt(persona) {
     `## Knowledge`,
     ``,
     persona.sections["Knowledge"],
-    ``,
-    `## Locked phrases (do not paraphrase)`,
-    ...lockedPhraseLines
+    ``
   ];
+  const skillsBody = persona.optionalSections["Skills"] ?? "";
+  if (skillsBody.length > 0) {
+    parts.push(`## Skills`);
+    parts.push(``);
+    parts.push(skillsBody);
+    parts.push(``);
+  }
+  parts.push(`## Locked phrases (do not paraphrase)`);
+  parts.push(...lockedPhraseLines);
   return parts.join("\n");
 }
 function toDisplayName2(role) {

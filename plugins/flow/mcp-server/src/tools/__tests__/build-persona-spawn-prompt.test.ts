@@ -187,6 +187,33 @@ describe("buildPersonaSpawnPrompt", () => {
       buildPersonaSpawnPrompt({ targetRepoRoot: tmpRoot, role: "generalist-dev" }),
     ).rejects.toThrow(PersonaFileNotFoundError);
   });
+
+  it("(DR2 AC2/AC3) persona file with ## Skills section: briefing shows one-line ref, not full body", async () => {
+    const personaWithSkills = FIXTURE_PERSONA_MD +
+      "\n## Skills\n\n- handoff-discipline (.flow/skills/handoff-discipline.md): Before handing off.\n";
+    const dir = await makePersonaDir(tmpRoot, "generalist-dev");
+    await writePersonaFile(dir, personaWithSkills);
+
+    const { systemPrompt } = await buildPersonaSpawnPrompt({
+      targetRepoRoot: tmpRoot,
+      role: "generalist-dev",
+    });
+
+    // ## Skills heading appears.
+    expect(systemPrompt).toContain("## Skills");
+
+    // One-line reference is present.
+    expect(systemPrompt).toContain(
+      "- handoff-discipline (.flow/skills/handoff-discipline.md): Before handing off.",
+    );
+
+    // Full skill body is NOT inlined; the reference is a path pointer.
+    // (The skill file body itself lives at the path, not in the briefing.)
+    const skillsIdx = systemPrompt.indexOf("## Skills");
+    const lockedIdx = systemPrompt.indexOf("## Locked phrases");
+    expect(skillsIdx).toBeGreaterThan(-1);
+    expect(lockedIdx).toBeGreaterThan(skillsIdx);
+  });
 });
 
 describe("assemblePrompt (pure unit)", () => {
@@ -277,5 +304,71 @@ describe("assemblePrompt (pure unit)", () => {
     );
     // Only yield (<role>) and verdict (<SENTINEL>) should have substitution lines.
     expect(substituteLines.length).toBe(2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Story DR2 AC2/AC3 — ## Skills section rendering
+  // ---------------------------------------------------------------------------
+
+  it("(DR2 AC2/AC3) persona with ## Skills section renders one-line skill references (not full body)", () => {
+    // Persona with a ## Skills section containing a promoted-skill reference.
+    const personaWithSkills = FIXTURE_PERSONA_MD +
+      "\n## Skills\n\n- handoff-discipline (.flow/skills/handoff-discipline.md): Before handing off a story to the reviewer.\n";
+    const mockPersona = parsePersonaFile(personaWithSkills, "/fake/PERSONA.md");
+    const prompt = assemblePrompt(mockPersona);
+
+    // ## Skills heading appears in the output.
+    expect(prompt).toContain("## Skills");
+
+    // One-line skill reference is present.
+    expect(prompt).toContain(
+      "- handoff-discipline (.flow/skills/handoff-discipline.md): Before handing off a story to the reviewer.",
+    );
+
+    // The full skill body content is NOT inlined (only the reference line).
+    // (Verifying the reference is a path pointer, not the skill's markdown body.)
+    const skillsIdx = prompt.indexOf("## Skills");
+    const lockedIdx = prompt.indexOf("## Locked phrases");
+    expect(skillsIdx).toBeGreaterThan(-1);
+    expect(lockedIdx).toBeGreaterThan(skillsIdx);
+  });
+
+  it("(DR2 AC2) ## Skills section appears after ## Knowledge and before ## Locked phrases", () => {
+    const personaWithSkills = FIXTURE_PERSONA_MD +
+      "\n## Skills\n\n- my-skill (.flow/skills/my-skill.md): Use when needed.\n";
+    const mockPersona = parsePersonaFile(personaWithSkills, "/fake/PERSONA.md");
+    const prompt = assemblePrompt(mockPersona);
+
+    const knowledgeIdx = prompt.indexOf("## Knowledge");
+    const skillsIdx = prompt.indexOf("## Skills");
+    const lockedIdx = prompt.indexOf("## Locked phrases");
+
+    expect(knowledgeIdx).toBeGreaterThan(-1);
+    expect(skillsIdx).toBeGreaterThan(knowledgeIdx);
+    expect(lockedIdx).toBeGreaterThan(skillsIdx);
+  });
+
+  it("(DR2 AC3) persona without ## Skills section does NOT emit a ## Skills heading", () => {
+    // The base fixture persona has no ## Skills section.
+    const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+    const prompt = assemblePrompt(mockPersona);
+
+    expect(prompt).not.toContain("## Skills");
+  });
+
+  it("(DR2 AC2) a second role referencing the same skill also shows the one-line entry", () => {
+    // Simulate a second role's persona that also references the same skill.
+    const secondRolePersona = FIXTURE_PERSONA_MD
+      .replace("role: generalist-dev", "role: generalist-reviewer")
+      .replace("# Generalist Dev", "# Generalist Reviewer") +
+      "\n## Skills\n\n- handoff-discipline (.flow/skills/handoff-discipline.md): Verify the dev used it.\n";
+    const mockPersona = parsePersonaFile(secondRolePersona, "/fake/PERSONA.md");
+    const prompt = assemblePrompt(mockPersona);
+
+    // The one-line reference for the same skill appears for the second role.
+    expect(prompt).toContain("## Skills");
+    expect(prompt).toContain(
+      "- handoff-discipline (.flow/skills/handoff-discipline.md): Verify the dev used it.",
+    );
   });
 });

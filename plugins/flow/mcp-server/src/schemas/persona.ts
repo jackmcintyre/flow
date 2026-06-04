@@ -68,14 +68,28 @@ export const REQUIRED_PERSONA_SECTIONS = [
 export type RequiredPersonaSection = (typeof REQUIRED_PERSONA_SECTIONS)[number];
 
 /**
+ * Optional `##` section names that may appear in a persona file AFTER the
+ * required sections. Currently only `Skills` — holds one-line skill-reference
+ * entries appended by the `lesson-to-skill` promote handler (DR2). The section
+ * is omitted from persona files that have no promoted skills.
+ */
+export const OPTIONAL_PERSONA_SECTIONS = ["Skills"] as const;
+
+export type OptionalPersonaSection = (typeof OPTIONAL_PERSONA_SECTIONS)[number];
+
+/**
  * Parsed persona file. Mirrors `CatalogueRole`'s shape exactly so
  * consumers can interchange where the four-section catalogue prefix is
  * what matters; the `Knowledge` body is the only extra field. The
  * `sourcePath` is stamped on by the parser; it is NOT part of the
  * on-disk contract.
+ *
+ * `optionalSections` carries any recognised optional sections (`Skills`)
+ * that are present in the file. Absent sections are omitted from the map.
  */
 export type PersonaFile = PersonaFrontmatter & {
   sections: Record<RequiredPersonaSection, string>;
+  optionalSections: Partial<Record<OptionalPersonaSection, string>>;
   sourcePath: string;
 };
 

@@ -475,9 +475,9 @@ describe("acceptProposal production gate — skill-revise end-to-end (AC5)", () 
     });
 });
 // ---------------------------------------------------------------------------
-// AC6 — registration: all four kinds resolve to a real handler
+// AC6 — registration: all five kinds resolve to a real handler
 // ---------------------------------------------------------------------------
-describe("createProductionRegistry registers the four skill-* handlers (AC6)", () => {
+describe("createProductionRegistry registers the five skill-* handlers (AC6)", () => {
     it("each skill-* kind resolves to a handler (none fails closed)", () => {
         const registry = createProductionRegistry();
         for (const kind of [
@@ -485,10 +485,177 @@ describe("createProductionRegistry registers the four skill-* handlers (AC6)", (
             "skill-revise",
             "skill-supersede",
             "skill-retire",
+            "lesson-to-skill",
         ]) {
             const handler = registry.get(kind);
             expect(handler, `${kind} must resolve to a handler`).toBeDefined();
             expect(handler.type).toBe(kind);
         }
+    });
+});
+// ---------------------------------------------------------------------------
+// lesson-to-skill — AC1 (integration): creates skill + appends persona ref
+// ---------------------------------------------------------------------------
+const ULID_PROMOTE = "01KSYQGHBNE7AYBJW1BGQK39SP";
+const FIXTURE_PERSONA_MD = `---
+role: generalist-dev
+domain: "feature implementation in a story scope"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+  - Task
+gh_allow:
+  - pr-create
+  - pr-view
+  - pr-comment
+locked_phrases:
+  handoff: "Handoff to reviewer — story <story-id> ready for review."
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "2026-01-01T00:00:00.000Z"
+catalogue_version: "0.1.0"
+---
+
+# Generalist Dev
+
+## Domain
+
+Implements one story at a time end-to-end: claim, code, test, open PR, hand off to reviewer.
+
+## Mandate
+
+- Claim a story from the ready queue, work it in an isolated worktree.
+
+## Out of mandate
+
+- Reviewing the PR — yield to generalist-reviewer.
+
+## Prompt
+
+You are the generalist dev.
+
+## Knowledge
+
+- Always emit the handoff phrase on its own line.
+`;
+const PROMOTE_SKILL_REL = ".flow/skills/handoff-discipline.md";
+const PROMOTE_WHEN_TO_USE = "Before handing off a story to the reviewer.";
+function promoteLessonProposal() {
+    return {
+        type: "lesson-to-skill",
+        id: ULID_PROMOTE,
+        created_at: ISO,
+        rationale: "Codify the handoff discipline as a reusable skill.",
+        source_role: "generalist-dev",
+        proposed_path: PROMOTE_SKILL_REL,
+        frontmatter_description: "Handoff discipline for dev roles",
+        body: "# Handoff Discipline\n\nAlways emit the handoff phrase on its own line.",
+        when_to_use: PROMOTE_WHEN_TO_USE,
+    };
+}
+async function seedPersona(root, role, content) {
+    const dir = path.join(root, "team", role);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "PERSONA.md"), content, "utf8");
+}
+async function readPersonaRaw(root, role) {
+    return fs.readFile(path.join(root, "team", role, "PERSONA.md"), "utf8");
+}
+describe("lesson-to-skill handler (AC1)", () => {
+    it("creates the skill file and appends a one-line skill-reference to the persona", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = handlersByType(() => FIXED_NOW).get("lesson-to-skill");
+        const result = await handler.apply(promoteLessonProposal(), ctxOf(tmpRoot));
+        // changedPaths includes the skill file and the persona file.
+        expect(result.changedPaths).toContain(PROMOTE_SKILL_REL);
+        expect(result.changedPaths).toContain("team/generalist-dev/PERSONA.md");
+        expect(result.changedPaths).toHaveLength(2);
+        // Skill file exists and has correct frontmatter.
+        expect(await exists(tmpRoot, PROMOTE_SKILL_REL)).toBe(true);
+        const skill = await readSkill(tmpRoot, PROMOTE_SKILL_REL);
+        expect(skill.frontmatter.name).toBe("handoff-discipline");
+        expect(skill.frontmatter.description).toBe("Handoff discipline for dev roles");
+        expect(skill.frontmatter.version).toBe("0.1.0");
+        expect(skill.frontmatter.introduced_at).toBe(FIXED_NOW_ISO);
+        expect(skill.body).toBe("# Handoff Discipline\n\nAlways emit the handoff phrase on its own line.");
+        // Persona now has a ## Skills section with a one-line reference.
+        const personaContents = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaContents).toContain("## Skills");
+        expect(personaContents).toContain(`- handoff-discipline (${PROMOTE_SKILL_REL}): ${PROMOTE_WHEN_TO_USE}`);
+        // The full skill body is NOT present in the persona body.
+        expect(personaContents).not.toContain("# Handoff Discipline\n\nAlways emit the handoff phrase on its own line.");
+    });
+    it("preview renders a diff without writing files", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        const handler = handlersByType(() => FIXED_NOW).get("lesson-to-skill");
+        const diff = await handler.previewDiff(promoteLessonProposal(), ctxOf(tmpRoot));
+        expect(diff).toContain("Promote lesson to skill");
+        expect(diff).toContain(PROMOTE_SKILL_REL);
+        expect(diff).toContain("team/generalist-dev/PERSONA.md");
+        // Nothing written.
+        expect(await exists(tmpRoot, PROMOTE_SKILL_REL)).toBe(false);
+    });
+    it("raises SkillAlreadyExistsError when the skill path is already occupied", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        await seedSkill(tmpRoot, { relPath: PROMOTE_SKILL_REL });
+        const handler = handlersByType(() => FIXED_NOW).get("lesson-to-skill");
+        await expect(handler.apply(promoteLessonProposal(), ctxOf(tmpRoot))).rejects.toBeInstanceOf(SkillAlreadyExistsError);
+        // Persona file should be unchanged (skill collision prevents persona write).
+        const personaContents = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaContents).not.toContain("## Skills");
+    });
+    it("appends a second skill-reference when the ## Skills section already exists", async () => {
+        // Seed a persona that already has a ## Skills section.
+        const personaWithSkills = FIXTURE_PERSONA_MD.replace("## Knowledge\n\n- Always emit the handoff phrase on its own line.\n", "## Knowledge\n\n- Always emit the handoff phrase on its own line.\n\n## Skills\n\n- existing-skill (.flow/skills/existing-skill.md): Use it always.\n");
+        await seedPersona(tmpRoot, "generalist-dev", personaWithSkills);
+        const handler = handlersByType(() => FIXED_NOW).get("lesson-to-skill");
+        await handler.apply(promoteLessonProposal(), ctxOf(tmpRoot));
+        const personaContents = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaContents).toContain("- existing-skill (.flow/skills/existing-skill.md): Use it always.");
+        expect(personaContents).toContain(`- handoff-discipline (${PROMOTE_SKILL_REL}): ${PROMOTE_WHEN_TO_USE}`);
+    });
+});
+describe("lesson-to-skill end-to-end via acceptProposal gate (AC1 — production registry)", () => {
+    it("applies + commits skill + persona + proposal; re-accept no-ops", async () => {
+        await seedPersona(tmpRoot, "generalist-dev", FIXTURE_PERSONA_MD);
+        await writeRetroProposal({
+            targetRepoRoot: tmpRoot,
+            isoTimestamp: ISO,
+            proposals: [promoteLessonProposal()],
+        });
+        const git = makeFakeGitCommit("cc00dd11ee22ff33aa44bb5566778899ccddee00");
+        // Confirm.
+        const applied = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_PROMOTE,
+            confirm: true,
+            gitCommitImpl: git.impl,
+            now: () => FIXED_NOW,
+        });
+        expect(applied.status).toBe("applied");
+        // Skill written.
+        expect(await exists(tmpRoot, PROMOTE_SKILL_REL)).toBe(true);
+        // Persona updated with skill reference.
+        const personaContents = await readPersonaRaw(tmpRoot, "generalist-dev");
+        expect(personaContents).toContain("## Skills");
+        expect(personaContents).toContain(`- handoff-discipline (${PROMOTE_SKILL_REL}): ${PROMOTE_WHEN_TO_USE}`);
+        // Exactly one commit carrying skill + persona + proposal.
+        expect(git.calls).toHaveLength(1);
+        const committed = git.calls[0];
+        expect(committed.paths).toContain(PROMOTE_SKILL_REL);
+        expect(committed.paths).toContain("team/generalist-dev/PERSONA.md");
+        expect(committed.paths.some((p) => p.endsWith(`${ISO}.md`))).toBe(true);
+        // Idempotent re-accept — no second write, commit, or telemetry.
+        const reAccept = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_PROMOTE,
+            confirm: true,
+            gitCommitImpl: git.impl,
+            now: () => new Date("2099-01-01T00:00:00.000Z"),
+        });
+        expect(reAccept.status).toBe("already-applied");
+        expect(git.calls).toHaveLength(1);
     });
 });

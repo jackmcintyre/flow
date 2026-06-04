@@ -42,7 +42,7 @@ export interface SkillHandlerDeps {
     now: () => Date;
 }
 /**
- * Build the four `skill-*` apply handlers. The clock seam is injectable so
+ * Build the five `skill-*` apply handlers. The clock seam is injectable so
  * tests can assert `introduced_at` / `retired_at` deterministically; production
  * passes nothing and the real `Date` clock is used.
  */

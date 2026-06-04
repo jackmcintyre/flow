@@ -130,9 +130,21 @@ export function assemblePrompt(persona) {
         ``,
         persona.sections["Knowledge"],
         ``,
-        `## Locked phrases (do not paraphrase)`,
-        ...lockedPhraseLines,
     ];
+    // Append the ## Skills section when the persona has referenced skills.
+    // Each entry in the Skills body is a one-line reference of the form:
+    //   `- <skillName> (<skillPath>): <whenToUse>`
+    // The full skill body is NOT inlined — it is available on-demand by reading
+    // the skill file at the path noted in the reference line (Story DR2 AC2/AC3).
+    const skillsBody = persona.optionalSections["Skills"] ?? "";
+    if (skillsBody.length > 0) {
+        parts.push(`## Skills`);
+        parts.push(``);
+        parts.push(skillsBody);
+        parts.push(``);
+    }
+    parts.push(`## Locked phrases (do not paraphrase)`);
+    parts.push(...lockedPhraseLines);
     return parts.join("\n");
 }
 function toDisplayName(role) {

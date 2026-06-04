@@ -78,8 +78,8 @@ function fileWith(proposal) {
 // AC2 — Closed enum surface invariant
 // ---------------------------------------------------------------------------
 describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
-    it("exposes exactly eight proposal types", () => {
-        expect(RETRO_PROPOSAL_TYPES).toHaveLength(8);
+    it("exposes exactly nine proposal types", () => {
+        expect(RETRO_PROPOSAL_TYPES).toHaveLength(9);
         expect(new Set(RETRO_PROPOSAL_TYPES)).toEqual(new Set([
             "rule",
             "rule-retirement",
@@ -89,6 +89,7 @@ describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
             "skill-retire",
             "team-change",
             "persona-append",
+            "lesson-to-skill",
         ]));
     });
     it("rejects an unknown discriminator literal (no z.string() fallback)", () => {

@@ -35475,6 +35475,7 @@ var REQUIRED_PERSONA_SECTIONS = [
   "Prompt",
   "Knowledge"
 ];
+var OPTIONAL_PERSONA_SECTIONS = ["Skills"];
 
 // src/lib/markdown-frontmatter.ts
 var import_yaml = __toESM(require_dist2(), 1);
@@ -35612,9 +35613,11 @@ function parsePersonaFile(raw, sourcePath) {
     });
   }
   const sections = extractSections2(body);
+  const optionalSections = extractOptionalSections(body);
   return {
     ...result.data,
     sections,
+    optionalSections,
     sourcePath
   };
 }
@@ -35702,6 +35705,35 @@ function extractSections2(body) {
   }
   return filtered;
 }
+function extractOptionalSections(body) {
+  const lines = body.split("\n");
+  const out = {};
+  let currentHeading = null;
+  let currentBody = [];
+  const flush = () => {
+    if (currentHeading !== null) {
+      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+    }
+  };
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      flush();
+      currentHeading = match[1].trim();
+      currentBody = [];
+    } else if (currentHeading !== null) {
+      currentBody.push(line);
+    }
+  }
+  flush();
+  const result = {};
+  for (const optional2 of OPTIONAL_PERSONA_SECTIONS) {
+    if (out[optional2] !== void 0) {
+      result[optional2] = out[optional2];
+    }
+  }
+  return result;
+}
 function formatZodIssues2(issues) {
   const first = issues[0];
   if (!first) return "(no issue details)";
@@ -35777,10 +35809,17 @@ function assemblePrompt(persona) {
     `## Knowledge`,
     ``,
     persona.sections["Knowledge"],
-    ``,
-    `## Locked phrases (do not paraphrase)`,
-    ...lockedPhraseLines
+    ``
   ];
+  const skillsBody = persona.optionalSections["Skills"] ?? "";
+  if (skillsBody.length > 0) {
+    parts.push(`## Skills`);
+    parts.push(``);
+    parts.push(skillsBody);
+    parts.push(``);
+  }
+  parts.push(`## Locked phrases (do not paraphrase)`);
+  parts.push(...lockedPhraseLines);
   return parts.join("\n");
 }
 function toDisplayName2(role) {
@@ -37198,6 +37237,14 @@ var PersonaAppendProposalSchema = ProposalBase.extend({
   target_role: RolePathSchema,
   lesson: external_exports.string().min(1)
 }).strict();
+var LessonToSkillProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("lesson-to-skill"),
+  source_role: RolePathSchema,
+  proposed_path: PathInsideRepoSchema,
+  frontmatter_description: external_exports.string().min(1),
+  body: external_exports.string().min(1),
+  when_to_use: external_exports.string().min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -37206,7 +37253,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   SkillSupersedeProposalSchema,
   SkillRetireProposalSchema,
   TeamChangeProposalSchema,
-  PersonaAppendProposalSchema
+  PersonaAppendProposalSchema,
+  LessonToSkillProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,
@@ -37380,6 +37428,17 @@ function renderProposalFields(proposal) {
       return [
         ["target_role", proposal.target_role],
         ["lesson", proposal.lesson]
+      ];
+    case "lesson-to-skill":
+      return [
+        ["source_role", proposal.source_role],
+        ["proposed_path", proposal.proposed_path],
+        ["frontmatter_description", proposal.frontmatter_description],
+        ["when_to_use", proposal.when_to_use],
+        [
+          "body",
+          `(${proposal.body.split("\n").length} lines \u2014 see frontmatter)`
+        ]
       ];
   }
 }
@@ -44533,7 +44592,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "skill-supersede",
       "skill-retire",
       "team-change",
-      "persona-append"
+      "persona-append",
+      "lesson-to-skill"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -45373,9 +45433,9 @@ function assertRetirementProposal(proposal) {
 }
 
 // src/lib/apply-skill-proposal.ts
-var import_yaml14 = __toESM(require_dist2(), 1);
-import { promises as fs16 } from "node:fs";
-import * as path24 from "node:path";
+var import_yaml15 = __toESM(require_dist2(), 1);
+import { promises as fs17 } from "node:fs";
+import * as path25 from "node:path";
 
 // src/schemas/skill-frontmatter.ts
 var SemverSchema = external_exports.string().regex(/^\d+\.\d+\.\d+$/, "must be semver 'x.y.z'");
@@ -45389,6 +45449,187 @@ var SkillFrontmatterSchema = external_exports.object({
   supersedes: external_exports.string().optional(),
   retired_at: external_exports.string().optional()
 }).strict();
+
+// src/lib/apply-persona-append.ts
+var import_yaml14 = __toESM(require_dist2(), 1);
+import { promises as fs16 } from "node:fs";
+import * as path24 from "node:path";
+var TOOL_NAME3 = "acceptProposal";
+function personaRelPath(targetRole) {
+  return `team/${targetRole}/PERSONA.md`;
+}
+async function readPersonaRaw(targetRepoRoot, relPath) {
+  const abs = path24.join(targetRepoRoot, relPath);
+  try {
+    return await fs16.readFile(abs, "utf8");
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+}
+function reconstructPersonaFile(parsed, newKnowledgeBody, newSkillsBody) {
+  const frontmatter = {
+    role: parsed.role,
+    domain: parsed.domain,
+    model_tier: parsed.model_tier,
+    tools_allow: [...parsed.tools_allow],
+    gh_allow: [...parsed.gh_allow],
+    locked_phrases: { ...parsed.locked_phrases },
+    hired_at: parsed.hired_at,
+    catalogue_version: parsed.catalogue_version
+  };
+  const yamlBlock = (0, import_yaml14.stringify)(frontmatter).replace(/\n$/, "");
+  const h1 = parsed.role.split("-").map(
+    (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
+  ).join(" ");
+  const sections = [
+    `# ${h1}`,
+    ``,
+    `## Domain`,
+    ``,
+    parsed.sections.Domain,
+    ``,
+    `## Mandate`,
+    ``,
+    parsed.sections.Mandate,
+    ``,
+    `## Out of mandate`,
+    ``,
+    parsed.sections["Out of mandate"],
+    ``,
+    `## Prompt`,
+    ``,
+    parsed.sections.Prompt,
+    ``,
+    `## Knowledge`,
+    ``
+  ];
+  if (newKnowledgeBody.length > 0) {
+    sections.push(newKnowledgeBody);
+    sections.push(``);
+  }
+  const skillsBody = newSkillsBody !== void 0 ? newSkillsBody : parsed.optionalSections["Skills"] ?? "";
+  if (skillsBody.length > 0) {
+    sections.push(`## Skills`);
+    sections.push(``);
+    sections.push(skillsBody);
+    sections.push(``);
+  }
+  return `---
+${yamlBlock}
+---
+
+${sections.join("\n")}`;
+}
+function appendKnowledgeBullet(existingBody, lesson) {
+  const bullet = `- ${lesson}`;
+  if (existingBody.trim() === "") {
+    return bullet;
+  }
+  return `${existingBody}
+${bullet}`;
+}
+function appendSkillReference(existingBody, skillName2, skillPath, whenToUse) {
+  const line = `- ${skillName2} (${skillPath}): ${whenToUse}`;
+  if (existingBody.trim() === "") {
+    return line;
+  }
+  return `${existingBody}
+${line}`;
+}
+async function applySkillReferenceToPersona(opts) {
+  const { targetRepoRoot, role, skillName: skillName2, skillPath, whenToUse, toolName, actingRole } = opts;
+  const relPath = personaRelPath(role);
+  const absPath = path24.join(targetRepoRoot, relPath);
+  const raw = await readPersonaRaw(targetRepoRoot, relPath);
+  if (raw === null) {
+    throw new PersonaFileNotFoundError({
+      role,
+      personaPath: relPath
+    });
+  }
+  const parsed = parsePersonaFile(raw, relPath);
+  const existingSkillsBody = parsed.optionalSections["Skills"] ?? "";
+  const newSkillsBody = appendSkillReference(
+    existingSkillsBody,
+    skillName2,
+    skillPath,
+    whenToUse
+  );
+  const newContents = reconstructPersonaFile(
+    parsed,
+    parsed.sections.Knowledge,
+    newSkillsBody
+  );
+  await writeManagedFile({
+    absPath,
+    contents: newContents,
+    targetRepoRoot,
+    mcpToolContext: { toolName, role: actingRole }
+  });
+  return relPath;
+}
+function makePersonaAppendHandler() {
+  return {
+    type: "persona-append",
+    async previewDiff(proposal, ctx) {
+      assertPersonaAppendProposal(proposal);
+      const relPath = personaRelPath(proposal.target_role);
+      const raw = await readPersonaRaw(ctx.targetRepoRoot, relPath);
+      const lines = [];
+      lines.push(
+        `# persona-append proposal ${proposal.id} \u2192 ${relPath}`
+      );
+      lines.push(``);
+      if (raw === null) {
+        lines.push(
+          `ERROR: No persona file for role '${proposal.target_role}' at ${relPath}.`
+        );
+        lines.push(`Run /hire to create one before accepting this proposal.`);
+        return lines.join("\n") + "\n";
+      }
+      lines.push(
+        `Would append to ## Knowledge section of ${relPath}:`
+      );
+      lines.push(`+   - ${proposal.lesson}`);
+      return lines.join("\n") + "\n";
+    },
+    async apply(proposal, ctx) {
+      assertPersonaAppendProposal(proposal);
+      const relPath = personaRelPath(proposal.target_role);
+      const absPath = path24.join(ctx.targetRepoRoot, relPath);
+      const raw = await readPersonaRaw(ctx.targetRepoRoot, relPath);
+      if (raw === null) {
+        throw new PersonaFileNotFoundError({
+          role: proposal.target_role,
+          personaPath: relPath
+        });
+      }
+      const parsed = parsePersonaFile(raw, relPath);
+      const newKnowledgeBody = appendKnowledgeBullet(
+        parsed.sections.Knowledge,
+        proposal.lesson
+      );
+      const newContents = reconstructPersonaFile(parsed, newKnowledgeBody);
+      await writeManagedFile({
+        absPath,
+        contents: newContents,
+        targetRepoRoot: ctx.targetRepoRoot,
+        mcpToolContext: { toolName: TOOL_NAME3, role: ctx.role }
+      });
+      return { changedPaths: [relPath] };
+    }
+  };
+}
+function assertPersonaAppendProposal(proposal) {
+  if (proposal.type !== "persona-append") {
+    throw new Error(
+      `persona-append apply handler received a proposal of type '${proposal.type}'; expected 'persona-append'. This is a registry-dispatch bug.`
+    );
+  }
+}
 
 // src/lib/apply-skill-proposal.ts
 var ACCEPT_TOOL_NAME = "acceptProposal";
@@ -45404,13 +45645,13 @@ function bumpVersion(version2, bump) {
   return `${major}.${minor + 1}.0`;
 }
 function skillNameFromPath(relPath) {
-  return path24.basename(relPath, ".md");
+  return path25.basename(relPath, ".md");
 }
 function relPosix(targetRepoRoot, absPath) {
-  return path24.relative(targetRepoRoot, absPath).split(path24.sep).join("/");
+  return path25.relative(targetRepoRoot, absPath).split(path25.sep).join("/");
 }
 function renderSkillFile(frontmatter, body) {
-  const fm = (0, import_yaml14.stringify)(frontmatter, { lineWidth: 0 });
+  const fm = (0, import_yaml15.stringify)(frontmatter, { lineWidth: 0 });
   const trimmedBody = body.replace(/\n+$/, "");
   return `---
 ${fm}---
@@ -45421,7 +45662,7 @@ ${trimmedBody}
 async function readSkillFile(absPath, relPath) {
   let raw;
   try {
-    raw = await fs16.readFile(absPath, "utf8");
+    raw = await fs17.readFile(absPath, "utf8");
   } catch (err) {
     if (isEnoent4(err)) {
       throw new SkillNotFoundError({ skillPath: relPath });
@@ -45429,13 +45670,13 @@ async function readSkillFile(absPath, relPath) {
     throw err;
   }
   const { frontmatterRaw, body } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml14.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml15.parse)(frontmatterRaw);
   const frontmatter = SkillFrontmatterSchema.parse(parsedYaml);
   return { frontmatter, body };
 }
 async function fileExists(absPath) {
   try {
-    await fs16.access(absPath);
+    await fs17.access(absPath);
     return true;
   } catch {
     return false;
@@ -45445,24 +45686,24 @@ function isEnoent4(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 function archivePathFor(relPath) {
-  const dir = path24.posix.dirname(relPath.split(path24.sep).join("/"));
+  const dir = path25.posix.dirname(relPath.split(path25.sep).join("/"));
   const name = skillNameFromPath(relPath);
-  return path24.posix.join(dir, "_archived", `${name}.md`);
+  return path25.posix.join(dir, "_archived", `${name}.md`);
 }
 function historyPathFor(relPath, priorVersion) {
-  const posix2 = relPath.split(path24.sep).join("/");
+  const posix2 = relPath.split(path25.sep).join("/");
   return `${posix2}.history/${priorVersion}.md`;
 }
 async function writeManaged(ctx, relPath, contents) {
   await writeManagedFile({
-    absPath: path24.join(ctx.targetRepoRoot, relPath),
+    absPath: path25.join(ctx.targetRepoRoot, relPath),
     contents,
     targetRepoRoot: ctx.targetRepoRoot,
     mcpToolContext: { toolName: ACCEPT_TOOL_NAME, role: ctx.role }
   });
 }
 async function writeNewSkill(ctx, opts) {
-  const abs = path24.join(ctx.targetRepoRoot, opts.proposedPath);
+  const abs = path25.join(ctx.targetRepoRoot, opts.proposedPath);
   const rel = relPosix(ctx.targetRepoRoot, abs);
   if (await fileExists(abs)) {
     throw new SkillAlreadyExistsError({ skillPath: rel });
@@ -45517,7 +45758,7 @@ function makeSkillReviseHandler(deps) {
     type: "skill-revise",
     async previewDiff(proposal, ctx) {
       if (proposal.type !== "skill-revise") throw wrongKind(proposal.type);
-      const abs = path24.join(ctx.targetRepoRoot, proposal.target_skill_path);
+      const abs = path25.join(ctx.targetRepoRoot, proposal.target_skill_path);
       const rel = relPosix(ctx.targetRepoRoot, abs);
       const { frontmatter } = await readSkillFile(abs, rel);
       const nextVersion = bumpVersion(frontmatter.version, proposal.version_bump);
@@ -45534,7 +45775,7 @@ function makeSkillReviseHandler(deps) {
     },
     async apply(proposal, ctx) {
       if (proposal.type !== "skill-revise") throw wrongKind(proposal.type);
-      const abs = path24.join(ctx.targetRepoRoot, proposal.target_skill_path);
+      const abs = path25.join(ctx.targetRepoRoot, proposal.target_skill_path);
       const rel = relPosix(ctx.targetRepoRoot, abs);
       const { frontmatter, body } = await readSkillFile(abs, rel);
       const priorVersion = frontmatter.version;
@@ -45558,7 +45799,7 @@ function makeSkillSupersedeHandler(deps) {
     type: "skill-supersede",
     async previewDiff(proposal, ctx) {
       if (proposal.type !== "skill-supersede") throw wrongKind(proposal.type);
-      const supersededAbs = path24.join(
+      const supersededAbs = path25.join(
         ctx.targetRepoRoot,
         proposal.superseded_skill_path
       );
@@ -45567,7 +45808,7 @@ function makeSkillSupersedeHandler(deps) {
       const archiveRel = archivePathFor(supersededRel);
       const replacementRel = relPosix(
         ctx.targetRepoRoot,
-        path24.join(ctx.targetRepoRoot, proposal.replacement.proposed_path)
+        path25.join(ctx.targetRepoRoot, proposal.replacement.proposed_path)
       );
       return [
         `Supersede skill (one atomic apply):`,
@@ -45583,7 +45824,7 @@ function makeSkillSupersedeHandler(deps) {
     },
     async apply(proposal, ctx) {
       if (proposal.type !== "skill-supersede") throw wrongKind(proposal.type);
-      const supersededAbs = path24.join(
+      const supersededAbs = path25.join(
         ctx.targetRepoRoot,
         proposal.superseded_skill_path
       );
@@ -45607,7 +45848,7 @@ function makeSkillSupersedeHandler(deps) {
         archiveRel,
         renderSkillFile(archivedFm, supersededBody)
       );
-      await fs16.rm(supersededAbs);
+      await fs17.rm(supersededAbs);
       return { changedPaths: [replacementRel, archiveRel, supersededRel] };
     }
   };
@@ -45617,7 +45858,7 @@ function makeSkillRetireHandler(deps) {
     type: "skill-retire",
     async previewDiff(proposal, ctx) {
       if (proposal.type !== "skill-retire") throw wrongKind(proposal.type);
-      const abs = path24.join(ctx.targetRepoRoot, proposal.target_skill_path);
+      const abs = path25.join(ctx.targetRepoRoot, proposal.target_skill_path);
       const rel = relPosix(ctx.targetRepoRoot, abs);
       await readSkillFile(abs, rel);
       const archiveRel = archivePathFor(rel);
@@ -45632,7 +45873,7 @@ function makeSkillRetireHandler(deps) {
     },
     async apply(proposal, ctx) {
       if (proposal.type !== "skill-retire") throw wrongKind(proposal.type);
-      const abs = path24.join(ctx.targetRepoRoot, proposal.target_skill_path);
+      const abs = path25.join(ctx.targetRepoRoot, proposal.target_skill_path);
       const rel = relPosix(ctx.targetRepoRoot, abs);
       const { frontmatter, body } = await readSkillFile(abs, rel);
       const archiveRel = archivePathFor(rel);
@@ -45641,8 +45882,55 @@ function makeSkillRetireHandler(deps) {
         retired_at: deps.now().toISOString()
       };
       await writeManaged(ctx, archiveRel, renderSkillFile(archivedFm, body));
-      await fs16.rm(abs);
+      await fs17.rm(abs);
       return { changedPaths: [archiveRel, rel] };
+    }
+  };
+}
+function skillName(relPath) {
+  return path25.basename(relPath, ".md");
+}
+function makeLessonToSkillHandler(deps) {
+  return {
+    type: "lesson-to-skill",
+    async previewDiff(proposal, ctx) {
+      if (proposal.type !== "lesson-to-skill") throw wrongKind(proposal.type);
+      const abs = path25.join(ctx.targetRepoRoot, proposal.proposed_path);
+      const rel = relPosix(ctx.targetRepoRoot, abs);
+      const personaRel = `team/${proposal.source_role}/PERSONA.md`;
+      return [
+        `Promote lesson to skill (two effects):`,
+        ``,
+        `+ skill: ${rel}`,
+        `    description: ${proposal.frontmatter_description}`,
+        `    version: 0.1.0`,
+        ``,
+        `+ persona ref appended: ${personaRel}`,
+        `    entry: - ${skillName(rel)} (${rel}): ${proposal.when_to_use}`,
+        ``,
+        `--- skill body (${proposal.body.split("\n").length} lines) ---`,
+        proposal.body
+      ].join("\n");
+    },
+    async apply(proposal, ctx) {
+      if (proposal.type !== "lesson-to-skill") throw wrongKind(proposal.type);
+      const rel = await writeNewSkill(ctx, {
+        proposedPath: proposal.proposed_path,
+        description: proposal.frontmatter_description,
+        body: proposal.body,
+        sourceLessonRefs: lessonRefsFor(proposal),
+        introducedAt: deps.now().toISOString()
+      });
+      const personaRel = await applySkillReferenceToPersona({
+        targetRepoRoot: ctx.targetRepoRoot,
+        role: proposal.source_role,
+        skillName: skillName(rel),
+        skillPath: rel,
+        whenToUse: proposal.when_to_use,
+        toolName: ACCEPT_TOOL_NAME,
+        actingRole: ctx.role
+      });
+      return { changedPaths: [rel, personaRel] };
     }
   };
 }
@@ -45656,142 +45944,9 @@ function createSkillProposalHandlers(deps = DEFAULT_DEPS) {
     makeSkillCreateHandler(deps),
     makeSkillReviseHandler(deps),
     makeSkillSupersedeHandler(deps),
-    makeSkillRetireHandler(deps)
+    makeSkillRetireHandler(deps),
+    makeLessonToSkillHandler(deps)
   ];
-}
-
-// src/lib/apply-persona-append.ts
-var import_yaml15 = __toESM(require_dist2(), 1);
-import { promises as fs17 } from "node:fs";
-import * as path25 from "node:path";
-var TOOL_NAME3 = "acceptProposal";
-function personaRelPath(targetRole) {
-  return `team/${targetRole}/PERSONA.md`;
-}
-async function readPersonaRaw(targetRepoRoot, relPath) {
-  const abs = path25.join(targetRepoRoot, relPath);
-  try {
-    return await fs17.readFile(abs, "utf8");
-  } catch (err) {
-    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    throw err;
-  }
-}
-function reconstructPersonaFile(parsed, newKnowledgeBody) {
-  const frontmatter = {
-    role: parsed.role,
-    domain: parsed.domain,
-    model_tier: parsed.model_tier,
-    tools_allow: [...parsed.tools_allow],
-    gh_allow: [...parsed.gh_allow],
-    locked_phrases: { ...parsed.locked_phrases },
-    hired_at: parsed.hired_at,
-    catalogue_version: parsed.catalogue_version
-  };
-  const yamlBlock = (0, import_yaml15.stringify)(frontmatter).replace(/\n$/, "");
-  const h1 = parsed.role.split("-").map(
-    (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
-  ).join(" ");
-  const sections = [
-    `# ${h1}`,
-    ``,
-    `## Domain`,
-    ``,
-    parsed.sections.Domain,
-    ``,
-    `## Mandate`,
-    ``,
-    parsed.sections.Mandate,
-    ``,
-    `## Out of mandate`,
-    ``,
-    parsed.sections["Out of mandate"],
-    ``,
-    `## Prompt`,
-    ``,
-    parsed.sections.Prompt,
-    ``,
-    `## Knowledge`,
-    ``
-  ];
-  if (newKnowledgeBody.length > 0) {
-    sections.push(newKnowledgeBody);
-    sections.push(``);
-  }
-  return `---
-${yamlBlock}
----
-
-${sections.join("\n")}`;
-}
-function appendKnowledgeBullet(existingBody, lesson) {
-  const bullet = `- ${lesson}`;
-  if (existingBody.trim() === "") {
-    return bullet;
-  }
-  return `${existingBody}
-${bullet}`;
-}
-function makePersonaAppendHandler() {
-  return {
-    type: "persona-append",
-    async previewDiff(proposal, ctx) {
-      assertPersonaAppendProposal(proposal);
-      const relPath = personaRelPath(proposal.target_role);
-      const raw = await readPersonaRaw(ctx.targetRepoRoot, relPath);
-      const lines = [];
-      lines.push(
-        `# persona-append proposal ${proposal.id} \u2192 ${relPath}`
-      );
-      lines.push(``);
-      if (raw === null) {
-        lines.push(
-          `ERROR: No persona file for role '${proposal.target_role}' at ${relPath}.`
-        );
-        lines.push(`Run /hire to create one before accepting this proposal.`);
-        return lines.join("\n") + "\n";
-      }
-      lines.push(
-        `Would append to ## Knowledge section of ${relPath}:`
-      );
-      lines.push(`+   - ${proposal.lesson}`);
-      return lines.join("\n") + "\n";
-    },
-    async apply(proposal, ctx) {
-      assertPersonaAppendProposal(proposal);
-      const relPath = personaRelPath(proposal.target_role);
-      const absPath = path25.join(ctx.targetRepoRoot, relPath);
-      const raw = await readPersonaRaw(ctx.targetRepoRoot, relPath);
-      if (raw === null) {
-        throw new PersonaFileNotFoundError({
-          role: proposal.target_role,
-          personaPath: relPath
-        });
-      }
-      const parsed = parsePersonaFile(raw, relPath);
-      const newKnowledgeBody = appendKnowledgeBullet(
-        parsed.sections.Knowledge,
-        proposal.lesson
-      );
-      const newContents = reconstructPersonaFile(parsed, newKnowledgeBody);
-      await writeManagedFile({
-        absPath,
-        contents: newContents,
-        targetRepoRoot: ctx.targetRepoRoot,
-        mcpToolContext: { toolName: TOOL_NAME3, role: ctx.role }
-      });
-      return { changedPaths: [relPath] };
-    }
-  };
-}
-function assertPersonaAppendProposal(proposal) {
-  if (proposal.type !== "persona-append") {
-    throw new Error(
-      `persona-append apply handler received a proposal of type '${proposal.type}'; expected 'persona-append'. This is a registry-dispatch bug.`
-    );
-  }
 }
 
 // src/lib/proposal-apply-registry.ts
@@ -45816,7 +45971,8 @@ var KIND_TO_STORY = {
   "skill-supersede": "Story 6.7",
   "skill-retire": "Story 6.7",
   "team-change": "Story 6.10",
-  "persona-append": "Story 6.9"
+  "persona-append": "Story 6.9",
+  "lesson-to-skill": "Story DR2"
 };
 
 // src/tools/accept-proposal.ts

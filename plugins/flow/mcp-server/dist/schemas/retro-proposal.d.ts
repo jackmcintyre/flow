@@ -253,15 +253,48 @@ export declare const PersonaAppendProposalSchema: z.ZodObject<{
     lesson: z.ZodString;
 }, z.core.$strict>;
 /**
- * The closed set of eight proposal-type literals. Exported as a tuple so
- * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a ninth variant requires a
- * coordinated schema-change story.
+ * `lesson-to-skill` — promote a lesson from a role's Knowledge section into a
+ * standalone reusable skill that any role can reference.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *   1. Creates a skill file at `proposed_path` with the lesson content (reusing
+ *      the `skill-create` write path).
+ *   2. Appends a one-line skill-reference entry to the originating role's
+ *      `## Skills` section in `team/<source_role>/PERSONA.md` (name + when to
+ *      use it). If the `## Skills` section does not yet exist, it is added after
+ *      `## Knowledge`.
+ *
+ * `source_role` — the role whose persona carries the original lesson.
+ * `when_to_use` — a single-line description of when agents should apply this
+ *   skill (appears in the spawned-agent briefing alongside the skill name).
+ *
+ * (Story DR2 — lesson-to-skill promote gate)
  */
-export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change", "persona-append"];
+export declare const LessonToSkillProposalSchema: z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"lesson-to-skill">;
+    source_role: z.ZodString;
+    proposed_path: z.ZodString;
+    frontmatter_description: z.ZodString;
+    body: z.ZodString;
+    when_to_use: z.ZodString;
+}, z.core.$strict>;
 /**
- * The full retro-proposal discriminated union. AC2: exactly eight
- * variants, closed enum, no `z.string()` fallback.
+ * The closed set of nine proposal-type literals. Exported as a tuple so
+ * tests can iterate over it and assert the surface has not silently
+ * grown. Adding a tenth variant requires a coordinated schema-change story.
+ */
+export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change", "persona-append", "lesson-to-skill"];
+/**
+ * The full retro-proposal discriminated union. Nine variants, closed enum,
+ * no `z.string()` fallback.
  */
 export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
@@ -384,6 +417,21 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"persona-append">;
     target_role: z.ZodString;
     lesson: z.ZodString;
+}, z.core.$strict>, z.ZodObject<{
+    id: z.ZodString;
+    created_at: z.ZodString;
+    rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
+    type: z.ZodLiteral<"lesson-to-skill">;
+    source_role: z.ZodString;
+    proposed_path: z.ZodString;
+    frontmatter_description: z.ZodString;
+    body: z.ZodString;
+    when_to_use: z.ZodString;
 }, z.core.$strict>], "type">;
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
 /**
@@ -527,6 +575,21 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         type: z.ZodLiteral<"persona-append">;
         target_role: z.ZodString;
         lesson: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        id: z.ZodString;
+        created_at: z.ZodString;
+        rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
+        type: z.ZodLiteral<"lesson-to-skill">;
+        source_role: z.ZodString;
+        proposed_path: z.ZodString;
+        frontmatter_description: z.ZodString;
+        body: z.ZodString;
+        when_to_use: z.ZodString;
     }, z.core.$strict>], "type">>;
 }, z.core.$strict>;
 export type RetroProposalFile = z.infer<typeof RetroProposalFileSchema>;

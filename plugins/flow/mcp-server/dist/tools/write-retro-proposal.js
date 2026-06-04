@@ -266,6 +266,17 @@ function renderProposalFields(proposal) {
                 ["target_role", proposal.target_role],
                 ["lesson", proposal.lesson],
             ];
+        case "lesson-to-skill":
+            return [
+                ["source_role", proposal.source_role],
+                ["proposed_path", proposal.proposed_path],
+                ["frontmatter_description", proposal.frontmatter_description],
+                ["when_to_use", proposal.when_to_use],
+                [
+                    "body",
+                    `(${proposal.body.split("\n").length} lines — see frontmatter)`,
+                ],
+            ];
     }
 }
 // Re-export the schema's `RetroProposalFileSchema` for callers that need

@@ -6,9 +6,11 @@ import type { CatalogueRole } from "../schemas/catalogue.js";
 import {
   PersonaFrontmatterSchema,
   REQUIRED_PERSONA_SECTIONS,
+  OPTIONAL_PERSONA_SECTIONS,
   type PersonaFile,
   type PersonaFrontmatter,
   type RequiredPersonaSection,
+  type OptionalPersonaSection,
 } from "../schemas/persona.js";
 import { splitFrontmatter } from "./markdown-frontmatter.js";
 
@@ -92,10 +94,12 @@ export function parsePersonaFile(raw: string, sourcePath: string): PersonaFile {
   }
 
   const sections = extractSections(body);
+  const optionalSections = extractOptionalSections(body);
 
   return {
     ...result.data,
     sections: sections as Record<RequiredPersonaSection, string>,
+    optionalSections,
     sourcePath,
   };
 }
@@ -236,6 +240,49 @@ function extractSections(
     filtered[required] = out[required] ?? "";
   }
   return filtered;
+}
+
+/**
+ * Extract the recognised optional sections (`Skills`, etc.) from a persona
+ * body. Returns a partial map containing only the sections that are present.
+ * Sections not listed in `OPTIONAL_PERSONA_SECTIONS` are ignored.
+ */
+function extractOptionalSections(
+  body: string,
+): Partial<Record<OptionalPersonaSection, string>> {
+  const lines = body.split("\n");
+  const out: Partial<Record<string, string>> = {};
+  let currentHeading: string | null = null;
+  let currentBody: string[] = [];
+
+  const flush = () => {
+    if (currentHeading !== null) {
+      out[currentHeading] = currentBody
+        .join("\n")
+        .replace(/^\n+/, "")
+        .replace(/\n+$/, "");
+    }
+  };
+
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      flush();
+      currentHeading = match[1]!.trim();
+      currentBody = [];
+    } else if (currentHeading !== null) {
+      currentBody.push(line);
+    }
+  }
+  flush();
+
+  const result: Partial<Record<OptionalPersonaSection, string>> = {};
+  for (const optional of OPTIONAL_PERSONA_SECTIONS) {
+    if (out[optional] !== undefined) {
+      result[optional] = out[optional];
+    }
+  }
+  return result;
 }
 
 function formatZodIssues(issues: z.ZodIssue[]): string {
