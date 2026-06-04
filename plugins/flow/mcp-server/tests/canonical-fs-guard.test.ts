@@ -126,6 +126,13 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // production retro-analyst routes its single write through writeRetroProposal
   // (writeManagedFile with MCP tool context) and performs no raw fs writes.
   path.join(SRC_DIR, "tools", "__tests__", "retro-persona-append-proposals.test.ts"),
+  // Story native:01KT6RHTE3YME1ZAD5VRQAKDSW: gather-retro-inputs tests seed done/
+  // manifest YAML and backlog-state fixtures directly to tmpdir via raw
+  // fs.writeFile/mkdir to drive the gatherRetroInputs mechanical-failure drafting
+  // signal. Test file only; the production tool routes hardening-story writes
+  // through renderGateWriteNativeStory (atomicWriteFile) and performs no raw fs
+  // writes itself.
+  path.join(SRC_DIR, "tools", "gather-retro-inputs.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

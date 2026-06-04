@@ -69,6 +69,25 @@ export interface RecurringFrictionEntry {
     count: number;
 }
 /**
+ * One entry in `mechanicalFailuresDrafted` — a recurring mechanical failure
+ * (pitfall lessons sharing a `failure_class`) for which a hardening story was
+ * drafted and parked in the backlog as not-ready.
+ *
+ * Story native:01KT6RHTE3YME1ZAD5VRQAKDSW.
+ */
+export interface MechanicalFailureDraft {
+    /** The `failure_class` that triggered the draft. */
+    failure_class: string;
+    /** How many done-manifest pitfall lessons share this failure_class. */
+    recurrence_count: number;
+    /** The native ref of the newly-drafted hardening story. */
+    hardening_story_ref: string;
+    /** Absolute path to the newly-drafted hardening story file. */
+    hardening_story_path: string;
+}
+/** Threshold: a failure_class must recur at least this many times to trigger a draft. */
+export declare const MECHANICAL_FAILURE_THRESHOLD = 2;
+/**
  * The deterministic input bundle handed to the retro-analyst subagent.
  */
 export interface RetroInputs {
@@ -128,6 +147,16 @@ export interface RetroInputs {
      * Story native:01KT49PKTMJPJM7WMCB67TA6EY.
      */
     skillEffectiveness: SkillEffectivenessResult;
+    /**
+     * Hardening stories drafted during this retro run for recurring mechanical
+     * failures. Each entry records the `failure_class`, the recurrence count,
+     * and the newly-drafted story's ref and path. Empty when no failure class
+     * meets the threshold or all qualifying classes already have a pending
+     * hardening story in the backlog.
+     *
+     * Story native:01KT6RHTE3YME1ZAD5VRQAKDSW.
+     */
+    mechanicalFailuresDrafted: MechanicalFailureDraft[];
 }
 export interface GatherRetroInputsOptions {
     /** Absolute path to the target repository root. */
@@ -146,6 +175,17 @@ export interface GatherRetroInputsOptions {
      * specific window. Production callers (the MCP/CLI handler) never pass this.
      */
     cycleState?: CycleState | null;
+    /**
+     * Optional session ULID for telemetry on drafted hardening stories.
+     * When omitted, hardening story telemetry uses "retro-loop" as the agent
+     * session marker. (Story native:01KT6RHTE3YME1ZAD5VRQAKDSW)
+     */
+    sessionUlid?: string;
+    /**
+     * Optional override for the mechanical failure recurrence threshold.
+     * Defaults to `MECHANICAL_FAILURE_THRESHOLD` (2). Test seam.
+     */
+    mechanicalFailureThreshold?: number;
 }
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.

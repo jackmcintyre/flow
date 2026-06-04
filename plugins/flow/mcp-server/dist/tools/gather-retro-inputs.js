@@ -61,8 +61,13 @@ import { TelemetryEventSchema, } from "../schemas/telemetry-events.js";
 import { parseRuleRegistry } from "../schemas/discipline-rules.js";
 import { computeFailureClassFireCounts, } from "../lib/failure-class-fire-counts.js";
 import { computeSkillEffectiveness, } from "./compute-skill-effectiveness.js";
+import { renderGateWriteNativeStory, } from "./write-native-story.js";
+import { readBacklogInventory } from "./read-backlog-inventory.js";
+import { resolveWorkspace } from "../state/workspace-resolver.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
+/** Threshold: a failure_class must recur at least this many times to trigger a draft. */
+export const MECHANICAL_FAILURE_THRESHOLD = 2;
 /**
  * Gather the retro input bundle. See module JSDoc for full behaviour.
  *
@@ -104,7 +109,13 @@ export async function gatherRetroInputs(opts) {
     // (an empty per_skill map when no telemetry exists), so no null-guard is
     // needed and the retro never fails on an absent signal.
     const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
-    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness };
+    // Draft hardening stories for recurring mechanical failures
+    // (Story native:01KT6RHTE3YME1ZAD5VRQAKDSW). This is a write side-effect of
+    // the retro loop; the drafting only fires on native-adapter repos (where
+    // writeNativeStory applies). On non-native repos it short-circuits to [].
+    const threshold = opts.mechanicalFailureThreshold ?? MECHANICAL_FAILURE_THRESHOLD;
+    const mechanicalFailuresDrafted = await draftHardeningStories(targetRepoRoot, doneManifests, threshold, opts.sessionUlid);
+    return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
 }
 // ---------------------------------------------------------------------------
 // done/ manifests
@@ -286,6 +297,163 @@ async function gatherRuleRegistry(targetRepoRoot) {
     }
     // Validated parse — raises RuleRegistryMalformedError on a bad registry.
     return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+// ---------------------------------------------------------------------------
+// hardening story drafting (Story native:01KT6RHTE3YME1ZAD5VRQAKDSW)
+// ---------------------------------------------------------------------------
+/**
+ * Draft hardening stories for recurring mechanical failures.
+ *
+ * Groups `pitfall` lessons from done manifests by `failure_class`. For each
+ * class that meets or exceeds `threshold` (default 2), checks whether a
+ * not-ready or in-progress hardening story for that class already exists in the
+ * backlog (deduplication). Qualifying classes get a new native story authored
+ * via `renderGateWriteNativeStory` and parked as not-ready.
+ *
+ * Only runs on native-adapter repos. On non-native repos returns [].
+ *
+ * @param targetRepoRoot  Absolute path to the repo root.
+ * @param doneManifests   The cycle's done manifests (already gathered).
+ * @param threshold       Recurrence count to trigger a draft (default 2).
+ * @param sessionUlid     Optional session ULID for telemetry on drafted stories.
+ */
+async function draftHardeningStories(targetRepoRoot, doneManifests, threshold, sessionUlid) {
+    // Only native-adapter repos support writeNativeStory.
+    let workspace;
+    try {
+        workspace = await resolveWorkspace({ targetRepoRoot });
+    }
+    catch {
+        // Cannot resolve workspace (e.g. missing config.yaml) — skip gracefully.
+        return [];
+    }
+    if (workspace.activeAdapterName !== "native") {
+        return [];
+    }
+    // --- Step 1: collect pitfall lessons with failure_class from done manifests ---
+    const classCounts = new Map();
+    for (const manifest of doneManifests) {
+        for (const lesson of manifest.lessons ?? []) {
+            if (lesson.kind === "pitfall" && lesson.failure_class) {
+                classCounts.set(lesson.failure_class, (classCounts.get(lesson.failure_class) ?? 0) + 1);
+            }
+        }
+    }
+    // --- Step 2: find classes that exceed the threshold ---
+    const qualifying = [];
+    for (const [fc, count] of classCounts) {
+        if (count >= threshold) {
+            qualifying.push({ failure_class: fc, count });
+        }
+    }
+    qualifying.sort((a, b) => a.failure_class.localeCompare(b.failure_class));
+    if (qualifying.length === 0) {
+        return [];
+    }
+    // --- Step 3: deduplication — skip if a pending hardening story already exists ---
+    let existingHardeningClasses;
+    try {
+        const inventory = await readBacklogInventory({
+            targetRepoRoot,
+        });
+        existingHardeningClasses = buildExistingHardeningSet(inventory.backlog_inventory);
+    }
+    catch {
+        // If inventory read fails, proceed without dedup (safe: may draft duplicates
+        // but will not crash the retro).
+        existingHardeningClasses = new Set();
+    }
+    // --- Step 4: draft hardening stories for qualifying, non-duplicate classes ---
+    const drafted = [];
+    for (const { failure_class, count } of qualifying) {
+        if (existingHardeningClasses.has(failure_class)) {
+            // Already has a pending hardening story — skip.
+            continue;
+        }
+        const input = buildHardeningStoryInput(failure_class, count, targetRepoRoot, sessionUlid);
+        let result;
+        try {
+            result = await renderGateWriteNativeStory(input, targetRepoRoot, "author");
+        }
+        catch {
+            // A discipline-gate rejection or other write failure should not crash the
+            // retro. Skip this failure class and continue.
+            continue;
+        }
+        drafted.push({
+            failure_class,
+            recurrence_count: count,
+            hardening_story_ref: result.ref,
+            hardening_story_path: result.path,
+        });
+    }
+    return drafted;
+}
+/**
+ * Build the set of failure_class values that already have a pending (not-ready
+ * or in-progress) hardening story in the backlog. The deduplication marker is
+ * embedded in the story title: `"[Hardening] Guard against <failure_class>"`.
+ */
+function buildExistingHardeningSet(inventory) {
+    const existing = new Set();
+    const HARDENING_PREFIX = "[Hardening] Guard against ";
+    for (const item of inventory) {
+        // Skip done or withdrawn items — they are not "pending".
+        if (item.state === "done" || item.withdrawn) {
+            continue;
+        }
+        // The title encodes the failure_class as: "[Hardening] Guard against <fc>"
+        if (item.title.startsWith(HARDENING_PREFIX)) {
+            const fc = item.title.slice(HARDENING_PREFIX.length).trim();
+            if (fc.length > 0) {
+                existing.add(fc);
+            }
+        }
+    }
+    return existing;
+}
+/**
+ * Build the `WriteNativeStoryInput` for a hardening story that proposes a code
+ * guard against a specific failure class.
+ *
+ * `targetRepoRoot` is passed so the Zod schema validation (`.min(1)`) passes.
+ * `renderGateWriteNativeStory` receives `targetRepoRoot` separately as its own
+ * second argument and uses that for all path operations — `input.targetRepoRoot`
+ * is only consumed by the schema validator.
+ */
+function buildHardeningStoryInput(failure_class, recurrence_count, targetRepoRoot, sessionUlid) {
+    const title = `[Hardening] Guard against ${failure_class}`;
+    const sanitizedFc = failure_class.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+    return {
+        targetRepoRoot,
+        title,
+        narrative: {
+            role: "non-engineer operator",
+            want: `a code-level guard that prevents the recurring "${failure_class}" failure`,
+            so_that: `the team stops repeating this mechanical mistake (recurred ${recurrence_count} times this cycle)`,
+        },
+        acceptance_criteria: [
+            {
+                text: `**Given** the retro has identified "${failure_class}" as a recurring failure class (${recurrence_count} occurrences), **When** a dev implements this hardening, **Then** a code guard exists that makes the "${failure_class}" failure detectable at build or test time.`,
+                kind: "integration",
+                verification: {
+                    type: "vitest",
+                    target: `plugins/flow/mcp-server/src/__tests__/hardening-${sanitizedFc}.test.ts`,
+                },
+            },
+        ],
+        tasks: [
+            {
+                text: `Identify the code seam responsible for the "${failure_class}" failure class and add a deterministic guard (test, schema check, or runtime assertion) that catches it before it escapes to the dev loop.`,
+                ac_refs: ["AC1"],
+            },
+        ],
+        cited_sources: [
+            "plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts",
+        ],
+        depends_on: [],
+        sessionUlid: sessionUlid ?? "retro-loop",
+    };
 }
 // ---------------------------------------------------------------------------
 // recurring friction
