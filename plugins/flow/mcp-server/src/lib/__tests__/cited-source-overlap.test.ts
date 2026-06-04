@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { atomicWriteFile } from "../managed-fs.js";
 import {
   findOverlapBlockers,
   loadOverlapUniverse,
@@ -107,7 +108,7 @@ describe("loadOverlapUniverse", () => {
   ): Promise<void> {
     const dir = path.join(root, ".flow", "state", location);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, filename), body);
+    await atomicWriteFile(path.join(dir, filename), body);
   }
 
   beforeEach(async () => {

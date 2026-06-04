@@ -657,9 +657,13 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
   const storiesDir = path.join(root, ".flow", "native-stories");
   await fs.mkdir(storiesDir, { recursive: true });
 
-  // Story 10.3 — seed the cited source so the Tier-0 T0-5 resolvability check
-  // passes at scan (cited paths must resolve on disk).
+  // Story 10.3 — seed the cited sources so the Tier-0 T0-5 resolvability check
+  // passes at scan (cited paths must resolve on disk). The two stories cite
+  // DISTINCT files so they are genuinely independent: this test exercises the
+  // two-story loop mechanics, not the cited-source overlap gate (which would
+  // otherwise correctly serialize two stories that touch the same file).
   await atomicWriteFile(path.join(root, "src", "inner-cycle.ts"), "// seeded\n");
+  await atomicWriteFile(path.join(root, "src", "inner-cycle-b.ts"), "// seeded\n");
 
   // State directories
   await fs.mkdir(path.join(root, ".flow", "state", "to-do"), { recursive: true });
@@ -672,7 +676,7 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
   const refA = `native:${ulidA}`;
   const refB = `native:${ulidB}`;
 
-  function makeStoryContent(title: string): string {
+  function makeStoryContent(title: string, citedSource: string): string {
     return [
       `# ${title}`,
       "",
@@ -693,7 +697,7 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
       "",
       "## Cited Sources",
       "",
-      "- src/inner-cycle.ts",
+      `- ${citedSource}`,
       "",
       "## Implementation Notes",
       "",
@@ -705,8 +709,15 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
     ].join("\n");
   }
 
-  await atomicWriteFile(path.join(storiesDir, `${ulidA}.md`), makeStoryContent("Story A"));
-  await atomicWriteFile(path.join(storiesDir, `${ulidB}.md`), makeStoryContent("Story B"));
+  // Distinct cited sources → the two stories are independent (no overlap-gate serialization).
+  await atomicWriteFile(
+    path.join(storiesDir, `${ulidA}.md`),
+    makeStoryContent("Story A", "src/inner-cycle.ts"),
+  );
+  await atomicWriteFile(
+    path.join(storiesDir, `${ulidB}.md`),
+    makeStoryContent("Story B", "src/inner-cycle-b.ts"),
+  );
 
   // Team personas
   await fs.mkdir(path.join(root, "team", "generalist-dev"), { recursive: true });
