@@ -376,9 +376,15 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
 
       const sentinel = createSentinelWaiter(watcher);
 
-      // Wait for first successful compile
-      const ready = await sentinel.waitFor(1, 30_000);
-      expect(ready, "tsc --watch never reached steady-state within 30s").toBe(true);
+      // Wait for first successful compile.
+      // De-flake: the pre-PR gate runs this test inside the FULL vitest suite (all
+      // workers), which saturates the box and starves `tsc --watch`, so a real
+      // recompile can arrive well after a tight wall-clock budget. The per-wait
+      // ceilings here are deliberately generous (the watcher is event-driven, so a
+      // fast machine resolves instantly); the `it()` timeout below is the real
+      // backstop for a genuinely hung watcher.
+      const ready = await sentinel.waitFor(1, 60_000);
+      expect(ready, "tsc --watch never reached steady-state within 60s").toBe(true);
 
       // ── Phase 2: mutate the scratch source file to force a recompile ──
       const v2Content = initialContent.trimEnd() + "\n// touch\n";
@@ -387,14 +393,14 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
       utimesSync(srcFile, t1, t1);
 
       // ── Phase 3: wait for second sentinel (recompile done) ──
-      const recompiled = await sentinel.waitFor(2, 20_000);
+      const recompiled = await sentinel.waitFor(2, 60_000);
       // Restore original content immediately (before expect) so the reference build
       // sees the same source state.
       const t2 = new Date();
       writeFileSync(srcFile, initialContent);
       utimesSync(srcFile, t2, t2);
 
-      expect(recompiled, "tsc --watch did not emit a second success sentinel within 20s after source touch").toBe(true);
+      expect(recompiled, "tsc --watch did not emit a second success sentinel within 60s after source touch").toBe(true);
 
       // Give the normaliser a moment to finish (runs async after the sentinel).
       await new Promise((r) => setTimeout(r, 800));
@@ -441,8 +447,10 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
         expect(betaIdx, "normaliser should have sorted enum keys: beta < gamma").toBeLessThan(gammaIdx);
       }
     },
-    // Two tsc runs against the scratch project + overhead.
-    120_000,
+    // Two tsc runs against the scratch project + overhead. Budget is the real
+    // hang-backstop and must exceed the sum of the (generous) per-wait ceilings
+    // above (60s initial + 60s recompile) under a saturated gate box.
+    180_000,
   );
 
   /**
@@ -489,8 +497,10 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
       const sentinel = createSentinelWaiter(watcher);
 
       // Wait for initial compile to settle.
-      const initial = await sentinel.waitFor(1, 30_000);
-      expect(initial, "tsc --watch initial compile never settled within 30s").toBe(true);
+      // De-flake: generous ceiling — see the AC1 note. Starvation under the full
+      // gate suite, not a real hang, is what blew the old 30s budget.
+      const initial = await sentinel.waitFor(1, 60_000);
+      expect(initial, "tsc --watch initial compile never settled within 60s").toBe(true);
       await new Promise((r) => setTimeout(r, 400)); // let normaliser finish
 
       const scratchDts = "scratch-enum.d.ts";
@@ -510,10 +520,10 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
         utimesSync(srcFile, t, t);
 
         // Wait for the next sentinel (sentinel count = i + 2 because we started at 1).
-        const settled = await sentinel.waitFor(i + 2, 20_000);
+        const settled = await sentinel.waitFor(i + 2, 45_000);
         expect(
           settled,
-          `cycle ${i + 1}: tsc --watch did not emit success sentinel within 20s`,
+          `cycle ${i + 1}: tsc --watch did not emit success sentinel within 45s`,
         ).toBe(true);
 
         // Allow the normaliser to finish (it's async post-sentinel).
@@ -563,7 +573,8 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
         ).toBe(oddHashes[1]);
       }
     },
-    // 5 tsc recompiles × ~20s each + setup overhead.
-    300_000,
+    // Budget is the real hang-backstop: it must exceed 60s initial + 5 × 45s
+    // recompile ceilings + normaliser/hash overhead under a saturated gate box.
+    420_000,
   );
 });
