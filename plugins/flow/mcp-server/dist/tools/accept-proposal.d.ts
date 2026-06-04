@@ -46,7 +46,7 @@
  * check keys on the PRESENCE of the persisted `applied` block (not on the sha),
  * so it is robust to the post-commit sha back-fill.
  */
-import { gitCommit } from "../lib/git.js";
+import { gitCommit, filterGitIgnoredPaths } from "../lib/git.js";
 import { type ProposalApplyRegistry } from "../lib/proposal-apply-registry.js";
 export type AcceptProposalResult = {
     status: "preview";
@@ -85,6 +85,12 @@ export interface AcceptProposalOptions {
      * passes nothing and the real `gitCommit` wrapper is used.
      */
     gitCommitImpl?: typeof gitCommit;
+    /**
+     * Git-check-ignore implementation injection (mirrors `gitCommitImpl` seam).
+     * Tests pass a fake to avoid requiring a real git repo; production passes
+     * nothing and the real `filterGitIgnoredPaths` wrapper is used.
+     */
+    filterGitIgnoredPathsImpl?: typeof filterGitIgnoredPaths;
     /** Test seam for deterministic timestamps (applied_at + telemetry ts). */
     now?: () => Date;
 }

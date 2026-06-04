@@ -44488,6 +44488,29 @@ async function checkSharedRootLeak(opts) {
   const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
   return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
+async function filterGitIgnoredPaths(opts) {
+  const { targetRepoRoot, paths } = opts;
+  const execaImpl = opts.execaImpl ?? execa;
+  if (paths.length === 0) return [];
+  const result = await execaImpl(
+    "git",
+    ["-C", targetRepoRoot, "check-ignore", "--stdin"],
+    {
+      reject: false,
+      input: paths.join("\n")
+    }
+  );
+  const exitCode = result.exitCode ?? 1;
+  if (exitCode >= 2) {
+    return [...paths];
+  }
+  if (exitCode === 1) return [...paths];
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const ignoredSet = new Set(
+    stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
+  );
+  return paths.filter((p) => !ignoredSet.has(p));
+}
 
 // src/lib/logger.ts
 import { promises as fs11 } from "node:fs";
@@ -45889,6 +45912,7 @@ async function acceptProposal(opts) {
     role = DEFAULT_ROLE,
     handlers = createProductionRegistry(),
     gitCommitImpl = gitCommit,
+    filterGitIgnoredPathsImpl = filterGitIgnoredPaths,
     now
   } = opts;
   const clock = now ?? (() => /* @__PURE__ */ new Date());
@@ -45916,6 +45940,10 @@ async function acceptProposal(opts) {
     return { status: "preview", proposalId, type: proposal.type, diff };
   }
   const applyResult = await handler.apply(proposal, ctx);
+  const trackedHandlerPaths = await filterGitIgnoredPathsImpl({
+    targetRepoRoot,
+    paths: applyResult.changedPaths
+  });
   const preStampRaw = await fs18.readFile(located.absPath, "utf8");
   const appliedAt = clock().toISOString();
   const stampedContents = stampProposalApplied(
@@ -45931,10 +45959,48 @@ async function acceptProposal(opts) {
     targetRepoRoot,
     mcpToolContext: { toolName: TOOL_NAME4, role }
   });
+  if (trackedHandlerPaths.length === 0) {
+    const noCommitSha = "no-commit";
+    const finalContents2 = stampProposalApplied(
+      preStampRaw,
+      located,
+      appliedAt,
+      proposal.id,
+      noCommitSha
+    );
+    await writeManagedFile({
+      absPath: located.absPath,
+      contents: finalContents2,
+      targetRepoRoot,
+      mcpToolContext: { toolName: TOOL_NAME4, role }
+    });
+    await logTelemetryEvent({
+      targetRepoRoot,
+      event: {
+        type: "retro.proposal.applied",
+        session_id: proposal.id,
+        agent: role,
+        data: {
+          id: proposal.id,
+          proposal_type: proposal.type,
+          applied_sha: noCommitSha,
+          idempotency_key: proposal.id
+        }
+      },
+      ...now ? { now } : {}
+    });
+    return {
+      status: "applied",
+      proposalId,
+      type: proposal.type,
+      appliedSha: noCommitSha,
+      idempotencyKey: proposal.id
+    };
+  }
   let commitSha;
   try {
     const commitPaths = dedupePaths([
-      ...applyResult.changedPaths,
+      ...trackedHandlerPaths,
       located.relPath
     ]);
     const result = await gitCommitImpl({

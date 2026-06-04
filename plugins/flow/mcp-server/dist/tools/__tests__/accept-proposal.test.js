@@ -105,6 +105,18 @@ function makeFakeGitCommit(sha = "deadbeefcafe0000000000000000000000000000") {
     });
     return { impl, calls };
 }
+/**
+ * A fake `filterGitIgnoredPaths` seam. The caller supplies a set of paths that
+ * should be treated as "ignored"; all other paths in the candidate list are
+ * returned as tracked.
+ */
+function makeFakeFilterGitIgnoredPaths(ignoredPaths) {
+    const ignoredSet = new Set(ignoredPaths);
+    const impl = (async (opts) => {
+        return opts.paths.filter((p) => !ignoredSet.has(p));
+    });
+    return impl;
+}
 // ---------------------------------------------------------------------------
 // Tmpdir helpers + telemetry reader
 // ---------------------------------------------------------------------------
@@ -278,12 +290,15 @@ describe("acceptProposal — confirmed apply (AC3, AC5)", () => {
             diff: "+ the new rule\n",
         });
         const git = makeFakeGitCommit("aabbccddeeff00112233445566778899aabbccdd");
+        // No paths are ignored — all handler paths are tracked.
+        const filterIgnored = makeFakeFilterGitIgnoredPaths([]);
         const result = await acceptProposal({
             targetRepoRoot: tmpRoot,
             proposalId: ULID_RULE,
             confirm: true,
             handlers: registryWith(handler),
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
             now: () => FIXED_NOW,
         });
         // Status + sha.
@@ -340,12 +355,15 @@ describe("acceptProposal — confirmed apply (AC3, AC5)", () => {
         const failingGit = (async () => {
             throw new Error("git commit boom");
         });
+        // No paths are ignored — we want the commit to be attempted (and fail).
+        const filterIgnored = makeFakeFilterGitIgnoredPaths([]);
         await expect(acceptProposal({
             targetRepoRoot: tmpRoot,
             proposalId: ULID_RULE,
             confirm: true,
             handlers: registryWith(handler),
             gitCommitImpl: failingGit,
+            filterGitIgnoredPathsImpl: filterIgnored,
             now: () => FIXED_NOW,
         })).rejects.toThrow("git commit boom");
         // Stamp rolled back — proposal file byte-identical, no applied block.
@@ -373,6 +391,8 @@ describe("acceptProposal — idempotent re-run (AC4)", () => {
             diff: "d",
         });
         const git = makeFakeGitCommit("11112222333344445555666677778888999900aa");
+        // No paths are ignored — all handler paths are tracked.
+        const filterIgnored = makeFakeFilterGitIgnoredPaths([]);
         // First apply.
         const first = await acceptProposal({
             targetRepoRoot: tmpRoot,
@@ -380,6 +400,7 @@ describe("acceptProposal — idempotent re-run (AC4)", () => {
             confirm: true,
             handlers: registryWith(handler),
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
             now: () => FIXED_NOW,
         });
         expect(first.status).toBe("applied");
@@ -392,6 +413,7 @@ describe("acceptProposal — idempotent re-run (AC4)", () => {
             confirm: true,
             handlers: registryWith(handler),
             gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
             now: () => new Date("2099-01-01T00:00:00.000Z"),
         });
         expect(second.status).toBe("already-applied");
@@ -455,5 +477,170 @@ describe("acceptProposal — unregistered kind fails closed (AC6)", () => {
         });
         // Preview mode (confirm omitted) on an unregistered kind still fails closed.
         await expect(acceptProposal({ targetRepoRoot: tmpRoot, proposalId: ULID_TEAM })).rejects.toBeInstanceOf(ProposalKindNotApplicableYetError);
+    });
+});
+// ---------------------------------------------------------------------------
+// AC1 (new) — git-ignored target files: completes, stamps, re-run is no-op
+// ---------------------------------------------------------------------------
+describe("acceptProposal — git-ignored target files (AC1 new)", () => {
+    it("completes without error, writes the disk change, stamps the proposal, and a re-run is a no-op when all handler paths are git-ignored", async () => {
+        await writeRetroProposal({
+            targetRepoRoot: tmpRoot,
+            isoTimestamp: ISO,
+            proposals: [ruleProposal(ULID_RULE)],
+        });
+        const handler = makeFakeHandler({
+            type: "rule",
+            changedFileRel: "ignored-output/rules.yaml",
+            changedFileContents: "rules: [ignored]\n",
+            diff: "d",
+        });
+        const git = makeFakeGitCommit();
+        // All handler paths are ignored — no tracked paths to commit.
+        const filterIgnored = makeFakeFilterGitIgnoredPaths(["ignored-output/rules.yaml"]);
+        const result = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_RULE,
+            confirm: true,
+            handlers: registryWith(handler),
+            gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
+            now: () => FIXED_NOW,
+        });
+        // Apply completes without error.
+        expect(result.status).toBe("applied");
+        // The disk change was written.
+        const written = await fs.readFile(path.join(tmpRoot, "ignored-output", "rules.yaml"), "utf8");
+        expect(written).toBe("rules: [ignored]\n");
+        // No commit was made (nothing tracked to commit).
+        expect(git.calls).toHaveLength(0);
+        // Proposal is stamped as applied.
+        const after = await readProposalFile(ISO);
+        expect(after.file.proposals[0].applied).toBeDefined();
+        expect(after.file.proposals[0].applied.applied_at).toBe(FIXED_NOW.toISOString());
+        // Telemetry was still emitted.
+        const events = await readTelemetryEvents();
+        expect(events).toHaveLength(1);
+        expect(events[0].type).toBe("retro.proposal.applied");
+        // Re-run: second call exits as already-applied, changes nothing.
+        const second = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_RULE,
+            confirm: true,
+            handlers: registryWith(handler),
+            gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
+            now: () => new Date("2099-01-01T00:00:00.000Z"),
+        });
+        expect(second.status).toBe("already-applied");
+        // Handler was called only once (first run), not on the re-run.
+        expect(handler.applyCalls).toBe(1);
+        // Still no git commits.
+        expect(git.calls).toHaveLength(0);
+        // Still exactly one telemetry event.
+        expect(await readTelemetryEvents()).toHaveLength(1);
+    });
+});
+// ---------------------------------------------------------------------------
+// AC2 (new) — mixed tracked/ignored paths: only tracked subset is committed
+// ---------------------------------------------------------------------------
+describe("acceptProposal — mixed tracked and ignored paths (AC2 new)", () => {
+    it("commits only the tracked subset, silently skipping the ignored paths without error", async () => {
+        await writeRetroProposal({
+            targetRepoRoot: tmpRoot,
+            isoTimestamp: ISO,
+            proposals: [ruleProposal(ULID_RULE)],
+        });
+        // Handler returns two paths: one tracked, one ignored.
+        const trackedRel = "docs/tracked-rules.yaml";
+        const ignoredRel = "ignored-output/ignored-rules.yaml";
+        const handler = {
+            type: "rule",
+            async previewDiff() {
+                return "d";
+            },
+            async apply(_proposal, ctx) {
+                for (const rel of [trackedRel, ignoredRel]) {
+                    const abs = path.join(ctx.targetRepoRoot, rel);
+                    await fs.mkdir(path.dirname(abs), { recursive: true });
+                    await fs.writeFile(abs, `contents of ${rel}\n`, "utf8");
+                }
+                return { changedPaths: [trackedRel, ignoredRel] };
+            },
+        };
+        const git = makeFakeGitCommit("cafebabe0000000000000000000000000000cafe");
+        // Only the ignoredRel path is ignored; trackedRel is tracked.
+        const filterIgnored = makeFakeFilterGitIgnoredPaths([ignoredRel]);
+        const result = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_RULE,
+            confirm: true,
+            handlers: registryWith(handler),
+            gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
+            now: () => FIXED_NOW,
+        });
+        expect(result.status).toBe("applied");
+        // Both files were written to disk.
+        for (const rel of [trackedRel, ignoredRel]) {
+            const content = await fs.readFile(path.join(tmpRoot, rel), "utf8");
+            expect(content).toBe(`contents of ${rel}\n`);
+        }
+        // Exactly one commit was made.
+        expect(git.calls).toHaveLength(1);
+        const committed = git.calls[0];
+        // The commit includes the tracked path and the proposal file.
+        expect(committed.paths).toContain(trackedRel);
+        expect(committed.paths.some((p) => p.endsWith(`${ISO}.md`))).toBe(true);
+        // The ignored path was NOT committed.
+        expect(committed.paths).not.toContain(ignoredRel);
+        // Proposal is stamped with the real commit sha.
+        const after = await readProposalFile(ISO);
+        expect(after.file.proposals[0].applied?.applied_sha).toBe("cafebabe0000000000000000000000000000cafe");
+    });
+    it("already-stamped proposal exits cleanly without re-applying", async () => {
+        await writeRetroProposal({
+            targetRepoRoot: tmpRoot,
+            isoTimestamp: ISO,
+            proposals: [ruleProposal(ULID_RULE)],
+        });
+        const handler = makeFakeHandler({
+            type: "rule",
+            changedFileRel: "docs/rules.yaml",
+            changedFileContents: "rules: [r]\n",
+            diff: "d",
+        });
+        const git = makeFakeGitCommit("1111222233334444555566667777888899990000");
+        const filterIgnored = makeFakeFilterGitIgnoredPaths([]);
+        // First confirmed apply stamps the proposal.
+        const first = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_RULE,
+            confirm: true,
+            handlers: registryWith(handler),
+            gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
+            now: () => FIXED_NOW,
+        });
+        expect(first.status).toBe("applied");
+        const afterFirst = await readProposalFile(ISO);
+        expect(afterFirst.file.proposals[0].applied).toBeDefined();
+        // Second call with confirm: true detects the stamp and exits cleanly.
+        const second = await acceptProposal({
+            targetRepoRoot: tmpRoot,
+            proposalId: ULID_RULE,
+            confirm: true,
+            handlers: registryWith(handler),
+            gitCommitImpl: git.impl,
+            filterGitIgnoredPathsImpl: filterIgnored,
+            now: () => new Date("2099-06-01T00:00:00.000Z"),
+        });
+        expect(second.status).toBe("already-applied");
+        // Handler was called only once; no second git commit.
+        expect(handler.applyCalls).toBe(1);
+        expect(git.calls).toHaveLength(1);
+        // Proposal file unchanged since first apply.
+        const afterSecond = await readProposalFile(ISO);
+        expect(afterSecond.raw).toBe(afterFirst.raw);
     });
 });

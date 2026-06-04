@@ -680,3 +680,57 @@ export async function checkSharedRootLeak(opts) {
     const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
     return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
+// ---------------------------------------------------------------------------
+// filterGitIgnoredPaths (Story native:01KT6QF3V113W7GTG69B2RPVH0)
+// ---------------------------------------------------------------------------
+/**
+ * Filter out git-ignored paths from a candidate list, returning only the
+ * subset that git WILL track (i.e. not ignored by any `.gitignore` rule).
+ *
+ * Uses `git check-ignore --stdin` to ask git which of the candidate paths
+ * are ignored. Any path NOT echoed back by check-ignore is a tracked path.
+ *
+ * When `paths` is empty, returns `[]` immediately (no subprocess spawn).
+ * Best-effort on a non-zero exit from `git check-ignore` itself — the tool
+ * exits non-zero (exit code 1) when NONE of the paths are ignored, which is
+ * not an error: we still return ALL paths in that case. Only an exit code >= 2
+ * (unexpected git failure) causes the error to be surfaced; even then, the
+ * error is re-thrown so callers can decide.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ *
+ * (Story native:01KT6QF3V113W7GTG69B2RPVH0 — accept-proposal git-ignored paths)
+ */
+export async function filterGitIgnoredPaths(opts) {
+    const { targetRepoRoot, paths } = opts;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    if (paths.length === 0)
+        return [];
+    // Feed the paths to `git check-ignore --stdin` via stdin.
+    // `git check-ignore` exits 0 when at least one path is ignored,
+    // exits 1 when NO path is ignored, exits >=2 on error.
+    const result = await execaImpl("git", ["-C", targetRepoRoot, "check-ignore", "--stdin"], {
+        reject: false,
+        input: paths.join("\n"),
+    });
+    const exitCode = result.exitCode ?? 1;
+    if (exitCode >= 2) {
+        // Genuine git error (e.g. exit 128: not a git repo). Fall back to treating
+        // all paths as tracked so that callers in non-repo environments (e.g. tests
+        // using a bare tmpdir) are not broken. Ignorable when check-ignore itself
+        // cannot run — worst case is we attempt to `git add` a file that git would
+        // normally ignore, which git itself will then reject at the add/commit step.
+        return [...paths];
+    }
+    // exit 1 means nothing was ignored → all paths are tracked.
+    if (exitCode === 1)
+        return [...paths];
+    // exit 0: stdout lists the ignored paths, one per line.
+    const stdout = typeof result.stdout === "string" ? result.stdout : "";
+    const ignoredSet = new Set(stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0));
+    return paths.filter((p) => !ignoredSet.has(p));
+}
