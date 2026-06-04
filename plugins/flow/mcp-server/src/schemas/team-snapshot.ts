@@ -27,7 +27,7 @@ const KEBAB_ROLE_REGEX = /^[a-z0-9-]+$/;
  * - `detail`       — full lesson text.
  * - `source_ref`   — optional story ref provenance.
  */
-export const KnowledgeEntrySchema = z
+const KnowledgeEntrySchema = z
   .object({
     kind: z.enum(LESSON_KINDS),
     applies_when: z.string().min(1),
@@ -38,7 +38,7 @@ export const KnowledgeEntrySchema = z
 
 export type KnowledgeEntry = z.infer<typeof KnowledgeEntrySchema>;
 
-export const TeamSnapshotRoleSchema = z.discriminatedUnion("state", [
+const TeamSnapshotRoleSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("ok"),
     role: z.string().min(1).regex(KEBAB_ROLE_REGEX),

@@ -32,9 +32,9 @@
 import { z } from "zod";
 
 /** The three adjudication outcomes (rubric §5). Closed set. */
-export const ADJUDICATION_DECISIONS = ["ready", "escalate", "rework"] as const;
+const ADJUDICATION_DECISIONS = ["ready", "escalate", "rework"] as const;
 
-export const AdjudicationDecisionSchema = z.enum(ADJUDICATION_DECISIONS);
+const AdjudicationDecisionSchema = z.enum(ADJUDICATION_DECISIONS);
 export type AdjudicationDecision = z.infer<typeof AdjudicationDecisionSchema>;
 
 /**

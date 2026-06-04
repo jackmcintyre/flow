@@ -11,7 +11,7 @@ import { CanonicalFsWriteError } from "../errors.js";
  * once it lands in Story 1.5, `lib/logger.ts`) from importing a
  * write-shaped `node:fs` API.
  */
-export const CANONICAL_PATH_GLOBS: readonly string[] = [
+const CANONICAL_PATH_GLOBS: readonly string[] = [
   ".flow/state/**",
   ".flow/telemetry/**",
   ".flow/retro-proposals/**",
@@ -73,7 +73,7 @@ function matchGlob(glob: string, relPath: string): boolean {
  * such a write is by definition not a canonical-state write under
  * this repo.
  */
-export function isCanonicalPath(
+function isCanonicalPath(
   absPath: string,
   targetRepoRoot: string,
 ): { canonical: boolean; matchedGlob?: string } {

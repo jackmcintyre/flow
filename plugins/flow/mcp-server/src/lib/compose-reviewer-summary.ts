@@ -86,7 +86,7 @@ export function composeVerdictLine(result: ReviewerResultFileShape): string {
  *
  * @param riskTier - The optional risk-tier block from the result file.
  */
-export function composeRiskTierEvidenceBlock(riskTier: RiskTierBlock | undefined): string {
+function composeRiskTierEvidenceBlock(riskTier: RiskTierBlock | undefined): string {
   if (riskTier === undefined) {
     return "";
   }

@@ -13,7 +13,7 @@ import { z } from "zod";
  * parser surfaces a typed error citing the cap when violated. Do
  * not relax.
  */
-export const CriterionSchema = z
+const CriterionSchema = z
   .object({
     name: z.string().min(1),
     what: z.string().min(1),

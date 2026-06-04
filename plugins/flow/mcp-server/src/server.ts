@@ -10,14 +10,14 @@ import type { RolePermissions } from "./schemas/role-permissions.js";
  * because later stories may compose schemas from Zod, hand-written
  * JSON Schema, or generators — we don't want to lock the shape now.
  */
-export interface ToolInputSchema {
+interface ToolInputSchema {
   type: "object";
   properties?: Record<string, unknown>;
   required?: string[];
   [key: string]: unknown;
 }
 
-export interface ToolCallResult {
+interface ToolCallResult {
   content: Array<{ type: "text"; text: string } | Record<string, unknown>>;
   isError?: boolean;
   [key: string]: unknown;
@@ -28,17 +28,17 @@ export interface ToolCallResult {
  * the MCP request carries `_meta.role`. Tools that don't need the
  * context just ignore `ctx`.
  */
-export interface ToolHandlerContext {
+interface ToolHandlerContext {
   role?: string;
   permissions?: RolePermissions;
 }
 
-export type ToolHandler = (
+type ToolHandler = (
   args: Record<string, unknown>,
   ctx?: ToolHandlerContext,
 ) => Promise<ToolCallResult> | ToolCallResult;
 
-export interface ToolDescriptor {
+interface ToolDescriptor {
   name: string;
   description: string;
   inputSchema: ToolInputSchema;

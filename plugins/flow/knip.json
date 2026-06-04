@@ -1,15 +1,14 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["workflows/**"],
   "ignoreBinaries": ["python3"],
-  "ignoreExportsUsedInFile": true,
+  "ignoreExportsUsedInFile": false,
   "workspaces": {
+    ".": {
+      "entry": ["workflows/*.js"],
+      "project": ["workflows/*.js"]
+    },
     "mcp-server": {
       "entry": ["src/cli.ts", "scripts/*.mjs"],
-      "project": ["src/**/*.ts"]
-    },
-    "mcp-proxy": {
-      "entry": ["src/index.ts", "scripts/*.mjs"],
       "project": ["src/**/*.ts"]
     }
   }

@@ -92,7 +92,7 @@ const USEFUL_VERDICT = "READY FOR MERGE" as const;
  * Per-skill effectiveness stats. `.strict()` so unknown-key injection is
  * rejected (mirrors `AgreementMetricResultSchema`'s posture).
  */
-export const PerSkillEffectivenessSchema = z
+const PerSkillEffectivenessSchema = z
   .object({
     invoke_count: z.number().int().nonnegative(),
     useful_fire_count: z.number().int().nonnegative(),
@@ -100,7 +100,7 @@ export const PerSkillEffectivenessSchema = z
   })
   .strict();
 
-export type PerSkillEffectiveness = z.infer<typeof PerSkillEffectivenessSchema>;
+type PerSkillEffectiveness = z.infer<typeof PerSkillEffectivenessSchema>;
 
 /**
  * Zod schema for the `computeSkillEffectiveness` return value. Mirrors

@@ -14,7 +14,7 @@
 
 import { vi } from "vitest";
 
-export interface GhStubResult {
+interface GhStubResult {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
@@ -26,7 +26,7 @@ export interface GhStubResult {
  * Matched when `args[1]` equals the given method and `args[0]` matches
  * the given URL (exact string or RegExp).
  */
-export interface GhApiRoute {
+interface GhApiRoute {
   /** URL to match (args[0]). String for exact match, RegExp for pattern. */
   url: string | RegExp;
   /** HTTP method to match (args[1], e.g. "GET", "POST", "PATCH"). */

@@ -136,10 +136,9 @@ async function realpathOrSelf(p: string): Promise<string> {
 
 /**
  * The directory that holds ALL of a session's dev-story worktrees — a sibling
- * of the checkout, never nested inside it. Exported so the reaper and tests
- * derive the same root.
+ * of the checkout, never nested inside it.
  */
-export function devStoryWorktreesRoot(
+function devStoryWorktreesRoot(
   targetRepoRoot: string,
   sessionUlid: string,
 ): string {

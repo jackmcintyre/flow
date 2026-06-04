@@ -23,7 +23,7 @@ import { z } from "zod";
  *
  * Strict mode: unknown keys raise a Zod error (MalformedGhErrorMapError in the caller).
  */
-export const GhErrorMapEntrySchema = z
+const GhErrorMapEntrySchema = z
   .object({
     exit_code: z.number().int(),
     stderr_regex: z.string().optional(),

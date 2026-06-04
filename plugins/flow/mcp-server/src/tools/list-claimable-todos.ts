@@ -25,7 +25,7 @@ import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { isClaimable } from "../state/manifest-state-machine.js";
 import { shortHandle } from "../lib/short-handle.js";
 
-export interface ClaimableCandidate {
+interface ClaimableCandidate {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
   ref: string;
   /**

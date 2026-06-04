@@ -623,4 +623,3 @@ export async function aggregateJudgePanel(
   });
 }
 
-export type { LensName, LensVerdict, PanelVerdict };

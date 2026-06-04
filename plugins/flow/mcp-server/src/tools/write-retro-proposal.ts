@@ -56,7 +56,6 @@ import { stringify as yamlStringify } from "yaml";
 import { RetroProposalAlreadyExistsError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import {
-  RetroProposalFileSchema,
   parseRetroProposalFile,
   type DurabilityRecommendation,
   type DurabilityRoutingContext,
@@ -507,7 +506,3 @@ function renderProposalFields(
   }
 }
 
-// Re-export the schema's `RetroProposalFileSchema` for callers that need
-// the raw schema (e.g. apply-tool tests in Epic 6b). Keeps the public
-// surface in one import path.
-export { RetroProposalFileSchema };

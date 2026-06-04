@@ -35,7 +35,7 @@ import type { AcResult } from "../../tools/run-reviewer-session.js";
  * local; no real GitHub org/repo is needed — the URL just needs to match the
  * `processDevTranscript` extraction regex.
  */
-export const SMOKE_PR_URL = "https://github.com/smoke-org/smoke-repo/pull/99";
+const SMOKE_PR_URL = "https://github.com/smoke-org/smoke-repo/pull/99";
 
 /**
  * The ref for the smoke story. Must be a valid Crockford ULID prefixed with "native:".

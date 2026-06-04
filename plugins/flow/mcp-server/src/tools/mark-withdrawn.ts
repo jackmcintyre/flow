@@ -22,7 +22,7 @@ import {
 import { STATE_NAMES, type StateName } from "../state/manifest-state-machine.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 
-export const MarkWithdrawnInputSchema = z.object({
+const MarkWithdrawnInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   ref: z.string().min(1),
 });

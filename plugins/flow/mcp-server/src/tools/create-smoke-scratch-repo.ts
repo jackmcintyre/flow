@@ -10,7 +10,7 @@ import { getPluginRoot } from "../lib/plugin-root.js";
 // Schemas
 // ---------------------------------------------------------------------------
 
-export const CreateSmokeScratchRepoOptionsSchema = z.object({
+const CreateSmokeScratchRepoOptionsSchema = z.object({
   /** Short kebab-case label embedded in the scratch directory name. */
   label: z.string().regex(/^[a-z0-9-]+$/, "label must be kebab-case (lowercase letters, digits, hyphens)").min(1),
   /** Parent directory under which the scratch dir is created. Defaults to os.tmpdir(). */

@@ -30,7 +30,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { listDirtyPaths, stashWorkingTree } from "../lib/git.js";
 
-export const GuardCleanRootInputSchema = z.object({
+const GuardCleanRootInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   /** Optional story ref for a more legible stash message / log line. */
   ref: z.string().min(1).optional(),

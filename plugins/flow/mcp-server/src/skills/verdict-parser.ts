@@ -44,7 +44,7 @@ export const VERDICT_SENTINELS = [
   "BLOCKED",
 ] as const;
 
-export type VerdictSentinel = (typeof VERDICT_SENTINELS)[number];
+type VerdictSentinel = (typeof VERDICT_SENTINELS)[number];
 
 export type VerdictParseResult =
   | { ok: true; sentinel: VerdictSentinel; details?: string }

@@ -33,7 +33,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 
-export type OverlapLocation = "to-do" | "in-progress" | "done";
+type OverlapLocation = "to-do" | "in-progress" | "done";
 
 export interface OverlapStory {
   /** Story ref, e.g. `native:01HZ...` (from the manifest, or the filename). */

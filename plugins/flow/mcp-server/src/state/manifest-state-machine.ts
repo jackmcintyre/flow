@@ -199,7 +199,7 @@ function operatorFieldsEqual(a: OperatorEditableFields, b: OperatorEditableField
  * `claimStory`), read by `detectInProgressHandEdit`, removed by
  * `removeInProgressSnapshot` on transition out of `in-progress/`.
  */
-export interface InProgressSnapshot {
+interface InProgressSnapshot {
   source_hash: string;
   title: string;
   narrative: string;

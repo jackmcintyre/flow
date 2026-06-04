@@ -195,5 +195,3 @@ export const NativeAdapter: PlanningAdapter = {
     return validateStoryAgainstDiscipline(story);
   },
 };
-
-export { parseNativeStory };

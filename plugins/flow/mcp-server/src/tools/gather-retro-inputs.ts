@@ -92,7 +92,7 @@ const TELEMETRY_FILE_REGEX = /\.jsonl$/;
  * One entry in the `recurringFriction` array — a friction kind that recurred
  * at or above the threshold (count >= 2) within the cycle.
  */
-export interface RecurringFrictionEntry {
+interface RecurringFrictionEntry {
   /** The friction kind (closed enum from `AgentFrictionEventSchema`). */
   kind: FrictionKind;
   /** How many `agent.friction` events of this kind occurred in the cycle. */
@@ -106,7 +106,7 @@ export interface RecurringFrictionEntry {
  *
  * Story native:01KT6RHTE3YME1ZAD5VRQAKDSW.
  */
-export interface MechanicalFailureDraft {
+interface MechanicalFailureDraft {
   /** The `failure_class` that triggered the draft. */
   failure_class: string;
   /** How many done-manifest pitfall lessons share this failure_class. */
@@ -118,7 +118,7 @@ export interface MechanicalFailureDraft {
 }
 
 /** Threshold: a failure_class must recur at least this many times to trigger a draft. */
-export const MECHANICAL_FAILURE_THRESHOLD = 2;
+const MECHANICAL_FAILURE_THRESHOLD = 2;
 
 /**
  * The deterministic input bundle handed to the retro-analyst subagent.
