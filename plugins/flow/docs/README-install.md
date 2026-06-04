@@ -192,13 +192,13 @@ Manifests in `<target-repo>/.flow/state/done/` may be hand-edited without any pl
 
 ## Build artefacts
 
-`plugins/flow/mcp-server/dist/` is **committed to git by design** (Story 1.9). `/plugin install` copies the working tree as-is and does not run a build step, so the compiled MCP server must already be present in the tree.
+The compiled MCP server is **committed to git by design** (Story 1.9): `/plugin install` copies the working tree as-is and does not run a build step, so the server must already be present in the tree. But only the **two self-contained bundles** are committed — `dist/index.js` (the MCP server entrypoint in `.claude-plugin/plugin.json`) and `dist/cli.js` (the workflow `node <cli> <tool>` seam). Both inline every dependency, so they boot with no `node_modules`, and they are all a clean-machine install actually loads. The rest of the tsc `dist/` tree (loose `.js` stubs + `.d.ts` types the bundles supersede) is **gitignored** (`mcp-server/.gitignore`) so a one-line `src/` change no longer drags ~566 generated files into its PR.
 
 Contract:
 
-- Any change to `plugins/flow/mcp-server/src/**` must be followed by `pnpm install --frozen-lockfile && pnpm build` from `plugins/flow/mcp-server/`, and the resulting `dist/` committed in the same change.
-- CI fails any PR where the committed `dist/` drifts from a fresh `pnpm build` (see `.github/workflows/ci.yml` — the `Verify committed dist/ matches fresh build` step runs `git diff --exit-code mcp-server/dist`). The vitest suite `tests/dist-shipping.test.ts` mirrors that check locally and also imports `dist/index.js` and `dist/tools/register.js` as a sentinel against partial builds.
-- Do NOT re-add `dist/` (or `**/dist/`) to any `.gitignore`. If a new workspace package needs its own `dist/` ignored, name it explicitly and leave a comment.
+- Any change to `plugins/flow/mcp-server/src/**` must be followed by `pnpm install --frozen-lockfile && pnpm build` from `plugins/flow/mcp-server/`, and the resulting `dist/index.js` + `dist/cli.js` committed in the same change (the other emitted files are ignored).
+- CI fails any PR where the committed bundles drift from a fresh `pnpm build` (see `.github/workflows/ci.yml` — the `Verify committed dist/ matches fresh build` step runs `git diff --exit-code mcp-server/dist`, which now only sees the two tracked files). The vitest suite `tests/dist-shipping.test.ts` mirrors the byte-for-byte drift check locally, and `scripts/assert-clean-install.mjs` (run by `pnpm build`) is the runtime ground-truth gate: it boots the server from ONLY the two committed bundles, so it fails if either bundle stops being self-contained.
+- Track exactly those two bundles under `dist/`. Do NOT commit the rest of the tsc output, and do NOT broaden the ignore to drop the two bundles — a clean-machine install would then have no server and die with `ERR_MODULE_NOT_FOUND`.
 - Do NOT introduce a `prepare` / `postinstall` build hook to "fix" this. `/plugin install` won't run it. The committed-artefact path is the v1 contract.
 
 > See Story 7.2 (Epic 7) for the full first-run walkthrough.

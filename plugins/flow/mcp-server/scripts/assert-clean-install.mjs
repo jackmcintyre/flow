@@ -3,12 +3,16 @@
 /**
  * Clean-install self-containment proof — the ground-truth guard.
  *
- * Copies the plugin tree to a temp dir WITHOUT node_modules (exactly what a
- * GitHub-marketplace or clean-machine install ships), then boots the bundled MCP
- * server and drives a real tool call over stdio. If the bundle still needs a
- * third-party dependency, this fails with `ERR_MODULE_NOT_FOUND` — catching the
- * regression that a static scan can't (e.g. an un-inlined transitive dep, or a
- * lazily-required module). Stronger than assert-bundle; the two run together.
+ * Copies the plugin tree to a temp dir WITHOUT node_modules AND with only the
+ * two committed bundles under dist/ (index.js + cli.js) — exactly what a
+ * GitHub-marketplace or clean-machine install ships now that the rest of the
+ * tsc dist tree is gitignored. Then boots the bundled MCP server and drives a
+ * real tool call over stdio. If the bundle still needs a third-party dependency
+ * — OR a sibling dist file that is no longer committed — this fails with
+ * `ERR_MODULE_NOT_FOUND`, catching the regression that a static scan can't
+ * (e.g. an un-inlined transitive dep, a lazily-required module, or a stray
+ * import of a now-untracked loose dist file). Stronger than assert-bundle; the
+ * two run together.
  *
  * Invoked by `pnpm build` after assert-bundle, so the guarantee holds locally and
  * in CI. Self-cleans its temp dir. Exits 1 on failure.
@@ -33,12 +37,26 @@ const TARGET = path.resolve(PLUGIN_ROOT, "..", "..");
 
 const MODULE_ERROR = /ERR_MODULE_NOT_FOUND|Cannot find (module|package)/;
 
+// Only these two self-contained bundles are committed under dist/; a clean
+// install ships nothing else there. Restrict the copy to them so this guard
+// proves the bundles boot in isolation (not propped up by loose local tsc output).
+const DIST = path.join(MCP_SERVER, "dist");
+const KEPT_DIST = new Set(["index.js", "cli.js"]);
+
 const work = await mkdtemp(path.join(tmpdir(), "flow-clean-install-"));
 try {
   const dest = path.join(work, "flow");
   await cp(PLUGIN_ROOT, dest, {
     recursive: true,
-    filter: (src) => !src.split(path.sep).includes("node_modules"),
+    filter: (src) => {
+      if (src.split(path.sep).includes("node_modules")) return false;
+      // Within dist/, copy ONLY the two committed bundles (skip the gitignored
+      // tsc tree — loose .js stubs, .d.ts, and the tools/lib/schemas subdirs).
+      if (src.startsWith(DIST + path.sep)) {
+        return KEPT_DIST.has(path.relative(DIST, src));
+      }
+      return true;
+    },
   });
 
   const entry = path.join(dest, "mcp-server", "dist", "index.js");

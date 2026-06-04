@@ -1,119 +1,82 @@
 import { describe, it, expect } from "vitest";
 import { execa } from "execa";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
  * Story 1.9 — Ship a pre-built dist/ with the plugin.
  *
- * Two blocks:
- *  (a) DRIFT — rebuild `dist/` into a temp dir and assert it matches the
- *      committed `dist/` byte-for-byte. Mirrors the CI step.
- *  (b) SENTINEL — dynamically import `dist/index.js` and
- *      `dist/tools/register.js`, asserting exports exist. Catches the
- *      partial-build / missing-tools-directory regression from PR #61.
+ * Only the two self-contained esbuild bundles are committed under dist/:
+ *   - dist/index.js — the MCP stdio server (.claude-plugin/plugin.json)
+ *   - dist/cli.js   — the stateless CLI seam (workflows)
+ * The rest of the tsc dist tree is gitignored (see mcp-server/.gitignore). The
+ * bundles inline every dependency, so these two files are all a clean-machine
+ * `/plugin install` loads at runtime. scripts/assert-clean-install.mjs is the
+ * runtime ground-truth gate (boots the server from ONLY these two files); this
+ * suite mirrors the shipping + drift contract in the test runner.
  *
- * For the index.js sentinel we spawn a short-lived child process rather
- * than importing in-process — `dist/index.js` calls `main()` at module
- * top level which connects an stdio transport and would hang the test
- * worker. Spawning + sending EOF lets the process tear down cleanly.
+ * Two blocks:
+ *  (a) SHIPPING CONTRACT — the two bundles are present and dist/index.js boots
+ *      without a module-resolution error (the partial-build regression, PR #61).
+ *  (b) DRIFT — re-bundle src/ into a temp dir and assert the committed bundles
+ *      match byte-for-byte. Mirrors the CI `git diff --exit-code` gate.
+ *
+ * For the index.js boot check we spawn a short-lived child process rather than
+ * importing in-process — `dist/index.js` calls `main()` at module top level,
+ * which connects an stdio transport and would hang the test worker.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_ROOT = resolve(HERE, "..");
 const DIST_DIR = resolve(SERVER_ROOT, "dist");
-const REGISTER_DIST = resolve(DIST_DIR, "tools/register.js");
 const INDEX_DIST = resolve(DIST_DIR, "index.js");
-
-async function walkFiles(root: string): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true, recursive: true });
-  return entries
-    .filter((e) => e.isFile())
-    .map((e) => {
-      // Node's recursive readdir sets `parentPath` on each Dirent.
-      const parent = (e as unknown as { parentPath?: string; path?: string })
-        .parentPath ?? (e as unknown as { path?: string }).path ?? root;
-      return relative(root, join(parent, e.name));
-    })
-    .sort();
-}
+const CLI_DIST = resolve(DIST_DIR, "cli.js");
+const COMMITTED_BUNDLES = ["index.js", "cli.js"];
 
 describe("dist shipping contract (Story 1.9)", () => {
-  describe("sentinel: committed dist/ exposes the expected modules", () => {
-    it("dist/tools/register.js exports registerAllTools", async () => {
-      const mod = await import(REGISTER_DIST);
-      expect(typeof mod.registerAllTools).toBe("function");
+  describe("shipping contract: the two committed bundles are present and boot", () => {
+    it("dist/index.js and dist/cli.js exist", async () => {
+      await expect(access(INDEX_DIST)).resolves.toBeUndefined();
+      await expect(access(CLI_DIST)).resolves.toBeUndefined();
     });
 
-    it("dist/index.js exists and starts as a node module without immediate crash", async () => {
-      // Spawn the entrypoint with stdin closed. The server connects an
-      // stdio transport and waits for input; closing stdin immediately
-      // should let it shut down. We assert it didn't crash with a
-      // MODULE_NOT_FOUND-style error in the first 1500ms.
-      const proc = execa("node", [INDEX_DIST], {
+    it("dist/index.js starts as a node module without a module-resolution crash", async () => {
+      // Spawn the entrypoint with stdin closed. The server connects an stdio
+      // transport and waits for input; closing stdin lets it shut down. If the
+      // bundle failed to inline a dependency — or reached for a now-untracked
+      // loose dist file — it exits non-zero with MODULE_NOT_FOUND on stderr.
+      // A timeout (process kept running waiting for stdio) is the OK outcome.
+      const result = await execa("node", [INDEX_DIST], {
         reject: false,
         timeout: 1500,
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
       });
-      const result = await proc;
-      // If the module failed to resolve (e.g. dist/tools/ missing), the
-      // process exits non-zero with a MODULE_NOT_FOUND on stderr.
-      // A timeout (process kept running waiting for stdio) is the OK
-      // outcome — execa surfaces it via `timedOut: true`.
       const stderr = result.stderr ?? "";
       expect(stderr).not.toMatch(/MODULE_NOT_FOUND|Cannot find module/);
     });
   });
 
-  describe("drift: a fresh full build (tsc + normalise + bundle) matches the committed dist/", () => {
-    it("byte-equal file set and contents", async () => {
+  describe("drift: a fresh bundle of src/ matches the committed bundles", () => {
+    it("index.js + cli.js are byte-equal to a fresh esbuild bundle", async () => {
       const tmpRoot = await mkdtemp(join(tmpdir(), "flow-dist-drift-"));
       try {
-        await execa(
-          "pnpm",
-          ["exec", "tsc", "-p", "tsconfig.json", "--outDir", tmpRoot],
-          { cwd: SERVER_ROOT },
-        );
-        // Story 5.24: committed dist/ is post-`normalise-dist.mjs` (the build script
-        // chains it after tsc). Mirror that here so this drift check compares
-        // apples-to-apples against what `pnpm build` actually produces.
-        const normaliser = await import(
-          resolve(SERVER_ROOT, "scripts/normalise-dist.mjs")
-        ) as { normaliseDistTree: (root: string) => Promise<string[]> };
-        await normaliser.normaliseDistTree(tmpRoot);
-
-        // The committed dist's index.js + cli.js are esbuild bundles, not raw
-        // tsc output. Reproduce the same bundle step into the temp dir so the
-        // drift check compares against the FULL build (tsc + normalise + bundle)
-        // — exactly what `pnpm build` and the CI drift gate produce.
+        // bundle.mjs reads entry sources from the real src/ and writes the two
+        // bundles to CREW_BUNDLE_OUT_DIR — exactly what `pnpm build` and the CI
+        // drift gate produce for the committed files.
         await execa("node", ["scripts/bundle.mjs"], {
           cwd: SERVER_ROOT,
           env: { ...process.env, CREW_BUNDLE_OUT_DIR: tmpRoot },
         });
 
-        const [committed, fresh] = await Promise.all([
-          walkFiles(DIST_DIR),
-          walkFiles(tmpRoot),
-        ]);
-
-        // 1. file sets are identical
-        const onlyInCommitted = committed.filter((f) => !fresh.includes(f));
-        const onlyInFresh = fresh.filter((f) => !committed.includes(f));
-        expect(
-          { onlyInCommitted: onlyInCommitted.slice(0, 5), onlyInFresh: onlyInFresh.slice(0, 5) },
-        ).toEqual({ onlyInCommitted: [], onlyInFresh: [] });
-
-        // 2. contents match byte-for-byte
         const divergent: string[] = [];
-        for (const rel of committed) {
-          const a = await readFile(join(DIST_DIR, rel));
-          const b = await readFile(join(tmpRoot, rel));
-          if (!a.equals(b)) divergent.push(rel);
-          if (divergent.length >= 5) break;
+        for (const rel of COMMITTED_BUNDLES) {
+          const committed = await readFile(join(DIST_DIR, rel));
+          const fresh = await readFile(join(tmpRoot, rel));
+          if (!committed.equals(fresh)) divergent.push(rel);
         }
         expect(divergent).toEqual([]);
       } finally {

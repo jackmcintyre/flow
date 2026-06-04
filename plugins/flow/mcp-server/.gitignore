@@ -1,0 +1,14 @@
+# Build output. Only the two self-contained esbuild bundles are committed —
+# `dist/index.js` (the MCP server entrypoint in .claude-plugin/plugin.json) and
+# `dist/cli.js` (the workflow `node <cli> <tool>` seam). Together they are all a
+# clean-machine `/plugin install` actually loads at runtime; both inline every
+# dependency, so they boot with no node_modules. Everything else under dist/ is
+# tsc output (loose .js stubs + .d.ts types) that the bundles supersede — kept
+# out of git so a one-line src change no longer drags ~566 generated files into
+# its PR (the diff/merge-conflict surface that motivated this).
+#
+# Gated by scripts/assert-clean-install.mjs, which boots the server from ONLY
+# these two files. See docs/README-install.md § Build artefacts before changing.
+/dist/*
+!/dist/index.js
+!/dist/cli.js
