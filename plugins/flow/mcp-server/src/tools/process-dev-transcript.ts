@@ -27,6 +27,8 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
+import { buildBranchSlug } from "../lib/pr-body.js";
+import { execa as defaultExeca } from "execa";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -53,6 +55,12 @@ export interface ProcessDevTranscriptOptions {
   sessionUlid: string;
   ref: string;
   devTranscript: string;
+  /**
+   * Test seam for the in-line PR-recovery fallback (Story: dev-outcome seam
+   * hardening). Production callers omit it and the real `execa` is used to query
+   * GitHub. Injected in tests so the `gh pr list` lookup is deterministic.
+   */
+  execaImpl?: typeof defaultExeca;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +120,7 @@ export async function processDevTranscript(
   opts: ProcessDevTranscriptOptions,
 ): Promise<ProcessDevTranscriptResult> {
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
+  const execaImpl = opts.execaImpl ?? defaultExeca;
   const chatLog: string[] = [];
 
   const manifestPath = path.resolve(
@@ -235,12 +244,32 @@ export async function processDevTranscript(
       lastMatch = m;
     }
 
-    if (lastMatch === null) {
-      const tail = devTranscript.slice(-500);
-      throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
-    }
+    if (lastMatch !== null) {
+      prNumber = parseInt(lastMatch[1]!, 10);
+    } else {
+      // Last-resort recovery (dev-outcome seam hardening): no dev-outcome.json AND
+      // no PR URL in the (synthesized) handoff. This is the orphan class where the
+      // dev opened a PR by hand after the pre-PR gate refused, so nothing recorded
+      // the PR. Ask GitHub directly for an open PR on this story's reproduced branch
+      // and route it to review ON THE SAME PASS — the in-line analogue of the #287
+      // orphan-scan recovery. Without this, a green PR is stranded until the next drain.
+      const recovered = await findOpenPrForRef({
+        targetRepoRoot,
+        ref,
+        manifestPath,
+        execaImpl,
+      });
 
-    prNumber = parseInt(lastMatch[1]!, 10);
+      if (recovered === null) {
+        const tail = devTranscript.slice(-500);
+        throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
+      }
+
+      prNumber = recovered;
+      chatLog.push(
+        `dev-outcome.json absent and no PR URL in handoff — recovered open PR #${recovered} for ${ref} via gh pr list; routing to review.`,
+      );
+    }
   }
 
   // Handoff parsed OK — compute the reviewer spawn prompt.
@@ -268,5 +297,50 @@ function buildActionHint(errorClass: "defer" | "retry" | "needs-human"): string 
       return "transient network error; re-run /flow:start (v2 will auto-retry)";
     case "needs-human":
       return "run `gh auth login` then re-run /flow:start";
+  }
+}
+
+/**
+ * Recover the PR number for an orphaned-but-real PR when no dev-outcome.json and
+ * no transcript URL are available. Reproduces the dev branch deterministically
+ * from `{ref, title}` (the manifest carries the title) — the same slug the dev
+ * tool, the dep-merge check, and the orphan scan use — and asks GitHub for an
+ * open PR on that head. Returns the PR number, or `null` if it cannot prove one
+ * (un-reproducible slug, gh error, empty/!parseable output) — in which case the
+ * caller throws the original not-found error. Fail-safe: any failure → null.
+ */
+async function findOpenPrForRef(opts: {
+  targetRepoRoot: string;
+  ref: string;
+  manifestPath: string;
+  execaImpl: typeof defaultExeca;
+}): Promise<number | null> {
+  let branch: string;
+  try {
+    const manifest = await readManifest(opts.manifestPath);
+    branch = buildBranchSlug({ ref: opts.ref, title: manifest.title });
+  } catch {
+    return null;
+  }
+
+  try {
+    const result = await opts.execaImpl(
+      "gh",
+      ["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1"],
+      { cwd: opts.targetRepoRoot },
+    );
+    const stdout = (result.stdout ?? "").trim();
+    if (stdout === "") return null;
+    const parsed: unknown = JSON.parse(stdout);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      typeof (parsed[0] as { number?: unknown }).number === "number"
+    ) {
+      return (parsed[0] as { number: number }).number;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }

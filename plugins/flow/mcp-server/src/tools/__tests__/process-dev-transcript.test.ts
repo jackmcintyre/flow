@@ -30,6 +30,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { devOutcomeFilePath } from "../../lib/read-dev-outcome-file.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
+import { buildBranchSlug } from "../../lib/pr-body.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,61 @@ describe("(a) happy handoff → spawn-reviewer", () => {
     // Manifest NOT mutated (no blocked_by).
     const onDisk = await readOnDiskManifest();
     expect(onDisk.blocked_by).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (a2) In-line PR recovery — dev-outcome.json absent AND no PR URL in the
+// (synthesized) handoff. This is the orphan class the dev-outcome seam fix
+// targets: the dev opened a PR by hand after the pre-PR gate refused, so nothing
+// recorded it. The tool must recover the PR from GitHub on the same pass instead
+// of throwing PrUrlNotFoundInDevTranscriptError. The old tests mocked both git
+// and the ignore-filter on the HAPPY path, so this orphan class was never
+// exercised — which is exactly why #286/#306 slipped through.
+// ---------------------------------------------------------------------------
+
+describe("(a2) dev-outcome absent + no PR URL → recover open PR via gh pr list", () => {
+  it("returns spawn-reviewer with the recovered prNumber, querying the reproduced branch", async () => {
+    const expectedBranch = buildBranchSlug({ ref: STORY_REF, title: "Test Story" });
+    let queriedArgs: readonly string[] | null = null;
+    const fakeExeca = (async (_cmd: string, args: readonly string[]) => {
+      queriedArgs = args;
+      return { stdout: JSON.stringify([{ number: 306 }]) };
+    }) as unknown as typeof import("execa").execa;
+
+    const result = await processDevTranscript({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      ref: STORY_REF,
+      // Hands off cleanly, but carries NO PR URL — exactly what the drain passes
+      // (the synthesized handoff phrase) when no dev-outcome.json was written.
+      devTranscript: HANDOFF_PHRASE,
+      execaImpl: fakeExeca,
+    });
+
+    expect(result.next).toBe("spawn-reviewer");
+    if (result.next !== "spawn-reviewer") return;
+    expect(result.prNumber).toBe(306);
+    // Regression guard: the lookup queried the deterministically-reproduced branch.
+    expect(queriedArgs).toContain("--head");
+    expect(queriedArgs).toContain(expectedBranch);
+    expect(
+      result.chatLog.some((l) => l.includes("recovered open PR #306")),
+    ).toBe(true);
+  });
+
+  it("throws PrUrlNotFoundInDevTranscriptError when GitHub reports no open PR", async () => {
+    const fakeExeca = (async () => ({ stdout: "[]" })) as unknown as typeof import("execa").execa;
+
+    await expect(
+      processDevTranscript({
+        targetRepoRoot: tmpRoot,
+        sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
+        devTranscript: HANDOFF_PHRASE,
+        execaImpl: fakeExeca,
+      }),
+    ).rejects.toThrow();
   });
 });
 

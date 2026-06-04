@@ -37965,6 +37965,7 @@ var NEEDS_HUMAN_DECISION_RE = /^needs-human-decision:[ \t]*(\S.*\S|\S)[ \t]*$/m;
 var PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/g;
 async function processDevTranscript(opts) {
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
+  const execaImpl = opts.execaImpl ?? execa;
   const chatLog = [];
   const manifestPath = path42.resolve(
     targetRepoRoot,
@@ -38024,11 +38025,24 @@ async function processDevTranscript(opts) {
     while ((m = prUrlReClone.exec(devTranscript)) !== null) {
       lastMatch = m;
     }
-    if (lastMatch === null) {
-      const tail = devTranscript.slice(-500);
-      throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
+    if (lastMatch !== null) {
+      prNumber = parseInt(lastMatch[1], 10);
+    } else {
+      const recovered = await findOpenPrForRef({
+        targetRepoRoot,
+        ref,
+        manifestPath,
+        execaImpl
+      });
+      if (recovered === null) {
+        const tail = devTranscript.slice(-500);
+        throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
+      }
+      prNumber = recovered;
+      chatLog.push(
+        `dev-outcome.json absent and no PR URL in handoff \u2014 recovered open PR #${recovered} for ${ref} via gh pr list; routing to review.`
+      );
     }
-    prNumber = parseInt(lastMatch[1], 10);
   }
   const { systemPrompt: reviewerPrompt } = await buildPersonaSpawnPrompt({
     targetRepoRoot,
@@ -38047,6 +38061,31 @@ function buildActionHint(errorClass) {
       return "transient network error; re-run /flow:start (v2 will auto-retry)";
     case "needs-human":
       return "run `gh auth login` then re-run /flow:start";
+  }
+}
+async function findOpenPrForRef(opts) {
+  let branch;
+  try {
+    const manifest = await readManifest(opts.manifestPath);
+    branch = buildBranchSlug({ ref: opts.ref, title: manifest.title });
+  } catch {
+    return null;
+  }
+  try {
+    const result = await opts.execaImpl(
+      "gh",
+      ["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1"],
+      { cwd: opts.targetRepoRoot }
+    );
+    const stdout = (result.stdout ?? "").trim();
+    if (stdout === "") return null;
+    const parsed = JSON.parse(stdout);
+    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0].number === "number") {
+      return parsed[0].number;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
