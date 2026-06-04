@@ -165,14 +165,38 @@ describe("(a) spawn-dev — eligible (depsReady: true) story in to-do/", () => {
             return;
         expect(result.ref).toBe(STORY_REF_B);
     });
-    it("claims a story with a met dep when done/ contains that dep", async () => {
+    it("claims a story with a met dep when done/ contains that dep AND it is merged", async () => {
         await seedDoneStory(DEP_REF);
         await seedTodoStory(makeTodoManifest(STORY_REF_A, { depends_on: [DEP_REF] }));
-        const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+        const result = await claimNextStory({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            isDependencyMerged: async () => true,
+        });
         expect(result.next).toBe("spawn-dev");
         if (result.next !== "spawn-dev")
             return;
         expect(result.ref).toBe(STORY_REF_A);
+    });
+    it("build-blind fix: does NOT claim a story whose dep is in done/ but not merged", async () => {
+        // The prerequisite is approved (in done/) but its PR is not yet merged.
+        // Claiming the dependent here would build it from a main that lacks the
+        // prerequisite — the exact defect the merge gate closes.
+        await seedDoneStory(DEP_REF);
+        await seedTodoStory(makeTodoManifest(STORY_REF_A, { depends_on: [DEP_REF] }));
+        const result = await claimNextStory({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            isDependencyMerged: async () => false,
+        });
+        // Nothing else is claimable and nothing is in-progress → queue-drained.
+        expect(result.next).toBe("queue-drained");
+        // The dependent is still sitting in to-do/ (never claimed).
+        const stillTodo = await fs
+            .stat(path.join(todoDir, `${STORY_REF_A}.yaml`))
+            .then(() => true)
+            .catch(() => false);
+        expect(stillTodo).toBe(true);
     });
 });
 // ---------------------------------------------------------------------------
