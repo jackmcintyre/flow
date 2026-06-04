@@ -26387,8 +26387,8 @@ async function getStatus(opts) {
 }
 
 // src/tools/open-cycle.ts
-var import_yaml5 = __toESM(require_dist(), 1);
-import * as path13 from "node:path";
+var import_yaml7 = __toESM(require_dist(), 1);
+import * as path17 from "node:path";
 
 // ../node_modules/.pnpm/ulid@3.0.2/node_modules/ulid/dist/node/index.js
 import crypto from "node:crypto";
@@ -26706,9 +26706,9 @@ async function logTelemetryEvent(opts) {
 }
 
 // src/tools/gather-retro-inputs.ts
-var import_yaml4 = __toESM(require_dist(), 1);
-import { promises as fs10 } from "node:fs";
-import * as path12 from "node:path";
+var import_yaml6 = __toESM(require_dist(), 1);
+import { promises as fs12 } from "node:fs";
+import * as path16 from "node:path";
 
 // src/schemas/risk-tiering-spec.ts
 var ChangeTypeSchema = external_exports.enum(["revert", "migration", "schema", "dep-bump"]);
@@ -27414,8 +27414,610 @@ async function computeSkillEffectiveness(opts) {
   };
 }
 
+// src/tools/write-native-story.ts
+import { createHash as createHash3 } from "node:crypto";
+import * as path13 from "node:path";
+
+// src/validators/discipline-resolvability.ts
+import { promises as fs10 } from "node:fs";
+import * as path12 from "node:path";
+function isWellFormedTarget(target) {
+  const t = target.trim();
+  if (t.length === 0) return false;
+  if (/\s/.test(t)) return false;
+  if (t.startsWith("-")) return false;
+  if (path12.isAbsolute(t)) return false;
+  return true;
+}
+async function statOrNull(absPath) {
+  try {
+    return await fs10.stat(absPath);
+  } catch {
+    return null;
+  }
+}
+async function resolveDisciplinePaths(story, targetRepoRoot) {
+  if (!isEnrichedStory(story)) return [];
+  const reasons = [];
+  const citedSources = story.cited_sources ?? [];
+  if (citedSources.length === 0) {
+    reasons.push({
+      code: "missing-cited-sources",
+      field: "cited_sources",
+      detail: "Native story cites no sources. Every native story must list \u22651 repo-relative path in '## Cited Sources' (the files the author read to ground the story)."
+    });
+  } else {
+    for (const cited of citedSources) {
+      const abs = path12.resolve(targetRepoRoot, cited);
+      if (await statOrNull(abs) === null) {
+        reasons.push({
+          code: "unresolvable-cited-source",
+          field: "cited_sources",
+          detail: `Cited source '${cited}' does not resolve on disk (looked at '${abs}'). Cited sources are files the author read \u2014 fix the path or remove the citation.`
+        });
+      }
+    }
+  }
+  story.acceptance_criteria.forEach((ac, i2) => {
+    const v = ac.verification;
+    if (!v) return;
+    if (!isWellFormedTarget(v.target)) {
+      reasons.push({
+        code: "invalid-verification-target",
+        field: `acceptance_criteria[${i2}].verification.target`,
+        detail: `AC${i2 + 1} verification target '${v.target}' is not a well-formed repo-relative path. Reject invented flags / non-path strings (e.g. 'vitest --grep \u2026'); the target must name a single path (a test file for 'vitest:', an artifact for 'artifact:').`
+      });
+      return;
+    }
+  });
+  for (let i2 = 0; i2 < story.acceptance_criteria.length; i2++) {
+    const v = story.acceptance_criteria[i2].verification;
+    if (!v) continue;
+    if (v.type !== "artifact") continue;
+    if (!isWellFormedTarget(v.target)) continue;
+    const abs = path12.resolve(targetRepoRoot, v.target);
+    if (await statOrNull(abs) === null) {
+      reasons.push({
+        code: "unresolvable-verification-target",
+        field: `acceptance_criteria[${i2}].verification.target`,
+        detail: `AC${i2 + 1} artifact verification target '${v.target}' does not resolve on disk (looked at '${abs}'). An 'artifact:' target is an existing contract and must resolve; only 'vitest:' targets (build outputs) are exempt.`
+      });
+    }
+  }
+  return reasons;
+}
+
+// src/tools/write-native-story.ts
+var WriteNativeStoryInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  title: external_exports.string().min(1),
+  /**
+   * Story 10.2 — the narrative is now a structured `{ role, want, so_that }`
+   * object. REQUIRED on the native write path (mirrors the `verification`
+   * precedent from 10.1). `renderNativeStoryBody` emits the canonical
+   * "As a {role}, I want {want}, so that {so_that}." sentence and
+   * `parseNativeStory` parses exactly that grammar back, closing the round-trip.
+   */
+  narrative: external_exports.object({
+    role: external_exports.string().min(1),
+    want: external_exports.string().min(1),
+    so_that: external_exports.string().min(1)
+  }),
+  acceptance_criteria: external_exports.array(
+    external_exports.object({
+      text: external_exports.string().min(1),
+      kind: external_exports.enum(["integration", "unit"]),
+      /**
+       * Story 10.1 — every native AC carries a structured verification
+       * directive. REQUIRED on the native write path (mirrors the
+       * three-site `kind` enum precedent: parser, this schema, manifest
+       * schema). `target` is non-empty; resolvability of the path is the
+       * 10.3 T0-6 check, not enforced here.
+       */
+      verification: external_exports.object({
+        type: external_exports.enum(["vitest", "artifact"]),
+        target: external_exports.string().min(1)
+      })
+    })
+  ).min(1),
+  /**
+   * Story 10.2 — implementation tasks. REQUIRED on the native write path: ≥1
+   * task, each carrying ≥1 `ac_refs` (e.g. `["AC1", "AC3"]`). The pre-write
+   * round-trip through `parseNativeStory` additionally rejects a task whose
+   * `ac_ref` dangles (names an AC the story does not declare). Whole-story
+   * T0-1 enforcement at scan time is Story 10.3.
+   */
+  tasks: external_exports.array(
+    external_exports.object({
+      text: external_exports.string().min(1),
+      ac_refs: external_exports.array(external_exports.string().min(1)).min(1)
+    })
+  ).min(1),
+  /**
+   * Story 10.2 — repo-relative source paths cited by the story. REQUIRED on the
+   * native write path: ≥1 path. That each path *resolves on disk* is T0-5
+   * (Story 10.3) — not enforced here.
+   */
+  cited_sources: external_exports.array(external_exports.string().min(1)).min(1),
+  implementation_notes: external_exports.string().optional(),
+  /**
+   * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
+   * a non-empty build-time default is substituted so the rendered
+   * `## Implementation Notes` always carries all three `###` sub-sections.
+   */
+  files_touched: external_exports.string().optional(),
+  definition_of_done: external_exports.string().optional(),
+  risk_reasoning: external_exports.string().optional(),
+  depends_on: external_exports.array(external_exports.string()),
+  /**
+   * Session id for the `draft.authored` telemetry envelope. Optional — the
+   * author subagent / `/flow:author` skill passes its orchestration session
+   * ULID when available; defaults to a stable operator marker so the event
+   * still validates when authored interactively. (Story 9.2)
+   */
+  sessionUlid: external_exports.string().min(1).optional()
+});
+var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
+var DEFAULT_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
+  "- [ ] `pnpm test` green (all tests passing).",
+  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
+  "- [ ] PR opened against `main` with CI green."
+].join("\n");
+var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
+function renderNarrativeSentence(narrative) {
+  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+}
+function renderNativeStoryBody(input) {
+  const lines = [`# ${input.title}`, ""];
+  lines.push("## Narrative", "");
+  lines.push(renderNarrativeSentence(input.narrative));
+  lines.push("");
+  lines.push("## Acceptance Criteria", "");
+  for (let i2 = 0; i2 < input.acceptance_criteria.length; i2++) {
+    const ac = input.acceptance_criteria[i2];
+    const tag = ac.kind === "integration" ? " (integration)" : "";
+    lines.push(`**AC${i2 + 1}${tag}:**`);
+    lines.push(ac.text);
+    lines.push(`${ac.verification.type}: ${ac.verification.target}`);
+    lines.push("");
+  }
+  lines.push("## Tasks", "");
+  for (const task of input.tasks) {
+    const nums = task.ac_refs.map((r) => r.replace(/^AC/i, "")).join(", ");
+    lines.push(`- ${task.text} (AC: ${nums})`);
+  }
+  lines.push("");
+  lines.push("## Cited Sources", "");
+  for (const src of input.cited_sources) {
+    lines.push(`- ${src}`);
+  }
+  lines.push("");
+  lines.push("## Implementation Notes", "");
+  lines.push(renderImplementationNotesBody(input));
+  lines.push("");
+  lines.push("## Dependencies", "");
+  if (input.depends_on.length > 0) {
+    lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
+    for (const dep of input.depends_on) {
+      lines.push(`- ${dep}`);
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+async function writeNativeStory(rawInput) {
+  const input = WriteNativeStoryInputSchema.parse(rawInput);
+  const targetRepoRoot = path13.resolve(input.targetRepoRoot);
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  if (workspace.activeAdapterName !== "native") {
+    throw new WrongAdapterError({
+      expectedAdapter: "native",
+      actualAdapter: workspace.activeAdapterName,
+      targetRepoRoot,
+      toolName: "writeNativeStory"
+    });
+  }
+  return renderGateWriteNativeStory(input, targetRepoRoot);
+}
+async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
+  const newUlid = ulid3();
+  const storiesDir = path13.join(targetRepoRoot, ".flow", "native-stories");
+  const absPath = path13.join(storiesDir, `${newUlid}.md`);
+  const ref = `native:${newUlid}`;
+  const candidate = inputToSourceStory(input, ref, absPath);
+  const pureResult = validateStoryAgainstDiscipline(candidate);
+  const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
+  violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
+  if (violations.length > 0) {
+    throw new DisciplineViolationError({ violations });
+  }
+  const body = renderNativeStoryBody(input);
+  parseNativeStory(absPath, body);
+  await atomicWriteFile(absPath, body);
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "draft.authored",
+      session_id: input.sessionUlid ?? "operator",
+      agent,
+      story_id: ref,
+      data: { ref, title: input.title }
+    }
+  });
+  return { ref, path: absPath };
+}
+function renderImplementationNotesBody(input) {
+  const parts = [];
+  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
+    parts.push(input.implementation_notes.trim());
+    parts.push("");
+  }
+  const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
+  parts.push("### Files touched", "", filesTouched, "");
+  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+  parts.push("### Definition of Done", "", dod, "");
+  const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
+  parts.push("### Risk", "", risk, "");
+  return parts.join("\n").trim();
+}
+function inputToSourceStory(input, ref, absPath) {
+  return {
+    ref,
+    title: input.title,
+    // The discipline validator scans the raw narrative string for implicit
+    // depends-on refs, so pass the canonical rendered sentence (10.2).
+    narrative: renderNarrativeSentence(input.narrative),
+    narrative_struct: input.narrative,
+    acceptance_criteria: input.acceptance_criteria,
+    depends_on: input.depends_on,
+    // Story 10.8: pass the full rendered implementation notes (including the
+    // three build-ready sub-sections with their defaults) so the discipline
+    // gate sees the same text the file will contain.
+    implementation_notes: renderImplementationNotesBody(input),
+    tasks: input.tasks,
+    cited_sources: input.cited_sources,
+    raw_path: absPath,
+    raw_frontmatter: { title: input.title, ref },
+    source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
+  };
+}
+
+// src/tools/read-backlog-inventory.ts
+var import_yaml5 = __toESM(require_dist(), 1);
+import { promises as fs11 } from "node:fs";
+import * as path15 from "node:path";
+
+// src/state/manifest-state-machine.ts
+var import_yaml4 = __toESM(require_dist(), 1);
+import { rename, mkdir, stat, readFile, unlink } from "node:fs/promises";
+import * as path14 from "node:path";
+var STATE_NAMES = [
+  "to-do",
+  "in-progress",
+  "blocked",
+  "done"
+];
+var DEFAULT_FS_IMPL = {
+  rename: (from, to) => rename(from, to),
+  mkdir: (dir, opts) => mkdir(dir, opts),
+  stat: (p) => stat(p)
+};
+function isStateName(value) {
+  return STATE_NAMES.includes(value);
+}
+async function moveBetweenStates(opts) {
+  const { targetRepoRoot, ref, from, to } = opts;
+  const fsImpl = opts.fsImpl ?? DEFAULT_FS_IMPL;
+  if (!isStateName(from) || !isStateName(to)) {
+    throw new InvalidStateNameError({
+      attemptedFrom: from,
+      attemptedTo: to,
+      allowedStates: STATE_NAMES,
+      reason: "unknown state name"
+    });
+  }
+  const stateRoot = path14.join(targetRepoRoot, ".flow", "state");
+  const absFromPath = path14.join(stateRoot, from, ref + ".yaml");
+  const absToPath = path14.join(stateRoot, to, ref + ".yaml");
+  for (const absPath of [absFromPath, absToPath]) {
+    const rel = path14.relative(stateRoot, absPath);
+    if (rel.startsWith("..") || path14.isAbsolute(rel)) {
+      throw new InvalidStateNameError({
+        attemptedFrom: from,
+        attemptedTo: to,
+        allowedStates: STATE_NAMES,
+        reason: "path escapes state root"
+      });
+    }
+  }
+  await fsImpl.mkdir(path14.dirname(absToPath), { recursive: true });
+  try {
+    await fsImpl.rename(absFromPath, absToPath);
+  } catch (err) {
+    const code = err?.code;
+    if (code === "EXDEV") {
+      throw new CrossFilesystemMoveError({
+        absFromPath,
+        absToPath,
+        ref,
+        originalCode: "EXDEV"
+      });
+    }
+    if (code === "ENOENT") {
+      throw new ManifestNotFoundError({
+        ref,
+        expectedAbsPath: absFromPath,
+        fromState: from
+      });
+    }
+    throw err;
+  }
+  return { from, to, ref, absFromPath, absToPath };
+}
+function operatorFieldsEqual(a2, b) {
+  if (a2.title !== b.title) return false;
+  if (a2.narrative !== b.narrative) return false;
+  if (a2.implementation_notes !== b.implementation_notes) return false;
+  if (a2.withdrawn !== b.withdrawn) return false;
+  if (a2.acceptance_criteria.length !== b.acceptance_criteria.length) return false;
+  for (let i2 = 0; i2 < a2.acceptance_criteria.length; i2++) {
+    const ac_a = a2.acceptance_criteria[i2];
+    const ac_b = b.acceptance_criteria[i2];
+    if (ac_a.text !== ac_b.text || ac_a.kind !== ac_b.kind) return false;
+  }
+  if (a2.depends_on.length !== b.depends_on.length) return false;
+  for (let i2 = 0; i2 < a2.depends_on.length; i2++) {
+    if (a2.depends_on[i2] !== b.depends_on[i2]) return false;
+  }
+  return true;
+}
+function snapshotPath(targetRepoRoot, ref) {
+  return path14.join(targetRepoRoot, ".flow", "state", "in-progress", `${ref}.snapshot.yaml`);
+}
+async function writeInProgressSnapshot(opts) {
+  const { targetRepoRoot, ref, manifest } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  const snapshot = {
+    source_hash: manifest.source_hash,
+    title: manifest.title,
+    narrative: manifest.narrative,
+    acceptance_criteria: manifest.acceptance_criteria,
+    implementation_notes: manifest.implementation_notes,
+    depends_on: manifest.depends_on,
+    withdrawn: manifest.withdrawn
+  };
+  const yamlText = (0, import_yaml4.stringify)(snapshot, { lineWidth: 0 });
+  await atomicWriteFile(absPath, yamlText);
+  return { absPath };
+}
+async function removeInProgressSnapshot(opts) {
+  const { targetRepoRoot, ref } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  try {
+    await unlink(absPath);
+  } catch (err) {
+    const code = err?.code;
+    if (code === "ENOENT") return;
+    throw err;
+  }
+}
+async function readInProgressSnapshot(opts) {
+  const { targetRepoRoot, ref } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  try {
+    const raw = await readFile(absPath, "utf8");
+    const parsed = (0, import_yaml4.parse)(raw);
+    return parsed;
+  } catch (err) {
+    const code = err?.code;
+    if (code === "ENOENT") return null;
+    throw err;
+  }
+}
+async function detectInProgressHandEdit(opts) {
+  const { targetRepoRoot, ref } = opts;
+  const absPath = path14.join(targetRepoRoot, ".flow", "state", "in-progress", ref + ".yaml");
+  let rawText;
+  try {
+    rawText = await readFile(absPath, "utf8");
+  } catch (err) {
+    const code = err?.code;
+    if (code === "ENOENT") {
+      throw new ManifestNotFoundError({
+        ref,
+        expectedAbsPath: absPath,
+        fromState: "in-progress"
+      });
+    }
+    throw err;
+  }
+  const parsed = (0, import_yaml4.parse)(rawText);
+  const manifest = parseExecutionManifest(parsed, { absPath });
+  const snapshot = await readInProgressSnapshot({ targetRepoRoot, ref });
+  if (snapshot === null) {
+    throw new InProgressHandEditError({
+      ref,
+      changedFields: ["_snapshot_missing"],
+      absPath
+    });
+  }
+  const changedFields = [];
+  if (manifest.source_hash !== snapshot.source_hash) {
+    changedFields.push("source_hash");
+  }
+  const snapshotFields = {
+    title: snapshot.title,
+    narrative: snapshot.narrative,
+    acceptance_criteria: snapshot.acceptance_criteria,
+    implementation_notes: snapshot.implementation_notes,
+    depends_on: [...snapshot.depends_on],
+    withdrawn: snapshot.withdrawn
+  };
+  const diskFields = {
+    title: manifest.title,
+    narrative: manifest.narrative,
+    acceptance_criteria: manifest.acceptance_criteria,
+    implementation_notes: manifest.implementation_notes,
+    depends_on: manifest.depends_on,
+    withdrawn: manifest.withdrawn
+  };
+  if (!operatorFieldsEqual(diskFields, snapshotFields)) {
+    if (diskFields.title !== snapshotFields.title) changedFields.push("title");
+    if (diskFields.narrative !== snapshotFields.narrative) changedFields.push("narrative");
+    if (diskFields.implementation_notes !== snapshotFields.implementation_notes)
+      changedFields.push("implementation_notes");
+    if (diskFields.withdrawn !== snapshotFields.withdrawn) changedFields.push("withdrawn");
+    const acA = diskFields.acceptance_criteria;
+    const acB = snapshotFields.acceptance_criteria;
+    let acDiffers = acA.length !== acB.length;
+    if (!acDiffers) {
+      for (let i2 = 0; i2 < acA.length; i2++) {
+        if (acA[i2].text !== acB[i2].text || acA[i2].kind !== acB[i2].kind) {
+          acDiffers = true;
+          break;
+        }
+      }
+    }
+    if (acDiffers) changedFields.push("acceptance_criteria");
+    const doA = diskFields.depends_on;
+    const doB = snapshotFields.depends_on;
+    let doDiffers = doA.length !== doB.length;
+    if (!doDiffers) {
+      for (let i2 = 0; i2 < doA.length; i2++) {
+        if (doA[i2] !== doB[i2]) {
+          doDiffers = true;
+          break;
+        }
+      }
+    }
+    if (doDiffers) changedFields.push("depends_on");
+  }
+  if (changedFields.length > 0) {
+    throw new InProgressHandEditError({ ref, changedFields, absPath });
+  }
+  return { ok: true };
+}
+function isClaimable(manifest) {
+  return manifest.withdrawn === false && manifest.status === "to-do";
+}
+
+// src/tools/read-backlog-inventory.ts
+var ReadBacklogInventoryInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  /**
+   * Optional single-item filter. When set, only the entry whose `ref` matches
+   * is returned (the others are still scanned so `mode` stays accurate). The
+   * gate-1 judge workflow passes this so it fetches exactly the draft under
+   * judgement instead of relaying the whole backlog through a seam courier.
+   */
+  ref: external_exports.string().min(1).optional(),
+  /**
+   * When true, each returned entry is enriched with `specText` (the draft's full
+   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
+   * Default false keeps the inventory lean for its planner/board/dashboard
+   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
+   * the real draft (not an empty `"(spec text not available)"` placeholder).
+   */
+  includeSpecText: external_exports.boolean().optional()
+});
+var ULID_PATTERN = /^[0-9A-Z]{26}$/;
+function extractH1Title(content, fallback) {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : fallback;
+}
+async function readBacklogInventory(rawInput) {
+  const input = ReadBacklogInventoryInputSchema.parse(rawInput);
+  const targetRepoRoot = path15.resolve(input.targetRepoRoot);
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  const isNative = workspace.activeAdapterName === "native";
+  const stateRoot = path15.join(targetRepoRoot, ".flow", "state");
+  const doneDir = path15.join(stateRoot, "done");
+  const inventory = [];
+  const seenRefs = /* @__PURE__ */ new Set();
+  for (const stateName of STATE_NAMES) {
+    const stateDir = path15.join(stateRoot, stateName);
+    let entries;
+    try {
+      entries = await fs11.readdir(stateDir);
+    } catch {
+      continue;
+    }
+    for (const filename of entries) {
+      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
+      const absPath = path15.join(stateDir, filename);
+      const rawText = await fs11.readFile(absPath, "utf8");
+      const parsed = (0, import_yaml5.parse)(rawText);
+      const manifest = parseExecutionManifest(parsed, { absPath });
+      let depsReady = true;
+      for (const dep of manifest.depends_on) {
+        try {
+          await fs11.stat(path15.join(doneDir, `${dep}.yaml`));
+        } catch {
+          depsReady = false;
+          break;
+        }
+      }
+      const entry = {
+        ref: manifest.ref,
+        title: manifest.title,
+        state: stateName,
+        withdrawn: manifest.withdrawn,
+        ready: manifest.ready,
+        depsReady
+      };
+      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
+        const specAbs = path15.isAbsolute(manifest.source_path) ? manifest.source_path : path15.join(targetRepoRoot, manifest.source_path);
+        try {
+          entry.specText = await fs11.readFile(specAbs, "utf8");
+        } catch {
+        }
+        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
+      }
+      inventory.push(entry);
+      seenRefs.add(manifest.ref);
+    }
+  }
+  if (isNative) {
+    const nativeStoriesDir2 = path15.join(targetRepoRoot, ".flow", "native-stories");
+    let nativeFiles;
+    try {
+      nativeFiles = await fs11.readdir(nativeStoriesDir2);
+    } catch {
+      nativeFiles = [];
+    }
+    for (const filename of nativeFiles) {
+      if (!filename.endsWith(".md")) continue;
+      const basename4 = filename.slice(0, -3);
+      if (!ULID_PATTERN.test(basename4)) continue;
+      const ref = `native:${basename4}`;
+      if (seenRefs.has(ref)) continue;
+      const absPath = path15.join(nativeStoriesDir2, filename);
+      const content = await fs11.readFile(absPath, "utf8");
+      const title = extractH1Title(content, basename4);
+      const entry = {
+        ref,
+        title,
+        state: "native-source-only",
+        withdrawn: false,
+        ready: false,
+        depsReady: true
+      };
+      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
+        entry.specText = content;
+      }
+      inventory.push(entry);
+    }
+  }
+  const mode = inventory.length === 0 ? "first-run" : "re-open";
+  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
+  return { mode, backlog_inventory };
+}
+
 // src/tools/gather-retro-inputs.ts
 var TELEMETRY_FILE_REGEX = /\.jsonl$/;
+var MECHANICAL_FAILURE_THRESHOLD = 2;
 async function gatherRetroInputs(opts) {
   const { targetRepoRoot, fireCountConfig } = opts;
   const cycleState = opts.cycleState !== void 0 ? opts.cycleState : await readCycleState(targetRepoRoot);
@@ -27438,13 +28040,20 @@ async function gatherRetroInputs(opts) {
   }
   const recurringFriction = computeRecurringFriction(telemetrySummary.events);
   const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness };
+  const threshold = opts.mechanicalFailureThreshold ?? MECHANICAL_FAILURE_THRESHOLD;
+  const mechanicalFailuresDrafted = await draftHardeningStories(
+    targetRepoRoot,
+    doneManifests,
+    threshold,
+    opts.sessionUlid
+  );
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
 }
 async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
-  const doneDir = path12.join(targetRepoRoot, ".flow", "state", "done");
+  const doneDir = path16.join(targetRepoRoot, ".flow", "state", "done");
   let entries;
   try {
-    entries = await fs10.readdir(doneDir);
+    entries = await fs12.readdir(doneDir);
   } catch (err) {
     if (isEnoent(err)) {
       return [];
@@ -27454,24 +28063,24 @@ async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
   const manifestFiles = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
   const manifests = [];
   for (const file2 of manifestFiles) {
-    const absPath = path12.join(doneDir, file2);
+    const absPath = path16.join(doneDir, file2);
     if (windowStartMs !== null) {
-      const stat2 = await fs10.stat(absPath);
+      const stat2 = await fs12.stat(absPath);
       if (stat2.mtimeMs < windowStartMs) {
         continue;
       }
     }
-    const raw = await fs10.readFile(absPath, "utf8");
-    const parsed = (0, import_yaml4.parse)(raw);
+    const raw = await fs12.readFile(absPath, "utf8");
+    const parsed = (0, import_yaml6.parse)(raw);
     manifests.push(parseExecutionManifest(parsed, { absPath }));
   }
   return manifests;
 }
 async function gatherTelemetry(targetRepoRoot, windowStartMs) {
-  const telemetryDir = path12.join(targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path16.join(targetRepoRoot, ".flow", "telemetry");
   let entries;
   try {
-    entries = await fs10.readdir(telemetryDir);
+    entries = await fs12.readdir(telemetryDir);
   } catch (err) {
     if (isEnoent(err)) {
       return { events: [], skipped_count: 0 };
@@ -27482,8 +28091,8 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   const events = [];
   let skipped_count = 0;
   for (const file2 of files) {
-    const absPath = path12.join(telemetryDir, file2);
-    const raw = await fs10.readFile(absPath, "utf8");
+    const absPath = path16.join(telemetryDir, file2);
+    const raw = await fs12.readFile(absPath, "utf8");
     const lines = raw.split("\n");
     for (const line of lines) {
       if (line.trim() === "") {
@@ -27510,10 +28119,10 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   return { events, skipped_count };
 }
 async function gatherPriorProposals(targetRepoRoot) {
-  const proposalsDir = path12.join(targetRepoRoot, ".flow", "retro-proposals");
+  const proposalsDir = path16.join(targetRepoRoot, ".flow", "retro-proposals");
   let entries;
   try {
-    entries = await fs10.readdir(proposalsDir);
+    entries = await fs12.readdir(proposalsDir);
   } catch (err) {
     if (isEnoent(err)) {
       return [];
@@ -27521,7 +28130,7 @@ async function gatherPriorProposals(targetRepoRoot) {
     throw err;
   }
   const proposals = entries.filter((f) => f.endsWith(".md")).map((f) => ({
-    path: path12.join(proposalsDir, f),
+    path: path16.join(proposalsDir, f),
     // The writer keys the filename by ISO timestamp (Story 6.3):
     // `<isoTimestamp>.md`. Strip the `.md` suffix to recover it.
     iso_timestamp: f.slice(0, -".md".length)
@@ -27530,14 +28139,14 @@ async function gatherPriorProposals(targetRepoRoot) {
   return proposals;
 }
 async function gatherRuleRegistry(targetRepoRoot) {
-  const registryPath = path12.join(
+  const registryPath = path16.join(
     targetRepoRoot,
     "docs",
     "discipline-rules.yaml"
   );
   let raw;
   try {
-    raw = await fs10.readFile(registryPath, "utf8");
+    raw = await fs12.readFile(registryPath, "utf8");
   } catch (err) {
     if (isEnoent(err)) {
       return null;
@@ -27545,6 +28154,122 @@ async function gatherRuleRegistry(targetRepoRoot) {
     throw err;
   }
   return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+async function draftHardeningStories(targetRepoRoot, doneManifests, threshold, sessionUlid) {
+  let workspace;
+  try {
+    workspace = await resolveWorkspace({ targetRepoRoot });
+  } catch {
+    return [];
+  }
+  if (workspace.activeAdapterName !== "native") {
+    return [];
+  }
+  const classCounts = /* @__PURE__ */ new Map();
+  for (const manifest of doneManifests) {
+    for (const lesson of manifest.lessons ?? []) {
+      if (lesson.kind === "pitfall" && lesson.failure_class) {
+        classCounts.set(
+          lesson.failure_class,
+          (classCounts.get(lesson.failure_class) ?? 0) + 1
+        );
+      }
+    }
+  }
+  const qualifying = [];
+  for (const [fc, count2] of classCounts) {
+    if (count2 >= threshold) {
+      qualifying.push({ failure_class: fc, count: count2 });
+    }
+  }
+  qualifying.sort((a2, b) => a2.failure_class.localeCompare(b.failure_class));
+  if (qualifying.length === 0) {
+    return [];
+  }
+  let existingHardeningClasses;
+  try {
+    const inventory = await readBacklogInventory({
+      targetRepoRoot
+    });
+    existingHardeningClasses = buildExistingHardeningSet(inventory.backlog_inventory);
+  } catch {
+    existingHardeningClasses = /* @__PURE__ */ new Set();
+  }
+  const drafted = [];
+  for (const { failure_class, count: count2 } of qualifying) {
+    if (existingHardeningClasses.has(failure_class)) {
+      continue;
+    }
+    const input = buildHardeningStoryInput(
+      failure_class,
+      count2,
+      targetRepoRoot,
+      sessionUlid
+    );
+    let result;
+    try {
+      result = await renderGateWriteNativeStory(input, targetRepoRoot, "author");
+    } catch {
+      continue;
+    }
+    drafted.push({
+      failure_class,
+      recurrence_count: count2,
+      hardening_story_ref: result.ref,
+      hardening_story_path: result.path
+    });
+  }
+  return drafted;
+}
+function buildExistingHardeningSet(inventory) {
+  const existing = /* @__PURE__ */ new Set();
+  const HARDENING_PREFIX = "[Hardening] Guard against ";
+  for (const item of inventory) {
+    if (item.state === "done" || item.withdrawn) {
+      continue;
+    }
+    if (item.title.startsWith(HARDENING_PREFIX)) {
+      const fc = item.title.slice(HARDENING_PREFIX.length).trim();
+      if (fc.length > 0) {
+        existing.add(fc);
+      }
+    }
+  }
+  return existing;
+}
+function buildHardeningStoryInput(failure_class, recurrence_count, targetRepoRoot, sessionUlid) {
+  const title = `[Hardening] Guard against ${failure_class}`;
+  const sanitizedFc = failure_class.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  return {
+    targetRepoRoot,
+    title,
+    narrative: {
+      role: "non-engineer operator",
+      want: `a code-level guard that prevents the recurring "${failure_class}" failure`,
+      so_that: `the team stops repeating this mechanical mistake (recurred ${recurrence_count} times this cycle)`
+    },
+    acceptance_criteria: [
+      {
+        text: `**Given** the retro has identified "${failure_class}" as a recurring failure class (${recurrence_count} occurrences), **When** a dev implements this hardening, **Then** a code guard exists that makes the "${failure_class}" failure detectable at build or test time.`,
+        kind: "integration",
+        verification: {
+          type: "vitest",
+          target: `plugins/flow/mcp-server/src/__tests__/hardening-${sanitizedFc}.test.ts`
+        }
+      }
+    ],
+    tasks: [
+      {
+        text: `Identify the code seam responsible for the "${failure_class}" failure class and add a deterministic guard (test, schema check, or runtime assertion) that catches it before it escapes to the dev loop.`,
+        ac_refs: ["AC1"]
+      }
+    ],
+    cited_sources: [
+      "plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts"
+    ],
+    depends_on: [],
+    sessionUlid: sessionUlid ?? "retro-loop"
+  };
 }
 function computeRecurringFriction(events) {
   const RECURRING_THRESHOLD = 2;
@@ -27621,7 +28346,7 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     done_manifests: inputs.doneManifests,
     retro_proposals: inputs.priorProposals.map((p) => ({
       // Store repo-relative paths so the archive is portable.
-      path: path13.relative(targetRepoRoot, p.path),
+      path: path17.relative(targetRepoRoot, p.path),
       iso_timestamp: p.iso_timestamp
     })),
     telemetry_summary: {
@@ -27630,8 +28355,8 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     }
   };
   const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
-  const absPath = path13.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
-  await atomicWriteFile(absPath, (0, import_yaml5.stringify)(archiveRecord, { lineWidth: 0 }));
+  const absPath = path17.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
+  await atomicWriteFile(absPath, (0, import_yaml7.stringify)(archiveRecord, { lineWidth: 0 }));
   return absPath;
 }
 
@@ -27704,78 +28429,9 @@ function drainPhaseDone(args) {
 }
 
 // src/tools/scan-sources.ts
-var import_yaml8 = __toESM(require_dist(), 1);
-import { promises as fs13 } from "node:fs";
-import * as path18 from "node:path";
-
-// src/validators/discipline-resolvability.ts
-import { promises as fs11 } from "node:fs";
-import * as path14 from "node:path";
-function isWellFormedTarget(target) {
-  const t = target.trim();
-  if (t.length === 0) return false;
-  if (/\s/.test(t)) return false;
-  if (t.startsWith("-")) return false;
-  if (path14.isAbsolute(t)) return false;
-  return true;
-}
-async function statOrNull(absPath) {
-  try {
-    return await fs11.stat(absPath);
-  } catch {
-    return null;
-  }
-}
-async function resolveDisciplinePaths(story, targetRepoRoot) {
-  if (!isEnrichedStory(story)) return [];
-  const reasons = [];
-  const citedSources = story.cited_sources ?? [];
-  if (citedSources.length === 0) {
-    reasons.push({
-      code: "missing-cited-sources",
-      field: "cited_sources",
-      detail: "Native story cites no sources. Every native story must list \u22651 repo-relative path in '## Cited Sources' (the files the author read to ground the story)."
-    });
-  } else {
-    for (const cited of citedSources) {
-      const abs = path14.resolve(targetRepoRoot, cited);
-      if (await statOrNull(abs) === null) {
-        reasons.push({
-          code: "unresolvable-cited-source",
-          field: "cited_sources",
-          detail: `Cited source '${cited}' does not resolve on disk (looked at '${abs}'). Cited sources are files the author read \u2014 fix the path or remove the citation.`
-        });
-      }
-    }
-  }
-  story.acceptance_criteria.forEach((ac, i2) => {
-    const v = ac.verification;
-    if (!v) return;
-    if (!isWellFormedTarget(v.target)) {
-      reasons.push({
-        code: "invalid-verification-target",
-        field: `acceptance_criteria[${i2}].verification.target`,
-        detail: `AC${i2 + 1} verification target '${v.target}' is not a well-formed repo-relative path. Reject invented flags / non-path strings (e.g. 'vitest --grep \u2026'); the target must name a single path (a test file for 'vitest:', an artifact for 'artifact:').`
-      });
-      return;
-    }
-  });
-  for (let i2 = 0; i2 < story.acceptance_criteria.length; i2++) {
-    const v = story.acceptance_criteria[i2].verification;
-    if (!v) continue;
-    if (v.type !== "artifact") continue;
-    if (!isWellFormedTarget(v.target)) continue;
-    const abs = path14.resolve(targetRepoRoot, v.target);
-    if (await statOrNull(abs) === null) {
-      reasons.push({
-        code: "unresolvable-verification-target",
-        field: `acceptance_criteria[${i2}].verification.target`,
-        detail: `AC${i2 + 1} artifact verification target '${v.target}' does not resolve on disk (looked at '${abs}'). An 'artifact:' target is an existing contract and must resolve; only 'vitest:' targets (build outputs) are exempt.`
-      });
-    }
-  }
-  return reasons;
-}
+var import_yaml9 = __toESM(require_dist(), 1);
+import { promises as fs14 } from "node:fs";
+import * as path20 from "node:path";
 
 // src/lib/extract-dep-refs.ts
 var NATIVE_REF_RE2 = /^native:[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -27819,11 +28475,11 @@ function extractDepRefsFromSpecBody(body) {
 }
 
 // src/state/lookup-risk-tiering-spec.ts
-import { promises as fs12 } from "node:fs";
-import * as path15 from "node:path";
+import { promises as fs13 } from "node:fs";
+import * as path18 from "node:path";
 
 // src/validators/risk-tiering-spec.ts
-var import_yaml6 = __toESM(require_dist(), 1);
+var import_yaml8 = __toESM(require_dist(), 1);
 function formatZodIssues2(issues) {
   const first = issues[0];
   if (!first) return "(no issue details)";
@@ -27863,7 +28519,7 @@ function parseRiskTieringSpec(raw, sourcePath, copyTarget) {
   const yamlBlock = extractFrontmatter(raw, sourcePath, copyTarget);
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml6.parse)(yamlBlock);
+    parsedYaml = (0, import_yaml8.parse)(yamlBlock);
   } catch (err) {
     throw new MalformedRiskTieringSpecError({
       sourcePath,
@@ -27914,10 +28570,10 @@ function parseRiskTieringSpec(raw, sourcePath, copyTarget) {
 
 // src/state/lookup-risk-tiering-spec.ts
 async function lookupRiskTieringSpec(opts) {
-  const overridePath = path15.join(opts.targetRepoRoot, "docs", "risk-tiering.md");
-  const defaultPath = path15.join(opts.pluginRoot, "docs", "risk-tiering.md");
+  const overridePath = path18.join(opts.targetRepoRoot, "docs", "risk-tiering.md");
+  const defaultPath = path18.join(opts.pluginRoot, "docs", "risk-tiering.md");
   try {
-    const raw = await fs12.readFile(overridePath, "utf8");
+    const raw = await fs13.readFile(overridePath, "utf8");
     return parseRiskTieringSpec(raw, overridePath, defaultPath);
   } catch (err) {
     if (err.code !== "ENOENT") {
@@ -27925,7 +28581,7 @@ async function lookupRiskTieringSpec(opts) {
     }
   }
   try {
-    const raw = await fs12.readFile(defaultPath, "utf8");
+    const raw = await fs13.readFile(defaultPath, "utf8");
     return parseRiskTieringSpec(raw, defaultPath, defaultPath);
   } catch (err) {
     if (err.code === "ENOENT") {
@@ -27937,7 +28593,7 @@ async function lookupRiskTieringSpec(opts) {
 
 // src/lib/detect-change-types.ts
 var import_picomatch = __toESM(require_picomatch2(), 1);
-import * as path16 from "node:path";
+import * as path19 from "node:path";
 var isMigrationPath = (0, import_picomatch.default)(["**/migrations/**", "**/migration/**"]);
 var isSchemaPath = (0, import_picomatch.default)(["**/schema.sql", "**/schema.prisma", "**/schema.graphql", "**/*.sql"]);
 var DEP_BUMP_BASENAMES = /* @__PURE__ */ new Set([
@@ -27955,7 +28611,7 @@ var DEP_BUMP_BASENAMES = /* @__PURE__ */ new Set([
 ]);
 function classifyPath(filePath) {
   const types = [];
-  const basename4 = path16.basename(filePath);
+  const basename4 = path19.basename(filePath);
   if (isMigrationPath(filePath)) {
     types.push("migration");
   }
@@ -28099,231 +28755,17 @@ async function classifyRiskTier(opts) {
   };
 }
 
-// src/state/manifest-state-machine.ts
-var import_yaml7 = __toESM(require_dist(), 1);
-import { rename, mkdir, stat, readFile, unlink } from "node:fs/promises";
-import * as path17 from "node:path";
-var STATE_NAMES = [
-  "to-do",
-  "in-progress",
-  "blocked",
-  "done"
-];
-var DEFAULT_FS_IMPL = {
-  rename: (from, to) => rename(from, to),
-  mkdir: (dir, opts) => mkdir(dir, opts),
-  stat: (p) => stat(p)
-};
-function isStateName(value) {
-  return STATE_NAMES.includes(value);
-}
-async function moveBetweenStates(opts) {
-  const { targetRepoRoot, ref, from, to } = opts;
-  const fsImpl = opts.fsImpl ?? DEFAULT_FS_IMPL;
-  if (!isStateName(from) || !isStateName(to)) {
-    throw new InvalidStateNameError({
-      attemptedFrom: from,
-      attemptedTo: to,
-      allowedStates: STATE_NAMES,
-      reason: "unknown state name"
-    });
-  }
-  const stateRoot = path17.join(targetRepoRoot, ".flow", "state");
-  const absFromPath = path17.join(stateRoot, from, ref + ".yaml");
-  const absToPath = path17.join(stateRoot, to, ref + ".yaml");
-  for (const absPath of [absFromPath, absToPath]) {
-    const rel = path17.relative(stateRoot, absPath);
-    if (rel.startsWith("..") || path17.isAbsolute(rel)) {
-      throw new InvalidStateNameError({
-        attemptedFrom: from,
-        attemptedTo: to,
-        allowedStates: STATE_NAMES,
-        reason: "path escapes state root"
-      });
-    }
-  }
-  await fsImpl.mkdir(path17.dirname(absToPath), { recursive: true });
-  try {
-    await fsImpl.rename(absFromPath, absToPath);
-  } catch (err) {
-    const code = err?.code;
-    if (code === "EXDEV") {
-      throw new CrossFilesystemMoveError({
-        absFromPath,
-        absToPath,
-        ref,
-        originalCode: "EXDEV"
-      });
-    }
-    if (code === "ENOENT") {
-      throw new ManifestNotFoundError({
-        ref,
-        expectedAbsPath: absFromPath,
-        fromState: from
-      });
-    }
-    throw err;
-  }
-  return { from, to, ref, absFromPath, absToPath };
-}
-function operatorFieldsEqual(a2, b) {
-  if (a2.title !== b.title) return false;
-  if (a2.narrative !== b.narrative) return false;
-  if (a2.implementation_notes !== b.implementation_notes) return false;
-  if (a2.withdrawn !== b.withdrawn) return false;
-  if (a2.acceptance_criteria.length !== b.acceptance_criteria.length) return false;
-  for (let i2 = 0; i2 < a2.acceptance_criteria.length; i2++) {
-    const ac_a = a2.acceptance_criteria[i2];
-    const ac_b = b.acceptance_criteria[i2];
-    if (ac_a.text !== ac_b.text || ac_a.kind !== ac_b.kind) return false;
-  }
-  if (a2.depends_on.length !== b.depends_on.length) return false;
-  for (let i2 = 0; i2 < a2.depends_on.length; i2++) {
-    if (a2.depends_on[i2] !== b.depends_on[i2]) return false;
-  }
-  return true;
-}
-function snapshotPath(targetRepoRoot, ref) {
-  return path17.join(targetRepoRoot, ".flow", "state", "in-progress", `${ref}.snapshot.yaml`);
-}
-async function writeInProgressSnapshot(opts) {
-  const { targetRepoRoot, ref, manifest } = opts;
-  const absPath = snapshotPath(targetRepoRoot, ref);
-  const snapshot = {
-    source_hash: manifest.source_hash,
-    title: manifest.title,
-    narrative: manifest.narrative,
-    acceptance_criteria: manifest.acceptance_criteria,
-    implementation_notes: manifest.implementation_notes,
-    depends_on: manifest.depends_on,
-    withdrawn: manifest.withdrawn
-  };
-  const yamlText = (0, import_yaml7.stringify)(snapshot, { lineWidth: 0 });
-  await atomicWriteFile(absPath, yamlText);
-  return { absPath };
-}
-async function removeInProgressSnapshot(opts) {
-  const { targetRepoRoot, ref } = opts;
-  const absPath = snapshotPath(targetRepoRoot, ref);
-  try {
-    await unlink(absPath);
-  } catch (err) {
-    const code = err?.code;
-    if (code === "ENOENT") return;
-    throw err;
-  }
-}
-async function readInProgressSnapshot(opts) {
-  const { targetRepoRoot, ref } = opts;
-  const absPath = snapshotPath(targetRepoRoot, ref);
-  try {
-    const raw = await readFile(absPath, "utf8");
-    const parsed = (0, import_yaml7.parse)(raw);
-    return parsed;
-  } catch (err) {
-    const code = err?.code;
-    if (code === "ENOENT") return null;
-    throw err;
-  }
-}
-async function detectInProgressHandEdit(opts) {
-  const { targetRepoRoot, ref } = opts;
-  const absPath = path17.join(targetRepoRoot, ".flow", "state", "in-progress", ref + ".yaml");
-  let rawText;
-  try {
-    rawText = await readFile(absPath, "utf8");
-  } catch (err) {
-    const code = err?.code;
-    if (code === "ENOENT") {
-      throw new ManifestNotFoundError({
-        ref,
-        expectedAbsPath: absPath,
-        fromState: "in-progress"
-      });
-    }
-    throw err;
-  }
-  const parsed = (0, import_yaml7.parse)(rawText);
-  const manifest = parseExecutionManifest(parsed, { absPath });
-  const snapshot = await readInProgressSnapshot({ targetRepoRoot, ref });
-  if (snapshot === null) {
-    throw new InProgressHandEditError({
-      ref,
-      changedFields: ["_snapshot_missing"],
-      absPath
-    });
-  }
-  const changedFields = [];
-  if (manifest.source_hash !== snapshot.source_hash) {
-    changedFields.push("source_hash");
-  }
-  const snapshotFields = {
-    title: snapshot.title,
-    narrative: snapshot.narrative,
-    acceptance_criteria: snapshot.acceptance_criteria,
-    implementation_notes: snapshot.implementation_notes,
-    depends_on: [...snapshot.depends_on],
-    withdrawn: snapshot.withdrawn
-  };
-  const diskFields = {
-    title: manifest.title,
-    narrative: manifest.narrative,
-    acceptance_criteria: manifest.acceptance_criteria,
-    implementation_notes: manifest.implementation_notes,
-    depends_on: manifest.depends_on,
-    withdrawn: manifest.withdrawn
-  };
-  if (!operatorFieldsEqual(diskFields, snapshotFields)) {
-    if (diskFields.title !== snapshotFields.title) changedFields.push("title");
-    if (diskFields.narrative !== snapshotFields.narrative) changedFields.push("narrative");
-    if (diskFields.implementation_notes !== snapshotFields.implementation_notes)
-      changedFields.push("implementation_notes");
-    if (diskFields.withdrawn !== snapshotFields.withdrawn) changedFields.push("withdrawn");
-    const acA = diskFields.acceptance_criteria;
-    const acB = snapshotFields.acceptance_criteria;
-    let acDiffers = acA.length !== acB.length;
-    if (!acDiffers) {
-      for (let i2 = 0; i2 < acA.length; i2++) {
-        if (acA[i2].text !== acB[i2].text || acA[i2].kind !== acB[i2].kind) {
-          acDiffers = true;
-          break;
-        }
-      }
-    }
-    if (acDiffers) changedFields.push("acceptance_criteria");
-    const doA = diskFields.depends_on;
-    const doB = snapshotFields.depends_on;
-    let doDiffers = doA.length !== doB.length;
-    if (!doDiffers) {
-      for (let i2 = 0; i2 < doA.length; i2++) {
-        if (doA[i2] !== doB[i2]) {
-          doDiffers = true;
-          break;
-        }
-      }
-    }
-    if (doDiffers) changedFields.push("depends_on");
-  }
-  if (changedFields.length > 0) {
-    throw new InProgressHandEditError({ ref, changedFields, absPath });
-  }
-  return { ok: true };
-}
-function isClaimable(manifest) {
-  return manifest.withdrawn === false && manifest.status === "to-do";
-}
-
 // src/tools/scan-sources.ts
 async function statOrNull2(absPath) {
   try {
-    return await fs13.stat(absPath);
+    return await fs14.stat(absPath);
   } catch {
     return null;
   }
 }
 function repoRelativePath(rawPath, targetRepoRoot) {
-  const rel = path18.relative(targetRepoRoot, rawPath);
-  if (rel.startsWith("..") || path18.isAbsolute(rel)) {
+  const rel = path20.relative(targetRepoRoot, rawPath);
+  if (rel.startsWith("..") || path20.isAbsolute(rel)) {
     return rawPath;
   }
   return rel;
@@ -28349,7 +28791,7 @@ function symmetricDiff(a2, b) {
 async function checkDepsDrift(story) {
   let body;
   try {
-    body = await fs13.readFile(story.raw_path, "utf8");
+    body = await fs14.readFile(story.raw_path, "utf8");
   } catch {
     return null;
   }
@@ -28390,7 +28832,7 @@ async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath,
     ]
   });
   const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-  const yamlText = (0, import_yaml8.stringify)(blockedManifest, { lineWidth: 0 });
+  const yamlText = (0, import_yaml9.stringify)(blockedManifest, { lineWidth: 0 });
   await writeManagedFile({
     absPath: absBlockedPath,
     contents: yamlText,
@@ -28464,18 +28906,18 @@ async function scanSources(opts) {
     blockedRefs: [],
     depsDriftRefs: []
   };
-  const stateRoot = path18.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path20.join(targetRepoRoot, ".flow", "state");
   {
-    const toDoDir = path18.join(stateRoot, "to-do");
-    const blockedDir = path18.join(stateRoot, "blocked");
+    const toDoDir = path20.join(stateRoot, "to-do");
+    const blockedDir = path20.join(stateRoot, "blocked");
     let toDoFiles = [];
     let blockedFiles = [];
     try {
-      toDoFiles = await fs13.readdir(toDoDir);
+      toDoFiles = await fs14.readdir(toDoDir);
     } catch {
     }
     try {
-      blockedFiles = await fs13.readdir(blockedDir);
+      blockedFiles = await fs14.readdir(blockedDir);
     } catch {
     }
     const toDoRefs = new Set(toDoFiles.filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)));
@@ -28486,14 +28928,14 @@ async function scanSources(opts) {
         console.warn(
           `[scanSources] Ref ${ref} exists in both to-do/ and blocked/ \u2014 recovering by removing stale blocked/ manifest (to-do/ wins).`
         );
-        await fs13.unlink(path18.join(blockedDir, blockedFile));
+        await fs14.unlink(path20.join(blockedDir, blockedFile));
       }
     }
   }
   for (const story of sourceStories) {
     let currentState = null;
     for (const stateName of STATE_NAMES) {
-      const absPath = path18.join(stateRoot, stateName, `${story.ref}.yaml`);
+      const absPath = path20.join(stateRoot, stateName, `${story.ref}.yaml`);
       const s = await statOrNull2(absPath);
       if (s !== null) {
         currentState = stateName;
@@ -28508,9 +28950,9 @@ async function scanSources(opts) {
       continue;
     }
     if (currentState === "blocked") {
-      const absBlockedPath = path18.join(stateRoot, "blocked", `${story.ref}.yaml`);
-      const rawBlocked = await fs13.readFile(absBlockedPath, "utf8");
-      const parsedBlocked = (0, import_yaml8.parse)(rawBlocked);
+      const absBlockedPath = path20.join(stateRoot, "blocked", `${story.ref}.yaml`);
+      const rawBlocked = await fs14.readFile(absBlockedPath, "utf8");
+      const parsedBlocked = (0, import_yaml9.parse)(rawBlocked);
       const existingBlockedHash = parsedBlocked["source_hash"];
       if (existingBlockedHash === story.source_hash) {
         result.skippedRefs.push({ ref: story.ref, reason: "not-in-to-do" });
@@ -28540,17 +28982,17 @@ async function scanSources(opts) {
       }
       const disciplineResult = await runFullDisciplineGate(story, activeAdapter, targetRepoRoot);
       if (disciplineResult === null) {
-        const absToDoPathNew = path18.join(stateRoot, "to-do", `${story.ref}.yaml`);
+        const absToDoPathNew = path20.join(stateRoot, "to-do", `${story.ref}.yaml`);
         const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
         const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-        const yamlText = (0, import_yaml8.stringify)(manifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml9.stringify)(manifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absToDoPathNew,
           contents: yamlText,
           targetRepoRoot,
           mcpToolContext: { toolName: "scanSources", role: "operator" }
         });
-        await fs13.unlink(absBlockedPath);
+        await fs14.unlink(absBlockedPath);
         result.createdRefs.push(story.ref);
       } else {
         const blockedManifestRaw = stripUndefined({
@@ -28576,7 +29018,7 @@ async function scanSources(opts) {
           }))
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-        const yamlText = (0, import_yaml8.stringify)(blockedManifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml9.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -28596,7 +29038,7 @@ async function scanSources(opts) {
     if (currentState === null) {
       const driftDetail = await checkDepsDrift(story);
       if (driftDetail !== null) {
-        const absBlockedPath = path18.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        const absBlockedPath = path20.join(stateRoot, "blocked", `${story.ref}.yaml`);
         await writeDepsDriftBlockedManifest(
           story,
           driftDetail,
@@ -28648,8 +29090,8 @@ async function scanSources(opts) {
           }))
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-        const absBlockedPath = path18.join(stateRoot, "blocked", `${story.ref}.yaml`);
-        const yamlText = (0, import_yaml8.stringify)(blockedManifest, { lineWidth: 0 });
+        const absBlockedPath = path20.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        const yamlText = (0, import_yaml9.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -28660,11 +29102,11 @@ async function scanSources(opts) {
         continue;
       }
     }
-    const absToDoPath = path18.join(stateRoot, "to-do", `${story.ref}.yaml`);
+    const absToDoPath = path20.join(stateRoot, "to-do", `${story.ref}.yaml`);
     if (currentState === null) {
       const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
       const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-      const yamlText = (0, import_yaml8.stringify)(manifest, { lineWidth: 0 });
+      const yamlText = (0, import_yaml9.stringify)(manifest, { lineWidth: 0 });
       await writeManagedFile({
         absPath: absToDoPath,
         contents: yamlText,
@@ -28675,7 +29117,7 @@ async function scanSources(opts) {
     } else if (currentState === "to-do") {
       let rawText;
       try {
-        rawText = await fs13.readFile(absToDoPath, "utf8");
+        rawText = await fs14.readFile(absToDoPath, "utf8");
       } catch (err) {
         const errno = err.code ?? "UNKNOWN";
         result.skippedRefs.push({
@@ -28687,7 +29129,7 @@ async function scanSources(opts) {
       }
       let existingManifest;
       try {
-        const parsed = (0, import_yaml8.parse)(rawText);
+        const parsed = (0, import_yaml9.parse)(rawText);
         existingManifest = parseExecutionManifest(parsed, { absPath: absToDoPath });
       } catch (err) {
         const detailMessage = err instanceof Error ? err.message : String(err);
@@ -28701,7 +29143,7 @@ async function scanSources(opts) {
       if (existingManifest.source_hash !== story.source_hash) {
         const driftDetail = await checkDepsDrift(story);
         if (driftDetail !== null) {
-          const absBlockedPath = path18.join(stateRoot, "blocked", `${story.ref}.yaml`);
+          const absBlockedPath = path20.join(stateRoot, "blocked", `${story.ref}.yaml`);
           await writeDepsDriftBlockedManifest(
             story,
             driftDetail,
@@ -28727,7 +29169,7 @@ async function scanSources(opts) {
           source_hash: story.source_hash,
           source_path: repoRelativePath(story.raw_path, targetRepoRoot)
         };
-        const yamlText = (0, import_yaml8.stringify)(stripUndefined(updatedManifest), {
+        const yamlText = (0, import_yaml9.stringify)(stripUndefined(updatedManifest), {
           lineWidth: 0
         });
         await writeManagedFile({
@@ -28746,12 +29188,12 @@ async function scanSources(opts) {
 }
 
 // src/tools/create-smoke-scratch-repo.ts
-import { promises as fs14 } from "node:fs";
+import { promises as fs15 } from "node:fs";
 import * as os from "node:os";
-import * as path25 from "node:path";
+import * as path27 from "node:path";
 
 // src/lib/git.ts
-import * as path24 from "node:path";
+import * as path26 from "node:path";
 
 // ../node_modules/.pnpm/is-plain-obj@4.1.0/node_modules/is-plain-obj/index.js
 function isPlainObject2(value) {
@@ -29598,12 +30040,12 @@ var handleCommand = (filePath, rawArguments, rawOptions) => {
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/arguments/options.js
 var import_cross_spawn = __toESM(require_cross_spawn(), 1);
-import path23 from "node:path";
+import path25 from "node:path";
 import process7 from "node:process";
 
 // ../node_modules/.pnpm/npm-run-path@6.0.0/node_modules/npm-run-path/index.js
 import process5 from "node:process";
-import path20 from "node:path";
+import path22 from "node:path";
 
 // ../node_modules/.pnpm/path-key@4.0.0/node_modules/path-key/index.js
 function pathKey(options = {}) {
@@ -29620,7 +30062,7 @@ function pathKey(options = {}) {
 // ../node_modules/.pnpm/unicorn-magic@0.3.0/node_modules/unicorn-magic/node.js
 import { promisify } from "node:util";
 import { execFile as execFileCallback, execFileSync as execFileSyncOriginal } from "node:child_process";
-import path19 from "node:path";
+import path21 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var execFileOriginal = promisify(execFileCallback);
 function toPath(urlOrPath) {
@@ -29629,12 +30071,12 @@ function toPath(urlOrPath) {
 function traversePathUp(startPath) {
   return {
     *[Symbol.iterator]() {
-      let currentPath = path19.resolve(toPath(startPath));
+      let currentPath = path21.resolve(toPath(startPath));
       let previousPath;
       while (previousPath !== currentPath) {
         yield currentPath;
         previousPath = currentPath;
-        currentPath = path19.resolve(currentPath, "..");
+        currentPath = path21.resolve(currentPath, "..");
       }
     }
   };
@@ -29649,27 +30091,27 @@ var npmRunPath = ({
   execPath: execPath2 = process5.execPath,
   addExecPath = true
 } = {}) => {
-  const cwdPath = path20.resolve(toPath(cwd));
+  const cwdPath = path22.resolve(toPath(cwd));
   const result = [];
-  const pathParts = pathOption.split(path20.delimiter);
+  const pathParts = pathOption.split(path22.delimiter);
   if (preferLocal) {
     applyPreferLocal(result, pathParts, cwdPath);
   }
   if (addExecPath) {
     applyExecPath(result, pathParts, execPath2, cwdPath);
   }
-  return pathOption === "" || pathOption === path20.delimiter ? `${result.join(path20.delimiter)}${pathOption}` : [...result, pathOption].join(path20.delimiter);
+  return pathOption === "" || pathOption === path22.delimiter ? `${result.join(path22.delimiter)}${pathOption}` : [...result, pathOption].join(path22.delimiter);
 };
 var applyPreferLocal = (result, pathParts, cwdPath) => {
   for (const directory of traversePathUp(cwdPath)) {
-    const pathPart = path20.join(directory, "node_modules/.bin");
+    const pathPart = path22.join(directory, "node_modules/.bin");
     if (!pathParts.includes(pathPart)) {
       result.push(pathPart);
     }
   }
 };
 var applyExecPath = (result, pathParts, execPath2, cwdPath) => {
-  const pathPart = path20.resolve(cwdPath, toPath(execPath2), "..");
+  const pathPart = path22.resolve(cwdPath, toPath(execPath2), "..");
   if (!pathParts.includes(pathPart)) {
     result.push(pathPart);
   }
@@ -30824,7 +31266,7 @@ var killAfterTimeout = async (subprocess, timeout, context, { signal }) => {
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/methods/node.js
 import { execPath, execArgv } from "node:process";
-import path21 from "node:path";
+import path23 from "node:path";
 var mapNode = ({ options }) => {
   if (options.node === false) {
     throw new TypeError('The "node" option cannot be false with `execaNode()`.');
@@ -30843,7 +31285,7 @@ var handleNodeOption = (file2, commandArguments, {
     throw new TypeError('The "execPath" option has been removed. Please use the "nodePath" option instead.');
   }
   const normalizedNodePath = safeNormalizeFileUrl(nodePath, 'The "nodePath" option');
-  const resolvedNodePath = path21.resolve(cwd, normalizedNodePath);
+  const resolvedNodePath = path23.resolve(cwd, normalizedNodePath);
   const newOptions = {
     ...options,
     nodePath: resolvedNodePath,
@@ -30853,7 +31295,7 @@ var handleNodeOption = (file2, commandArguments, {
   if (!shouldHandleNode) {
     return [file2, commandArguments, newOptions];
   }
-  if (path21.basename(file2, ".exe") === "node") {
+  if (path23.basename(file2, ".exe") === "node") {
     throw new TypeError('When the "node" option is true, the first argument does not need to be "node".');
   }
   return [
@@ -30943,11 +31385,11 @@ var serializeEncoding = (encoding) => typeof encoding === "string" ? `"${encodin
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/arguments/cwd.js
 import { statSync as statSync2 } from "node:fs";
-import path22 from "node:path";
+import path24 from "node:path";
 import process6 from "node:process";
 var normalizeCwd = (cwd = getDefaultCwd()) => {
   const cwdString = safeNormalizeFileUrl(cwd, 'The "cwd" option');
-  return path22.resolve(cwdString);
+  return path24.resolve(cwdString);
 };
 var getDefaultCwd = () => {
   try {
@@ -30994,7 +31436,7 @@ var normalizeOptions = (filePath, rawArguments, rawOptions) => {
   options.killSignal = normalizeKillSignal(options.killSignal);
   options.forceKillAfterDelay = normalizeForceKillAfterDelay(options.forceKillAfterDelay);
   options.lines = options.lines.map((lines, fdNumber) => lines && !BINARY_ENCODINGS.has(options.encoding) && options.buffer[fdNumber]);
-  if (process7.platform === "win32" && path23.basename(file2, ".exe") === "cmd") {
+  if (process7.platform === "win32" && path25.basename(file2, ".exe") === "cmd") {
     commandArguments.unshift("/q");
   }
   return { file: file2, commandArguments, options };
@@ -35760,7 +36202,7 @@ async function resolveSessionLedgerRoot(opts) {
   if ((result.exitCode ?? 1) !== 0) return opts.cwd;
   const commonDir = (typeof result.stdout === "string" ? result.stdout : "").trim();
   if (!commonDir) return opts.cwd;
-  return path24.dirname(commonDir);
+  return path26.dirname(commonDir);
 }
 async function listDirtyPaths(opts) {
   const execaImpl = opts.execaImpl ?? execa;
@@ -35809,7 +36251,7 @@ async function checkSharedRootLeak(opts) {
     cwd: worktreeCwd,
     ...execaImpl ? { execaImpl } : {}
   });
-  if (path24.resolve(sharedRoot) === path24.resolve(worktreeCwd)) {
+  if (path26.resolve(sharedRoot) === path26.resolve(worktreeCwd)) {
     return { leaked: false, paths: [], sharedRootPath: sharedRoot };
   }
   if (committedPaths.length === 0) {
@@ -35834,38 +36276,38 @@ var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
 async function createSmokeScratchRepo(opts) {
   const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
   const { label, parentDir } = parsed;
-  const standardsTemplatePath = path25.resolve(
+  const standardsTemplatePath = path27.resolve(
     getPluginRoot(),
     "docs",
     "standards-example.md"
   );
-  const scratchRoot = await fs14.mkdtemp(
-    path25.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
+  const scratchRoot = await fs15.mkdtemp(
+    path27.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
   );
   await gitInitWithEmptyCommit({ cwd: scratchRoot });
   await writeManagedFile({
-    absPath: path25.join(scratchRoot, ".flow", "config.yaml"),
+    absPath: path27.join(scratchRoot, ".flow", "config.yaml"),
     contents: "adapter: native\nstandards: {}\n",
     targetRepoRoot: scratchRoot
   });
-  const standardsContents = await fs14.readFile(standardsTemplatePath, "utf8");
+  const standardsContents = await fs15.readFile(standardsTemplatePath, "utf8");
   await writeManagedFile({
-    absPath: path25.join(scratchRoot, ".flow", "standards.md"),
+    absPath: path27.join(scratchRoot, ".flow", "standards.md"),
     contents: standardsContents,
     targetRepoRoot: scratchRoot
   });
   const cleanup = async () => {
-    await fs14.rm(scratchRoot, { recursive: true, force: true });
+    await fs15.rm(scratchRoot, { recursive: true, force: true });
   };
   return { scratchRoot, cleanup };
 }
 
 // src/tools/instantiate-persona.ts
-import { promises as fs17 } from "node:fs";
-import * as path28 from "node:path";
+import { promises as fs18 } from "node:fs";
+import * as path30 from "node:path";
 
 // src/lib/persona-file.ts
-var import_yaml10 = __toESM(require_dist(), 1);
+var import_yaml11 = __toESM(require_dist(), 1);
 
 // src/schemas/catalogue.ts
 var ModelTierSchema = external_exports.enum(["opus", "sonnet", "haiku"]);
@@ -35945,7 +36387,7 @@ var REQUIRED_PERSONA_SECTIONS = [
 ];
 
 // src/lib/markdown-frontmatter.ts
-var import_yaml9 = __toESM(require_dist(), 1);
+var import_yaml10 = __toESM(require_dist(), 1);
 function splitFrontmatter(raw, sourcePath) {
   const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
   if (!text.startsWith("---\n") && !text.startsWith("---\r")) {
@@ -35970,7 +36412,7 @@ function parseCatalogueRole(raw, sourcePath) {
   const { frontmatterRaw, body } = splitFrontmatter(raw, sourcePath);
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml9.parse)(frontmatterRaw);
+    parsedYaml = (0, import_yaml10.parse)(frontmatterRaw);
   } catch (err) {
     throw new CatalogueShapeError({
       sourcePath,
@@ -36042,7 +36484,7 @@ function parsePersonaFile(raw, sourcePath) {
   }
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml10.parse)(frontmatterRaw);
+    parsedYaml = (0, import_yaml11.parse)(frontmatterRaw);
   } catch (err) {
     throw new PersonaFileMalformedError({
       personaPath: sourcePath,
@@ -36098,7 +36540,7 @@ function renderPersonaFile(opts) {
     hired_at: hiredAt,
     catalogue_version: catalogueVersion
   };
-  const yamlBlock = (0, import_yaml10.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml11.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = toDisplayName(catalogue.role);
   const sections = [
     `# ${h1}`,
@@ -36178,13 +36620,13 @@ function formatZodIssues4(issues) {
 }
 
 // src/tools/read-catalogue.ts
-import { promises as fs15 } from "node:fs";
-import * as path26 from "node:path";
+import { promises as fs16 } from "node:fs";
+import * as path28 from "node:path";
 async function readCatalogue(opts) {
-  const cataloguePath = path26.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
+  const cataloguePath = path28.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
   let raw;
   try {
-    raw = await fs15.readFile(cataloguePath, "utf8");
+    raw = await fs16.readFile(cataloguePath, "utf8");
   } catch (err) {
     if (isEnoent2(err)) {
       throw new CatalogueRoleNotFoundError({
@@ -36201,8 +36643,8 @@ function isEnoent2(err) {
 }
 
 // src/tools/read-custom-role.ts
-import { promises as fs16 } from "node:fs";
-import * as path27 from "node:path";
+import { promises as fs17 } from "node:fs";
+import * as path29 from "node:path";
 var KEBAB_CASE = /^[a-z0-9-]+$/;
 async function readCustomRole(opts) {
   if (!KEBAB_CASE.test(opts.role)) {
@@ -36211,7 +36653,7 @@ async function readCustomRole(opts) {
       zodMessage: `role id '${opts.role}' does not match the required kebab-case shape /^[a-z0-9-]+$/`
     });
   }
-  const customPath = path27.join(
+  const customPath = path29.join(
     opts.targetRepoRoot,
     "team",
     "custom",
@@ -36219,7 +36661,7 @@ async function readCustomRole(opts) {
   );
   let raw;
   try {
-    raw = await fs16.readFile(customPath, "utf8");
+    raw = await fs17.readFile(customPath, "utf8");
   } catch (err) {
     if (isEnoent3(err)) {
       throw new CatalogueRoleNotFoundError({
@@ -36246,13 +36688,13 @@ function isEnoent3(err) {
 async function instantiatePersona(opts) {
   const clock = opts.clock ?? (() => /* @__PURE__ */ new Date());
   const pluginVersion = opts.pluginVersion ?? getPluginVersion();
-  const customPath = path28.join(
+  const customPath = path30.join(
     opts.targetRepoRoot,
     "team",
     "custom",
     `${opts.role}.md`
   );
-  const cataloguePath = path28.join(
+  const cataloguePath = path30.join(
     opts.pluginRoot,
     "catalogue",
     `${opts.role}.md`
@@ -36284,7 +36726,7 @@ async function instantiatePersona(opts) {
       throw err;
     }
   }
-  const personaPath = path28.join(
+  const personaPath = path30.join(
     opts.targetRepoRoot,
     "team",
     opts.role,
@@ -36292,7 +36734,7 @@ async function instantiatePersona(opts) {
   );
   let exists = false;
   try {
-    await fs17.stat(personaPath);
+    await fs18.stat(personaPath);
     exists = true;
   } catch (err) {
     if (!isEnoent4(err)) {
@@ -36323,208 +36765,9 @@ function isEnoent4(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
-// src/tools/write-native-story.ts
-import { createHash as createHash3 } from "node:crypto";
-import * as path29 from "node:path";
-var WriteNativeStoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  title: external_exports.string().min(1),
-  /**
-   * Story 10.2 — the narrative is now a structured `{ role, want, so_that }`
-   * object. REQUIRED on the native write path (mirrors the `verification`
-   * precedent from 10.1). `renderNativeStoryBody` emits the canonical
-   * "As a {role}, I want {want}, so that {so_that}." sentence and
-   * `parseNativeStory` parses exactly that grammar back, closing the round-trip.
-   */
-  narrative: external_exports.object({
-    role: external_exports.string().min(1),
-    want: external_exports.string().min(1),
-    so_that: external_exports.string().min(1)
-  }),
-  acceptance_criteria: external_exports.array(
-    external_exports.object({
-      text: external_exports.string().min(1),
-      kind: external_exports.enum(["integration", "unit"]),
-      /**
-       * Story 10.1 — every native AC carries a structured verification
-       * directive. REQUIRED on the native write path (mirrors the
-       * three-site `kind` enum precedent: parser, this schema, manifest
-       * schema). `target` is non-empty; resolvability of the path is the
-       * 10.3 T0-6 check, not enforced here.
-       */
-      verification: external_exports.object({
-        type: external_exports.enum(["vitest", "artifact"]),
-        target: external_exports.string().min(1)
-      })
-    })
-  ).min(1),
-  /**
-   * Story 10.2 — implementation tasks. REQUIRED on the native write path: ≥1
-   * task, each carrying ≥1 `ac_refs` (e.g. `["AC1", "AC3"]`). The pre-write
-   * round-trip through `parseNativeStory` additionally rejects a task whose
-   * `ac_ref` dangles (names an AC the story does not declare). Whole-story
-   * T0-1 enforcement at scan time is Story 10.3.
-   */
-  tasks: external_exports.array(
-    external_exports.object({
-      text: external_exports.string().min(1),
-      ac_refs: external_exports.array(external_exports.string().min(1)).min(1)
-    })
-  ).min(1),
-  /**
-   * Story 10.2 — repo-relative source paths cited by the story. REQUIRED on the
-   * native write path: ≥1 path. That each path *resolves on disk* is T0-5
-   * (Story 10.3) — not enforced here.
-   */
-  cited_sources: external_exports.array(external_exports.string().min(1)).min(1),
-  implementation_notes: external_exports.string().optional(),
-  /**
-   * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
-   * a non-empty build-time default is substituted so the rendered
-   * `## Implementation Notes` always carries all three `###` sub-sections.
-   */
-  files_touched: external_exports.string().optional(),
-  definition_of_done: external_exports.string().optional(),
-  risk_reasoning: external_exports.string().optional(),
-  depends_on: external_exports.array(external_exports.string()),
-  /**
-   * Session id for the `draft.authored` telemetry envelope. Optional — the
-   * author subagent / `/flow:author` skill passes its orchestration session
-   * ULID when available; defaults to a stable operator marker so the event
-   * still validates when authored interactively. (Story 9.2)
-   */
-  sessionUlid: external_exports.string().min(1).optional()
-});
-var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
-var DEFAULT_DEFINITION_OF_DONE = [
-  "- [ ] All ACs met.",
-  "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
-  "- [ ] `pnpm test` green (all tests passing).",
-  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
-  "- [ ] PR opened against `main` with CI green."
-].join("\n");
-var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
-function renderNarrativeSentence(narrative) {
-  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
-}
-function renderNativeStoryBody(input) {
-  const lines = [`# ${input.title}`, ""];
-  lines.push("## Narrative", "");
-  lines.push(renderNarrativeSentence(input.narrative));
-  lines.push("");
-  lines.push("## Acceptance Criteria", "");
-  for (let i2 = 0; i2 < input.acceptance_criteria.length; i2++) {
-    const ac = input.acceptance_criteria[i2];
-    const tag = ac.kind === "integration" ? " (integration)" : "";
-    lines.push(`**AC${i2 + 1}${tag}:**`);
-    lines.push(ac.text);
-    lines.push(`${ac.verification.type}: ${ac.verification.target}`);
-    lines.push("");
-  }
-  lines.push("## Tasks", "");
-  for (const task of input.tasks) {
-    const nums = task.ac_refs.map((r) => r.replace(/^AC/i, "")).join(", ");
-    lines.push(`- ${task.text} (AC: ${nums})`);
-  }
-  lines.push("");
-  lines.push("## Cited Sources", "");
-  for (const src of input.cited_sources) {
-    lines.push(`- ${src}`);
-  }
-  lines.push("");
-  lines.push("## Implementation Notes", "");
-  lines.push(renderImplementationNotesBody(input));
-  lines.push("");
-  lines.push("## Dependencies", "");
-  if (input.depends_on.length > 0) {
-    lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
-    for (const dep of input.depends_on) {
-      lines.push(`- ${dep}`);
-    }
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-async function writeNativeStory(rawInput) {
-  const input = WriteNativeStoryInputSchema.parse(rawInput);
-  const targetRepoRoot = path29.resolve(input.targetRepoRoot);
-  const workspace = await resolveWorkspace({ targetRepoRoot });
-  if (workspace.activeAdapterName !== "native") {
-    throw new WrongAdapterError({
-      expectedAdapter: "native",
-      actualAdapter: workspace.activeAdapterName,
-      targetRepoRoot,
-      toolName: "writeNativeStory"
-    });
-  }
-  return renderGateWriteNativeStory(input, targetRepoRoot);
-}
-async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
-  const newUlid = ulid3();
-  const storiesDir = path29.join(targetRepoRoot, ".flow", "native-stories");
-  const absPath = path29.join(storiesDir, `${newUlid}.md`);
-  const ref = `native:${newUlid}`;
-  const candidate = inputToSourceStory(input, ref, absPath);
-  const pureResult = validateStoryAgainstDiscipline(candidate);
-  const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
-  violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
-  if (violations.length > 0) {
-    throw new DisciplineViolationError({ violations });
-  }
-  const body = renderNativeStoryBody(input);
-  parseNativeStory(absPath, body);
-  await atomicWriteFile(absPath, body);
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      type: "draft.authored",
-      session_id: input.sessionUlid ?? "operator",
-      agent,
-      story_id: ref,
-      data: { ref, title: input.title }
-    }
-  });
-  return { ref, path: absPath };
-}
-function renderImplementationNotesBody(input) {
-  const parts = [];
-  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
-    parts.push(input.implementation_notes.trim());
-    parts.push("");
-  }
-  const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
-  parts.push("### Files touched", "", filesTouched, "");
-  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
-  parts.push("### Definition of Done", "", dod, "");
-  const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
-  parts.push("### Risk", "", risk, "");
-  return parts.join("\n").trim();
-}
-function inputToSourceStory(input, ref, absPath) {
-  return {
-    ref,
-    title: input.title,
-    // The discipline validator scans the raw narrative string for implicit
-    // depends-on refs, so pass the canonical rendered sentence (10.2).
-    narrative: renderNarrativeSentence(input.narrative),
-    narrative_struct: input.narrative,
-    acceptance_criteria: input.acceptance_criteria,
-    depends_on: input.depends_on,
-    // Story 10.8: pass the full rendered implementation notes (including the
-    // three build-ready sub-sections with their defaults) so the discipline
-    // gate sees the same text the file will contain.
-    implementation_notes: renderImplementationNotesBody(input),
-    tasks: input.tasks,
-    cited_sources: input.cited_sources,
-    raw_path: absPath,
-    raw_frontmatter: { title: input.title, ref },
-    source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
-  };
-}
-
 // src/tools/bmad-to-native-ingest.ts
-import { promises as fs18 } from "node:fs";
-import * as path30 from "node:path";
+import { promises as fs19 } from "node:fs";
+import * as path31 from "node:path";
 var BmadToNativeIngestInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   /**
@@ -36559,21 +36802,21 @@ var BmadToNativeIngestToolInputSchema = BmadToNativeIngestInputSchema.extend({
   drafts: external_exports.record(external_exports.string(), EnrichedDraftSchema)
 });
 function provenanceCitation(bmadSourcePath, targetRepoRoot) {
-  return path30.relative(targetRepoRoot, bmadSourcePath);
+  return path31.relative(targetRepoRoot, bmadSourcePath);
 }
 async function indexAlreadyIngested(storiesDir) {
   const byCitedPath = /* @__PURE__ */ new Map();
   let entries;
   try {
-    entries = (await fs18.readdir(storiesDir)).filter((f) => f.endsWith(".md"));
+    entries = (await fs19.readdir(storiesDir)).filter((f) => f.endsWith(".md"));
   } catch {
     return byCitedPath;
   }
   for (const name of entries) {
-    const abs = path30.join(storiesDir, name);
+    const abs = path31.join(storiesDir, name);
     let parsed;
     try {
-      parsed = parseNativeStory(abs, await fs18.readFile(abs, "utf8"));
+      parsed = parseNativeStory(abs, await fs19.readFile(abs, "utf8"));
     } catch {
       continue;
     }
@@ -36585,10 +36828,10 @@ async function indexAlreadyIngested(storiesDir) {
 }
 async function bmadToNativeIngest(rawInput, enrich) {
   const input = BmadToNativeIngestInputSchema.parse(rawInput);
-  const targetRepoRoot = path30.resolve(input.targetRepoRoot);
+  const targetRepoRoot = path31.resolve(input.targetRepoRoot);
   const workspace = await resolveWorkspace({ targetRepoRoot });
   const sourceStories = await workspace.activeAdapter.listSourceStories();
-  const storiesDir = path30.join(targetRepoRoot, ".flow", "native-stories");
+  const storiesDir = path31.join(targetRepoRoot, ".flow", "native-stories");
   const alreadyIngested = await indexAlreadyIngested(storiesDir);
   const written = [];
   const needs_fix_up = [];
@@ -36664,13 +36907,13 @@ async function bmadToNativeIngestTool(rawInput) {
 }
 
 // src/tools/read-persona.ts
-import { promises as fs19 } from "node:fs";
-import * as path31 from "node:path";
+import { promises as fs20 } from "node:fs";
+import * as path32 from "node:path";
 async function readPersona(opts) {
-  const personaPath = path31.join(opts.targetRepoRoot, "team", opts.role, "PERSONA.md");
+  const personaPath = path32.join(opts.targetRepoRoot, "team", opts.role, "PERSONA.md");
   let raw;
   try {
-    raw = await fs19.readFile(personaPath, "utf8");
+    raw = await fs20.readFile(personaPath, "utf8");
   } catch (err) {
     if (isEnoent5(err)) {
       throw new PersonaFileNotFoundError({
@@ -36746,9 +36989,9 @@ function toDisplayName2(role) {
 }
 
 // src/tools/list-claimable-todos.ts
-var import_yaml11 = __toESM(require_dist(), 1);
-import { promises as fs20 } from "node:fs";
-import * as path32 from "node:path";
+var import_yaml12 = __toESM(require_dist(), 1);
+import { promises as fs21 } from "node:fs";
+import * as path33 from "node:path";
 
 // src/lib/short-handle.ts
 function shortHandle(ref) {
@@ -36763,13 +37006,13 @@ function shortHandle(ref) {
 // src/tools/list-claimable-todos.ts
 async function listClaimableTodos(opts) {
   const { targetRepoRoot } = opts;
-  const stateRoot = path32.join(targetRepoRoot, ".flow", "state");
-  const todoDir = path32.join(stateRoot, "to-do");
-  const inProgressDir = path32.join(stateRoot, "in-progress");
-  const doneDir = path32.join(stateRoot, "done");
+  const stateRoot = path33.join(targetRepoRoot, ".flow", "state");
+  const todoDir = path33.join(stateRoot, "to-do");
+  const inProgressDir = path33.join(stateRoot, "in-progress");
+  const doneDir = path33.join(stateRoot, "done");
   let todoEntries;
   try {
-    todoEntries = await fs20.readdir(todoDir);
+    todoEntries = await fs21.readdir(todoDir);
   } catch (err) {
     if (isEnoent6(err)) {
       todoEntries = [];
@@ -36780,26 +37023,26 @@ async function listClaimableTodos(opts) {
   const yamlEntries = todoEntries.filter((f) => f.endsWith(".yaml")).sort();
   const candidates = [];
   for (const entry of yamlEntries) {
-    const absPath = path32.join(todoDir, entry);
+    const absPath = path33.join(todoDir, entry);
     let raw;
     try {
-      raw = await fs20.readFile(absPath, "utf8");
+      raw = await fs21.readFile(absPath, "utf8");
     } catch (err) {
       if (isEnoent6(err)) {
         continue;
       }
       throw err;
     }
-    const parsed = (0, import_yaml11.parse)(raw);
+    const parsed = (0, import_yaml12.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!isClaimable(manifest)) {
       continue;
     }
     let depsReady = true;
     for (const dep of manifest.depends_on) {
-      const depPath = path32.join(doneDir, `${dep}.yaml`);
+      const depPath = path33.join(doneDir, `${dep}.yaml`);
       try {
-        await fs20.stat(depPath);
+        await fs21.stat(depPath);
       } catch (err) {
         if (isEnoent6(err)) {
           depsReady = false;
@@ -36819,7 +37062,7 @@ async function listClaimableTodos(opts) {
   }
   let inProgressCount = 0;
   try {
-    const inProgressEntries = await fs20.readdir(inProgressDir);
+    const inProgressEntries = await fs21.readdir(inProgressDir);
     inProgressCount = inProgressEntries.filter(
       (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
     ).length;
@@ -36832,121 +37075,6 @@ async function listClaimableTodos(opts) {
 }
 function isEnoent6(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/read-backlog-inventory.ts
-var import_yaml12 = __toESM(require_dist(), 1);
-import { promises as fs21 } from "node:fs";
-import * as path33 from "node:path";
-var ReadBacklogInventoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  /**
-   * Optional single-item filter. When set, only the entry whose `ref` matches
-   * is returned (the others are still scanned so `mode` stays accurate). The
-   * gate-1 judge workflow passes this so it fetches exactly the draft under
-   * judgement instead of relaying the whole backlog through a seam courier.
-   */
-  ref: external_exports.string().min(1).optional(),
-  /**
-   * When true, each returned entry is enriched with `specText` (the draft's full
-   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
-   * Default false keeps the inventory lean for its planner/board/dashboard
-   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
-   * the real draft (not an empty `"(spec text not available)"` placeholder).
-   */
-  includeSpecText: external_exports.boolean().optional()
-});
-var ULID_PATTERN = /^[0-9A-Z]{26}$/;
-function extractH1Title(content, fallback) {
-  const match = content.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : fallback;
-}
-async function readBacklogInventory(rawInput) {
-  const input = ReadBacklogInventoryInputSchema.parse(rawInput);
-  const targetRepoRoot = path33.resolve(input.targetRepoRoot);
-  const workspace = await resolveWorkspace({ targetRepoRoot });
-  const isNative = workspace.activeAdapterName === "native";
-  const stateRoot = path33.join(targetRepoRoot, ".flow", "state");
-  const doneDir = path33.join(stateRoot, "done");
-  const inventory = [];
-  const seenRefs = /* @__PURE__ */ new Set();
-  for (const stateName of STATE_NAMES) {
-    const stateDir = path33.join(stateRoot, stateName);
-    let entries;
-    try {
-      entries = await fs21.readdir(stateDir);
-    } catch {
-      continue;
-    }
-    for (const filename of entries) {
-      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
-      const absPath = path33.join(stateDir, filename);
-      const rawText = await fs21.readFile(absPath, "utf8");
-      const parsed = (0, import_yaml12.parse)(rawText);
-      const manifest = parseExecutionManifest(parsed, { absPath });
-      let depsReady = true;
-      for (const dep of manifest.depends_on) {
-        try {
-          await fs21.stat(path33.join(doneDir, `${dep}.yaml`));
-        } catch {
-          depsReady = false;
-          break;
-        }
-      }
-      const entry = {
-        ref: manifest.ref,
-        title: manifest.title,
-        state: stateName,
-        withdrawn: manifest.withdrawn,
-        ready: manifest.ready,
-        depsReady
-      };
-      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
-        const specAbs = path33.isAbsolute(manifest.source_path) ? manifest.source_path : path33.join(targetRepoRoot, manifest.source_path);
-        try {
-          entry.specText = await fs21.readFile(specAbs, "utf8");
-        } catch {
-        }
-        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
-      }
-      inventory.push(entry);
-      seenRefs.add(manifest.ref);
-    }
-  }
-  if (isNative) {
-    const nativeStoriesDir2 = path33.join(targetRepoRoot, ".flow", "native-stories");
-    let nativeFiles;
-    try {
-      nativeFiles = await fs21.readdir(nativeStoriesDir2);
-    } catch {
-      nativeFiles = [];
-    }
-    for (const filename of nativeFiles) {
-      if (!filename.endsWith(".md")) continue;
-      const basename4 = filename.slice(0, -3);
-      if (!ULID_PATTERN.test(basename4)) continue;
-      const ref = `native:${basename4}`;
-      if (seenRefs.has(ref)) continue;
-      const absPath = path33.join(nativeStoriesDir2, filename);
-      const content = await fs21.readFile(absPath, "utf8");
-      const title = extractH1Title(content, basename4);
-      const entry = {
-        ref,
-        title,
-        state: "native-source-only",
-        withdrawn: false,
-        ready: false,
-        depsReady: true
-      };
-      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
-        entry.specText = content;
-      }
-      inventory.push(entry);
-    }
-  }
-  const mode = inventory.length === 0 ? "first-run" : "re-open";
-  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
-  return { mode, backlog_inventory };
 }
 
 // src/tools/claim-next-story.ts
