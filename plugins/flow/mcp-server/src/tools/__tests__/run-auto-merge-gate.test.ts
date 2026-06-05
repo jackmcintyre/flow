@@ -26,7 +26,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as os from "node:os";
 import * as path from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import { stringify as yamlStringify } from "yaml";
 import { fileURLToPath } from "node:url";
 
@@ -878,7 +878,7 @@ describe("AC5(h) — boundary: ratio exactly equals threshold (>= semantics)", (
 // ---------------------------------------------------------------------------
 
 describe("AC5(j) — MCP tool registration smoke", () => {
-  it("register.ts includes runAutoMergeGate and total count is 31", () => {
+  it("register.ts includes runAutoMergeGate and live tool set matches the committed snapshot", () => {
     const registeredTools: string[] = [];
     const fakeServer = {
       registerTool: (tool: { name: string }) => {
@@ -886,22 +886,22 @@ describe("AC5(j) — MCP tool registration smoke", () => {
       },
     };
     registerAllTools(fakeServer as unknown as Parameters<typeof registerAllTools>[0]);
-    expect(registeredTools).toContain("runAutoMergeGate");
-    // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38).
-    // De-cruft 2026-05-30: removed recordAgentInvoke + recordPrCloseAction (unwired dead code). 38 → 36.
-    // Story 6.4 added acceptProposal. 36 → 37.
-    // Story 9.1 added markStoryReady. 37 → 38.
-    // Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel). 38 → 40.
-    // Story 9.4 added adjudicateQualityLead (Quality Lead). 40 → 41.
-    // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
-    // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
-    // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
-    // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
-    // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
-    // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
-    // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
-    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
-    expect(registeredTools.length).toBe(50);
+
+    const snapshotPath = path.resolve(HERE, "..", "tool-inventory.snapshot.json");
+    const snapshotNames = JSON.parse(
+      readFileSync(snapshotPath, "utf8"),
+    ) as string[];
+
+    const liveSet = new Set(registeredTools);
+    const snapshotSet = new Set(snapshotNames);
+
+    const added = [...liveSet].filter((n) => !snapshotSet.has(n));
+    const removed = [...snapshotSet].filter((n) => !liveSet.has(n));
+
+    // Names in live but absent from snapshot — update tool-inventory.snapshot.json to add them.
+    expect(added).toEqual([]);
+    // Names in snapshot but absent from live — update tool-inventory.snapshot.json to remove them.
+    expect(removed).toEqual([]);
   });
 });
 
