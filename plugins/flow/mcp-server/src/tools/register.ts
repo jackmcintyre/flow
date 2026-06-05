@@ -396,6 +396,27 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         // Story 10.2 — ≥1 repo-relative cited source path.
         cited_sources: { type: "array", items: { type: "string" } },
         implementation_notes: { type: "string" },
+        // Story 10.8 — three OPTIONAL build-ready fields that fill the
+        // `## Implementation Notes` sub-sections. The zod schema accepts them;
+        // they were previously missing from this advertised schema, so the
+        // author subagent never knew to set them and every draft rendered the
+        // hollow "TBD by dev" defaults — which the gate-1 Considered lens bounces.
+        // Surface + describe them so the author fills them (especially risk).
+        files_touched: {
+          type: "string",
+          description:
+            "Build-ready '### Files touched' content: the new (NEW) and updated (UPDATE) files this story creates/changes. Omitting it renders a TBD-by-dev placeholder.",
+        },
+        definition_of_done: {
+          type: "string",
+          description:
+            "Build-ready '### Definition of Done' content: the checklist of what must be true to ship (ACs met, build/tests green, dist rebuilt and committed, PR green). Omitting it renders a generic default.",
+        },
+        risk_reasoning: {
+          type: "string",
+          description:
+            "Build-ready '### Risk' content: the highest-risk failure mode for this story, why, and its mitigation. Set this — omitting it renders a hollow 'TBD by dev' risk that the gate-1 Considered lens rejects, forcing a re-author.",
+        },
         depends_on: { type: "array", items: { type: "string" } },
         sessionUlid: { type: "string" },
       },
