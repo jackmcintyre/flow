@@ -1180,6 +1180,190 @@ function makeLeakGateStubExeca(opts: {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Story native:01KTAP1N6DEF181646EW3RJH8W — friction telemetry AC3
+// pre-PR gate errors (build, test, rebase-conflict) → exactly one
+// agent.friction 'forced-fallback' event per gate failure, error unchanged.
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — friction telemetry AC3: forced-fallback on gate failures", () => {
+  it("AC3: build gate failure → exactly one forced-fallback friction event, PrePrBuildFailedError re-raised", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    const spy = makeStubExeca({ buildShouldFail: true });
+
+    try {
+      await expect(
+        runDevTerminalAction({
+          targetRepoRoot: ctx.repoRoot,
+          ref: REF,
+          title: TITLE,
+          type: TYPE,
+          body: BODY,
+          summary: SUMMARY,
+          manifestPath: ctx.manifestPath,
+          sessionUlid: SESSION_ULID,
+          worktree: false,
+          execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+        }),
+      ).rejects.toThrow(); // PrePrBuildFailedError
+
+      // Exactly one forced-fallback friction event.
+      const forcedCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "forced-fallback",
+      );
+      expect(forcedCalls).toHaveLength(1);
+      const call = forcedCalls[0]![0]!;
+      expect(call.kind).toBe("forced-fallback");
+      expect(call.role).toBe("generalist-dev");
+      expect(call.session_id).toBe(SESSION_ULID);
+      expect(call.story_id).toBe(REF);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("AC3: test gate failure → exactly one forced-fallback friction event, PrePrTestFailedError re-raised", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    const spy = makeStubExeca({ testShouldFail: true });
+
+    try {
+      await expect(
+        runDevTerminalAction({
+          targetRepoRoot: ctx.repoRoot,
+          ref: REF,
+          title: TITLE,
+          type: TYPE,
+          body: BODY,
+          summary: SUMMARY,
+          manifestPath: ctx.manifestPath,
+          sessionUlid: SESSION_ULID,
+          worktree: false,
+          execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+        }),
+      ).rejects.toThrow(); // PrePrTestFailedError
+
+      // Exactly one forced-fallback friction event.
+      const forcedCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "forced-fallback",
+      );
+      expect(forcedCalls).toHaveLength(1);
+      const call = forcedCalls[0]![0]!;
+      expect(call.kind).toBe("forced-fallback");
+      expect(call.role).toBe("generalist-dev");
+      expect(call.session_id).toBe(SESSION_ULID);
+      expect(call.story_id).toBe(REF);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("AC3: rebase conflict → exactly one forced-fallback friction event, RebaseConflictError re-raised", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    const CONFLICT_OUTPUT =
+      "CONFLICT (content): Merge conflict in src/index.ts\n" +
+      "error: could not apply 1a2b3c4... feat: something\n";
+    const spy = makeStubExeca({ rebaseConflictStdout: CONFLICT_OUTPUT });
+
+    try {
+      await expect(
+        runDevTerminalAction({
+          targetRepoRoot: ctx.repoRoot,
+          ref: REF,
+          title: TITLE,
+          type: TYPE,
+          body: BODY,
+          summary: SUMMARY,
+          manifestPath: ctx.manifestPath,
+          sessionUlid: SESSION_ULID,
+          worktree: false,
+          execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+        }),
+      ).rejects.toThrow(); // RebaseConflictError
+
+      // Exactly one forced-fallback friction event.
+      const forcedCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "forced-fallback",
+      );
+      expect(forcedCalls).toHaveLength(1);
+      const call = forcedCalls[0]![0]!;
+      expect(call.kind).toBe("forced-fallback");
+      expect(call.role).toBe("generalist-dev");
+      expect(call.session_id).toBe(SESSION_ULID);
+      expect(call.story_id).toBe(REF);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("AC3: no friction emitted on the happy path (all gates pass)", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    try {
+      const result = await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+
+      expect(result.ok).toBe(true);
+
+      // No forced-fallback friction events on the happy path.
+      const forcedCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "forced-fallback",
+      );
+      expect(forcedCalls).toHaveLength(0);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("AC3: build gate error propagates unchanged even if emitFriction throws internally", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction").mockRejectedValue(
+      new Error("telemetry write failed"),
+    );
+
+    const spy = makeStubExeca({ buildShouldFail: true });
+
+    try {
+      // Must throw the original PrePrBuildFailedError, not the friction error.
+      const { PrePrBuildFailedError: PrePrBuildFailedErrorClass } = await import("../../errors.js");
+      await expect(
+        runDevTerminalAction({
+          targetRepoRoot: ctx.repoRoot,
+          ref: REF,
+          title: TITLE,
+          type: TYPE,
+          body: BODY,
+          summary: SUMMARY,
+          manifestPath: ctx.manifestPath,
+          sessionUlid: SESSION_ULID,
+          worktree: false,
+          execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+        }),
+      ).rejects.toBeInstanceOf(PrePrBuildFailedErrorClass);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+});
+
 describe("runDevTerminalAction — pre-PR leak gate (Story native:01KT47430Q4C73K5E3ZECBSE5R AC2)", () => {
   let wtCtx: WorktreeTestContext;
 

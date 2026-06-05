@@ -438,3 +438,95 @@ describe("AC3 — retro loop does not draft a duplicate when a pending hardening
     expect(secondStoriesCount).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KTAP1N6DEF181646EW3RJH8W — AC4: friction events written by
+// execution-phase seams surface in recurringFriction at threshold.
+//
+// Proves the end-to-end path: emitFriction → logTelemetryEvent →
+// .flow/telemetry/<month>.jsonl → gatherRetroInputs.recurringFriction.
+// ---------------------------------------------------------------------------
+
+describe("AC4 — friction events written to telemetry appear in recurringFriction at threshold", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gather-retro-ac4-"));
+    await setupNativeWorkspace(tmpRoot);
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /**
+   * Write N agent.friction events of the given kind directly to the telemetry
+   * JSONL file, using logTelemetryEvent (the same path the real seams use).
+   */
+  async function seedFrictionEvents(
+    kind: "empty-input" | "missing-cited-source" | "forced-fallback",
+    count: number,
+  ): Promise<void> {
+    const { logTelemetryEvent } = await import("../lib/logger.js");
+    for (let i = 0; i < count; i++) {
+      await logTelemetryEvent({
+        targetRepoRoot: tmpRoot,
+        event: {
+          type: "agent.friction",
+          session_id: "01HZSESSTEST0000000000001",
+          agent: "generalist-dev",
+          story_id: `native:01HZSTORY00000000000AC4${String(i).padStart(2, "0")}`,
+          data: {
+            kind,
+            expected: "clean gate",
+            observed: `gate failed (iteration ${i})`,
+          },
+        },
+      });
+    }
+  }
+
+  it("two forced-fallback events appear in recurringFriction with count >= 2", async () => {
+    await seedFrictionEvents("forced-fallback", 2);
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    // The kind appears in recurringFriction with count at least 2.
+    const entry = bundle.recurringFriction.find((e) => e.kind === "forced-fallback");
+    expect(entry).toBeDefined();
+    expect(entry!.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it("two empty-input events appear in recurringFriction with count >= 2", async () => {
+    await seedFrictionEvents("empty-input", 2);
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const entry = bundle.recurringFriction.find((e) => e.kind === "empty-input");
+    expect(entry).toBeDefined();
+    expect(entry!.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it("two events of each kind both appear in recurringFriction (both kinds surface)", async () => {
+    await seedFrictionEvents("forced-fallback", 2);
+    await seedFrictionEvents("empty-input", 2);
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const forcedEntry = bundle.recurringFriction.find((e) => e.kind === "forced-fallback");
+    const emptyEntry = bundle.recurringFriction.find((e) => e.kind === "empty-input");
+    expect(forcedEntry).toBeDefined();
+    expect(forcedEntry!.count).toBeGreaterThanOrEqual(2);
+    expect(emptyEntry).toBeDefined();
+    expect(emptyEntry!.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it("a single event (below threshold) does NOT appear in recurringFriction", async () => {
+    await seedFrictionEvents("missing-cited-source", 1);
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const entry = bundle.recurringFriction.find((e) => e.kind === "missing-cited-source");
+    expect(entry).toBeUndefined();
+  });
+});

@@ -791,3 +791,151 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
     expect(["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"]).toContain(result.recommendedVerdict);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KTAP1N6DEF181646EW3RJH8W — friction telemetry emissions
+// AC1: empty acResults → exactly one agent.friction event with kind 'empty-input'
+// AC2: missing artifact (ENOENT) → exactly one agent.friction event with kind 'missing-cited-source'
+// ---------------------------------------------------------------------------
+
+describe("friction telemetry — AC1: empty acResults → empty-input event, verdict unchanged", () => {
+  it("emits exactly one agent.friction 'empty-input' event when extractAcsFromSpec returns [] and verdict is BLOCKED", async () => {
+    // Stub extractAcsFromSpec to return [] — no AC markers found.
+    const extractAcsMod = await import("../../lib/extract-acs-from-spec.js");
+    const spy = vi.spyOn(extractAcsMod, "extractAcsFromSpec").mockResolvedValueOnce([]);
+
+    // Spy on emitFriction via recordAgentFriction (the underlying call)
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    try {
+      const result = await callSession();
+
+      // The verdict is unchanged (BLOCKED) — emitFriction is additive.
+      expect(result.recommendedVerdict).toBe("BLOCKED");
+
+      // Exactly one friction event emitted with the correct shape.
+      const frictionCalls = frictionSpy.mock.calls;
+      const emptyInputCalls = frictionCalls.filter((c) => c[0]?.kind === "empty-input");
+      expect(emptyInputCalls).toHaveLength(1);
+      const call = emptyInputCalls[0]![0]!;
+      expect(call.kind).toBe("empty-input");
+      expect(call.role).toBe("generalist-reviewer");
+      expect(call.session_id).toBe(SESSION_ULID);
+      expect(call.story_id).toBe(STORY_REF);
+    } finally {
+      spy.mockRestore();
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("does NOT emit a friction event on the happy path (non-empty acResults)", async () => {
+    // Normal fixture session — has artifact AC (pass/fail) and vitest AC.
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    try {
+      await callSession();
+
+      // No empty-input friction events should fire (non-empty acResults).
+      const emptyInputCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "empty-input",
+      );
+      expect(emptyInputCalls).toHaveLength(0);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("verdict is unchanged (BLOCKED) even if emitFriction throws internally", async () => {
+    // Stub extractAcsFromSpec to return [] AND stub recordAgentFriction to throw.
+    const extractAcsMod = await import("../../lib/extract-acs-from-spec.js");
+    const extractSpy = vi.spyOn(extractAcsMod, "extractAcsFromSpec").mockResolvedValueOnce([]);
+
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction").mockRejectedValue(
+      new Error("telemetry write failed"),
+    );
+
+    try {
+      // Must not throw — emitFriction is fail-soft.
+      const result = await callSession();
+      expect(result.recommendedVerdict).toBe("BLOCKED");
+    } finally {
+      extractSpy.mockRestore();
+      frictionSpy.mockRestore();
+    }
+  });
+});
+
+describe("friction telemetry — AC2: missing artifact (ENOENT) → missing-cited-source event, verdict unchanged", () => {
+  it("emits exactly one agent.friction 'missing-cited-source' event per missing artifact check", async () => {
+    // Stub extractAcsFromSpec to return exactly ONE artifact AC (to get deterministic count).
+    // The fixture spec has two artifact ACs (AC1 + AC3 both reference hello-a.txt), so
+    // we stub to get a single AC for a precise 1:1 assertion.
+    const extractAcsMod = await import("../../lib/extract-acs-from-spec.js");
+    const extractSpy = vi.spyOn(extractAcsMod, "extractAcsFromSpec").mockResolvedValueOnce([
+      { index: 1, tag: null, firstLine: "artifact: hello-a.txt", body: ["artifact: hello-a.txt"] },
+    ]);
+
+    // Remove the artifact file so the reviewer gets an ENOENT result.
+    await fs.rm(path.join(tmpRoot, "hello-a.txt"));
+
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    try {
+      const result = await callSession();
+
+      // The verdict is unchanged (NEEDS CHANGES) — artifact failed.
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+
+      // Exactly one missing-cited-source friction event (one artifact check, one miss).
+      const missingCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "missing-cited-source",
+      );
+      expect(missingCalls).toHaveLength(1);
+      const call = missingCalls[0]![0]!;
+      expect(call.kind).toBe("missing-cited-source");
+      expect(call.role).toBe("generalist-reviewer");
+      expect(call.session_id).toBe(SESSION_ULID);
+      expect(call.story_id).toBe(STORY_REF);
+    } finally {
+      extractSpy.mockRestore();
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("does NOT emit a missing-cited-source event when the artifact is present", async () => {
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction");
+
+    try {
+      await callSession();
+
+      const missingCalls = frictionSpy.mock.calls.filter(
+        (c) => c[0]?.kind === "missing-cited-source",
+      );
+      expect(missingCalls).toHaveLength(0);
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+
+  it("verdict is unchanged (NEEDS CHANGES) even if emitFriction throws internally", async () => {
+    await fs.rm(path.join(tmpRoot, "hello-a.txt"));
+
+    const recordFrictionMod = await import("../record-agent-friction.js");
+    const frictionSpy = vi.spyOn(recordFrictionMod, "recordAgentFriction").mockRejectedValue(
+      new Error("telemetry write failed"),
+    );
+
+    try {
+      // Must not throw — emitFriction is fail-soft.
+      const result = await callSession();
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+    } finally {
+      frictionSpy.mockRestore();
+    }
+  });
+});

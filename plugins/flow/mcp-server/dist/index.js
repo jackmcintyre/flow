@@ -51112,6 +51112,81 @@ async function processReviewerTranscript(opts) {
 // src/tools/run-dev-terminal-action.ts
 import * as path62 from "node:path";
 
+// src/tools/record-agent-friction.ts
+var RecordAgentFrictionOptionsSchema = external_exports.object({
+  /** Absolute path to the target repository root. */
+  targetRepoRoot: external_exports.string().min(1),
+  /** Role name of the agent experiencing the friction (kebab-cased). */
+  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  /**
+   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
+   * inside a story flow.
+   */
+  story_id: external_exports.string().min(1).optional(),
+  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  session_id: external_exports.string().min(1),
+  /** The closed-enum friction category. */
+  kind: external_exports.enum([
+    "empty-input",
+    "missing-cited-source",
+    "forced-fallback",
+    "repeated-retry"
+  ]),
+  /** What the agent expected to receive. Keep short and structural (NFR14). */
+  expected: external_exports.string().min(1),
+  /** What the agent actually received / had to compensate for (NFR14). */
+  observed: external_exports.string().min(1),
+  /**
+   * Optional role label for downstream correlation. Defaults to the
+   * value of `agent` when omitted (they are the same in most callers).
+   */
+  role: external_exports.string().optional()
+}).strict();
+async function recordAgentFriction(opts) {
+  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
+  const {
+    targetRepoRoot,
+    agent,
+    story_id,
+    session_id,
+    kind,
+    expected,
+    observed
+  } = validated;
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "agent.friction",
+      session_id,
+      agent,
+      ...story_id !== void 0 ? { story_id } : {},
+      data: { kind, expected, observed }
+    }
+  });
+  return { ok: true, kind, agent, session_id };
+}
+
+// src/lib/emit-friction.ts
+async function emitFriction(opts) {
+  try {
+    await recordAgentFriction({
+      targetRepoRoot: opts.targetRepoRoot,
+      agent: opts.role,
+      role: opts.role,
+      session_id: opts.session_id,
+      story_id: opts.story_id,
+      kind: opts.kind,
+      expected: opts.expected,
+      observed: opts.observed
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[emitFriction] suppressed error emitting agent.friction (kind=${opts.kind}): ${String(err)}
+`
+    );
+  }
+}
+
 // src/lib/extract-acs-from-spec.ts
 import { promises as fs45 } from "node:fs";
 async function extractAcsFromSpec(specPath) {
@@ -51415,17 +51490,39 @@ async function runDevTerminalAction(opts) {
       role: ROLE,
       ...execaImpl ? { execaImpl } : {}
     });
-    await gitRebaseOnto({
-      targetRepoRoot: gitRoot,
-      role: ROLE,
-      onto: `origin/${base}`,
-      ...execaImpl ? { execaImpl } : {}
-    });
+    try {
+      await gitRebaseOnto({
+        targetRepoRoot: gitRoot,
+        role: ROLE,
+        onto: `origin/${base}`,
+        ...execaImpl ? { execaImpl } : {}
+      });
+    } catch (rebaseErr) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: `clean rebase onto origin/${base} (no conflicts)`,
+        observed: `rebase conflict aborted \u2014 story branch cannot be rebased onto origin/${base} cleanly`
+      });
+      throw rebaseErr;
+    }
     const buildResult = await runProjectBuild({
       devWorkingDir: gitRoot,
       ...execaImpl ? { execaImpl } : {}
     });
     if (buildResult.exitCode !== 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm build exits 0 (no type errors)",
+        observed: `pre-PR build gate failed (exit ${buildResult.exitCode})`
+      });
       throw new PrePrBuildFailedError({
         exitCode: buildResult.exitCode,
         buildCommand: buildResult.commandLine,
@@ -51439,6 +51536,15 @@ async function runDevTerminalAction(opts) {
       ...execaImpl ? { execaImpl } : {}
     });
     if (testResult.exitCode !== 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm test exits 0 (no failing tests)",
+        observed: `pre-PR test gate failed (exit ${testResult.exitCode})`
+      });
       throw new PrePrTestFailedError({
         exitCode: testResult.exitCode,
         testCommand: testResult.commandLine,
@@ -51454,6 +51560,15 @@ async function runDevTerminalAction(opts) {
         ...execaImpl ? { execaImpl } : {}
       });
       if (leakResult.leaked) {
+        await emitFriction({
+          targetRepoRoot,
+          kind: "forced-fallback",
+          role: ROLE,
+          session_id: sessionUlid,
+          story_id: ref,
+          expected: "dev edits isolated to worktree (shared root checkout clean)",
+          observed: `pre-PR leak gate detected ${leakResult.paths.length} path(s) escaped to shared root: ${leakResult.paths.slice(0, 3).join(", ")}`
+        });
         throw new PrePrLeakDetectedError({
           leakedPaths: leakResult.paths,
           sharedRootPath: leakResult.sharedRootPath
@@ -51888,13 +52003,25 @@ async function runReviewerSession(opts) {
     for (const ac of acEntries) {
       const classification = classifyAc(ac.body);
       if (classification.applicability === "runnable-artifact-check") {
-        acResults[ac.index] = await runArtifactCheck(
+        const artifactResult = await runArtifactCheck(
           ac.index,
           ac.tag,
           classification.artifactPath,
           worktreePath
           // checkRoot — AC2
         );
+        acResults[ac.index] = artifactResult;
+        if (artifactResult.applicability === "runnable-artifact-check" && artifactResult.status === "fail" && artifactResult.reason.includes("ENOENT")) {
+          await emitFriction({
+            targetRepoRoot,
+            kind: "missing-cited-source",
+            role,
+            session_id: sessionUlid,
+            story_id: ref,
+            expected: `artifact present at ${classification.artifactPath}`,
+            observed: `artifact missing (ENOENT): ${classification.artifactPath}`
+          });
+        }
       } else if (classification.applicability === "runnable-vitest") {
         acResults[ac.index] = await runVitestCheck(
           ac.index,
@@ -51951,6 +52078,17 @@ async function runReviewerSession(opts) {
     await cleanup();
   }
   const recommendedVerdict = deriveRecommendedVerdict(acResults);
+  if (Object.keys(acResults).length === 0) {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "empty-input",
+      role,
+      session_id: sessionUlid,
+      story_id: ref,
+      expected: "at least one AC marker (artifact: or vitest:) extracted from the story spec",
+      observed: "no AC markers found \u2014 extractAcsFromSpec returned empty; reviewer verified nothing"
+    });
+  }
   const resultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
   await fs49.mkdir(path64.dirname(resultFilePath), { recursive: true });
   const fileProjection = {
@@ -53556,60 +53694,6 @@ async function adjudicateQualityLead(opts) {
     verdictFilePath,
     ...blessed !== void 0 ? { blessed } : {}
   };
-}
-
-// src/tools/record-agent-friction.ts
-var RecordAgentFrictionOptionsSchema = external_exports.object({
-  /** Absolute path to the target repository root. */
-  targetRepoRoot: external_exports.string().min(1),
-  /** Role name of the agent experiencing the friction (kebab-cased). */
-  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
-  /**
-   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
-   * inside a story flow.
-   */
-  story_id: external_exports.string().min(1).optional(),
-  /** Drain-session ULID (or any opaque caller-supplied identifier). */
-  session_id: external_exports.string().min(1),
-  /** The closed-enum friction category. */
-  kind: external_exports.enum([
-    "empty-input",
-    "missing-cited-source",
-    "forced-fallback",
-    "repeated-retry"
-  ]),
-  /** What the agent expected to receive. Keep short and structural (NFR14). */
-  expected: external_exports.string().min(1),
-  /** What the agent actually received / had to compensate for (NFR14). */
-  observed: external_exports.string().min(1),
-  /**
-   * Optional role label for downstream correlation. Defaults to the
-   * value of `agent` when omitted (they are the same in most callers).
-   */
-  role: external_exports.string().optional()
-}).strict();
-async function recordAgentFriction(opts) {
-  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
-  const {
-    targetRepoRoot,
-    agent,
-    story_id,
-    session_id,
-    kind,
-    expected,
-    observed
-  } = validated;
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      type: "agent.friction",
-      session_id,
-      agent,
-      ...story_id !== void 0 ? { story_id } : {},
-      data: { kind, expected, observed }
-    }
-  });
-  return { ok: true, kind, agent, session_id };
 }
 
 // src/tools/resolve-lens-roles.ts

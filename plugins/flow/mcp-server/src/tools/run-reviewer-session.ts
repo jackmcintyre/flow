@@ -47,6 +47,7 @@ import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
+import { emitFriction } from "../lib/emit-friction.js";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
 import type { RiskTierBlock } from "./classify-risk-tier.js";
@@ -579,12 +580,26 @@ export async function runReviewerSession(
       const classification = classifyAc(ac.body);
 
       if (classification.applicability === "runnable-artifact-check") {
-        acResults[ac.index] = await runArtifactCheck(
+        const artifactResult = await runArtifactCheck(
           ac.index,
           ac.tag,
           classification.artifactPath!,
           worktreePath,  // checkRoot — AC2
         );
+        acResults[ac.index] = artifactResult;
+        // Emit missing-cited-source friction when the artifact is absent (ENOENT).
+        // Fail-soft: the verdict is unchanged whether or not telemetry succeeds.
+        if (artifactResult.applicability === "runnable-artifact-check" && artifactResult.status === "fail" && artifactResult.reason.includes("ENOENT")) {
+          await emitFriction({
+            targetRepoRoot,
+            kind: "missing-cited-source",
+            role,
+            session_id: sessionUlid,
+            story_id: ref,
+            expected: `artifact present at ${classification.artifactPath}`,
+            observed: `artifact missing (ENOENT): ${classification.artifactPath}`,
+          });
+        }
       } else if (classification.applicability === "runnable-vitest") {
         acResults[ac.index] = await runVitestCheck(
           ac.index,
@@ -668,6 +683,21 @@ export async function runReviewerSession(
   // Derive recommendedVerdict deterministically (spec §3f — revision 2)
   // -------------------------------------------------------------------------
   const recommendedVerdict = deriveRecommendedVerdict(acResults);
+
+  // Emit empty-input friction when no AC markers were found (Rule-2 empty branch).
+  // This is the known AC-marker-gap blind spot where the reviewer silently verifies
+  // nothing. Fail-soft: the verdict is unchanged whether or not telemetry succeeds.
+  if (Object.keys(acResults).length === 0) {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "empty-input",
+      role,
+      session_id: sessionUlid,
+      story_id: ref,
+      expected: "at least one AC marker (artifact: or vitest:) extracted from the story spec",
+      observed: "no AC markers found — extractAcsFromSpec returned empty; reviewer verified nothing",
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Persist reviewer-result.json (spec §3g — revision 2)
