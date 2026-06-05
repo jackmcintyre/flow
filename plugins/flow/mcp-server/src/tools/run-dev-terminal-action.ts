@@ -59,6 +59,7 @@ import {
   PrePrLeakDetectedError,
   PrePrTestFailedError,
 } from "../errors.js";
+import { emitFriction } from "../lib/emit-friction.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
@@ -245,12 +246,28 @@ export async function runDevTerminalAction(opts: {
       role: ROLE,
       ...(execaImpl ? { execaImpl } : {}),
     });
-    await gitRebaseOnto({
-      targetRepoRoot: gitRoot,
-      role: ROLE,
-      onto: `origin/${base}`,
-      ...(execaImpl ? { execaImpl } : {}),
-    });
+    try {
+      await gitRebaseOnto({
+        targetRepoRoot: gitRoot,
+        role: ROLE,
+        onto: `origin/${base}`,
+        ...(execaImpl ? { execaImpl } : {}),
+      });
+    } catch (rebaseErr) {
+      // Emit forced-fallback friction before re-raising the rebase conflict.
+      // Fail-soft: the original error propagates unchanged whether or not
+      // the telemetry write succeeds.
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: `clean rebase onto origin/${base} (no conflicts)`,
+        observed: `rebase conflict aborted — story branch cannot be rebased onto origin/${base} cleanly`,
+      });
+      throw rebaseErr;
+    }
 
     // (viii) Full-build gate (Story 8.17). Run the project's full build — the
     // same whole-project type-check CI runs (`pnpm build` at `plugins/flow`) — in
@@ -266,6 +283,18 @@ export async function runDevTerminalAction(opts: {
       ...(execaImpl ? { execaImpl } : {}),
     });
     if (buildResult.exitCode !== 0) {
+      // Emit forced-fallback friction before re-raising the build failure.
+      // Fail-soft: the original error propagates unchanged whether or not
+      // the telemetry write succeeds.
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm build exits 0 (no type errors)",
+        observed: `pre-PR build gate failed (exit ${buildResult.exitCode})`,
+      });
       throw new PrePrBuildFailedError({
         exitCode: buildResult.exitCode,
         buildCommand: buildResult.commandLine,
@@ -286,6 +315,18 @@ export async function runDevTerminalAction(opts: {
       ...(execaImpl ? { execaImpl } : {}),
     });
     if (testResult.exitCode !== 0) {
+      // Emit forced-fallback friction before re-raising the test failure.
+      // Fail-soft: the original error propagates unchanged whether or not
+      // the telemetry write succeeds.
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm test exits 0 (no failing tests)",
+        observed: `pre-PR test gate failed (exit ${testResult.exitCode})`,
+      });
       throw new PrePrTestFailedError({
         exitCode: testResult.exitCode,
         testCommand: testResult.commandLine,
@@ -314,6 +355,18 @@ export async function runDevTerminalAction(opts: {
         ...(execaImpl ? { execaImpl } : {}),
       });
       if (leakResult.leaked) {
+        // Emit forced-fallback friction before re-raising the leak detection.
+        // Fail-soft: the original error propagates unchanged whether or not
+        // the telemetry write succeeds.
+        await emitFriction({
+          targetRepoRoot,
+          kind: "forced-fallback",
+          role: ROLE,
+          session_id: sessionUlid,
+          story_id: ref,
+          expected: "dev edits isolated to worktree (shared root checkout clean)",
+          observed: `pre-PR leak gate detected ${leakResult.paths.length} path(s) escaped to shared root: ${leakResult.paths.slice(0, 3).join(", ")}`,
+        });
         throw new PrePrLeakDetectedError({
           leakedPaths: leakResult.paths,
           sharedRootPath: leakResult.sharedRootPath,
