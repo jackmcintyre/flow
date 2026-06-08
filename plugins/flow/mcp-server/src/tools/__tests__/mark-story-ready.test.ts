@@ -266,3 +266,114 @@ describe("markStoryReady AC4 — readiness telemetry event", () => {
     expect(await readReadinessEvents()).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC2 — inline approval prompt at the end of /flow:plan (plan-flow seam)
+//
+// After the planner subagent drafts a story and a judge panel grade is
+// surfaced, /flow:plan presents a yes/no prompt. Answering yes triggers
+// markStoryReady(ready: true); any other answer leaves the story not-ready.
+// These tests verify the tool-seam contract (markStoryReady) that the skill
+// layer drives.
+// ---------------------------------------------------------------------------
+
+describe("plan-flow inline approval — AC2: yes answer approves, no/silence leaves parked", () => {
+  it("yes answer: markStoryReady(ready:true) flips the flag and emits a readiness event", async () => {
+    await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+    // Simulate the operator answering yes to the inline approval prompt.
+    const result = await markStoryReady({
+      targetRepoRoot: tmpRoot,
+      ref: STORY_REF,
+      ready: true,
+      sessionUlid: SESSION_ULID,
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.noop).toBe(false);
+
+    const after = await readManifest(todoPath(STORY_REF));
+    expect(after["ready"]).toBe(true);
+    expect(after["status"]).toBe("to-do");
+
+    // Exactly one readiness event was emitted for the toggle.
+    const events = await readReadinessEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.data?.ref).toBe(STORY_REF);
+    expect(events[0]!.data?.ready).toBe(true);
+  });
+
+  it("no answer: markStoryReady is not called → story remains not-ready, no readiness event", async () => {
+    await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+    // Simulate the operator answering no: the skill does NOT call markStoryReady.
+    // No mutation, no event.
+    const after = await readManifest(todoPath(STORY_REF));
+    expect(after["ready"]).toBe(false);
+
+    const events = await readReadinessEvents();
+    expect(events).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3 — inline approval: no-answer or non-yes leaves the story not-approved
+//
+// This covers the negative polarity: silence, explicit no, or any non-yes
+// response MUST leave the story in the not-ready state. The build loop cannot
+// claim a story that was not explicitly approved.
+// ---------------------------------------------------------------------------
+
+describe("inline approval AC3 — no/silence/non-yes keeps story not-approved", () => {
+  it("silence (skip prompt): story stays not-ready with ready:false", async () => {
+    await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+    // No call to markStoryReady — story stays at the default not-ready state.
+    const manifest = await readManifest(todoPath(STORY_REF));
+    expect(manifest["ready"]).toBe(false);
+    expect(manifest["status"]).toBe("to-do");
+  });
+
+  it("non-yes answer: markStoryReady(ready:false) is a no-op that keeps story not-ready", async () => {
+    await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+    // Simulate a non-yes answer: skill sees it and does NOT flip (ready stays false).
+    // If it were to call markStoryReady(ready:false), the call is a no-op.
+    const result = await markStoryReady({
+      targetRepoRoot: tmpRoot,
+      ref: STORY_REF,
+      ready: false,
+    });
+
+    // Already false → noop, no write, no event.
+    expect(result.noop).toBe(true);
+    expect(result.ready).toBe(false);
+
+    const after = await readManifest(todoPath(STORY_REF));
+    expect(after["ready"]).toBe(false);
+
+    // No readiness event emitted for a no-op call.
+    expect(await readReadinessEvents()).toHaveLength(0);
+  });
+
+  it("explicit yes then explicit no: un-approving via markStoryReady(ready:false) parks the story again", async () => {
+    await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+    // First: operator approves (yes).
+    await markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: true });
+    const approved = await readManifest(todoPath(STORY_REF));
+    expect(approved["ready"]).toBe(true);
+
+    // Then: operator reverses the decision via /flow:ready (no).
+    const result = await markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: false });
+    expect(result.noop).toBe(false);
+    expect(result.ready).toBe(false);
+
+    const parked = await readManifest(todoPath(STORY_REF));
+    expect(parked["ready"]).toBe(false);
+    expect(parked["status"]).toBe("to-do");
+
+    // Two events: one for approve, one for park.
+    expect(await readReadinessEvents()).toHaveLength(2);
+  });
+});
