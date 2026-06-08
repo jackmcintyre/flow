@@ -7,8 +7,6 @@
   },
   "include": ["src/**/*.ts"],
   "exclude": [
-    "src/__tests__/proxy-spawn.test.ts",
-    "src/__tests__/proxy-lockfile.test.ts",
     "src/tools/__tests__/audit-tool-reachability.test.ts"
   ]
 }
