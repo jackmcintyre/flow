@@ -64,6 +64,7 @@ import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
 import { recordStoryRetro } from "./tools/record-story-retro.js";
 import { recallLesson } from "./tools/recall-lesson.js";
 import { classifyStoryLane } from "./tools/classify-story-lane.js";
+import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -154,6 +155,13 @@ const TOOLS: Record<string, ToolFn> = {
   // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
   // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
   classifyStoryLane,
+  // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — fast-lane judge plan resolver.
+  // Pure deterministic function: maps (lane, detector_confirmed_dead) → a lens
+  // plan { skip, lenses, perLensModel }. Keeps the load-bearing decision in a
+  // tool result (not workflow JS) so it is unit-testable without the Workflow
+  // runtime. Callable on the no-MCP gate path:
+  //   node dist/cli.js resolveJudgePlan --json '{"storyId":"...","lane":"fast"}'
+  resolveJudgePlan,
 };
 
 function emit(obj: unknown): void {

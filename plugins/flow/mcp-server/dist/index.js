@@ -54157,6 +54157,63 @@ ${yamlBlock}
 ${sections.join("\n")}`;
 }
 
+// src/tools/resolve-judge-plan.ts
+var FULL_LENS_MODEL = {
+  structure: "sonnet",
+  discipline: "sonnet",
+  verifiability: "opus",
+  domain: "opus",
+  considered: "opus"
+};
+var FULL_LENSES = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered"
+];
+var FAST_LENS_NAME = "structure+verifiability";
+var JudgePlanSchema = external_exports.object({
+  /**
+   * When true, the judge is bypassed entirely (detector_confirmed_dead fast).
+   * When false, spawn the planned lenses.
+   */
+  skip: external_exports.boolean(),
+  /**
+   * The lens names to spawn. Empty when skip=true.
+   * For full lane: the five standard names.
+   * For fast lane: ['structure+verifiability'].
+   */
+  lenses: external_exports.array(external_exports.string()),
+  /**
+   * Model to use for each lens. Empty when skip=true.
+   */
+  perLensModel: external_exports.record(external_exports.string(), external_exports.enum(["sonnet", "opus"]))
+}).strict();
+function resolveJudgePlan(opts) {
+  const lane = opts.lane ?? "full";
+  const confirmedDead = opts.detector_confirmed_dead ?? false;
+  if (lane === "full") {
+    return {
+      skip: false,
+      lenses: [...FULL_LENSES],
+      perLensModel: { ...FULL_LENS_MODEL }
+    };
+  }
+  if (lane === "fast" && confirmedDead) {
+    return {
+      skip: true,
+      lenses: [],
+      perLensModel: {}
+    };
+  }
+  return {
+    skip: false,
+    lenses: [FAST_LENS_NAME],
+    perLensModel: { [FAST_LENS_NAME]: "sonnet" }
+  };
+}
+
 // src/tools/register.ts
 function registerAllTools(server) {
   server.registerTool({
@@ -56066,6 +56123,30 @@ function registerAllTools(server) {
         lane_hint: external_exports.enum(["fast", "full"]).optional()
       }).parse(args);
       const result = classifyStoryLane(parsed);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }]
+      };
+    }
+  });
+  server.registerTool({
+    name: "resolveJudgePlan",
+    description: "Resolve the judge lens plan from (lane, detector_confirmed_dead) before the judge panel runs (Story native:01KTKK2Y73EDDAXK470EZ3MHQ8). Pure deterministic function \u2014 no I/O, no LLM. full/absent \u2192 { skip: false, lenses: [5-lens array], perLensModel: { Structure+Discipline=sonnet, Verif+Domain+Considered=opus } }. fast \u2192 { skip: false, lenses: ['structure+verifiability'], perLensModel: { 'structure+verifiability': 'sonnet' } }. fast + detector_confirmed_dead=true \u2192 { skip: true, lenses: [], perLensModel: {} } (auto-bless bypass \u2014 merge gate remains the safety net). Returns { skip, lenses, perLensModel }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storyId: { type: "string" },
+        lane: { type: "string", enum: ["fast", "full"] },
+        detector_confirmed_dead: { type: "boolean" }
+      },
+      required: ["storyId"]
+    },
+    handler: async (args) => {
+      const parsed = external_exports.object({
+        storyId: external_exports.string().min(1),
+        lane: external_exports.enum(["fast", "full"]).optional(),
+        detector_confirmed_dead: external_exports.boolean().optional()
+      }).parse(args);
+      const result = resolveJudgePlan(parsed);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }]
       };

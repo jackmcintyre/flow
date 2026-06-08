@@ -40,6 +40,7 @@
   "recordReviewerLesson",
   "recordSkillInvoke",
   "recordStoryRetro",
+  "resolveJudgePlan",
   "resolveLensRoles",
   "runAutoMergeGate",
   "runDevTerminalAction",

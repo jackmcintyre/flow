@@ -59,6 +59,7 @@ import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
+import { resolveJudgePlan } from "./resolve-judge-plan.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2623,6 +2624,48 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         })
         .parse(args);
       const result = classifyStoryLane(parsed);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    },
+  });
+
+  // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — resolveJudgePlan: pure deterministic
+  // judge-plan resolver. Maps (lane, detector_confirmed_dead) to a lens plan
+  // { skip, lenses, perLensModel } before the costly judge panel is invoked.
+  // - full/absent → five-lens tiering verbatim (byte-identical to the current LENS_MODEL).
+  // - fast → one combined Structure+Verifiability lens on Sonnet (no Opus).
+  // - fast + detector_confirmed_dead=true → { skip: true } (auto-bless bypass).
+  // The load-bearing decision lives here (not in gate-1.workflow.js or agent prose)
+  // so it is unit-testable without the Workflow runtime.
+  server.registerTool({
+    name: "resolveJudgePlan",
+    description:
+      "Resolve the judge lens plan from (lane, detector_confirmed_dead) before the judge panel runs " +
+      "(Story native:01KTKK2Y73EDDAXK470EZ3MHQ8). " +
+      "Pure deterministic function — no I/O, no LLM. " +
+      "full/absent → { skip: false, lenses: [5-lens array], perLensModel: { Structure+Discipline=sonnet, Verif+Domain+Considered=opus } }. " +
+      "fast → { skip: false, lenses: ['structure+verifiability'], perLensModel: { 'structure+verifiability': 'sonnet' } }. " +
+      "fast + detector_confirmed_dead=true → { skip: true, lenses: [], perLensModel: {} } (auto-bless bypass — merge gate remains the safety net). " +
+      "Returns { skip, lenses, perLensModel }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storyId: { type: "string" },
+        lane: { type: "string", enum: ["fast", "full"] },
+        detector_confirmed_dead: { type: "boolean" },
+      },
+      required: ["storyId"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          storyId: z.string().min(1),
+          lane: z.enum(["fast", "full"]).optional(),
+          detector_confirmed_dead: z.boolean().optional(),
+        })
+        .parse(args);
+      const result = resolveJudgePlan(parsed);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
       };

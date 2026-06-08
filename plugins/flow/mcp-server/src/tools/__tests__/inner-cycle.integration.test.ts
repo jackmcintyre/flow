@@ -621,7 +621,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("recallLesson");
       // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 50 → 51.
       expect(toolNames).toContain("classifyStoryLane");
-      expect(toolNames.length).toBe(51);
+      // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
+      expect(toolNames).toContain("resolveJudgePlan");
+      expect(toolNames.length).toBe(52);
     } finally {
       await client.close();
       await server.close();
