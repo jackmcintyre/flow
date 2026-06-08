@@ -9,6 +9,7 @@
   "claimNextStory",
   "claimStory",
   "classifyRiskTier",
+  "classifyStoryLane",
   "completeStory",
   "computeAgreement",
   "computeSkillEffectiveness",

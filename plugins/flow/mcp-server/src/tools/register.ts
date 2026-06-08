@@ -58,6 +58,7 @@ import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-ad
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
+import { classifyStoryLane } from "./classify-story-lane.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2576,6 +2577,55 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         }
         throw err;
       }
+    },
+  });
+
+  // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — classifyStoryLane: pure deterministic
+  // lane classifier over execution-manifest signals. Returns { lane: 'fast'|'full',
+  // matched_rule, evidence } before the costly judge panel is invoked, so trivial
+  // low-risk work can take a cheaper path. Conservative by design: any missing
+  // signal, any elevated risk tier, or any security-sensitive cited source forces
+  // 'full'. The author's optional lane_hint is downgrade-only ('fast' hint honoured
+  // only if the classifier independently returns 'fast'; 'full' hint always wins).
+  // Pure: no I/O, no LLM, no spec load. The post-build classifyRiskTier on the real
+  // diff is the safety backstop; this is a cost optimisation, not a safety control.
+  server.registerTool({
+    name: "classifyStoryLane",
+    description:
+      "Classify a story into a cost lane ('fast' or 'full') from its execution-manifest signals " +
+      "(Story native:01KTKJXP6DWN5YHKVG96DH16V0). " +
+      "Pure deterministic function — no I/O, no LLM. " +
+      "'fast' requires ALL of: risk_tier='low' AND ≤3 cited_sources AND a safe change intent " +
+      "(docs-only, tests-only, or additive-only). " +
+      "ANY high/medium risk_tier, security-sensitive cited source, absent risk_tier, " +
+      "or ambiguous signals forces 'full' — an unknown story is never cheapened. " +
+      "The optional lane_hint is downgrade-only: a 'fast' hint is honoured only if the " +
+      "classifier independently returns 'fast'; a 'full' hint always wins. " +
+      "Returns { lane, matched_rule, evidence: { risk_tier, cited_sources_count, security_paths, author_hint } }. " +
+      "The post-build classifyRiskTier on the real diff remains the safety backstop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storyId: { type: "string" },
+        risk_tier: { type: "string", enum: ["low", "medium", "high"] },
+        cited_sources: { type: "array", items: { type: "string" } },
+        lane_hint: { type: "string", enum: ["fast", "full"] },
+      },
+      required: ["storyId"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          storyId: z.string().min(1),
+          risk_tier: z.enum(["low", "medium", "high"]).optional(),
+          cited_sources: z.array(z.string().min(1)).optional(),
+          lane_hint: z.enum(["fast", "full"]).optional(),
+        })
+        .parse(args);
+      const result = classifyStoryLane(parsed);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
     },
   });
 }

@@ -6,6 +6,7 @@ import { resolveDisciplinePaths } from "../validators/discipline-resolvability.j
 import { extractDepRefsFromSpecBody } from "../lib/extract-dep-refs.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
+import { classifyStoryLane } from "./classify-story-lane.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { ChangeType } from "../schemas/risk-tiering-spec.js";
 import {
@@ -288,6 +289,7 @@ type AuthorTimeRiskFields =
         change_types: ChangeType[];
         diff_size: number;
       };
+      lane: "fast" | "full";
     };
 
 /**
@@ -297,6 +299,11 @@ type AuthorTimeRiskFields =
  *   `{ changedPaths: story.cited_sources, commitMessages: [], diffSize: 0 }`.
  * Path-pattern matching with no diff — the same separable classifier the
  * post-build reviewer stamp uses, just fed the author-time path signal.
+ *
+ * Story native:01KTKJXP6DWN5YHKVG96DH16V0 — also runs `classifyStoryLane` to
+ * compute the `lane` field, applying the author's optional `lane_hint` as
+ * downgrade-only (a 'fast' hint is honoured only if the lane classifier
+ * independently returns 'fast'; a 'full' hint always wins).
  *
  * Gated to native/enriched stories that DECLARE `cited_sources`. A BMad/legacy
  * story with no `cited_sources` returns `{}` (NOT stamped) — no regression to
@@ -327,6 +334,20 @@ async function computeAuthorTimeRiskFields(
     diffSize: 0,
   });
 
+  // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — compute lane from the risk tier
+  // and the declared cited sources. Apply the author hint as downgrade-only:
+  // the hint is carried in the source story's raw frontmatter via `lane_hint`
+  // (if the native adapter exposes it) or is simply absent.
+  const laneHint = (story.raw_frontmatter as Record<string, unknown> | undefined)
+    ?.lane_hint as "fast" | "full" | undefined;
+
+  const laneResult = classifyStoryLane({
+    storyId: story.ref,
+    risk_tier: classification.tier,
+    cited_sources: story.cited_sources,
+    lane_hint: laneHint,
+  });
+
   return {
     risk_tier: classification.tier,
     risk_tier_evidence: {
@@ -335,6 +356,7 @@ async function computeAuthorTimeRiskFields(
       change_types: classification.evidence.change_types,
       diff_size: classification.evidence.diff_size,
     },
+    lane: laneResult.lane,
   };
 }
 

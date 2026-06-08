@@ -88,6 +88,16 @@ const WriteNativeStoryInputSchema = z.object({
    * still validates when authored interactively. (Story 9.2)
    */
   sessionUlid: z.string().min(1).optional(),
+  /**
+   * Story native:01KTKJXP6DWN5YHKVG96DH16V0 — optional author lane hint.
+   * Downgrade-only: a 'fast' hint is honoured only if `classifyStoryLane`
+   * independently also returns 'fast' at scan time; a 'full' hint always wins
+   * and is the safe choice when the author suspects elevated risk.
+   *
+   * Omitting this field (the default) lets the scan-time classifier decide the
+   * lane without any author bias.
+   */
+  lane_hint: z.enum(["fast", "full"]).optional(),
 });
 
 export type WriteNativeStoryInput = z.infer<typeof WriteNativeStoryInputSchema>;

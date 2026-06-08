@@ -375,6 +375,32 @@ export const ExecutionManifestSchema = z
      * Added in Story 6.1 AC4.
      */
     duration_seconds: z.number().int().nonnegative().optional(),
+
+    /**
+     * Cost lane assigned by `classifyStoryLane` at scan time
+     * (Story native:01KTKJXP6DWN5YHKVG96DH16V0).
+     *
+     * - `'fast'`  — the story's pre-build signals all classify as low-risk and
+     *   narrow-scope; downstream judge workflows may take a cheaper path.
+     * - `'full'`  — any elevated risk, ambiguous signal, or security-sensitive
+     *   path; the full judge panel must run.
+     *
+     * Conservative default: absent on legacy / BMad manifests that pre-date this
+     * field, or on manifests whose scan-time classification returned `full` and
+     * the caller chose to omit the field (both cases are treated as `'full'` by
+     * consumers). Additive and strict-compatible — old manifests parse unchanged.
+     */
+    lane: z.enum(["fast", "full"]).optional(),
+
+    /**
+     * True when the story was authored with explicit knowledge that it only
+     * removes dead code or dead configuration lines — a conservative human
+     * signal that the classifier uses to weight the `low.config-dead-lines`
+     * intent path. Optional and additive; absent ≡ false.
+     *
+     * Added in Story native:01KTKJXP6DWN5YHKVG96DH16V0.
+     */
+    detector_confirmed_dead: z.boolean().optional(),
   })
   .strict();
 

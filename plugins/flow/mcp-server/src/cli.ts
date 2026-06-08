@@ -63,6 +63,7 @@ import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
 import { recordStoryRetro } from "./tools/record-story-retro.js";
 import { recallLesson } from "./tools/recall-lesson.js";
+import { classifyStoryLane } from "./tools/classify-story-lane.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -147,6 +148,12 @@ const TOOLS: Record<string, ToolFn> = {
   // buildPersonaSpawnPrompt now emits a one-line index; agents call this
   // to retrieve the full detail body of a specific lesson by id.
   recallLesson,
+  // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — pre-judge lane classifier.
+  // Pure deterministic function: classifies a story into 'fast' or 'full'
+  // from its execution-manifest signals before the costly judge panel runs.
+  // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
+  // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
+  classifyStoryLane,
 };
 
 function emit(obj: unknown): void {
