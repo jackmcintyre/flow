@@ -32,6 +32,7 @@ import { DisciplineViolationError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { scanSources } from "../scan-sources.js";
 import { claimNextStory, QUEUE_DRAINED_LINE } from "../claim-next-story.js";
+import { markStoryReady } from "../mark-story-ready.js";
 
 const SESSION_ULID = "01HZSESSION00000000000099";
 
@@ -206,5 +207,84 @@ describe("author seam AC6 — draft.authored telemetry event", () => {
     );
 
     expect(await readDraftAuthoredEvents()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 — inline approval prompt at the end of /flow:author
+//
+// These tests verify the tool-layer seam that the /flow:author skill invokes
+// after surfacing a judge panel grade:
+//   - An explicit yes answer → markStoryReady(ready: true) → story is claimable
+//   - A no answer or silence → markStoryReady is not called → story stays parked
+//   - An explicit no answer → markStoryReady(ready: false) confirms not-ready
+// ---------------------------------------------------------------------------
+
+describe("author seam AC1 — inline approval prompt flips readiness via markStoryReady", () => {
+  it("yes answer: calling markStoryReady(ready:true) after authoring makes the story claimable", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+    await scanSources({ targetRepoRoot: root });
+
+    // Verify the story starts not-ready.
+    const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
+    const before = yamlParse(await fs.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    expect(before["ready"]).toBe(false);
+
+    // Simulate the operator answering yes: the skill calls markStoryReady(ready: true).
+    const result = await markStoryReady({
+      targetRepoRoot: root,
+      ref,
+      ready: true,
+      sessionUlid: SESSION_ULID,
+    });
+
+    expect(result.ref).toBe(ref);
+    expect(result.ready).toBe(true);
+    expect(result.noop).toBe(false);
+
+    // Story is now claimable — claimNextStory returns it (not queue-drained).
+    const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
+    expect(claim.next).toBe("spawn-dev");
+    if (claim.next === "spawn-dev") {
+      expect(claim.ref).toBe(ref);
+    }
+  });
+
+  it("no answer: not calling markStoryReady leaves the story parked not-ready, not claimable", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+    await scanSources({ targetRepoRoot: root });
+
+    // Simulate the operator answering no: the skill does NOT call markStoryReady.
+    // The story remains at its default not-ready state.
+
+    const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
+    const after = yamlParse(await fs.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    expect(after["ready"]).toBe(false);
+
+    // The build loop cannot claim it.
+    const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
+    expect(claim.next).toBe("queue-drained");
+    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+
+  it("silence / non-yes: markStoryReady(ready:false) is a no-op that keeps the story not-ready", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+    await scanSources({ targetRepoRoot: root });
+
+    // Simulate marking not-ready explicitly (e.g., the skill sees a non-yes response).
+    const result = await markStoryReady({
+      targetRepoRoot: root,
+      ref,
+      ready: false,
+      sessionUlid: SESSION_ULID,
+    });
+
+    // Already false → noop (no write, no event).
+    expect(result.noop).toBe(true);
+    expect(result.ready).toBe(false);
+
+    // Story is still not claimable.
+    const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
+    expect(claim.next).toBe("queue-drained");
   });
 });
