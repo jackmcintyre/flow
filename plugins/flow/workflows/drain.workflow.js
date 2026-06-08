@@ -29,7 +29,7 @@ export const meta = {
 //   devReviewerModel : OPTIONAL model string for the dev and reviewer subagents.
 //                    Default 'sonnet'. Override to 'opus' (or any model) for a higher-
 //                    quality (higher-cost) run. Does NOT affect the seam-relay courier
-//                    (always 'sonnet'), the judge panel, or persona/QL calls.
+//                    (always 'haiku'), the judge panel, or persona/QL calls.
 // ---------------------------------------------------------------------------
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
@@ -47,8 +47,8 @@ const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency >
 // Execution model for the dev and reviewer subagents (FU6). Default: 'sonnet' so
 // overnight drains use the cheaper model without hand-editing the workflow.
 // Override per-run by passing devReviewerModel: 'opus' (or any model string) in
-// the launch args. Does NOT affect the seam-relay courier (already 'sonnet'), the
-// judge panel, or persona/QL calls.
+// the launch args. Does NOT affect the seam-relay courier (a fixed 'haiku' — it
+// relays one JSON line and does no reasoning), the judge panel, or persona/QL calls.
 const execModel = (A && A.devReviewerModel) || 'sonnet'
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
@@ -69,14 +69,18 @@ const RawSchema = { type: 'object', additionalProperties: false, properties: { s
 const safeParse = (s) => { try { return JSON.parse(String(s).trim()) } catch (e) { return { _parseError: String(e), raw: String(s).slice(0, 400) } } }
 const J = (o) => JSON.stringify(o)
 
-// A SEAM: a cheap one-shot courier (sonnet) that runs ONE CLI command verbatim
+// A SEAM: a cheap one-shot courier (haiku) that runs ONE CLI command verbatim
 // and returns its single JSON line. This is the deterministic-seam discipline —
 // every load-bearing decision is a tool call, never script JS and never agent prose.
+// The courier does zero reasoning (it relays one JSON line), so it runs on the
+// cheapest model — the harness-instantiation tokens dominate, and Haiku's cache
+// read/create is several times cheaper than Sonnet's.
 // `retryable` re-invokes the courier on a garbled (non-JSON) relay — a fresh LLM
 // call usually returns clean JSON. Safe ONLY for read-only / idempotent seams.
 // MUTATING seams (claim / verdict / gate) leave retryable=false: a garble there
 // safely pauses that one story (no-silent-failure) rather than risk re-applying a
-// mutation the first call may already have landed. Sonnet makes garbles rare to begin with.
+// mutation the first call may already have landed. So even if Haiku garbles a
+// relay marginally more often than Sonnet, it pauses one story, never corrupts.
 //
 // `swallow` (Story 8.21) extends the existing "no line, keep going" degrade
 // convention from a *garbled* relay to a *hard rejection* of the underlying
@@ -101,7 +105,7 @@ const seam = async (cmd, label, retryable = false, swallow = false) => {
         `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
           `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
           `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-        { schema: RawSchema, label, phase: 'drain', model: 'sonnet' },
+        { schema: RawSchema, label, phase: 'drain', model: 'haiku' },
       )
     } catch (e) {
       // HARD rejection of the courier call. For an observability seam we degrade

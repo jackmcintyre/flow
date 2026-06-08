@@ -32,8 +32,9 @@ const RawSchema = { type: 'object', additionalProperties: false, properties: { s
 const safeParse = (s) => { try { return JSON.parse(String(s).trim()) } catch (e) { return { _parseError: String(e), raw: String(s).slice(0, 400) } } }
 const J = (o) => JSON.stringify(o)
 
-// A SEAM: a cheap one-shot courier (sonnet) that runs ONE CLI command verbatim
-// and returns its single JSON line. Mirrors drain.workflow.js seam() conventions:
+// A SEAM: a cheap one-shot courier (haiku) that runs ONE CLI command verbatim
+// and returns its single JSON line. The courier does zero reasoning, so it runs
+// on the cheapest model. Mirrors drain.workflow.js seam() conventions:
 // - retryable re-invokes the courier on a garbled (non-JSON) relay (safe ONLY for
 //   read-only / idempotent seams).
 // - MUTATING seams (adjudicate, writeLensVerdict) leave retryable=false so a garble
@@ -46,7 +47,7 @@ const seam = async (cmd, label, retryable = false) => {
       `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
         `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
         `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-      { schema: RawSchema, label, phase: 'gate-1', model: 'sonnet' },
+      { schema: RawSchema, label, phase: 'gate-1', model: 'haiku' },
     )
     parsed = r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
     if (!parsed._parseError) return parsed
