@@ -41780,6 +41780,58 @@ function resolveJudgePlan(opts) {
   };
 }
 
+// src/tools/resolve-build-plan.ts
+var import_yaml29 = __toESM(require_dist(), 1);
+import { readFile as readFile2 } from "node:fs/promises";
+var FAST_LANE_MODEL = "haiku";
+var FULL_LANE_MODEL = "sonnet";
+var FAST_REVIEW_DEPTH = "light";
+var FULL_REVIEW_DEPTH = "full";
+var BuildPlanSchema = external_exports.object({
+  /**
+   * Model string for both the dev and reviewer subagents.
+   * Routed into the existing `devReviewerModel` arg / `model` option on
+   * agent() calls — same channel as the FU6 per-run override.
+   */
+  devReviewerModel: external_exports.string().min(1),
+  /**
+   * Review depth directive for the reviewer step.
+   * 'light' → the reviewer performs a targeted check (no deep five-lens judge);
+   * 'full'  → the current full review behaviour (unchanged).
+   */
+  reviewDepth: external_exports.enum(["light", "full"])
+}).strict();
+async function readLaneFromManifest(manifestPath) {
+  try {
+    const raw = await readFile2(manifestPath, "utf8");
+    const parsed = (0, import_yaml29.parse)(raw);
+    const lane = parsed?.lane;
+    if (lane === "fast" || lane === "full") return lane;
+    return void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function resolveBuildPlan(opts) {
+  let lane;
+  if (opts.manifestPath) {
+    const manifestLane = await readLaneFromManifest(opts.manifestPath);
+    lane = manifestLane ?? opts.lane ?? "full";
+  } else {
+    lane = opts.lane ?? "full";
+  }
+  if (lane === "fast") {
+    return {
+      devReviewerModel: FAST_LANE_MODEL,
+      reviewDepth: FAST_REVIEW_DEPTH
+    };
+  }
+  return {
+    devReviewerModel: FULL_LANE_MODEL,
+    reviewDepth: FULL_REVIEW_DEPTH
+  };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -41871,7 +41923,15 @@ var TOOLS = {
   // tool result (not workflow JS) so it is unit-testable without the Workflow
   // runtime. Callable on the no-MCP gate path:
   //   node dist/cli.js resolveJudgePlan --json '{"storyId":"...","lane":"fast"}'
-  resolveJudgePlan
+  resolveJudgePlan,
+  // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — fast-lane build plan resolver.
+  // Pure deterministic function: maps a story's lane → { devReviewerModel,
+  // reviewDepth }. fast → haiku + light review; full/absent → sonnet + full
+  // review (no-regression pin). When manifestPath is provided, reads the
+  // lane from the persisted execution manifest written at scan time.
+  // Callable on the no-MCP drain path:
+  //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
+  resolveBuildPlan
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

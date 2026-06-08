@@ -54214,6 +54214,58 @@ function resolveJudgePlan(opts) {
   };
 }
 
+// src/tools/resolve-build-plan.ts
+var import_yaml34 = __toESM(require_dist2(), 1);
+import { readFile as readFile2 } from "node:fs/promises";
+var FAST_LANE_MODEL = "haiku";
+var FULL_LANE_MODEL = "sonnet";
+var FAST_REVIEW_DEPTH = "light";
+var FULL_REVIEW_DEPTH = "full";
+var BuildPlanSchema = external_exports.object({
+  /**
+   * Model string for both the dev and reviewer subagents.
+   * Routed into the existing `devReviewerModel` arg / `model` option on
+   * agent() calls — same channel as the FU6 per-run override.
+   */
+  devReviewerModel: external_exports.string().min(1),
+  /**
+   * Review depth directive for the reviewer step.
+   * 'light' → the reviewer performs a targeted check (no deep five-lens judge);
+   * 'full'  → the current full review behaviour (unchanged).
+   */
+  reviewDepth: external_exports.enum(["light", "full"])
+}).strict();
+async function readLaneFromManifest(manifestPath) {
+  try {
+    const raw = await readFile2(manifestPath, "utf8");
+    const parsed = (0, import_yaml34.parse)(raw);
+    const lane = parsed?.lane;
+    if (lane === "fast" || lane === "full") return lane;
+    return void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function resolveBuildPlan(opts) {
+  let lane;
+  if (opts.manifestPath) {
+    const manifestLane = await readLaneFromManifest(opts.manifestPath);
+    lane = manifestLane ?? opts.lane ?? "full";
+  } else {
+    lane = opts.lane ?? "full";
+  }
+  if (lane === "fast") {
+    return {
+      devReviewerModel: FAST_LANE_MODEL,
+      reviewDepth: FAST_REVIEW_DEPTH
+    };
+  }
+  return {
+    devReviewerModel: FULL_LANE_MODEL,
+    reviewDepth: FULL_REVIEW_DEPTH
+  };
+}
+
 // src/tools/register.ts
 function registerAllTools(server) {
   server.registerTool({
@@ -56147,6 +56199,30 @@ function registerAllTools(server) {
         detector_confirmed_dead: external_exports.boolean().optional()
       }).parse(args);
       const result = resolveJudgePlan(parsed);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }]
+      };
+    }
+  });
+  server.registerTool({
+    name: "resolveBuildPlan",
+    description: "Resolve the build plan (dev/reviewer model + review depth) from a story's lane (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F). fast -> { devReviewerModel: 'haiku', reviewDepth: 'light' }. full/absent -> { devReviewerModel: 'sonnet', reviewDepth: 'full' } (no-regression pin). When manifestPath is provided, reads the lane from the persisted execution manifest (written at scan time by classifyStoryLane); pass lane directly for a pure no-I/O call. The dev's pre-PR build+test gate (runDevTerminalAction) and merge gate (runAutoMergeGate) are unchanged -- the cheaper path sits entirely in front of the same hard gates. Returns { devReviewerModel, reviewDepth }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storyId: { type: "string" },
+        lane: { type: "string", enum: ["fast", "full"] },
+        manifestPath: { type: "string" }
+      },
+      required: ["storyId"]
+    },
+    handler: async (args) => {
+      const parsed = external_exports.object({
+        storyId: external_exports.string().min(1),
+        lane: external_exports.enum(["fast", "full"]).optional(),
+        manifestPath: external_exports.string().min(1).optional()
+      }).parse(args);
+      const result = await resolveBuildPlan(parsed);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }]
       };

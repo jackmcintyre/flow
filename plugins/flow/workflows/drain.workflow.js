@@ -50,6 +50,13 @@ const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency >
 // Override per-run by passing devReviewerModel: 'opus' (or any model string) in
 // the launch args. Does NOT affect the seam-relay courier (Haiku for read-only
 // seams, Sonnet for mutating ones — see seam()), the judge panel, or persona/QL calls.
+//
+// Per-story lane routing (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): when the
+// claim returns a story with a persisted lane, resolveBuildPlan maps that lane
+// to { devReviewerModel, reviewDepth } — fast → haiku + light, full → sonnet +
+// full. The run-level devReviewerModel arg (execModel) is the fallback default
+// when no per-story override is resolved; it continues to work as before so
+// existing launch scripts are unaffected.
 const execModel = (A && A.devReviewerModel) || 'sonnet'
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
@@ -227,8 +234,19 @@ let drainedReason = 'incomplete'
 //     spawn on the first iteration and review the existing PR (resumePrNumber).
 //     Any NEEDS-CHANGES rework after that runs dev normally (it pushes to the
 //     same existing PR, exactly as a normal rework round does).
-async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '' }) {
+//   storyModel  — per-story model override (from resolveBuildPlan). Falls back to
+//                 the run-level execModel when absent (backwards-compatible).
+//   reviewDepth — per-story review depth from resolveBuildPlan ('light' | 'full').
+//                 Passed to the reviewer's prompt so a fast-lane story gets a
+//                 targeted review rather than the full deep pass. Defaults to
+//                 'full' (current behaviour) when absent.
+async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '', storyModel = null, reviewDepth = 'full' }) {
   let verdict = null, prNumber = resumeAtReview ? resumePrNumber : null
+  // Per-story model: use the resolveBuildPlan result when available, else the
+  // run-level execModel (the FU6 devReviewerModel launch arg or 'sonnet').
+  // This preserves full backwards compatibility: a run with no per-story lane
+  // routing continues to use exactly the same model as before.
+  const agentModel = storyModel || execModel
 
   for (let rw = 0; rw < MAX_REWORK; rw++) {
     const skipDev = resumeAtReview && rw === 0
@@ -276,7 +294,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the drain and orphans your story. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
-        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree', model: execModel },
+        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree', model: agentModel },
       )
 
       const devText = String(devFinal || '')
@@ -327,6 +345,16 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
 
     // REVIEW — clean context. The reviewer's binding verdict transports through
     // the reviewer-result FILE that runReviewerSession writes (never chat).
+    // REVIEW DEPTH (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): when reviewDepth
+    // is 'light' (fast-lane story), the reviewer performs a targeted check —
+    // confirm the ACs are met and the build is green, skip deep analysis.
+    // When reviewDepth is 'full' (the default), the current full review applies.
+    // The binding verdict tool (runReviewerSession) and the merge gate
+    // (runAutoMergeGate) are UNCHANGED regardless of depth — only the
+    // reviewer's instruction scope adjusts.
+    const reviewDepthNote = reviewDepth === 'light'
+      ? '\n\n## Review depth: LIGHT (fast-lane story)\nThis is a fast-lane story (low-risk, cheap path). Perform a targeted review: confirm the ACs are met and the build passes — skip deep analysis, extensive comments, or non-critical nitpicks. Your runReviewerSession call and the merge gate are unchanged.'
+      : ''
     // HEARTBEAT: bracket the review phase (start → done with elapsed time).
     const reviewStartedAt = await progressStart(ref, 'review')
     await agent(
@@ -338,8 +366,8 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
         `If — and ONLY if — this review surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runReviewerSession call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
         `  node ${CLI} recordReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, lesson: { kind: '<kind>', text: '<one-line lesson text>' } })}'\n` +
         `This is OPTIONAL and fail-soft: most reviews teach nothing reusable — in that case call nothing. Recording no lesson, or any failure of this command, must NEVER block or change the verdict, the build, or the merge. Do not invent a lesson just to fill the slot; one real lesson or none.\n\n` +
-        `Do NOT merge, push, or edit the PR yourself. Do NOT hand-edit any \`.flow/state\` file — the TOOLS own those writes (runReviewerSession owns the verdict file; recordReviewerLesson, the one exception above, owns the lesson write). Those two named commands are the only writes you make.`,
-      { label: `rev:${ref}:${rw}${tag}`, phase: ph, model: execModel },
+        `Do NOT merge, push, or edit the PR yourself. Do NOT hand-edit any \`.flow/state\` file — the TOOLS own those writes (runReviewerSession owns the verdict file; recordReviewerLesson, the one exception above, owns the lesson write). Those two named commands are the only writes you make.${reviewDepthNote}`,
+      { label: `rev:${ref}:${rw}${tag}`, phase: ph, model: agentModel },
     )
     await progressDone(ref, 'review', reviewStartedAt)
 
@@ -427,7 +455,12 @@ for (const o of orphans) {
   const mode = prNumber ? 'resume-at-review' : 're-run'
   resumed.push({ ref, mode, attempt: re.resumeAttempts })
   log(`resuming orphan ${ref} (${mode}, attempt ${re.resumeAttempts})`)
-  await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume' })
+  // Resolve the build plan for the orphan's lane (same seam as the main drain loop).
+  // Fail-soft: a garbled relay falls back to full-lane defaults.
+  const orphanPlan = await seam(`node ${CLI} resolveBuildPlan --json '${J({ storyId: ref, manifestPath })}'`, `build-plan:${ref}:resume`, true)
+  const orphanModel = (orphanPlan && !orphanPlan._parseError && typeof orphanPlan.devReviewerModel === 'string') ? orphanPlan.devReviewerModel : null
+  const orphanReviewDepth = (orphanPlan && !orphanPlan._parseError && (orphanPlan.reviewDepth === 'light' || orphanPlan.reviewDepth === 'full')) ? orphanPlan.reviewDepth : 'full'
+  await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume', storyModel: orphanModel, reviewDepth: orphanReviewDepth })
   await guardRoot(ref)
 }
 
@@ -482,13 +515,24 @@ async function drainWorker(workerId) {
     if (!claim || claim.next !== 'spawn-dev') { recordReason(claim?.next || claim?._parseError || 'claim-failed'); return }
     const { ref, title, manifestPath } = claim
     log(`claimed ${ref} — ${title} (worker ${workerId})`)
+    // FAST-LANE ROUTING (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): resolve the
+    // build plan (dev/reviewer model + review depth) from the story's persisted
+    // lane. The seam reads the lane from the in-progress manifest and returns
+    // { devReviewerModel, reviewDepth }. Fail-soft: a garbled relay or a missing
+    // lane falls back to the full-lane defaults (sonnet + full review), so this
+    // seam degrading gracefully is exactly equivalent to the pre-routing behaviour.
+    // Read-only / idempotent → retryable. The hard gates are UNCHANGED.
+    const buildPlan = await seam(`node ${CLI} resolveBuildPlan --json '${J({ storyId: ref, manifestPath })}'`, `build-plan:${ref}`, true)
+    const storyModel = (buildPlan && !buildPlan._parseError && typeof buildPlan.devReviewerModel === 'string') ? buildPlan.devReviewerModel : null
+    const storyReviewDepth = (buildPlan && !buildPlan._parseError && (buildPlan.reviewDepth === 'light' || buildPlan.reviewDepth === 'full')) ? buildPlan.reviewDepth : 'full'
+    if (storyModel) log(`${ref} build-plan: model=${storyModel} reviewDepth=${storyReviewDepth}`)
     // PER-WORKER ISOLATION: a throw inside processStory (a seam hard-rejection, a
     // build crash, any unexpected error) must land THIS story in blocked with its
     // reason and never abort the run or poison a sibling. processStory already
     // buckets every *expected* outcome itself; this catch is the backstop for an
     // UNEXPECTED throw so the no-silent-failures surface holds even then.
     try {
-      await processStory({ ref, title, manifestPath })
+      await processStory({ ref, title, manifestPath, storyModel, reviewDepth: storyReviewDepth })
     } catch (e) {
       // Preserve the failure REASON (the error message — what an operator needs)
       // up front, with a short stack tail for context. Capturing .message first
