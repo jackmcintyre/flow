@@ -41723,6 +41723,63 @@ ${yamlBlock}
 ${sections.join("\n")}`;
 }
 
+// src/tools/resolve-judge-plan.ts
+var FULL_LENS_MODEL = {
+  structure: "sonnet",
+  discipline: "sonnet",
+  verifiability: "opus",
+  domain: "opus",
+  considered: "opus"
+};
+var FULL_LENSES = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered"
+];
+var FAST_LENS_NAME = "structure+verifiability";
+var JudgePlanSchema = external_exports.object({
+  /**
+   * When true, the judge is bypassed entirely (detector_confirmed_dead fast).
+   * When false, spawn the planned lenses.
+   */
+  skip: external_exports.boolean(),
+  /**
+   * The lens names to spawn. Empty when skip=true.
+   * For full lane: the five standard names.
+   * For fast lane: ['structure+verifiability'].
+   */
+  lenses: external_exports.array(external_exports.string()),
+  /**
+   * Model to use for each lens. Empty when skip=true.
+   */
+  perLensModel: external_exports.record(external_exports.string(), external_exports.enum(["sonnet", "opus"]))
+}).strict();
+function resolveJudgePlan(opts) {
+  const lane = opts.lane ?? "full";
+  const confirmedDead = opts.detector_confirmed_dead ?? false;
+  if (lane === "full") {
+    return {
+      skip: false,
+      lenses: [...FULL_LENSES],
+      perLensModel: { ...FULL_LENS_MODEL }
+    };
+  }
+  if (lane === "fast" && confirmedDead) {
+    return {
+      skip: true,
+      lenses: [],
+      perLensModel: {}
+    };
+  }
+  return {
+    skip: false,
+    lenses: [FAST_LENS_NAME],
+    perLensModel: { [FAST_LENS_NAME]: "sonnet" }
+  };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -41807,7 +41864,14 @@ var TOOLS = {
   // from its execution-manifest signals before the costly judge panel runs.
   // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
   // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
-  classifyStoryLane
+  classifyStoryLane,
+  // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — fast-lane judge plan resolver.
+  // Pure deterministic function: maps (lane, detector_confirmed_dead) → a lens
+  // plan { skip, lenses, perLensModel }. Keeps the load-bearing decision in a
+  // tool result (not workflow JS) so it is unit-testable without the Workflow
+  // runtime. Callable on the no-MCP gate path:
+  //   node dist/cli.js resolveJudgePlan --json '{"storyId":"...","lane":"fast"}'
+  resolveJudgePlan
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

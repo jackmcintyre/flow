@@ -616,7 +616,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
     // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
     // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 50 → 51.
-    expect(registeredTools.length).toBe(51);
+    // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
+    expect(registeredTools.length).toBe(52);
   });
 });
 

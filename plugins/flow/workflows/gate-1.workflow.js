@@ -110,6 +110,9 @@ if (invItem) {
   specText = invItem.specText || ''
   riskTier = invItem.riskTier
 }
+// Read the persisted lane from the inventory item (stamped at scan time by
+// the lane classifier). Absent → resolveJudgePlan defaults to 'full' internally.
+const persistedLane = invItem?.lane || undefined
 // Fail loud rather than silently grade an empty spec — a blind panel is wasted
 // tokens and a false verdict (no success-by-luck). The operator re-runs once the
 // draft is scannable/readable.
@@ -138,16 +141,74 @@ const draft = {
 const judgePersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:judge', true))?.systemPrompt || ''
 
 // ---------------------------------------------------------------------------
-// Phase 2: fan out five lens judges in PARALLEL via Promise.all.
-// Each judge is a short-lived read+write subagent. Unlike the drain's serial
-// per-story loop, judges are pure readers + one-write (writeLensVerdict) so
-// parallel dispatch is safe and correct. Each judge receives its lens name,
-// rubric checks, the draft spec text, the draft's risk tier, and an instruction
-// to call writeLensVerdict --json exactly once. The judge's transcript is not
-// load-bearing; only its file is.
+// Resolve the judge plan from the persisted lane (+ detector_confirmed_dead).
+// The load-bearing decision lives here — in a deterministic tool result, not
+// in workflow JS or agent prose. resolveJudgePlan is a pure CLI seam:
+//   full/absent → five-lens panel (current LENS_MODEL tiering, verbatim)
+//   fast → one combined Structure+Verifiability lens on Sonnet
+//   fast + detector_confirmed_dead=true → { skip: true } (auto-bless)
+// ---------------------------------------------------------------------------
+const judgePlanArgs = { storyId: REF, lane: persistedLane }
+// detector_confirmed_dead is a future field; omitting it now defaults to false.
+const judgePlanResult = await seam(
+  `node ${CLI} resolveJudgePlan --json '${J(judgePlanArgs)}'`,
+  'resolve-judge-plan',
+  true,
+)
+if (!judgePlanResult || judgePlanResult._parseError || judgePlanResult.error) {
+  return {
+    error: 'resolve-judge-plan-failed',
+    detail: judgePlanResult?._parseError || judgePlanResult?.error || 'unknown',
+    sessionUlid: SU,
+    ref: REF,
+  }
+}
+const judgePlan = judgePlanResult
+log(`judge plan for ref=${REF}: lane=${persistedLane || 'full'} skip=${judgePlan.skip} lenses=${JSON.stringify(judgePlan.lenses)}`)
+
+// ---------------------------------------------------------------------------
+// Auto-bless path: skip=true means the reachability auditor confirmed dead-code.
+// Call adjudicateQualityLead directly with a synthetic clean panel so the bless
+// brake fires through the normal path (ready + telemetry).
+// ---------------------------------------------------------------------------
+if (judgePlan.skip) {
+  log(`ref=${REF} SKIP path — lane=fast+detector_confirmed_dead; bypassing judge panel, auto-blessing via adjudicateQualityLead.`)
+  // Synthesise a minimal clean panel verdict (all lenses skipped → zero fails).
+  const syntheticPanel = {
+    ref: REF,
+    sessionUlid: SU,
+    lenses: [],
+    passed: true,
+    riskTier: riskTier || 'low',
+  }
+  const skipAdjudicateResult = await seam(
+    `node ${CLI} adjudicateQualityLead --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref: REF, panel: syntheticPanel, round: 1, k: 1 })}'`,
+    'adjudicate-skip',
+  )
+  const skipDecision = skipAdjudicateResult?.verdict?.decision
+  log(`skip-path adjudication for ref=${REF}: decision=${skipDecision}`)
+  return {
+    sessionUlid: SU,
+    ref: REF,
+    decision: skipDecision || 'ready',
+    riskTier: riskTier || 'low',
+    lane: 'fast',
+    skipped: true,
+    perLens: [],
+    failed: [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: fan out lens judges in PARALLEL via Promise.all.
+// Fan-out is now driven by judgePlan.lenses (from resolveJudgePlan) rather than
+// the hardcoded LENSES array. For lane=full this is the same five lenses at the
+// same models. For lane=fast it is one combined Structure+Verifiability lens on
+// Sonnet. Each judge is a short-lived read+write subagent whose only load-bearing
+// act is calling writeLensVerdict --json exactly once.
 // ---------------------------------------------------------------------------
 phase('judge')
-log(`fanning out five lens judges in parallel for ref=${REF}`)
+log(`fanning out ${judgePlan.lenses.length} lens judge(s) in parallel for ref=${REF}`)
 
 // The rubric checks (abbreviated) per lens — enough for the judge to know what
 // to grade. The full rubric lives in the planning artifacts; these are the Tier-1
@@ -158,6 +219,9 @@ const LENS_RUBRIC = {
   discipline: 'Grade against Discipline lens (rubric §3.3): one coherent concern per story, no scope creep, no premature abstraction. Pass if the story is disciplined; fail with the specific discipline breach in `missed`.',
   domain: 'Grade against Domain lens (rubric §3.4): technically accurate, no ungrounded claims, implementation is plausible. Pass if the domain is sound; fail with the specific inaccuracy in `missed`.',
   considered: 'Grade against Considered lens (rubric §3.5): failure modes addressed. For low-risk drafts: names what could break + pins top failure. For medium/high: cold-dev-sufficient (every open question has a defaulted answer). Pass if the bar is met; fail with the specific gap in `missed`.',
+  // Fast-lane combined lens: Structure + Verifiability in one pass on Sonnet.
+  // The two most COMMON author errors: malformed ACs and hollow-draft issues.
+  'structure+verifiability': 'Grade against Structure lens (rubric §3.1) AND Verifiability lens (rubric §3.2) in a single combined pass. Structure: Given/When/Then ACs, task decomposition, no hidden coupling — fail if the story is not self-contained. Verifiability: grade PINNABILITY-ONCE-BUILT — once the proposed work is built, could a correctly-written test fail if the described behaviour were missing? Do NOT fault net-new behaviour for not yet existing. Fail if any AC success condition can never be pinned in principle. Write a SINGLE `missed` string covering all Structure and Verifiability gaps found (or "nothing missed" on a clean sweep). Pass only if BOTH lenses pass.',
 }
 
 const LENSES = ['structure', 'verifiability', 'discipline', 'domain', 'considered']
@@ -181,8 +245,11 @@ const LENS_MODEL = {
 }
 
 const judgeResults = await Promise.all(
-  LENSES.map(async (lens) => {
-    const role = lensRoles[lens]
+  judgePlan.lenses.map(async (lens) => {
+    // For full lane: role from lensRoles[lens] (the five standard names).
+    // For fast lane: the combined 'structure+verifiability' lens uses the
+    // 'generalist-reviewer' role as a fallback (lensRoles won't have this key).
+    const role = lensRoles[lens] || lensRoles['structure'] || 'generalist-reviewer'
     // Build persona for this lens's role
     const personaResult = await seam(
       `node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role })}'`,
@@ -222,7 +289,9 @@ const judgeResults = await Promise.all(
       `The verdict is written to: \`${verdictFilePath}\``
 
     try {
-      await agent(judgePrompt, { label: `judge:${lens}`, phase: 'judge', model: LENS_MODEL[lens] })
+      // Model is sourced from the resolved plan (judgePlan.perLensModel), not the
+      // static LENS_MODEL constant — this handles both full and fast lane models.
+      await agent(judgePrompt, { label: `judge:${lens}`, phase: 'judge', model: judgePlan.perLensModel[lens] || 'sonnet' })
     } catch (e) {
       log(`judge ${lens} agent threw: ${String(e)} — aggregation will fail loudly on the missing verdict file`)
     }
@@ -231,7 +300,7 @@ const judgeResults = await Promise.all(
   }),
 )
 
-log(`all five lens judges settled for ref=${REF}`)
+log(`all ${judgePlan.lenses.length} lens judge(s) settled for ref=${REF}`)
 
 // ---------------------------------------------------------------------------
 // Phase 3: aggregate and adjudicate.
