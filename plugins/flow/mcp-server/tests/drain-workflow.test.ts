@@ -81,11 +81,13 @@ describe("Story 8.5 — drain workflow integrity", () => {
     expect(SRC).toContain("Infinity");
   });
 
-  it("uses sonnet couriers for seams; dev edits inside its own worktree (Story 8.20)", () => {
-    // Couriers relay tool JSON verbatim; sonnet is far more reliable at that than
-    // haiku (which garbled a verdict relay on the first multi-story drain, story 8.13).
-    expect(SRC).toContain("model: 'sonnet'");
-    expect(SRC).not.toContain("model: 'haiku'");
+  it("routes courier model by seam kind (Haiku read-only, Sonnet mutating); dev edits inside its own worktree (Story 8.20)", () => {
+    // Couriers relay tool JSON verbatim. The model is chosen by the read-only vs
+    // mutating axis (the `retryable` flag): read-only/idempotent seams run on the
+    // cheaper Haiku (a garble just re-invokes), while MUTATING seams stay on the
+    // more-reliable Sonnet — Haiku garbled exactly such a verdict relay on the first
+    // multi-story drain (story 8.13), and a garbled mutating relay pauses the story.
+    expect(SRC).toContain("model: retryable ? 'haiku' : 'sonnet'");
     // Story 8.20: the dev's EDITING SURFACE is its own worktree — the dev agent is
     // spawned with the runtime's per-agent `isolation: 'worktree'` primitive, so two
     // devs against the same repo can never cross-contaminate edits. This is what

@@ -32,12 +32,14 @@ const RawSchema = { type: 'object', additionalProperties: false, properties: { s
 const safeParse = (s) => { try { return JSON.parse(String(s).trim()) } catch (e) { return { _parseError: String(e), raw: String(s).slice(0, 400) } } }
 const J = (o) => JSON.stringify(o)
 
-// A SEAM: a cheap one-shot courier (sonnet) that runs ONE CLI command verbatim
-// and returns its single JSON line. Mirrors drain.workflow.js seam() conventions:
-// - retryable re-invokes the courier on a garbled (non-JSON) relay (safe ONLY for
-//   read-only / idempotent seams).
-// - MUTATING seams (adjudicate, writeLensVerdict) leave retryable=false so a garble
-//   safely pauses rather than risk double-applying a mutation.
+// A SEAM: a cheap one-shot courier that runs ONE CLI command verbatim and returns
+// its single JSON line. The courier does zero reasoning, so its model is chosen by
+// seam kind to trim the harness-instantiation tax. Mirrors drain.workflow.js:
+// - read-only / idempotent seams (retryable=true) run on HAIKU; a garbled relay
+//   simply re-invokes, so the cheaper, marginally-garblier model costs only a rare retry.
+// - MUTATING seams (adjudicate, writeLensVerdict) leave retryable=false and stay on
+//   SONNET so a garble safely pauses rather than risk double-applying a mutation
+//   (Haiku garbled exactly such a verdict relay on drain 8.13).
 const seam = async (cmd, label, retryable = false) => {
   const attempts = retryable ? 3 : 1
   let parsed = { _parseError: 'agent-null' }
@@ -46,7 +48,7 @@ const seam = async (cmd, label, retryable = false) => {
       `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
         `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
         `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-      { schema: RawSchema, label, phase: 'gate-1', model: 'sonnet' },
+      { schema: RawSchema, label, phase: 'gate-1', model: retryable ? 'haiku' : 'sonnet' },
     )
     parsed = r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
     if (!parsed._parseError) return parsed
