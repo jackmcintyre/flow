@@ -27150,7 +27150,31 @@ var ExecutionManifestSchema = external_exports.object({
    *
    * Added in Story 6.1 AC4.
    */
-  duration_seconds: external_exports.number().int().nonnegative().optional()
+  duration_seconds: external_exports.number().int().nonnegative().optional(),
+  /**
+   * Cost lane assigned by `classifyStoryLane` at scan time
+   * (Story native:01KTKJXP6DWN5YHKVG96DH16V0).
+   *
+   * - `'fast'`  — the story's pre-build signals all classify as low-risk and
+   *   narrow-scope; downstream judge workflows may take a cheaper path.
+   * - `'full'`  — any elevated risk, ambiguous signal, or security-sensitive
+   *   path; the full judge panel must run.
+   *
+   * Conservative default: absent on legacy / BMad manifests that pre-date this
+   * field, or on manifests whose scan-time classification returned `full` and
+   * the caller chose to omit the field (both cases are treated as `'full'` by
+   * consumers). Additive and strict-compatible — old manifests parse unchanged.
+   */
+  lane: external_exports.enum(["fast", "full"]).optional(),
+  /**
+   * True when the story was authored with explicit knowledge that it only
+   * removes dead code or dead configuration lines — a conservative human
+   * signal that the classifier uses to weight the `low.config-dead-lines`
+   * intent path. Optional and additive; absent ≡ false.
+   *
+   * Added in Story native:01KTKJXP6DWN5YHKVG96DH16V0.
+   */
+  detector_confirmed_dead: external_exports.boolean().optional()
 }).strict();
 function parseExecutionManifest(input, opts) {
   const result = ExecutionManifestSchema.safeParse(input);
@@ -27639,7 +27663,17 @@ var WriteNativeStoryInputSchema = external_exports.object({
    * ULID when available; defaults to a stable operator marker so the event
    * still validates when authored interactively. (Story 9.2)
    */
-  sessionUlid: external_exports.string().min(1).optional()
+  sessionUlid: external_exports.string().min(1).optional(),
+  /**
+   * Story native:01KTKJXP6DWN5YHKVG96DH16V0 — optional author lane hint.
+   * Downgrade-only: a 'fast' hint is honoured only if `classifyStoryLane`
+   * independently also returns 'fast' at scan time; a 'full' hint always wins
+   * and is the safe choice when the author suspects elevated risk.
+   *
+   * Omitting this field (the default) lets the scan-time classifier decide the
+   * lane without any author bias.
+   */
+  lane_hint: external_exports.enum(["fast", "full"]).optional()
 });
 var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
 var DEFAULT_DEFINITION_OF_DONE = [
@@ -28848,6 +28882,153 @@ async function classifyRiskTier(opts) {
   };
 }
 
+// src/tools/classify-story-lane.ts
+var SECURITY_SENSITIVE_PATTERNS = [
+  /migrations?\//i,
+  /\.sql$/i,
+  /schema\.(ts|js|json|yaml|yml)$/i,
+  /\/schemas?\//i,
+  // Package manifests and lock files can change behaviour by convention
+  /package\.json$/,
+  /package-lock\.json$/,
+  /pnpm-lock\.yaml$/,
+  /yarn\.lock$/,
+  /\.npmrc$/,
+  // Build/test config can change behaviour without import wiring
+  /tsconfig.*\.json$/,
+  /\.config\.(js|ts|mjs|cjs)$/,
+  // Docker and env files
+  /Dockerfile(\..*)?$/,
+  /\.env(\.|$)/,
+  /\.sh$/,
+  // CI workflows (convention-wired)
+  /\.github\//
+];
+var StoryLaneResultSchema = external_exports.object({
+  lane: external_exports.enum(["fast", "full"]),
+  /**
+   * The rule id that determined the lane.
+   * - One of the `FAST_RULE_IDS` when lane = 'fast'.
+   * - 'full.high-risk-tier' when risk_tier is 'high'.
+   * - 'full.non-low-risk-tier' when risk_tier is 'medium' or missing.
+   * - 'full.security-path' when a cited source matches a sensitive pattern.
+   * - 'full.no-risk-tier' when risk_tier is absent.
+   * - 'full.ambiguous-signals' for any other conservative fall-through.
+   * - 'full.hint-override' when the author hint forced full.
+   */
+  matched_rule: external_exports.string().min(1),
+  /**
+   * The signals that triggered the matched rule.
+   */
+  evidence: external_exports.object({
+    risk_tier: external_exports.enum(["low", "medium", "high"]).nullable(),
+    cited_sources_count: external_exports.number().int().nonnegative(),
+    /** The cited source paths that triggered the 'full.security-path' rule, if any. */
+    security_paths: external_exports.array(external_exports.string()),
+    /** The author hint that was supplied, if any. */
+    author_hint: external_exports.enum(["fast", "full"]).nullable()
+  })
+}).strict();
+function hasSecurityPath(citedSources) {
+  const matched = [];
+  for (const src of citedSources) {
+    if (SECURITY_SENSITIVE_PATTERNS.some((re) => re.test(src))) {
+      matched.push(src);
+    }
+  }
+  return { found: matched.length > 0, paths: matched };
+}
+function isDocsOnly(citedSources) {
+  if (citedSources.length === 0) return false;
+  return citedSources.every((src) => /docs\//i.test(src) || /\.md$/i.test(src));
+}
+function isTestsOnly(citedSources) {
+  if (citedSources.length === 0) return false;
+  const TEST_PATTERNS = [/\.test\.ts$/, /\.test\.js$/, /\.test\.d\.ts$/, /__tests__\//, /^tests\//];
+  return citedSources.every((src) => TEST_PATTERNS.some((re) => re.test(src)));
+}
+function isAdditiveIntent(citedSources) {
+  if (citedSources.length === 0) return false;
+  const EXCLUDE_PATTERNS = [
+    /package\.json$/,
+    /package-lock\.json$/,
+    /pnpm-lock\.yaml$/,
+    /yarn\.lock$/,
+    /\.npmrc$/,
+    /tsconfig.*\.json$/,
+    /\.config\.(js|ts|mjs|cjs)$/,
+    /Dockerfile(\..*)?$/,
+    /\.env(\.|$)/,
+    /\.sh$/,
+    /\.github\//
+  ];
+  return !citedSources.some((src) => EXCLUDE_PATTERNS.some((re) => re.test(src)));
+}
+function classifyStoryLane(opts) {
+  const { risk_tier, cited_sources, lane_hint } = opts;
+  const citedSources = cited_sources ?? [];
+  const authorHint = lane_hint ?? null;
+  const riskTier = risk_tier ?? null;
+  function fullResult(matched_rule, securityPaths = []) {
+    return {
+      lane: "full",
+      matched_rule,
+      evidence: {
+        risk_tier: riskTier,
+        cited_sources_count: citedSources.length,
+        security_paths: securityPaths,
+        author_hint: authorHint
+      }
+    };
+  }
+  function fastResult(matched_rule) {
+    return {
+      lane: "fast",
+      matched_rule,
+      evidence: {
+        risk_tier: riskTier,
+        cited_sources_count: citedSources.length,
+        security_paths: [],
+        author_hint: authorHint
+      }
+    };
+  }
+  if (riskTier === null || riskTier === void 0) {
+    return fullResult("full.no-risk-tier");
+  }
+  if (riskTier === "high") {
+    return fullResult("full.high-risk-tier");
+  }
+  if (riskTier === "medium") {
+    return fullResult("full.non-low-risk-tier");
+  }
+  const { found: hasSecurity, paths: secPaths } = hasSecurityPath(citedSources);
+  if (hasSecurity) {
+    return fullResult("full.security-path", secPaths);
+  }
+  if (citedSources.length === 0) {
+    return fullResult("full.ambiguous-signals");
+  }
+  if (citedSources.length > 3) {
+    return fullResult("full.ambiguous-signals");
+  }
+  if (isDocsOnly(citedSources)) {
+    return applyHint(fastResult("low.docs-only"), authorHint, fullResult);
+  }
+  if (isTestsOnly(citedSources)) {
+    return applyHint(fastResult("low.tests-only"), authorHint, fullResult);
+  }
+  if (isAdditiveIntent(citedSources)) {
+    return applyHint(fastResult("low.additive-only"), authorHint, fullResult);
+  }
+  return fullResult("full.ambiguous-signals");
+}
+function applyHint(classified, authorHint, fullResultFn) {
+  if (classified.lane === "full") return classified;
+  if (authorHint === "full") return fullResultFn("full.hint-override");
+  return classified;
+}
+
 // src/tools/scan-sources.ts
 async function statOrNull2(absPath) {
   try {
@@ -28945,6 +29126,13 @@ async function computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot) {
     commitMessages: [],
     diffSize: 0
   });
+  const laneHint = story.raw_frontmatter?.lane_hint;
+  const laneResult = classifyStoryLane({
+    storyId: story.ref,
+    risk_tier: classification.tier,
+    cited_sources: story.cited_sources,
+    lane_hint: laneHint
+  });
   return {
     risk_tier: classification.tier,
     risk_tier_evidence: {
@@ -28952,7 +29140,8 @@ async function computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot) {
       paths: classification.evidence.paths,
       change_types: classification.evidence.change_types,
       diff_size: classification.evidence.diff_size
-    }
+    },
+    lane: laneResult.lane
   };
 }
 function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
@@ -41612,7 +41801,13 @@ var TOOLS = {
   // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
   // buildPersonaSpawnPrompt now emits a one-line index; agents call this
   // to retrieve the full detail body of a specific lesson by id.
-  recallLesson
+  recallLesson,
+  // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — pre-judge lane classifier.
+  // Pure deterministic function: classifies a story into 'fast' or 'full'
+  // from its execution-manifest signals before the costly judge panel runs.
+  // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
+  // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
+  classifyStoryLane
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

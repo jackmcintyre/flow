@@ -619,7 +619,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("recordReviewerLesson");
       // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
       expect(toolNames).toContain("recallLesson");
-      expect(toolNames.length).toBe(50);
+      // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 50 → 51.
+      expect(toolNames).toContain("classifyStoryLane");
+      expect(toolNames.length).toBe(51);
     } finally {
       await client.close();
       await server.close();
