@@ -48190,6 +48190,81 @@ async function resolveDisciplinePaths(story, targetRepoRoot) {
   return reasons;
 }
 
+// src/tools/record-agent-friction.ts
+var RecordAgentFrictionOptionsSchema = external_exports.object({
+  /** Absolute path to the target repository root. */
+  targetRepoRoot: external_exports.string().min(1),
+  /** Role name of the agent experiencing the friction (kebab-cased). */
+  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  /**
+   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
+   * inside a story flow.
+   */
+  story_id: external_exports.string().min(1).optional(),
+  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  session_id: external_exports.string().min(1),
+  /** The closed-enum friction category. */
+  kind: external_exports.enum([
+    "empty-input",
+    "missing-cited-source",
+    "forced-fallback",
+    "repeated-retry"
+  ]),
+  /** What the agent expected to receive. Keep short and structural (NFR14). */
+  expected: external_exports.string().min(1),
+  /** What the agent actually received / had to compensate for (NFR14). */
+  observed: external_exports.string().min(1),
+  /**
+   * Optional role label for downstream correlation. Defaults to the
+   * value of `agent` when omitted (they are the same in most callers).
+   */
+  role: external_exports.string().optional()
+}).strict();
+async function recordAgentFriction(opts) {
+  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
+  const {
+    targetRepoRoot,
+    agent,
+    story_id,
+    session_id,
+    kind,
+    expected,
+    observed
+  } = validated;
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "agent.friction",
+      session_id,
+      agent,
+      ...story_id !== void 0 ? { story_id } : {},
+      data: { kind, expected, observed }
+    }
+  });
+  return { ok: true, kind, agent, session_id };
+}
+
+// src/lib/emit-friction.ts
+async function emitFriction(opts) {
+  try {
+    await recordAgentFriction({
+      targetRepoRoot: opts.targetRepoRoot,
+      agent: opts.role,
+      role: opts.role,
+      session_id: opts.session_id,
+      story_id: opts.story_id,
+      kind: opts.kind,
+      expected: opts.expected,
+      observed: opts.observed
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[emitFriction] suppressed error emitting agent.friction (kind=${opts.kind}): ${String(err)}
+`
+    );
+  }
+}
+
 // src/tools/write-native-story.ts
 var WriteNativeStoryInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
@@ -48334,6 +48409,15 @@ async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author
   const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
   violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
   if (violations.length > 0) {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "forced-fallback",
+      role: "author",
+      session_id: input.sessionUlid ?? "operator",
+      story_id: ref,
+      expected: "story passes all Tier-0 discipline checks",
+      observed: `DisciplineViolationError: ${violations.map((v) => v.code).join(", ")}`
+    });
     throw new DisciplineViolationError({ violations });
   }
   const body = renderNativeStoryBody(input);
@@ -51112,81 +51196,6 @@ async function processReviewerTranscript(opts) {
 // src/tools/run-dev-terminal-action.ts
 import * as path62 from "node:path";
 
-// src/tools/record-agent-friction.ts
-var RecordAgentFrictionOptionsSchema = external_exports.object({
-  /** Absolute path to the target repository root. */
-  targetRepoRoot: external_exports.string().min(1),
-  /** Role name of the agent experiencing the friction (kebab-cased). */
-  agent: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
-  /**
-   * Optional story ref (`<adapter>:<source-id>`) when friction occurred
-   * inside a story flow.
-   */
-  story_id: external_exports.string().min(1).optional(),
-  /** Drain-session ULID (or any opaque caller-supplied identifier). */
-  session_id: external_exports.string().min(1),
-  /** The closed-enum friction category. */
-  kind: external_exports.enum([
-    "empty-input",
-    "missing-cited-source",
-    "forced-fallback",
-    "repeated-retry"
-  ]),
-  /** What the agent expected to receive. Keep short and structural (NFR14). */
-  expected: external_exports.string().min(1),
-  /** What the agent actually received / had to compensate for (NFR14). */
-  observed: external_exports.string().min(1),
-  /**
-   * Optional role label for downstream correlation. Defaults to the
-   * value of `agent` when omitted (they are the same in most callers).
-   */
-  role: external_exports.string().optional()
-}).strict();
-async function recordAgentFriction(opts) {
-  const validated = RecordAgentFrictionOptionsSchema.parse(opts);
-  const {
-    targetRepoRoot,
-    agent,
-    story_id,
-    session_id,
-    kind,
-    expected,
-    observed
-  } = validated;
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      type: "agent.friction",
-      session_id,
-      agent,
-      ...story_id !== void 0 ? { story_id } : {},
-      data: { kind, expected, observed }
-    }
-  });
-  return { ok: true, kind, agent, session_id };
-}
-
-// src/lib/emit-friction.ts
-async function emitFriction(opts) {
-  try {
-    await recordAgentFriction({
-      targetRepoRoot: opts.targetRepoRoot,
-      agent: opts.role,
-      role: opts.role,
-      session_id: opts.session_id,
-      story_id: opts.story_id,
-      kind: opts.kind,
-      expected: opts.expected,
-      observed: opts.observed
-    });
-  } catch (err) {
-    process.stderr.write(
-      `[emitFriction] suppressed error emitting agent.friction (kind=${opts.kind}): ${String(err)}
-`
-    );
-  }
-}
-
 // src/lib/extract-acs-from-spec.ts
 import { promises as fs45 } from "node:fs";
 async function extractAcsFromSpec(specPath) {
@@ -53485,11 +53494,25 @@ async function runJudgePanel(opts) {
     const role = lensRoles[lens];
     const resultFilePath = lensVerdictFilePath(targetRepoRoot, sessionUlid, draft.ref, lens);
     await judgeRunner({ lens, role, draft, riskTier, resultFilePath });
-    const verdict2 = await readLensVerdictFile({
-      filePath: resultFilePath,
-      expectedLens: lens,
-      expectedRole: role
-    });
+    let verdict2;
+    try {
+      verdict2 = await readLensVerdictFile({
+        filePath: resultFilePath,
+        expectedLens: lens,
+        expectedRole: role
+      });
+    } catch (err) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "missing-cited-source",
+        role: "orchestrator",
+        session_id: sessionUlid,
+        story_id: draft.ref,
+        expected: `valid LensVerdict file at ${resultFilePath} for lens '${lens}'`,
+        observed: err instanceof Error ? err.message : String(err)
+      });
+      throw err;
+    }
     lenses.push(verdict2);
   }
   const verdict = PanelVerdictSchema.parse({ tier0, lenses });
@@ -53655,6 +53678,17 @@ async function adjudicateQualityLead(opts) {
   const markReady = opts.markReady ?? markStoryReady;
   const panel = PanelVerdictSchema.parse(opts.panel);
   const synthesis = synthesiseDecision({ panel, round, k });
+  if (synthesis.decision === "escalate") {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "forced-fallback",
+      role: "quality-lead",
+      session_id: sessionUlid,
+      story_id: ref,
+      expected: `panel reaches unanimous pass within K rounds`,
+      observed: `Panel still split after round ${round} of K=${k}; escalating`
+    });
+  }
   let blessed;
   if (synthesis.decision === "ready") {
     blessed = await markReady({

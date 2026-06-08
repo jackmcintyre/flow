@@ -61,6 +61,7 @@ import { atomicWriteFile } from "../lib/managed-fs.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { logTelemetryEvent } from "../lib/logger.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
+import { emitFriction } from "../lib/emit-friction.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -380,11 +381,25 @@ export async function runJudgePanel(
 
     await judgeRunner({ lens, role, draft, riskTier, resultFilePath });
 
-    const verdict = await readLensVerdictFile({
-      filePath: resultFilePath,
-      expectedLens: lens,
-      expectedRole: role,
-    });
+    let verdict: LensVerdict;
+    try {
+      verdict = await readLensVerdictFile({
+        filePath: resultFilePath,
+        expectedLens: lens,
+        expectedRole: role,
+      });
+    } catch (err) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "missing-cited-source",
+        role: "orchestrator",
+        session_id: sessionUlid,
+        story_id: draft.ref,
+        expected: `valid LensVerdict file at ${resultFilePath} for lens '${lens}'`,
+        observed: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     lenses.push(verdict);
   }
 
