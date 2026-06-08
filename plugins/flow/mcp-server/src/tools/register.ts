@@ -60,6 +60,7 @@ import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
 import { resolveJudgePlan } from "./resolve-judge-plan.js";
+import { resolveBuildPlan } from "./resolve-build-plan.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2666,6 +2667,51 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         })
         .parse(args);
       const result = resolveJudgePlan(parsed);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    },
+  });
+
+  // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — resolveBuildPlan: pure deterministic
+  // build-plan resolver. Maps a story's lane → { devReviewerModel, reviewDepth }.
+  // - fast  → cheap model (haiku) + light review
+  // - full/absent → current Sonnet default + full review (no-regression pin)
+  // When manifestPath is provided, reads the lane from the persisted execution
+  // manifest (written at scan time by classifyStoryLane). The load-bearing
+  // decision lives here (not in drain.workflow.js or agent prose) so it is
+  // unit-testable without the Workflow runtime. Callable on the no-MCP drain path:
+  //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
+  server.registerTool({
+    name: "resolveBuildPlan",
+    description:
+      "Resolve the build plan (dev/reviewer model + review depth) from a story's lane " +
+      "(Story native:01KTKK3HQYNFS1M1ZR9TG02G1F). " +
+      "fast -> { devReviewerModel: 'haiku', reviewDepth: 'light' }. " +
+      "full/absent -> { devReviewerModel: 'sonnet', reviewDepth: 'full' } (no-regression pin). " +
+      "When manifestPath is provided, reads the lane from the persisted execution manifest " +
+      "(written at scan time by classifyStoryLane); pass lane directly for a pure no-I/O call. " +
+      "The dev's pre-PR build+test gate (runDevTerminalAction) and merge gate (runAutoMergeGate) " +
+      "are unchanged -- the cheaper path sits entirely in front of the same hard gates. " +
+      "Returns { devReviewerModel, reviewDepth }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storyId: { type: "string" },
+        lane: { type: "string", enum: ["fast", "full"] },
+        manifestPath: { type: "string" },
+      },
+      required: ["storyId"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          storyId: z.string().min(1),
+          lane: z.enum(["fast", "full"]).optional(),
+          manifestPath: z.string().min(1).optional(),
+        })
+        .parse(args);
+      const result = await resolveBuildPlan(parsed);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
       };

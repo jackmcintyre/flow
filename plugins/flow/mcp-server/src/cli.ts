@@ -65,6 +65,7 @@ import { recordStoryRetro } from "./tools/record-story-retro.js";
 import { recallLesson } from "./tools/recall-lesson.js";
 import { classifyStoryLane } from "./tools/classify-story-lane.js";
 import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
+import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -162,6 +163,14 @@ const TOOLS: Record<string, ToolFn> = {
   // runtime. Callable on the no-MCP gate path:
   //   node dist/cli.js resolveJudgePlan --json '{"storyId":"...","lane":"fast"}'
   resolveJudgePlan,
+  // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — fast-lane build plan resolver.
+  // Pure deterministic function: maps a story's lane → { devReviewerModel,
+  // reviewDepth }. fast → haiku + light review; full/absent → sonnet + full
+  // review (no-regression pin). When manifestPath is provided, reads the
+  // lane from the persisted execution manifest written at scan time.
+  // Callable on the no-MCP drain path:
+  //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
+  resolveBuildPlan,
 };
 
 function emit(obj: unknown): void {

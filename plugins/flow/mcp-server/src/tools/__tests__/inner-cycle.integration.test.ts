@@ -557,7 +557,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // ---------------------------------------------------------------------------
 
 describe("AC4(g): tool count and required tools present", () => {
-  it("registered tool list has exactly 27 entries and contains the required tools but NOT runDevSession", async () => {
+  it("registered tool list has exactly 53 entries and contains the required tools but NOT runDevSession", async () => {
     const server = createServer();
     registerAllTools(server);
 
@@ -623,7 +623,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("classifyStoryLane");
       // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
       expect(toolNames).toContain("resolveJudgePlan");
-      expect(toolNames.length).toBe(52);
+      // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 52 → 53.
+      expect(toolNames).toContain("resolveBuildPlan");
+      expect(toolNames.length).toBe(53);
     } finally {
       await client.close();
       await server.close();

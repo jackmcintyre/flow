@@ -111,3 +111,105 @@ describe("Story 8.5 — drain workflow integrity", () => {
     // parse error and the loop pauses that story rather than risk a double-apply.
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2 + AC3 structural-anchor tests.
+//
+// AC2: the drain reads each claimed story's persisted lane and sets the dev/reviewer
+//      model and review depth from resolveBuildPlan before spawning the dev,
+//      defaulting to the current tier when lane is absent.
+//
+// AC3: the dev's pre-PR build+test gate (runDevTerminalAction) and the merge gate
+//      (runAutoMergeGate) call sites are unchanged — the cheap path sits entirely
+//      in front of the unchanged hard gates.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2: resolveBuildPlan wired in the drain", () => {
+  it("calls resolveBuildPlan as a seam after each claim (structural anchor)", () => {
+    // The drain must invoke resolveBuildPlan via the CLI seam to read the
+    // persisted lane from the manifest and return the build plan.
+    expect(SRC).toContain("resolveBuildPlan");
+  });
+
+  it("passes manifestPath to resolveBuildPlan so the lane is read from the manifest", () => {
+    // The seam call must pass manifestPath so the tool reads the persisted lane.
+    expect(SRC).toMatch(/resolveBuildPlan.*manifestPath/s);
+  });
+
+  it("applies resolveBuildPlan's devReviewerModel to the dev agent call", () => {
+    // The dev agent() call must use the per-story model (agentModel, from the build plan),
+    // not a hardcoded 'sonnet' or the global execModel directly.
+    expect(SRC).toContain("agentModel");
+    // The dev spawn carries model: agentModel (not model: execModel directly).
+    expect(SRC).toContain("model: agentModel");
+  });
+
+  it("applies resolveBuildPlan's devReviewerModel to the reviewer agent call", () => {
+    // Both dev AND reviewer agent() calls must use agentModel (AC2: both affected).
+    // The SRC contains exactly one reference to model: agentModel per dev call
+    // and one per reviewer call — assert it appears at least twice.
+    const occurrences = (SRC.match(/model: agentModel/g) || []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(2);
+  });
+
+  it("passes reviewDepth to the reviewer so a fast-lane story gets a light review", () => {
+    // The reviewer's prompt is constructed with a reviewDepthNote derived from reviewDepth.
+    expect(SRC).toContain("reviewDepth");
+    expect(SRC).toContain("reviewDepthNote");
+    // The light-review text is injected into the reviewer's prompt.
+    expect(SRC).toContain("LIGHT (fast-lane story)");
+  });
+
+  it("defaults to the current tier when lane is absent (fail-soft seam, backwards-compatible)", () => {
+    // When resolveBuildPlan returns a garbled relay or no devReviewerModel, the
+    // drain falls back to storyModel=null and uses execModel (the run-level default).
+    // This keeps full backwards compatibility with existing launch scripts.
+    expect(SRC).toContain("storyModel = null");
+    // agentModel is computed as storyModel || execModel — the fallback chain.
+    expect(SRC).toContain("storyModel || execModel");
+  });
+
+  it("resolveBuildPlan seam is retryable (read-only / idempotent)", () => {
+    // Like other read-only seams (mint, persona, etc.), the build-plan seam opts in
+    // to retryable=true so a garbled relay re-invokes (no mutation risk).
+    // The seam call label starts with 'build-plan:' and the third arg is true.
+    // The workflow uses backtick template literals for the label arg.
+    expect(SRC).toMatch(/build-plan:.*`,\s*true/);
+  });
+});
+
+describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC3: hard gates unchanged by fast-lane routing", () => {
+  it("runDevTerminalAction call site is unchanged (still uses the same seam label pattern)", () => {
+    // The hard pre-PR gate (runDevTerminalAction) is invoked by the DEV subagent
+    // via the CLI prompt — the drain's prompt string still references it unchanged.
+    expect(SRC).toContain("runDevTerminalAction");
+  });
+
+  it("runAutoMergeGate call site is unchanged (seam label 'gate:')", () => {
+    // The merge gate seam label 'gate:<ref>' is present — the gate call site is unmodified.
+    // The workflow uses backtick template literals for the label arg.
+    expect(SRC).toContain("gate:${ref}");
+  });
+
+  it("runDevTerminalAction is still in the dev prompt (the dev calls it, not the drain)", () => {
+    // The drain passes runDevTerminalAction to the dev subagent via prompt text —
+    // the instruction is still there verbatim.
+    expect(SRC).toContain("node ${CLI} runDevTerminalAction");
+  });
+
+  it("runAutoMergeGate is still called as a seam after a green verdict", () => {
+    // The gate seam is still called unconditionally on a green verdict.
+    expect(SRC).toContain("node ${CLI} runAutoMergeGate");
+  });
+
+  it("the cheap path (fast-lane model + light review) sits before the unchanged hard gates", () => {
+    // resolveBuildPlan is called AFTER claim but BEFORE dev spawn (which is before
+    // processDevTranscript, verdict, and gate). The script must contain both
+    // resolveBuildPlan and runAutoMergeGate with the gate appearing after.
+    const rpIdx = SRC.indexOf("resolveBuildPlan");
+    const gateIdx = SRC.indexOf("node ${CLI} runAutoMergeGate");
+    expect(rpIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(rpIdx);
+  });
+});
