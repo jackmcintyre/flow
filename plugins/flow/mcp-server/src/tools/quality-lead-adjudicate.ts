@@ -41,6 +41,7 @@ import {
 } from "../schemas/adjudication-verdict.js";
 import { PanelVerdictSchema, type PanelVerdict } from "../schemas/lens-verdict.js";
 import { markStoryReady, type MarkStoryReadyOutput } from "./mark-story-ready.js";
+import { emitFriction } from "../lib/emit-friction.js";
 
 /** Default escalation threshold (rubric §7 open question, proposed default 2). */
 export const DEFAULT_ADJUDICATION_K = 2;
@@ -213,6 +214,23 @@ export async function adjudicateQualityLead(
 
   // Step 2 — synthesise (rubric §5). Pure; no side effects.
   const synthesis = synthesiseDecision({ panel, round, k });
+
+  // Emit friction on escalate — a panel that persists split after K rounds is a
+  // planning-phase friction event. The emit must occur before the verdict is
+  // assembled (and before the quality.adjudicated telemetry event), but must not
+  // change the returned verdict. emitFriction is fail-soft; it swallows its own
+  // errors so a telemetry failure cannot alter the decision.
+  if (synthesis.decision === "escalate") {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "forced-fallback",
+      role: "quality-lead",
+      session_id: sessionUlid,
+      story_id: ref,
+      expected: `panel reaches unanimous pass within K rounds`,
+      observed: `Panel still split after round ${round} of K=${k}; escalating`,
+    });
+  }
 
   // Step 3 — bless ONLY on `ready`, ONLY through the brake. A close call (escalate)
   // and a fail (rework) leave the draft not-ready: the brake is never called.

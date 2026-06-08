@@ -10,6 +10,7 @@ import { logTelemetryEvent } from "../lib/logger.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { validateStoryAgainstDiscipline } from "../validators/planning-discipline.js";
 import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
+import { emitFriction } from "../lib/emit-friction.js";
 
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
@@ -313,6 +314,15 @@ export async function renderGateWriteNativeStory(
       : [];
   violations.push(...(await resolveDisciplinePaths(candidate, targetRepoRoot)));
   if (violations.length > 0) {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "forced-fallback",
+      role: "author",
+      session_id: input.sessionUlid ?? "operator",
+      story_id: ref,
+      expected: "story passes all Tier-0 discipline checks",
+      observed: `DisciplineViolationError: ${violations.map((v) => v.code).join(", ")}`,
+    });
     throw new DisciplineViolationError({ violations });
   }
 
