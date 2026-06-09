@@ -1,15 +1,25 @@
 /**
  * Integration tests for the author seam — Story 9.2 (Epic 9 intake cockpit,
- * gate 1: "propose a feature").
+ * gate 1: "propose a feature") and Story native:01KT49G9B38NZ2QP16GY843KYK
+ * (auto-materialise on write).
  *
  * The seam reuses the existing native-authoring machinery end-to-end:
  *   - `writeNativeStory` (now fail-closed on discipline) authors the draft,
- *   - `scanSources` materialises it into a backlog manifest defaulted
- *     not-ready (the Story 9.1 brake),
+ *   - auto-materialises the manifest into to-do/ immediately after writing
+ *     (Story native:01KT49G9B38NZ2QP16GY843KYK AC1),
  *   - the claim entry point (`claimNextStory`) refuses to return it until the
- *     operator blesses it.
+ *     operator blesses it (Story 9.1 readiness brake, AC2).
  *
- * Covered ACs:
+ * Covered ACs (Story native:01KT49G9B38NZ2QP16GY843KYK):
+ *   AC1 — (integration) after writeNativeStory returns, the to-do/ manifest
+ *         exists WITHOUT a manual scanSources call.
+ *   AC2 — (unit) the auto-materialised manifest carries ready: false —
+ *         the readiness brake is intact.
+ *   AC4 — (unit) BMad-adapter repos do NOT auto-materialise on write
+ *         (writeNativeStory rejects with WrongAdapterError for non-native repos,
+ *         so no scan is triggered — BMad behaviour is unchanged).
+ *
+ * Covered ACs (Story 9.2, preserved):
  *   AC2 — a candidate that passes the discipline gate is written, scanned into
  *         a backlog manifest that reads not-ready, and is NOT returned by the
  *         claim entry point.
@@ -28,7 +38,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { DisciplineViolationError } from "../../errors.js";
+import { DisciplineViolationError, WrongAdapterError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { scanSources } from "../scan-sources.js";
 import { claimNextStory, QUEUE_DRAINED_LINE } from "../claim-next-story.js";
@@ -141,11 +151,14 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe("author seam AC2 — passing draft is parked not-ready in the backlog", () => {
-  it("authors through the seam, scans, and the draft is a not-ready manifest the claim path will not return", async () => {
+  it("authors through the seam and the draft is a not-ready manifest the claim path will not return", async () => {
     const { ref } = await writeNativeStory(passingCandidate());
 
+    // writeNativeStory auto-materialises the manifest (Story native:01KT49G9B38NZ2QP16GY843KYK):
+    // a subsequent scan sees the ref as unchanged (idempotency invariant, AC3).
     const scan = await scanSources({ targetRepoRoot: root });
-    expect(scan.createdRefs).toContain(ref);
+    // The ref is already materialised — it shows up as unchanged, not created.
+    expect(scan.unchangedRefs).toContain(ref);
 
     // The manifest exists in the backlog state and reads not-ready.
     const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
@@ -286,5 +299,87 @@ describe("author seam AC1 — inline approval prompt flips readiness via markSto
     // Story is still not claimable.
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
     expect(claim.next).toBe("queue-drained");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT49G9B38NZ2QP16GY843KYK
+// AC1 — auto-materialise: to-do/ manifest exists WITHOUT a manual /flow:scan
+// ---------------------------------------------------------------------------
+
+describe("auto-materialise AC1 — to-do manifest created immediately on writeNativeStory (no manual scan needed)", () => {
+  it("after writeNativeStory returns, the to-do manifest exists without a manual scanSources call", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+
+    // No explicit scanSources call — the manifest must already exist.
+    const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
+    const stat = await fs.stat(manifestPath).catch(() => null);
+    expect(stat).not.toBeNull();
+
+    const parsed = yamlParse(await fs.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    expect(parsed["ref"]).toBe(ref);
+    expect(parsed["status"]).toBe("to-do");
+  });
+
+  it("the auto-materialised manifest is not claimable — the readiness brake (Story 9.1) is intact", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+
+    // Without blessing, the claim entry point must refuse this story.
+    const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
+    expect(claim.next).toBe("queue-drained");
+    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+
+    // Verify the ref is in to-do/ (not absent — was materialised).
+    const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
+    await expect(fs.access(manifestPath)).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT49G9B38NZ2QP16GY843KYK
+// AC2 — auto-materialised manifest carries ready: false
+// ---------------------------------------------------------------------------
+
+describe("auto-materialise AC2 — auto-materialised manifest carries ready: false (readiness brake intact)", () => {
+  it("the to-do manifest written by writeNativeStory has ready: false without an explicit scanSources call", async () => {
+    const { ref } = await writeNativeStory(passingCandidate());
+
+    const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);
+    const parsed = yamlParse(await fs.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+
+    // The readiness brake must be intact on the auto-materialised manifest.
+    expect(parsed["ready"]).toBe(false);
+    expect(parsed["status"]).toBe("to-do");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT49G9B38NZ2QP16GY843KYK
+// AC4 — BMad adapter guard: writeNativeStory rejects on non-native repos,
+//        so no auto-materialisation occurs for BMad workspaces.
+// ---------------------------------------------------------------------------
+
+describe("auto-materialise AC4 — BMad adapter repos do NOT auto-materialise on write", () => {
+  it("writeNativeStory throws WrongAdapterError on a BMad-adapter repo and writes no manifest", async () => {
+    // Switch the workspace to a BMad adapter by rewriting config.yaml.
+    await atomicWriteFile(
+      path.join(root, ".flow", "config.yaml"),
+      `adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\n`,
+    );
+
+    // writeNativeStory must reject with WrongAdapterError — the native adapter
+    // guard fires before any write or scan step.
+    let caught: unknown;
+    try {
+      await writeNativeStory(passingCandidate());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(WrongAdapterError);
+
+    // No to-do manifest must exist — nothing was scanned.
+    const todoDir = path.join(root, ".flow", "state", "to-do");
+    const entries = await fs.readdir(todoDir).catch(() => [] as string[]);
+    expect(entries.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
   });
 });

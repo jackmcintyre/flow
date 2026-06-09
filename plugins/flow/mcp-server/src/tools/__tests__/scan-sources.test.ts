@@ -1,11 +1,16 @@
 /**
- * Integration test for Story 9.1 (AC5): the scan step writes new backlog
- * manifests with `ready` defaulting to `false`, so a just-scanned item is in
- * the backlog but NOT claimable until the operator blesses it.
+ * Integration tests for Story 9.1 (AC5) and Story
+ * native:01KT49G9B38NZ2QP16GY843KYK (AC3 — scan idempotency after
+ * auto-materialise).
  *
- * Scans a single native source story into a fresh `to-do/` manifest, asserts
- * the written manifest reads not-ready, and asserts the claim entry point
- * (`claimNextStory`) does not return it (fail-closed readiness brake).
+ * Story 9.1 AC5: the scan step writes new backlog manifests with `ready`
+ * defaulting to `false`, so a just-scanned item is in the backlog but NOT
+ * claimable until the operator blesses it.
+ *
+ * Story native:01KT49G9B38NZ2QP16GY843KYK AC3: a story auto-materialised by
+ * `writeNativeStory` appears in `unchangedRefs` (not `createdRefs`) when the
+ * operator subsequently runs `/flow:scan` manually — confirming that the
+ * idempotency invariant of scanSources is preserved.
  *
  * Fixture pattern mirrors scan-sources-readfile-resilience.test.ts:
  * minimal native-adapter workspace (config.yaml + native story), fresh tmpdir,
@@ -19,6 +24,7 @@ import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { scanSources } from "../scan-sources.js";
+import { writeNativeStory } from "../write-native-story.js";
 import { claimNextStory, QUEUE_DRAINED_LINE } from "../claim-next-story.js";
 
 // A valid Crockford Base32 ULID (uppercase, 26 chars, no I/L/O/U).
@@ -108,5 +114,71 @@ describe("scan-sources Story 9.1 (AC5) — fresh manifests default ready: false"
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
     expect(claim.next).toBe("queue-drained");
     expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KT49G9B38NZ2QP16GY843KYK AC3 — scan idempotency after
+// auto-materialise: a story already in to-do/ from writeNativeStory's
+// auto-scan appears in unchangedRefs (not createdRefs) on a subsequent
+// manual /flow:scan — the idempotency invariant of scanSources is preserved.
+// ---------------------------------------------------------------------------
+
+describe("scan-sources Story native:01KT49G9B38NZ2QP16GY843KYK AC3 — idempotency after auto-materialise", () => {
+  it("a manifest auto-created by writeNativeStory lands in unchangedRefs on a subsequent manual scan (no duplicate, no overwrite)", async () => {
+    const workspace = path.join(scratch, "workspace-ac3");
+    await fs.mkdir(workspace);
+
+    const storiesDir = path.join(workspace, ".flow", "native-stories");
+    await fs.mkdir(storiesDir, { recursive: true });
+    await fs.mkdir(path.join(workspace, ".flow", "state", "in-progress"), { recursive: true });
+    await fs.mkdir(path.join(workspace, ".flow", "state", "done"), { recursive: true });
+
+    // Native-adapter config.
+    await atomicWriteFile(
+      path.join(workspace, ".flow", "config.yaml"),
+      `adapter: native\nadapter_config: {}\n`,
+    );
+
+    // Seed the cited source so T0-5 resolvability passes.
+    await atomicWriteFile(path.join(workspace, "src", "state", "ledger.ts"), "// seeded\n");
+
+    // Author a native story — writeNativeStory auto-materialises the manifest.
+    const { ref } = await writeNativeStory({
+      targetRepoRoot: workspace,
+      title: "Persist the backlog ledger",
+      narrative: {
+        role: "operator",
+        want: "the plugin to write sprint-status.yaml",
+        so_that: "the backlog ledger is durable",
+      },
+      acceptance_criteria: [
+        {
+          text: "**Given** a backlog, **When** the operator runs it, **Then** sprint-status.yaml is updated and read back unchanged.",
+          kind: "integration" as const,
+          verification: { type: "vitest" as const, target: "src/__tests__/ledger.integration.test.ts" },
+        },
+      ],
+      tasks: [{ text: "Write the ledger persistence path", ac_refs: ["AC1"] }],
+      cited_sources: ["src/state/ledger.ts"],
+      depends_on: [],
+      sessionUlid: SESSION_ULID,
+    });
+
+    // Confirm the manifest was auto-materialised.
+    const manifestPath = path.join(workspace, ".flow", "state", "to-do", `${ref}.yaml`);
+    await expect(fs.access(manifestPath)).resolves.toBeUndefined();
+
+    // Run a subsequent manual scan — the idempotency invariant must hold.
+    const secondScan = await scanSources({ targetRepoRoot: workspace });
+
+    // The ref must appear in unchangedRefs (hash matches, no overwrite).
+    expect(secondScan.unchangedRefs).toContain(ref);
+
+    // It must NOT appear in createdRefs — no duplicate manifest written.
+    expect(secondScan.createdRefs).not.toContain(ref);
+
+    // And not in updatedRefs — the source file was not changed.
+    expect(secondScan.updatedRefs).not.toContain(ref);
   });
 });

@@ -46777,9 +46777,9 @@ function dedupePaths(paths) {
 }
 
 // src/tools/gather-retro-inputs.ts
-var import_yaml21 = __toESM(require_dist2(), 1);
-import { promises as fs29 } from "node:fs";
-import * as path38 from "node:path";
+var import_yaml22 = __toESM(require_dist2(), 1);
+import { promises as fs30 } from "node:fs";
+import * as path39 from "node:path";
 
 // src/schemas/cycle-state.ts
 import { promises as fs22 } from "node:fs";
@@ -47020,7 +47020,7 @@ async function computeSkillEffectiveness(opts) {
 
 // src/tools/write-native-story.ts
 import { createHash as createHash3 } from "node:crypto";
-import * as path36 from "node:path";
+import * as path37 from "node:path";
 
 // src/adapters/native/parse-native-story.ts
 import { createHash } from "node:crypto";
@@ -48289,1677 +48289,10 @@ async function emitFriction(opts) {
   }
 }
 
-// src/tools/write-native-story.ts
-var WriteNativeStoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  title: external_exports.string().min(1),
-  /**
-   * Story 10.2 — the narrative is now a structured `{ role, want, so_that }`
-   * object. REQUIRED on the native write path (mirrors the `verification`
-   * precedent from 10.1). `renderNativeStoryBody` emits the canonical
-   * "As a {role}, I want {want}, so that {so_that}." sentence and
-   * `parseNativeStory` parses exactly that grammar back, closing the round-trip.
-   */
-  narrative: external_exports.object({
-    role: external_exports.string().min(1),
-    want: external_exports.string().min(1),
-    so_that: external_exports.string().min(1)
-  }),
-  acceptance_criteria: external_exports.array(
-    external_exports.object({
-      text: external_exports.string().min(1),
-      kind: external_exports.enum(["integration", "unit"]),
-      /**
-       * Story 10.1 — every native AC carries a structured verification
-       * directive. REQUIRED on the native write path (mirrors the
-       * three-site `kind` enum precedent: parser, this schema, manifest
-       * schema). `target` is non-empty; resolvability of the path is the
-       * 10.3 T0-6 check, not enforced here.
-       */
-      verification: external_exports.object({
-        type: external_exports.enum(["vitest", "artifact"]),
-        target: external_exports.string().min(1)
-      })
-    })
-  ).min(1),
-  /**
-   * Story 10.2 — implementation tasks. REQUIRED on the native write path: ≥1
-   * task, each carrying ≥1 `ac_refs` (e.g. `["AC1", "AC3"]`). The pre-write
-   * round-trip through `parseNativeStory` additionally rejects a task whose
-   * `ac_ref` dangles (names an AC the story does not declare). Whole-story
-   * T0-1 enforcement at scan time is Story 10.3.
-   */
-  tasks: external_exports.array(
-    external_exports.object({
-      text: external_exports.string().min(1),
-      ac_refs: external_exports.array(external_exports.string().min(1)).min(1)
-    })
-  ).min(1),
-  /**
-   * Story 10.2 — repo-relative source paths cited by the story. REQUIRED on the
-   * native write path: ≥1 path. That each path *resolves on disk* is T0-5
-   * (Story 10.3) — not enforced here.
-   */
-  cited_sources: external_exports.array(external_exports.string().min(1)).min(1),
-  implementation_notes: external_exports.string().optional(),
-  /**
-   * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
-   * a non-empty build-time default is substituted so the rendered
-   * `## Implementation Notes` always carries all three `###` sub-sections.
-   */
-  files_touched: external_exports.string().optional(),
-  definition_of_done: external_exports.string().optional(),
-  risk_reasoning: external_exports.string().optional(),
-  depends_on: external_exports.array(external_exports.string()),
-  /**
-   * Session id for the `draft.authored` telemetry envelope. Optional — the
-   * author subagent / `/flow:author` skill passes its orchestration session
-   * ULID when available; defaults to a stable operator marker so the event
-   * still validates when authored interactively. (Story 9.2)
-   */
-  sessionUlid: external_exports.string().min(1).optional(),
-  /**
-   * Story native:01KTKJXP6DWN5YHKVG96DH16V0 — optional author lane hint.
-   * Downgrade-only: a 'fast' hint is honoured only if `classifyStoryLane`
-   * independently also returns 'fast' at scan time; a 'full' hint always wins
-   * and is the safe choice when the author suspects elevated risk.
-   *
-   * Omitting this field (the default) lets the scan-time classifier decide the
-   * lane without any author bias.
-   */
-  lane_hint: external_exports.enum(["fast", "full"]).optional()
-});
-var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
-var DEFAULT_DEFINITION_OF_DONE = [
-  "- [ ] All ACs met.",
-  "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
-  "- [ ] `pnpm test` green (all tests passing).",
-  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
-  "- [ ] PR opened against `main` with CI green."
-].join("\n");
-var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
-function renderNarrativeSentence(narrative) {
-  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
-}
-function renderNativeStoryBody(input) {
-  const lines = [`# ${input.title}`, ""];
-  lines.push("## Narrative", "");
-  lines.push(renderNarrativeSentence(input.narrative));
-  lines.push("");
-  lines.push("## Acceptance Criteria", "");
-  for (let i2 = 0; i2 < input.acceptance_criteria.length; i2++) {
-    const ac = input.acceptance_criteria[i2];
-    const tag = ac.kind === "integration" ? " (integration)" : "";
-    lines.push(`**AC${i2 + 1}${tag}:**`);
-    lines.push(ac.text);
-    lines.push(`${ac.verification.type}: ${ac.verification.target}`);
-    lines.push("");
-  }
-  lines.push("## Tasks", "");
-  for (const task of input.tasks) {
-    const nums = task.ac_refs.map((r) => r.replace(/^AC/i, "")).join(", ");
-    lines.push(`- ${task.text} (AC: ${nums})`);
-  }
-  lines.push("");
-  lines.push("## Cited Sources", "");
-  for (const src of input.cited_sources) {
-    lines.push(`- ${src}`);
-  }
-  lines.push("");
-  lines.push("## Implementation Notes", "");
-  lines.push(renderImplementationNotesBody(input));
-  lines.push("");
-  lines.push("## Dependencies", "");
-  if (input.depends_on.length > 0) {
-    lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
-    for (const dep of input.depends_on) {
-      lines.push(`- ${dep}`);
-    }
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-async function writeNativeStory(rawInput) {
-  const input = WriteNativeStoryInputSchema.parse(rawInput);
-  const targetRepoRoot = path36.resolve(input.targetRepoRoot);
-  const workspace = await resolveWorkspace({ targetRepoRoot });
-  if (workspace.activeAdapterName !== "native") {
-    throw new WrongAdapterError({
-      expectedAdapter: "native",
-      actualAdapter: workspace.activeAdapterName,
-      targetRepoRoot,
-      toolName: "writeNativeStory"
-    });
-  }
-  return renderGateWriteNativeStory(input, targetRepoRoot);
-}
-async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
-  const newUlid = ulid3();
-  const storiesDir = path36.join(targetRepoRoot, ".flow", "native-stories");
-  const absPath = path36.join(storiesDir, `${newUlid}.md`);
-  const ref = `native:${newUlid}`;
-  const candidate = inputToSourceStory(input, ref, absPath);
-  const pureResult = validateStoryAgainstDiscipline(candidate);
-  const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
-  violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
-  if (violations.length > 0) {
-    await emitFriction({
-      targetRepoRoot,
-      kind: "forced-fallback",
-      role: "author",
-      session_id: input.sessionUlid ?? "operator",
-      story_id: ref,
-      expected: "story passes all Tier-0 discipline checks",
-      observed: `DisciplineViolationError: ${violations.map((v) => v.code).join(", ")}`
-    });
-    throw new DisciplineViolationError({ violations });
-  }
-  const body = renderNativeStoryBody(input);
-  parseNativeStory(absPath, body);
-  await atomicWriteFile(absPath, body);
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      type: "draft.authored",
-      session_id: input.sessionUlid ?? "operator",
-      agent,
-      story_id: ref,
-      data: { ref, title: input.title }
-    }
-  });
-  return { ref, path: absPath };
-}
-function renderImplementationNotesBody(input) {
-  const parts = [];
-  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
-    parts.push(input.implementation_notes.trim());
-    parts.push("");
-  }
-  const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
-  parts.push("### Files touched", "", filesTouched, "");
-  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
-  parts.push("### Definition of Done", "", dod, "");
-  const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
-  parts.push("### Risk", "", risk, "");
-  return parts.join("\n").trim();
-}
-function inputToSourceStory(input, ref, absPath) {
-  return {
-    ref,
-    title: input.title,
-    // The discipline validator scans the raw narrative string for implicit
-    // depends-on refs, so pass the canonical rendered sentence (10.2).
-    narrative: renderNarrativeSentence(input.narrative),
-    narrative_struct: input.narrative,
-    acceptance_criteria: input.acceptance_criteria,
-    depends_on: input.depends_on,
-    // Story 10.8: pass the full rendered implementation notes (including the
-    // three build-ready sub-sections with their defaults) so the discipline
-    // gate sees the same text the file will contain.
-    implementation_notes: renderImplementationNotesBody(input),
-    tasks: input.tasks,
-    cited_sources: input.cited_sources,
-    raw_path: absPath,
-    raw_frontmatter: { title: input.title, ref },
-    source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
-  };
-}
-
-// src/tools/read-backlog-inventory.ts
+// src/tools/scan-sources.ts
 var import_yaml20 = __toESM(require_dist2(), 1);
 import { promises as fs28 } from "node:fs";
-import * as path37 from "node:path";
-var ReadBacklogInventoryInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  /**
-   * Optional single-item filter. When set, only the entry whose `ref` matches
-   * is returned (the others are still scanned so `mode` stays accurate). The
-   * gate-1 judge workflow passes this so it fetches exactly the draft under
-   * judgement instead of relaying the whole backlog through a seam courier.
-   */
-  ref: external_exports.string().min(1).optional(),
-  /**
-   * When true, each returned entry is enriched with `specText` (the draft's full
-   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
-   * Default false keeps the inventory lean for its planner/board/dashboard
-   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
-   * the real draft (not an empty `"(spec text not available)"` placeholder).
-   */
-  includeSpecText: external_exports.boolean().optional()
-});
-var ULID_PATTERN = /^[0-9A-Z]{26}$/;
-function extractH1Title(content, fallback) {
-  const match = content.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : fallback;
-}
-async function readBacklogInventory(rawInput) {
-  const input = ReadBacklogInventoryInputSchema.parse(rawInput);
-  const targetRepoRoot = path37.resolve(input.targetRepoRoot);
-  const workspace = await resolveWorkspace({ targetRepoRoot });
-  const isNative = workspace.activeAdapterName === "native";
-  const stateRoot = path37.join(targetRepoRoot, ".flow", "state");
-  const doneDir = path37.join(stateRoot, "done");
-  const inventory = [];
-  const seenRefs = /* @__PURE__ */ new Set();
-  for (const stateName of STATE_NAMES) {
-    const stateDir = path37.join(stateRoot, stateName);
-    let entries;
-    try {
-      entries = await fs28.readdir(stateDir);
-    } catch {
-      continue;
-    }
-    for (const filename of entries) {
-      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
-      const absPath = path37.join(stateDir, filename);
-      const rawText = await fs28.readFile(absPath, "utf8");
-      const parsed = (0, import_yaml20.parse)(rawText);
-      const manifest = parseExecutionManifest(parsed, { absPath });
-      let depsReady = true;
-      for (const dep of manifest.depends_on) {
-        try {
-          await fs28.stat(path37.join(doneDir, `${dep}.yaml`));
-        } catch {
-          depsReady = false;
-          break;
-        }
-      }
-      const entry = {
-        ref: manifest.ref,
-        title: manifest.title,
-        state: stateName,
-        withdrawn: manifest.withdrawn,
-        ready: manifest.ready,
-        depsReady
-      };
-      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
-        const specAbs = path37.isAbsolute(manifest.source_path) ? manifest.source_path : path37.join(targetRepoRoot, manifest.source_path);
-        try {
-          entry.specText = await fs28.readFile(specAbs, "utf8");
-        } catch {
-        }
-        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
-      }
-      inventory.push(entry);
-      seenRefs.add(manifest.ref);
-    }
-  }
-  if (isNative) {
-    const nativeStoriesDir2 = path37.join(targetRepoRoot, ".flow", "native-stories");
-    let nativeFiles;
-    try {
-      nativeFiles = await fs28.readdir(nativeStoriesDir2);
-    } catch {
-      nativeFiles = [];
-    }
-    for (const filename of nativeFiles) {
-      if (!filename.endsWith(".md")) continue;
-      const basename6 = filename.slice(0, -3);
-      if (!ULID_PATTERN.test(basename6)) continue;
-      const ref = `native:${basename6}`;
-      if (seenRefs.has(ref)) continue;
-      const absPath = path37.join(nativeStoriesDir2, filename);
-      const content = await fs28.readFile(absPath, "utf8");
-      const title = extractH1Title(content, basename6);
-      const entry = {
-        ref,
-        title,
-        state: "native-source-only",
-        withdrawn: false,
-        ready: false,
-        depsReady: true
-      };
-      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
-        entry.specText = content;
-      }
-      inventory.push(entry);
-    }
-  }
-  const mode = inventory.length === 0 ? "first-run" : "re-open";
-  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
-  return { mode, backlog_inventory };
-}
-
-// src/tools/gather-retro-inputs.ts
-var TELEMETRY_FILE_REGEX = /\.jsonl$/;
-var MECHANICAL_FAILURE_THRESHOLD = 2;
-async function gatherRetroInputs(opts) {
-  const { targetRepoRoot, fireCountConfig } = opts;
-  const cycleState = opts.cycleState !== void 0 ? opts.cycleState : await readCycleState(targetRepoRoot);
-  const windowStartMs = cycleState ? Date.parse(cycleState.opened_at) : null;
-  const doneManifests = await gatherDoneManifests(targetRepoRoot, windowStartMs);
-  const telemetrySummary = await gatherTelemetry(targetRepoRoot, windowStartMs);
-  const priorProposals = await gatherPriorProposals(targetRepoRoot);
-  const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
-  let fireCountSignal = null;
-  if (ruleRegistry !== null) {
-    const registryTyped = ruleRegistry;
-    const result = computeFailureClassFireCounts(
-      { doneManifests, telemetrySummary, ruleRegistry: registryTyped },
-      fireCountConfig
-    );
-    fireCountSignal = {
-      promotionCandidates: result.promotionCandidates,
-      retirementCandidates: result.retirementCandidates
-    };
-  }
-  const recurringFriction = computeRecurringFriction(telemetrySummary.events);
-  const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
-  const threshold = opts.mechanicalFailureThreshold ?? MECHANICAL_FAILURE_THRESHOLD;
-  const mechanicalFailuresDrafted = await draftHardeningStories(
-    targetRepoRoot,
-    doneManifests,
-    threshold,
-    opts.sessionUlid
-  );
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
-}
-async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
-  const doneDir = path38.join(targetRepoRoot, ".flow", "state", "done");
-  let entries;
-  try {
-    entries = await fs29.readdir(doneDir);
-  } catch (err) {
-    if (isEnoent5(err)) {
-      return [];
-    }
-    throw err;
-  }
-  const manifestFiles = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
-  const manifests = [];
-  for (const file2 of manifestFiles) {
-    const absPath = path38.join(doneDir, file2);
-    if (windowStartMs !== null) {
-      const stat2 = await fs29.stat(absPath);
-      if (stat2.mtimeMs < windowStartMs) {
-        continue;
-      }
-    }
-    const raw = await fs29.readFile(absPath, "utf8");
-    const parsed = (0, import_yaml21.parse)(raw);
-    manifests.push(parseExecutionManifest(parsed, { absPath }));
-  }
-  return manifests;
-}
-async function gatherTelemetry(targetRepoRoot, windowStartMs) {
-  const telemetryDir = path38.join(targetRepoRoot, ".flow", "telemetry");
-  let entries;
-  try {
-    entries = await fs29.readdir(telemetryDir);
-  } catch (err) {
-    if (isEnoent5(err)) {
-      return { events: [], skipped_count: 0 };
-    }
-    throw err;
-  }
-  const files = entries.filter((f) => TELEMETRY_FILE_REGEX.test(f)).sort();
-  const events = [];
-  let skipped_count = 0;
-  for (const file2 of files) {
-    const absPath = path38.join(telemetryDir, file2);
-    const raw = await fs29.readFile(absPath, "utf8");
-    const lines = raw.split("\n");
-    for (const line of lines) {
-      if (line.trim() === "") {
-        continue;
-      }
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        skipped_count++;
-        continue;
-      }
-      const result = TelemetryEventSchema.safeParse(parsed);
-      if (!result.success) {
-        skipped_count++;
-        continue;
-      }
-      if (windowStartMs !== null && Date.parse(result.data.ts) < windowStartMs) {
-        continue;
-      }
-      events.push(result.data);
-    }
-  }
-  return { events, skipped_count };
-}
-async function gatherPriorProposals(targetRepoRoot) {
-  const proposalsDir = path38.join(targetRepoRoot, ".flow", "retro-proposals");
-  let entries;
-  try {
-    entries = await fs29.readdir(proposalsDir);
-  } catch (err) {
-    if (isEnoent5(err)) {
-      return [];
-    }
-    throw err;
-  }
-  const proposals = entries.filter((f) => f.endsWith(".md")).map((f) => ({
-    path: path38.join(proposalsDir, f),
-    // The writer keys the filename by ISO timestamp (Story 6.3):
-    // `<isoTimestamp>.md`. Strip the `.md` suffix to recover it.
-    iso_timestamp: f.slice(0, -".md".length)
-  }));
-  proposals.sort((a2, b) => a2.iso_timestamp.localeCompare(b.iso_timestamp));
-  return proposals;
-}
-async function gatherRuleRegistry(targetRepoRoot) {
-  const registryPath = path38.join(
-    targetRepoRoot,
-    "docs",
-    "discipline-rules.yaml"
-  );
-  let raw;
-  try {
-    raw = await fs29.readFile(registryPath, "utf8");
-  } catch (err) {
-    if (isEnoent5(err)) {
-      return null;
-    }
-    throw err;
-  }
-  return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
-}
-async function draftHardeningStories(targetRepoRoot, doneManifests, threshold, sessionUlid) {
-  let workspace;
-  try {
-    workspace = await resolveWorkspace({ targetRepoRoot });
-  } catch {
-    return [];
-  }
-  if (workspace.activeAdapterName !== "native") {
-    return [];
-  }
-  const classCounts = /* @__PURE__ */ new Map();
-  for (const manifest of doneManifests) {
-    for (const lesson of manifest.lessons ?? []) {
-      if (lesson.kind === "pitfall" && lesson.failure_class) {
-        classCounts.set(
-          lesson.failure_class,
-          (classCounts.get(lesson.failure_class) ?? 0) + 1
-        );
-      }
-    }
-  }
-  const qualifying = [];
-  for (const [fc, count2] of classCounts) {
-    if (count2 >= threshold) {
-      qualifying.push({ failure_class: fc, count: count2 });
-    }
-  }
-  qualifying.sort((a2, b) => a2.failure_class.localeCompare(b.failure_class));
-  if (qualifying.length === 0) {
-    return [];
-  }
-  let existingHardeningClasses;
-  try {
-    const inventory = await readBacklogInventory({
-      targetRepoRoot
-    });
-    existingHardeningClasses = buildExistingHardeningSet(inventory.backlog_inventory);
-  } catch {
-    existingHardeningClasses = /* @__PURE__ */ new Set();
-  }
-  const drafted = [];
-  for (const { failure_class, count: count2 } of qualifying) {
-    if (existingHardeningClasses.has(failure_class)) {
-      continue;
-    }
-    const input = buildHardeningStoryInput(
-      failure_class,
-      count2,
-      targetRepoRoot,
-      sessionUlid
-    );
-    let result;
-    try {
-      result = await renderGateWriteNativeStory(input, targetRepoRoot, "author");
-    } catch {
-      continue;
-    }
-    drafted.push({
-      failure_class,
-      recurrence_count: count2,
-      hardening_story_ref: result.ref,
-      hardening_story_path: result.path
-    });
-  }
-  return drafted;
-}
-function buildExistingHardeningSet(inventory) {
-  const existing = /* @__PURE__ */ new Set();
-  const HARDENING_PREFIX = "[Hardening] Guard against ";
-  for (const item of inventory) {
-    if (item.state === "done" || item.withdrawn) {
-      continue;
-    }
-    if (item.title.startsWith(HARDENING_PREFIX)) {
-      const fc = item.title.slice(HARDENING_PREFIX.length).trim();
-      if (fc.length > 0) {
-        existing.add(fc);
-      }
-    }
-  }
-  return existing;
-}
-function buildHardeningStoryInput(failure_class, recurrence_count, targetRepoRoot, sessionUlid) {
-  const title = `[Hardening] Guard against ${failure_class}`;
-  const sanitizedFc = failure_class.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  return {
-    targetRepoRoot,
-    title,
-    narrative: {
-      role: "non-engineer operator",
-      want: `a code-level guard that prevents the recurring "${failure_class}" failure`,
-      so_that: `the team stops repeating this mechanical mistake (recurred ${recurrence_count} times this cycle)`
-    },
-    acceptance_criteria: [
-      {
-        text: `**Given** the retro has identified "${failure_class}" as a recurring failure class (${recurrence_count} occurrences), **When** a dev implements this hardening, **Then** a code guard exists that makes the "${failure_class}" failure detectable at build or test time.`,
-        kind: "integration",
-        verification: {
-          type: "vitest",
-          target: `plugins/flow/mcp-server/src/__tests__/hardening-${sanitizedFc}.test.ts`
-        }
-      }
-    ],
-    tasks: [
-      {
-        text: `Identify the code seam responsible for the "${failure_class}" failure class and add a deterministic guard (test, schema check, or runtime assertion) that catches it before it escapes to the dev loop.`,
-        ac_refs: ["AC1"]
-      }
-    ],
-    cited_sources: [
-      "plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts"
-    ],
-    depends_on: [],
-    sessionUlid: sessionUlid ?? "retro-loop"
-  };
-}
-function computeRecurringFriction(events) {
-  const RECURRING_THRESHOLD = 2;
-  const counts = /* @__PURE__ */ new Map();
-  for (const event of events) {
-    if (event.type === "agent.friction") {
-      const frictionEvent = event;
-      const kind = frictionEvent.data.kind;
-      counts.set(kind, (counts.get(kind) ?? 0) + 1);
-    }
-  }
-  const result = [];
-  for (const [kind, count2] of counts) {
-    if (count2 >= RECURRING_THRESHOLD) {
-      result.push({ kind, count: count2 });
-    }
-  }
-  result.sort((a2, b) => a2.kind.localeCompare(b.kind));
-  return result;
-}
-function isEnoent5(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/list-claimable-todos.ts
-var import_yaml22 = __toESM(require_dist2(), 1);
-import { promises as fs30 } from "node:fs";
-import * as path39 from "node:path";
-
-// src/lib/short-handle.ts
-function shortHandle(ref) {
-  const colon = ref.indexOf(":");
-  const localPart = colon === -1 ? ref : ref.slice(colon + 1);
-  if (ref.startsWith("native:")) {
-    return localPart.slice(0, 8);
-  }
-  return localPart;
-}
-
-// src/tools/list-claimable-todos.ts
-async function listClaimableTodos(opts) {
-  const { targetRepoRoot } = opts;
-  const stateRoot = path39.join(targetRepoRoot, ".flow", "state");
-  const todoDir = path39.join(stateRoot, "to-do");
-  const inProgressDir = path39.join(stateRoot, "in-progress");
-  const doneDir = path39.join(stateRoot, "done");
-  let todoEntries;
-  try {
-    todoEntries = await fs30.readdir(todoDir);
-  } catch (err) {
-    if (isEnoent6(err)) {
-      todoEntries = [];
-    } else {
-      throw err;
-    }
-  }
-  const yamlEntries = todoEntries.filter((f) => f.endsWith(".yaml")).sort();
-  const candidates = [];
-  for (const entry of yamlEntries) {
-    const absPath = path39.join(todoDir, entry);
-    let raw;
-    try {
-      raw = await fs30.readFile(absPath, "utf8");
-    } catch (err) {
-      if (isEnoent6(err)) {
-        continue;
-      }
-      throw err;
-    }
-    const parsed = (0, import_yaml22.parse)(raw);
-    const manifest = parseExecutionManifest(parsed, { absPath });
-    if (!isClaimable(manifest)) {
-      continue;
-    }
-    let depsReady = true;
-    for (const dep of manifest.depends_on) {
-      const depPath = path39.join(doneDir, `${dep}.yaml`);
-      try {
-        await fs30.stat(depPath);
-      } catch (err) {
-        if (isEnoent6(err)) {
-          depsReady = false;
-          break;
-        }
-        throw err;
-      }
-    }
-    candidates.push({
-      ref: manifest.ref,
-      shortHandle: shortHandle(manifest.ref),
-      title: manifest.title,
-      depends_on: manifest.depends_on,
-      depsReady,
-      ready: manifest.ready
-    });
-  }
-  let inProgressCount = 0;
-  try {
-    const inProgressEntries = await fs30.readdir(inProgressDir);
-    inProgressCount = inProgressEntries.filter(
-      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
-    ).length;
-  } catch (err) {
-    if (!isEnoent6(err)) {
-      throw err;
-    }
-  }
-  return { todos: candidates, inProgressCount };
-}
-function isEnoent6(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/mint-session-ulid.ts
-function mintSessionUlid() {
-  return { sessionUlid: ulid3() };
-}
-
-// src/tools/render-backlog-dashboard.ts
-function deriveEpic(ref) {
-  const colon = ref.indexOf(":");
-  const sourceId = colon === -1 ? ref : ref.slice(colon + 1);
-  const dot = sourceId.indexOf(".");
-  if (dot === -1) return null;
-  return sourceId.slice(0, dot);
-}
-function isClaimableEntry(entry) {
-  return entry.state === "to-do" && entry.ready === true && entry.depsReady === true && entry.withdrawn === false;
-}
-async function getBacklogDashboard(opts) {
-  const { backlog_inventory } = await readBacklogInventory({
-    targetRepoRoot: opts.targetRepoRoot
-  });
-  const entries = backlog_inventory.map((e) => ({
-    ref: e.ref,
-    title: e.title,
-    epic: deriveEpic(e.ref),
-    state: e.state,
-    withdrawn: e.withdrawn,
-    ready: e.ready,
-    claimable: isClaimableEntry(e)
-  }));
-  return { entries };
-}
-var NO_EPIC_HEADING = "(no epic)";
-function renderRow(entry) {
-  const readiness = entry.ready ? "ready" : "not ready";
-  const claim = entry.claimable ? "claimable" : "not claimable";
-  const withdrawn = entry.withdrawn ? " [withdrawn]" : "";
-  const handle = shortHandle(entry.ref);
-  return `  - [${handle}] ${entry.ref} \u2014 ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
-}
-function renderBacklogDashboard(snapshot) {
-  const lines = ["Backlog dashboard"];
-  if (snapshot.entries.length === 0) {
-    lines.push("  (backlog is empty \u2014 nothing here)");
-    return lines.join("\n");
-  }
-  const byEpic = /* @__PURE__ */ new Map();
-  for (const entry of snapshot.entries) {
-    const key = entry.epic;
-    const bucket = byEpic.get(key);
-    if (bucket) {
-      bucket.push(entry);
-    } else {
-      byEpic.set(key, [entry]);
-    }
-  }
-  const epicKeys = [...byEpic.keys()];
-  epicKeys.sort((a2, b) => {
-    if (a2 === b) return 0;
-    if (a2 === null) return 1;
-    if (b === null) return -1;
-    const na = Number(a2);
-    const nb = Number(b);
-    const aNum = !Number.isNaN(na);
-    const bNum = !Number.isNaN(nb);
-    if (aNum && bNum) return na - nb;
-    if (aNum) return -1;
-    if (bNum) return 1;
-    return a2 < b ? -1 : 1;
-  });
-  for (const key of epicKeys) {
-    const heading = key === null ? NO_EPIC_HEADING : `Epic ${key}`;
-    lines.push(heading);
-    const rows = byEpic.get(key).slice().sort((a2, b) => a2.ref < b.ref ? -1 : a2.ref > b.ref ? 1 : 0);
-    for (const row of rows) {
-      lines.push(renderRow(row));
-    }
-  }
-  return lines.join("\n");
-}
-
-// src/tools/get-status.ts
-import * as path40 from "node:path";
-
-// src/schemas/status-report.ts
-var ULID_REGEX2 = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-var StatusReportSchema = external_exports.object({
-  pluginVersion: external_exports.string().regex(SEMVER_REGEX),
-  targetRepoRoot: external_exports.string().min(1),
-  adapter: external_exports.discriminatedUnion("state", [
-    external_exports.object({ state: external_exports.literal("ok"), name: external_exports.string().min(1) }),
-    external_exports.object({
-      state: external_exports.literal("mismatched"),
-      name: external_exports.string().min(1),
-      otherMatchingAdapters: external_exports.array(external_exports.string())
-    })
-  ]),
-  standards: external_exports.discriminatedUnion("state", [
-    external_exports.object({ state: external_exports.literal("ok"), path: external_exports.string().min(1) }),
-    external_exports.object({ state: external_exports.literal("missing"), path: external_exports.string().min(1) }),
-    external_exports.object({
-      state: external_exports.literal("malformed"),
-      path: external_exports.string().min(1),
-      zodMessage: external_exports.string().min(1)
-    })
-  ]),
-  cycle: external_exports.union([external_exports.literal("none"), external_exports.string().regex(ULID_REGEX2)])
-});
-
-// src/state/validate-active-adapter.ts
-var SCHEMA_MODULE2 = "mcp-server/src/schemas/workspace-config.ts";
-async function validateActiveAdapter(workspace, opts) {
-  const adapters2 = opts?.adapters ?? adapters;
-  const configuredMatches = await workspace.activeAdapter.detect(workspace.targetRepoRoot);
-  if (configuredMatches) {
-    return workspace;
-  }
-  const others = adapters2.filter((a2) => a2.name !== workspace.activeAdapterName);
-  const otherResults = await Promise.all(others.map((a2) => a2.detect(workspace.targetRepoRoot)));
-  const otherMatchingAdapters = others.filter((_, i2) => otherResults[i2] === true).map((a2) => a2.name);
-  throw new StaleWorkspaceConfigError({
-    targetRepoRoot: workspace.targetRepoRoot,
-    configuredAdapter: workspace.activeAdapterName,
-    otherMatchingAdapters,
-    schemaModule: SCHEMA_MODULE2
-  });
-}
-
-// src/tools/get-status.ts
-async function getStatus(opts) {
-  const pluginVersion = getPluginVersion();
-  const workspace = await resolveWorkspace({
-    targetRepoRoot: opts.targetRepoRoot,
-    adapters: opts.adapters
-  });
-  let adapterReport;
-  try {
-    await validateActiveAdapter(workspace, { adapters: opts.adapters });
-    adapterReport = { state: "ok", name: workspace.activeAdapterName };
-  } catch (err) {
-    if (err instanceof StaleWorkspaceConfigError) {
-      adapterReport = {
-        state: "mismatched",
-        name: workspace.activeAdapterName,
-        otherMatchingAdapters: err.otherMatchingAdapters
-      };
-    } else {
-      throw err;
-    }
-  }
-  const standardsPath = path40.join(workspace.targetRepoRoot, "docs", "standards.md");
-  let standardsReport;
-  try {
-    await lookupStandards(workspace.targetRepoRoot);
-    standardsReport = { state: "ok", path: standardsPath };
-  } catch (err) {
-    if (err instanceof StandardsDocMissingError) {
-      standardsReport = { state: "missing", path: standardsPath };
-    } else if (err instanceof StandardsDocMalformedError) {
-      standardsReport = {
-        state: "malformed",
-        path: standardsPath,
-        zodMessage: err.zodMessage
-      };
-    } else {
-      throw err;
-    }
-  }
-  const cycleState = await readCycleState(workspace.targetRepoRoot);
-  const report = {
-    pluginVersion,
-    targetRepoRoot: workspace.targetRepoRoot,
-    adapter: adapterReport,
-    standards: standardsReport,
-    cycle: cycleState ? cycleState.cycle_ulid : "none"
-  };
-  return StatusReportSchema.parse(report);
-}
-function renderStatus(report) {
-  return [
-    `flow v${report.pluginVersion}`,
-    `target repo: ${report.targetRepoRoot}`,
-    `adapter: ${report.adapter.name} (${report.adapter.state})`,
-    `standards: ${report.standards.state} \u2014 ${report.standards.path}`,
-    `cycle: ${report.cycle}`
-  ].join("\n");
-}
-
-// src/tools/open-cycle.ts
-var import_yaml23 = __toESM(require_dist2(), 1);
-import * as path41 from "node:path";
-function isoForFilename(iso) {
-  return iso.replace(/[:.]/g, "-");
-}
-async function openCycle(opts) {
-  const { targetRepoRoot } = opts;
-  const now = opts.now ?? (() => /* @__PURE__ */ new Date());
-  const openedAt = now().toISOString();
-  const cycleUlid = ulid3();
-  const priorCycle = await readCycleState(targetRepoRoot);
-  let archivePath = null;
-  if (priorCycle !== null) {
-    archivePath = await archivePriorCycle(targetRepoRoot, priorCycle, openedAt);
-  }
-  const newState = { cycle_ulid: cycleUlid, opened_at: openedAt };
-  await atomicWriteFile(
-    cycleStatePath(targetRepoRoot),
-    JSON.stringify(newState, null, 2) + "\n"
-  );
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      ts: openedAt,
-      type: "cycle.opened",
-      session_id: opts.sessionUlid ?? cycleUlid,
-      agent: "orchestrator",
-      data: {
-        cycle_ulid: cycleUlid,
-        prior_cycle_ulid: priorCycle?.cycle_ulid ?? null,
-        archived: archivePath !== null
-      }
-    }
-  });
-  return {
-    cycleUlid,
-    openedAt,
-    priorCycleUlid: priorCycle?.cycle_ulid ?? null,
-    archivePath
-  };
-}
-async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
-  const inputs = await gatherRetroInputs({
-    targetRepoRoot,
-    cycleState: priorCycle
-  });
-  const archiveRecord = {
-    cycle_ulid: priorCycle.cycle_ulid,
-    opened_at: priorCycle.opened_at,
-    closed_at: openedAt,
-    done_manifests: inputs.doneManifests,
-    retro_proposals: inputs.priorProposals.map((p) => ({
-      // Store repo-relative paths so the archive is portable.
-      path: path41.relative(targetRepoRoot, p.path),
-      iso_timestamp: p.iso_timestamp
-    })),
-    telemetry_summary: {
-      event_count: inputs.telemetrySummary.events.length,
-      skipped_count: inputs.telemetrySummary.skipped_count
-    }
-  };
-  const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
-  const absPath = path41.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
-  await atomicWriteFile(absPath, (0, import_yaml23.stringify)(archiveRecord, { lineWidth: 0 }));
-  return absPath;
-}
-
-// src/tools/get-team-snapshot.ts
-import { promises as fs32 } from "node:fs";
-import * as path43 from "node:path";
-
-// src/lib/team-stats.ts
-import { promises as fs31 } from "node:fs";
-import * as path42 from "node:path";
-var MONTH_BUCKET_REGEX = /^\d{4}-\d{2}\.jsonl$/;
-async function readTeamTelemetryStats(opts) {
-  const telemetryDir = path42.join(opts.targetRepoRoot, ".flow", "telemetry");
-  let entries;
-  try {
-    entries = await fs31.readdir(telemetryDir);
-  } catch (err) {
-    if (isEnoent7(err)) {
-      return { fireCountsByAgent: {}, malformedLines: 0, malformedFiles: 0 };
-    }
-    throw err;
-  }
-  const fireCountsByAgent = {};
-  let malformedLines = 0;
-  let malformedFiles = 0;
-  for (const entry of entries) {
-    if (!MONTH_BUCKET_REGEX.test(entry)) {
-      continue;
-    }
-    const filePath = path42.join(telemetryDir, entry);
-    const raw = await fs31.readFile(filePath, "utf8");
-    const lines = raw.split("\n");
-    let fileHasMalformation = false;
-    for (const line of lines) {
-      if (line.trim() === "") {
-        continue;
-      }
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        malformedLines++;
-        fileHasMalformation = true;
-        continue;
-      }
-      const result = TelemetryEventSchema.safeParse(parsed);
-      if (!result.success) {
-        malformedLines++;
-        fileHasMalformation = true;
-        continue;
-      }
-      if (result.data.type === "agent.invoke") {
-        const agent = result.data.agent;
-        fireCountsByAgent[agent] = (fireCountsByAgent[agent] ?? 0) + 1;
-      }
-    }
-    if (fileHasMalformation) {
-      malformedFiles++;
-    }
-  }
-  return { fireCountsByAgent, malformedLines, malformedFiles };
-}
-function isEnoent7(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/schemas/team-snapshot.ts
-var KEBAB_ROLE_REGEX = /^[a-z0-9-]+$/;
-var KnowledgeEntrySchema = external_exports.object({
-  kind: external_exports.enum(LESSON_KINDS),
-  applies_when: external_exports.string().min(1),
-  detail: external_exports.string().min(1),
-  source_ref: external_exports.string().min(1).optional()
-}).strict();
-var TeamSnapshotRoleSchema = external_exports.discriminatedUnion("state", [
-  external_exports.object({
-    state: external_exports.literal("ok"),
-    role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
-    domain: external_exports.string().min(1),
-    fireCount: external_exports.number().int().nonnegative(),
-    knowledge: external_exports.array(KnowledgeEntrySchema)
-  }),
-  external_exports.object({
-    state: external_exports.literal("error"),
-    role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
-    error: external_exports.string().min(1)
-  })
-]);
-var TeamSnapshotSchema = external_exports.object({
-  roles: external_exports.array(TeamSnapshotRoleSchema),
-  knowledgeLimit: external_exports.number().int().positive(),
-  malformedTelemetryLines: external_exports.number().int().nonnegative(),
-  malformedTelemetryFiles: external_exports.number().int().nonnegative()
-}).strict();
-
-// src/tools/get-team-snapshot.ts
-async function getTeamSnapshot(opts) {
-  const { targetRepoRoot } = opts;
-  const knowledgeLimit = opts.knowledgeLimit ?? 3;
-  const teamDir = path43.join(targetRepoRoot, "team");
-  let dirEntries;
-  try {
-    dirEntries = await fs32.readdir(teamDir);
-  } catch (err) {
-    if (isEnoent8(err)) {
-      const stats2 = await readTeamTelemetryStats({ targetRepoRoot });
-      return TeamSnapshotSchema.parse({
-        roles: [],
-        knowledgeLimit,
-        malformedTelemetryLines: stats2.malformedLines,
-        malformedTelemetryFiles: stats2.malformedFiles
-      });
-    }
-    throw err;
-  }
-  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
-  const roleIds = [];
-  for (const entry of dirEntries) {
-    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) {
-      continue;
-    }
-    let stat2;
-    try {
-      stat2 = await fs32.stat(path43.join(teamDir, entry));
-    } catch {
-      continue;
-    }
-    if (!stat2.isDirectory()) {
-      continue;
-    }
-    roleIds.push(entry);
-  }
-  roleIds.sort();
-  const stats = await readTeamTelemetryStats({ targetRepoRoot });
-  const roles = [];
-  for (const role of roleIds) {
-    try {
-      const persona = await readPersona({ targetRepoRoot, role });
-      const knowledge = extractKnowledgeEntries(
-        persona.sections.Knowledge,
-        knowledgeLimit
-      );
-      roles.push({
-        state: "ok",
-        role,
-        domain: persona.domain,
-        fireCount: stats.fireCountsByAgent[role] ?? 0,
-        knowledge
-      });
-    } catch (err) {
-      if (err instanceof PersonaFileMalformedError) {
-        roles.push({
-          state: "error",
-          role,
-          error: err.message
-        });
-      } else if (err instanceof PersonaFileNotFoundError) {
-        console.warn(`[getTeamSnapshot] persona file for '${role}' vanished mid-snapshot \u2014 skipping`);
-      } else {
-        throw err;
-      }
-    }
-  }
-  return TeamSnapshotSchema.parse({
-    roles,
-    knowledgeLimit,
-    malformedTelemetryLines: stats.malformedLines,
-    malformedTelemetryFiles: stats.malformedFiles
-  });
-}
-var LESSON_BLOCK_PREFIX3 = "<!-- lesson:json ";
-var LESSON_BLOCK_SUFFIX3 = " -->";
-function extractKnowledgeEntries(knowledgeBody, limit) {
-  const structured = [];
-  const migrated = [];
-  for (const line of knowledgeBody.split("\n")) {
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith(LESSON_BLOCK_PREFIX3) && trimmed.endsWith(LESSON_BLOCK_SUFFIX3)) {
-      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX3.length, trimmed.length - LESSON_BLOCK_SUFFIX3.length).trim();
-      try {
-        const raw = JSON.parse(jsonStr);
-        if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
-          const obj = raw;
-          const entry = {
-            kind: obj["kind"],
-            applies_when: String(obj["applies_when"]),
-            detail: String(obj["detail"]),
-            ...typeof obj["source_ref"] === "string" && obj["source_ref"].length > 0 ? { source_ref: obj["source_ref"] } : {}
-          };
-          structured.push(entry);
-        }
-      } catch {
-      }
-      continue;
-    }
-    const match = /^-\s+(.+?)\s*$/.exec(line);
-    if (match) {
-      migrated.push({
-        kind: "pattern",
-        applies_when: match[1],
-        detail: match[1]
-      });
-    }
-  }
-  const all = [...structured, ...migrated];
-  return all.slice(-limit).reverse();
-}
-function renderTeamSnapshot(snapshot) {
-  const { roles, knowledgeLimit, malformedTelemetryLines, malformedTelemetryFiles } = snapshot;
-  const lines = [];
-  lines.push(`flow team \u2014 ${roles.length} role(s)`);
-  lines.push("");
-  if (roles.length === 0) {
-    lines.push(
-      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:skip-hiring to hire the default roster."
-    );
-  } else {
-    for (let i2 = 0; i2 < roles.length; i2++) {
-      const role = roles[i2];
-      lines.push(role.role);
-      if (role.state === "error") {
-        lines.push(`  error: ${role.error}`);
-      } else {
-        lines.push(`  domain:      ${role.domain}`);
-        lines.push(`  fire count:  ${role.fireCount}`);
-        lines.push(`  knowledge (last ${knowledgeLimit}):`);
-        if (role.knowledge.length === 0) {
-          lines.push("    (no entries)");
-        } else {
-          for (const entry of role.knowledge) {
-            const provenance = entry.source_ref != null ? ` [${entry.source_ref}]` : "";
-            lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
-          }
-        }
-      }
-      if (i2 < roles.length - 1) {
-        lines.push("");
-      }
-    }
-  }
-  if (malformedTelemetryLines > 0) {
-    lines.push("");
-    lines.push(
-      `(${malformedTelemetryLines} malformed telemetry line(s) skipped across ${malformedTelemetryFiles} file(s))`
-    );
-  }
-  return lines.join("\n");
-}
-function isEnoent8(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/instantiate-persona.ts
-import { promises as fs35 } from "node:fs";
-import * as path46 from "node:path";
-
-// src/tools/read-catalogue.ts
-import { promises as fs33 } from "node:fs";
-import * as path44 from "node:path";
-async function readCatalogue(opts) {
-  const cataloguePath = path44.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
-  let raw;
-  try {
-    raw = await fs33.readFile(cataloguePath, "utf8");
-  } catch (err) {
-    if (isEnoent9(err)) {
-      throw new CatalogueRoleNotFoundError({
-        role: opts.role,
-        cataloguePath
-      });
-    }
-    throw err;
-  }
-  return parseCatalogueRole(raw, cataloguePath);
-}
-function isEnoent9(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/read-custom-role.ts
-import { promises as fs34 } from "node:fs";
-import * as path45 from "node:path";
-var KEBAB_CASE = /^[a-z0-9-]+$/;
-async function readCustomRole(opts) {
-  if (!KEBAB_CASE.test(opts.role)) {
-    throw new CatalogueShapeError({
-      sourcePath: `<custom-role:${opts.role}>`,
-      zodMessage: `role id '${opts.role}' does not match the required kebab-case shape /^[a-z0-9-]+$/`
-    });
-  }
-  const customPath = path45.join(
-    opts.targetRepoRoot,
-    "team",
-    "custom",
-    `${opts.role}.md`
-  );
-  let raw;
-  try {
-    raw = await fs34.readFile(customPath, "utf8");
-  } catch (err) {
-    if (isEnoent10(err)) {
-      throw new CatalogueRoleNotFoundError({
-        role: opts.role,
-        cataloguePath: customPath
-      });
-    }
-    throw err;
-  }
-  const parsed = parseCatalogueRole(raw, customPath);
-  if (parsed.role !== opts.role) {
-    throw new CatalogueShapeError({
-      sourcePath: customPath,
-      zodMessage: `frontmatter role '${parsed.role}' does not match filename '${opts.role}'`
-    });
-  }
-  return parsed;
-}
-function isEnoent10(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/instantiate-persona.ts
-async function instantiatePersona(opts) {
-  const clock = opts.clock ?? (() => /* @__PURE__ */ new Date());
-  const pluginVersion = opts.pluginVersion ?? getPluginVersion();
-  const customPath = path46.join(
-    opts.targetRepoRoot,
-    "team",
-    "custom",
-    `${opts.role}.md`
-  );
-  const cataloguePath = path46.join(
-    opts.pluginRoot,
-    "catalogue",
-    `${opts.role}.md`
-  );
-  let source = null;
-  try {
-    source = await readCustomRole({
-      targetRepoRoot: opts.targetRepoRoot,
-      role: opts.role
-    });
-  } catch (err) {
-    if (!(err instanceof CatalogueRoleNotFoundError)) {
-      throw err;
-    }
-  }
-  if (source === null) {
-    try {
-      source = await readCatalogue({
-        pluginRoot: opts.pluginRoot,
-        role: opts.role
-      });
-    } catch (err) {
-      if (err instanceof CatalogueRoleNotFoundError) {
-        throw new CatalogueRoleNotFoundError({
-          role: opts.role,
-          cataloguePath: `${customPath} or ${cataloguePath}`
-        });
-      }
-      throw err;
-    }
-  }
-  const personaPath = path46.join(
-    opts.targetRepoRoot,
-    "team",
-    opts.role,
-    "PERSONA.md"
-  );
-  let exists = false;
-  try {
-    await fs35.stat(personaPath);
-    exists = true;
-  } catch (err) {
-    if (!isEnoent11(err)) {
-      throw err;
-    }
-  }
-  if (exists) {
-    throw new PersonaAlreadyExistsError({
-      role: opts.role,
-      personaPath
-    });
-  }
-  const hiredAt = clock().toISOString();
-  const contents = renderPersonaFile({
-    catalogue: source,
-    hiredAt,
-    catalogueVersion: pluginVersion
-  });
-  await writeManagedFile({
-    absPath: personaPath,
-    contents,
-    targetRepoRoot: opts.targetRepoRoot,
-    mcpToolContext: { toolName: "instantiatePersona", role: opts.role }
-  });
-  return { path: personaPath };
-}
-function isEnoent11(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/lookup-role-by-domain.ts
-import { promises as fs36 } from "node:fs";
-import * as path47 from "node:path";
-async function lookupRoleByDomain(opts) {
-  const teamDir = path47.join(opts.targetRepoRoot, "team");
-  try {
-    await fs36.stat(teamDir);
-  } catch (err) {
-    if (isEnoent12(err)) {
-      return { role: null };
-    }
-    throw err;
-  }
-  const entries = await fs36.readdir(teamDir);
-  for (const entry of entries) {
-    if (entry === "custom" || entry === "_archived") continue;
-    const subPath = path47.join(teamDir, entry);
-    let isDir = false;
-    try {
-      const stat2 = await fs36.stat(subPath);
-      isDir = stat2.isDirectory();
-    } catch (err) {
-      if (isEnoent12(err)) continue;
-      throw err;
-    }
-    if (!isDir) continue;
-    let persona;
-    try {
-      persona = await readPersona({
-        targetRepoRoot: opts.targetRepoRoot,
-        role: entry
-      });
-    } catch (err) {
-      if (err instanceof PersonaFileNotFoundError) {
-        continue;
-      }
-      throw err;
-    }
-    if (persona.domain === opts.domain) {
-      return { role: persona.role };
-    }
-  }
-  return { role: null };
-}
-function isEnoent12(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/mark-withdrawn.ts
-var import_yaml24 = __toESM(require_dist2(), 1);
-import { promises as fs37 } from "node:fs";
-import * as path48 from "node:path";
-var MarkWithdrawnInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  ref: external_exports.string().min(1)
-});
-function stripUndefined4(obj) {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== void 0)
-  );
-}
-function serialiseManifest(manifest) {
-  return (0, import_yaml24.stringify)(
-    stripUndefined4(manifest),
-    { lineWidth: 0 }
-  );
-}
-async function markWithdrawn(rawInput) {
-  const input = MarkWithdrawnInputSchema.parse(rawInput);
-  const targetRepoRoot = path48.resolve(input.targetRepoRoot);
-  const { ref } = input;
-  const workspace = await resolveWorkspace({ targetRepoRoot });
-  if (workspace.activeAdapterName === "native") {
-    throw new WrongAdapterError({
-      expectedAdapter: "non-native",
-      actualAdapter: workspace.activeAdapterName,
-      targetRepoRoot,
-      toolName: "markWithdrawn"
-    });
-  }
-  const stateRoot = path48.join(targetRepoRoot, ".flow", "state");
-  let foundState = null;
-  let foundAbsPath = null;
-  for (const stateName of STATE_NAMES) {
-    const candidate = path48.join(stateRoot, stateName, `${ref}.yaml`);
-    try {
-      await fs37.stat(candidate);
-      foundState = stateName;
-      foundAbsPath = candidate;
-      break;
-    } catch {
-    }
-  }
-  if (foundState === null || foundAbsPath === null) {
-    throw new ManifestNotFoundError({
-      ref,
-      expectedAbsPath: path48.join(stateRoot, "to-do", `${ref}.yaml`),
-      fromState: "to-do"
-    });
-  }
-  const rawText = await fs37.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml24.parse)(rawText);
-  const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
-  if (manifest.withdrawn === true) {
-    return {
-      ref,
-      alreadyWithdrawn: true,
-      state: foundState
-    };
-  }
-  const updated = { ...manifest, withdrawn: true };
-  const yamlText = serialiseManifest(updated);
-  await atomicWriteFile(foundAbsPath, yamlText);
-  return {
-    ref,
-    alreadyWithdrawn: false,
-    state: foundState,
-    absPath: foundAbsPath
-  };
-}
-
-// src/tools/mark-story-ready.ts
-var import_yaml25 = __toESM(require_dist2(), 1);
-import { promises as fs38 } from "node:fs";
-import * as path49 from "node:path";
-var MarkStoryReadyInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  ref: external_exports.string().min(1),
-  ready: external_exports.boolean(),
-  /**
-   * Session id for the telemetry envelope. Optional — the operator running
-   * `/flow:ready` interactively has no orchestration session ULID. Defaults
-   * to a stable operator marker so the event still validates.
-   */
-  sessionUlid: external_exports.string().min(1).optional()
-});
-async function markStoryReady(rawInput) {
-  const input = MarkStoryReadyInputSchema.parse(rawInput);
-  const targetRepoRoot = path49.resolve(input.targetRepoRoot);
-  const { ref, ready } = input;
-  const sessionUlid = input.sessionUlid ?? "operator";
-  const stateRoot = path49.join(targetRepoRoot, ".flow", "state");
-  let foundState = null;
-  let foundAbsPath = null;
-  for (const stateName of STATE_NAMES) {
-    const candidate = path49.join(stateRoot, stateName, `${ref}.yaml`);
-    try {
-      await fs38.stat(candidate);
-      foundState = stateName;
-      foundAbsPath = candidate;
-      break;
-    } catch {
-    }
-  }
-  if (foundState === null || foundAbsPath === null) {
-    throw new NotAnEligibleBacklogItemError({ ref, foundState: null, reason: "not-found" });
-  }
-  if (foundState !== "to-do") {
-    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
-  }
-  const rawText = await fs38.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml25.parse)(rawText);
-  const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
-  if (manifest.withdrawn === true) {
-    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "withdrawn" });
-  }
-  if (manifest.ready === ready) {
-    return { ref, ready, noop: true, state: foundState };
-  }
-  const updated = { ...manifest, ready };
-  const yamlText = serialiseManifest(updated);
-  await atomicWriteFile(foundAbsPath, yamlText);
-  await logTelemetryEvent({
-    targetRepoRoot,
-    event: {
-      type: "backlog.readiness_changed",
-      session_id: sessionUlid,
-      agent: "operator",
-      story_id: ref,
-      data: { ref, ready }
-    }
-  });
-  return { ref, ready, noop: false, state: foundState, absPath: foundAbsPath };
-}
-
-// src/tools/read-repo-signals.ts
-import { promises as fs39 } from "node:fs";
-import * as path50 from "node:path";
-
-// src/lib/repo-signal-detectors.ts
-var LANG_FILE_MAP = {
-  "package.json": "TypeScript",
-  "tsconfig.json": "TypeScript",
-  "pyproject.toml": "Python",
-  "requirements.txt": "Python",
-  "Cargo.toml": "Rust",
-  "go.mod": "Go"
-};
-var LANG_EXT_MAP = {
-  ".ts": "TypeScript",
-  ".tsx": "TypeScript",
-  ".js": "JavaScript",
-  ".jsx": "JavaScript",
-  ".py": "Python",
-  ".rs": "Rust",
-  ".go": "Go",
-  ".md": "Markdown"
-};
-var MANIFEST_FILENAMES = [
-  "package.json",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-  "pyproject.toml",
-  "requirements.txt",
-  "Cargo.toml",
-  "go.mod",
-  "Gemfile",
-  "build.gradle",
-  "pom.xml"
-];
-function detectLanguagesFromLayout(entries) {
-  const found = /* @__PURE__ */ new Set();
-  for (const entry of entries) {
-    const direct = LANG_FILE_MAP[entry];
-    if (direct) {
-      found.add(direct);
-      continue;
-    }
-    const dotIdx = entry.lastIndexOf(".");
-    if (dotIdx >= 0) {
-      const ext = entry.slice(dotIdx);
-      const lang = LANG_EXT_MAP[ext];
-      if (lang) found.add(lang);
-    }
-  }
-  return [...found].sort();
-}
-function detectDependencyManifests(entries) {
-  const set2 = new Set(entries);
-  return MANIFEST_FILENAMES.filter((name) => set2.has(name)).slice().sort();
-}
-function truncateReadmeExcerpt(raw, max = 500) {
-  const trimmed = raw.replace(/\s+$/, "");
-  if (trimmed.length <= max) return trimmed;
-  return `${trimmed.slice(0, max)}\u2026`;
-}
-
-// src/schemas/repo-signals.ts
-var RepoSignalsSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1),
-  languages: external_exports.array(external_exports.string().min(1)),
-  topLevelLayout: external_exports.array(external_exports.string().min(1)),
-  readmeExcerpt: external_exports.string(),
-  recentCommitTitles: external_exports.array(external_exports.string()),
-  dependencyManifests: external_exports.array(external_exports.string().min(1))
-}).strict();
-
-// src/tools/read-repo-signals.ts
-async function readRepoSignals(opts) {
-  const dirents = await fs39.readdir(opts.targetRepoRoot, {
-    withFileTypes: true
-  });
-  const topLevelLayout = dirents.map((d) => d.name).filter((name) => !name.startsWith(".") || name === ".flow").sort();
-  let languages = detectLanguagesFromLayout(topLevelLayout);
-  if (languages.length === 0) {
-    const subEntries = await collectDepthOneManifests(opts.targetRepoRoot, dirents);
-    if (subEntries.length > 0) {
-      languages = detectLanguagesFromLayout(subEntries);
-    }
-  }
-  const dependencyManifests = detectDependencyManifests(topLevelLayout);
-  const readmePath = path50.join(opts.targetRepoRoot, "README.md");
-  let readmeExcerpt = "";
-  try {
-    const raw = await fs39.readFile(readmePath, "utf8");
-    readmeExcerpt = truncateReadmeExcerpt(raw);
-  } catch (err) {
-    if (!isEnoent13(err)) {
-      throw err;
-    }
-  }
-  const recentCommitTitles = await readRecentCommitTitles({
-    cwd: opts.targetRepoRoot,
-    limit: 5
-  });
-  const payload = {
-    targetRepoRoot: opts.targetRepoRoot,
-    languages,
-    topLevelLayout,
-    readmeExcerpt,
-    recentCommitTitles,
-    dependencyManifests
-  };
-  return RepoSignalsSchema.parse(payload);
-}
-async function collectDepthOneManifests(repoRoot, rootDirents) {
-  const found = [];
-  for (const dirent of rootDirents) {
-    if (!dirent.isDirectory()) continue;
-    if (dirent.name.startsWith(".") || dirent.name === "node_modules") continue;
-    try {
-      const children = await fs39.readdir(path50.join(repoRoot, dirent.name));
-      for (const child of children) {
-        found.push(child);
-      }
-    } catch {
-    }
-  }
-  return found;
-}
-function isEnoent13(err) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/scan-sources.ts
-var import_yaml26 = __toESM(require_dist2(), 1);
-import { promises as fs40 } from "node:fs";
-import * as path51 from "node:path";
+import * as path36 from "node:path";
 
 // src/lib/extract-dep-refs.ts
 var NATIVE_REF_RE2 = /^native:[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -50187,14 +48520,14 @@ function renderScanResult(result) {
 }
 async function statOrNull2(absPath) {
   try {
-    return await fs40.stat(absPath);
+    return await fs28.stat(absPath);
   } catch {
     return null;
   }
 }
 function repoRelativePath(rawPath, targetRepoRoot) {
-  const rel = path51.relative(targetRepoRoot, rawPath);
-  if (rel.startsWith("..") || path51.isAbsolute(rel)) {
+  const rel = path36.relative(targetRepoRoot, rawPath);
+  if (rel.startsWith("..") || path36.isAbsolute(rel)) {
     return rawPath;
   }
   return rel;
@@ -50207,7 +48540,7 @@ async function runFullDisciplineGate(story, activeAdapter, targetRepoRoot) {
   if (reasons.length === 0) return null;
   return { kind: "discipline-violation", ref: story.ref, violations: reasons };
 }
-function stripUndefined5(obj) {
+function stripUndefined4(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== void 0)
   );
@@ -50220,7 +48553,7 @@ function symmetricDiff(a2, b) {
 async function checkDepsDrift(story) {
   let body;
   try {
-    body = await fs40.readFile(story.raw_path, "utf8");
+    body = await fs28.readFile(story.raw_path, "utf8");
   } catch {
     return null;
   }
@@ -50236,7 +48569,7 @@ async function checkDepsDrift(story) {
   };
 }
 async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath, activeAdapterName, targetRepoRoot) {
-  const blockedManifestRaw = stripUndefined5({
+  const blockedManifestRaw = stripUndefined4({
     ref: story.ref,
     status: "blocked",
     adapter: activeAdapterName,
@@ -50261,7 +48594,7 @@ async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath,
     ]
   });
   const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-  const yamlText = (0, import_yaml26.stringify)(blockedManifest, { lineWidth: 0 });
+  const yamlText = (0, import_yaml20.stringify)(blockedManifest, { lineWidth: 0 });
   await writeManagedFile({
     absPath: absBlockedPath,
     contents: yamlText,
@@ -50300,7 +48633,7 @@ async function computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot) {
   };
 }
 function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
-  const raw = stripUndefined5({
+  const raw = stripUndefined4({
     ref: story.ref,
     status: "to-do",
     adapter: adapterName,
@@ -50343,18 +48676,18 @@ async function scanSources(opts) {
     blockedRefs: [],
     depsDriftRefs: []
   };
-  const stateRoot = path51.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path36.join(targetRepoRoot, ".flow", "state");
   {
-    const toDoDir = path51.join(stateRoot, "to-do");
-    const blockedDir = path51.join(stateRoot, "blocked");
+    const toDoDir = path36.join(stateRoot, "to-do");
+    const blockedDir = path36.join(stateRoot, "blocked");
     let toDoFiles = [];
     let blockedFiles = [];
     try {
-      toDoFiles = await fs40.readdir(toDoDir);
+      toDoFiles = await fs28.readdir(toDoDir);
     } catch {
     }
     try {
-      blockedFiles = await fs40.readdir(blockedDir);
+      blockedFiles = await fs28.readdir(blockedDir);
     } catch {
     }
     const toDoRefs = new Set(toDoFiles.filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)));
@@ -50365,14 +48698,14 @@ async function scanSources(opts) {
         console.warn(
           `[scanSources] Ref ${ref} exists in both to-do/ and blocked/ \u2014 recovering by removing stale blocked/ manifest (to-do/ wins).`
         );
-        await fs40.unlink(path51.join(blockedDir, blockedFile));
+        await fs28.unlink(path36.join(blockedDir, blockedFile));
       }
     }
   }
   for (const story of sourceStories) {
     let currentState = null;
     for (const stateName of STATE_NAMES) {
-      const absPath = path51.join(stateRoot, stateName, `${story.ref}.yaml`);
+      const absPath = path36.join(stateRoot, stateName, `${story.ref}.yaml`);
       const s = await statOrNull2(absPath);
       if (s !== null) {
         currentState = stateName;
@@ -50387,9 +48720,9 @@ async function scanSources(opts) {
       continue;
     }
     if (currentState === "blocked") {
-      const absBlockedPath = path51.join(stateRoot, "blocked", `${story.ref}.yaml`);
-      const rawBlocked = await fs40.readFile(absBlockedPath, "utf8");
-      const parsedBlocked = (0, import_yaml26.parse)(rawBlocked);
+      const absBlockedPath = path36.join(stateRoot, "blocked", `${story.ref}.yaml`);
+      const rawBlocked = await fs28.readFile(absBlockedPath, "utf8");
+      const parsedBlocked = (0, import_yaml20.parse)(rawBlocked);
       const existingBlockedHash = parsedBlocked["source_hash"];
       if (existingBlockedHash === story.source_hash) {
         result.skippedRefs.push({ ref: story.ref, reason: "not-in-to-do" });
@@ -50419,20 +48752,20 @@ async function scanSources(opts) {
       }
       const disciplineResult = await runFullDisciplineGate(story, activeAdapter, targetRepoRoot);
       if (disciplineResult === null) {
-        const absToDoPathNew = path51.join(stateRoot, "to-do", `${story.ref}.yaml`);
+        const absToDoPathNew = path36.join(stateRoot, "to-do", `${story.ref}.yaml`);
         const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
         const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-        const yamlText = (0, import_yaml26.stringify)(manifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml20.stringify)(manifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absToDoPathNew,
           contents: yamlText,
           targetRepoRoot,
           mcpToolContext: { toolName: "scanSources", role: "operator" }
         });
-        await fs40.unlink(absBlockedPath);
+        await fs28.unlink(absBlockedPath);
         result.createdRefs.push(story.ref);
       } else {
-        const blockedManifestRaw = stripUndefined5({
+        const blockedManifestRaw = stripUndefined4({
           ref: story.ref,
           status: "blocked",
           adapter: activeAdapterName,
@@ -50455,7 +48788,7 @@ async function scanSources(opts) {
           }))
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-        const yamlText = (0, import_yaml26.stringify)(blockedManifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml20.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -50475,7 +48808,7 @@ async function scanSources(opts) {
     if (currentState === null) {
       const driftDetail = await checkDepsDrift(story);
       if (driftDetail !== null) {
-        const absBlockedPath = path51.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        const absBlockedPath = path36.join(stateRoot, "blocked", `${story.ref}.yaml`);
         await writeDepsDriftBlockedManifest(
           story,
           driftDetail,
@@ -50504,7 +48837,7 @@ async function scanSources(opts) {
           reason: "discipline-violation",
           detail: firstViolation?.detail
         });
-        const blockedManifestRaw = stripUndefined5({
+        const blockedManifestRaw = stripUndefined4({
           ref: story.ref,
           status: "blocked",
           adapter: activeAdapterName,
@@ -50527,8 +48860,8 @@ async function scanSources(opts) {
           }))
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-        const absBlockedPath = path51.join(stateRoot, "blocked", `${story.ref}.yaml`);
-        const yamlText = (0, import_yaml26.stringify)(blockedManifest, { lineWidth: 0 });
+        const absBlockedPath = path36.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        const yamlText = (0, import_yaml20.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -50539,11 +48872,11 @@ async function scanSources(opts) {
         continue;
       }
     }
-    const absToDoPath = path51.join(stateRoot, "to-do", `${story.ref}.yaml`);
+    const absToDoPath = path36.join(stateRoot, "to-do", `${story.ref}.yaml`);
     if (currentState === null) {
       const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
       const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-      const yamlText = (0, import_yaml26.stringify)(manifest, { lineWidth: 0 });
+      const yamlText = (0, import_yaml20.stringify)(manifest, { lineWidth: 0 });
       await writeManagedFile({
         absPath: absToDoPath,
         contents: yamlText,
@@ -50554,7 +48887,7 @@ async function scanSources(opts) {
     } else if (currentState === "to-do") {
       let rawText;
       try {
-        rawText = await fs40.readFile(absToDoPath, "utf8");
+        rawText = await fs28.readFile(absToDoPath, "utf8");
       } catch (err) {
         const errno = err.code ?? "UNKNOWN";
         result.skippedRefs.push({
@@ -50566,7 +48899,7 @@ async function scanSources(opts) {
       }
       let existingManifest;
       try {
-        const parsed = (0, import_yaml26.parse)(rawText);
+        const parsed = (0, import_yaml20.parse)(rawText);
         existingManifest = parseExecutionManifest(parsed, { absPath: absToDoPath });
       } catch (err) {
         const detailMessage = err instanceof Error ? err.message : String(err);
@@ -50580,7 +48913,7 @@ async function scanSources(opts) {
       if (existingManifest.source_hash !== story.source_hash) {
         const driftDetail = await checkDepsDrift(story);
         if (driftDetail !== null) {
-          const absBlockedPath = path51.join(stateRoot, "blocked", `${story.ref}.yaml`);
+          const absBlockedPath = path36.join(stateRoot, "blocked", `${story.ref}.yaml`);
           await writeDepsDriftBlockedManifest(
             story,
             driftDetail,
@@ -50606,7 +48939,7 @@ async function scanSources(opts) {
           source_hash: story.source_hash,
           source_path: repoRelativePath(story.raw_path, targetRepoRoot)
         };
-        const yamlText = (0, import_yaml26.stringify)(stripUndefined5(updatedManifest), {
+        const yamlText = (0, import_yaml20.stringify)(stripUndefined4(updatedManifest), {
           lineWidth: 0
         });
         await writeManagedFile({
@@ -50622,6 +48955,1678 @@ async function scanSources(opts) {
     }
   }
   return result;
+}
+
+// src/tools/write-native-story.ts
+var WriteNativeStoryInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  title: external_exports.string().min(1),
+  /**
+   * Story 10.2 — the narrative is now a structured `{ role, want, so_that }`
+   * object. REQUIRED on the native write path (mirrors the `verification`
+   * precedent from 10.1). `renderNativeStoryBody` emits the canonical
+   * "As a {role}, I want {want}, so that {so_that}." sentence and
+   * `parseNativeStory` parses exactly that grammar back, closing the round-trip.
+   */
+  narrative: external_exports.object({
+    role: external_exports.string().min(1),
+    want: external_exports.string().min(1),
+    so_that: external_exports.string().min(1)
+  }),
+  acceptance_criteria: external_exports.array(
+    external_exports.object({
+      text: external_exports.string().min(1),
+      kind: external_exports.enum(["integration", "unit"]),
+      /**
+       * Story 10.1 — every native AC carries a structured verification
+       * directive. REQUIRED on the native write path (mirrors the
+       * three-site `kind` enum precedent: parser, this schema, manifest
+       * schema). `target` is non-empty; resolvability of the path is the
+       * 10.3 T0-6 check, not enforced here.
+       */
+      verification: external_exports.object({
+        type: external_exports.enum(["vitest", "artifact"]),
+        target: external_exports.string().min(1)
+      })
+    })
+  ).min(1),
+  /**
+   * Story 10.2 — implementation tasks. REQUIRED on the native write path: ≥1
+   * task, each carrying ≥1 `ac_refs` (e.g. `["AC1", "AC3"]`). The pre-write
+   * round-trip through `parseNativeStory` additionally rejects a task whose
+   * `ac_ref` dangles (names an AC the story does not declare). Whole-story
+   * T0-1 enforcement at scan time is Story 10.3.
+   */
+  tasks: external_exports.array(
+    external_exports.object({
+      text: external_exports.string().min(1),
+      ac_refs: external_exports.array(external_exports.string().min(1)).min(1)
+    })
+  ).min(1),
+  /**
+   * Story 10.2 — repo-relative source paths cited by the story. REQUIRED on the
+   * native write path: ≥1 path. That each path *resolves on disk* is T0-5
+   * (Story 10.3) — not enforced here.
+   */
+  cited_sources: external_exports.array(external_exports.string().min(1)).min(1),
+  implementation_notes: external_exports.string().optional(),
+  /**
+   * Story 10.8 — three OPTIONAL build-ready fields. When omitted by the author,
+   * a non-empty build-time default is substituted so the rendered
+   * `## Implementation Notes` always carries all three `###` sub-sections.
+   */
+  files_touched: external_exports.string().optional(),
+  definition_of_done: external_exports.string().optional(),
+  risk_reasoning: external_exports.string().optional(),
+  depends_on: external_exports.array(external_exports.string()),
+  /**
+   * Session id for the `draft.authored` telemetry envelope. Optional — the
+   * author subagent / `/flow:author` skill passes its orchestration session
+   * ULID when available; defaults to a stable operator marker so the event
+   * still validates when authored interactively. (Story 9.2)
+   */
+  sessionUlid: external_exports.string().min(1).optional(),
+  /**
+   * Story native:01KTKJXP6DWN5YHKVG96DH16V0 — optional author lane hint.
+   * Downgrade-only: a 'fast' hint is honoured only if `classifyStoryLane`
+   * independently also returns 'fast' at scan time; a 'full' hint always wins
+   * and is the safe choice when the author suspects elevated risk.
+   *
+   * Omitting this field (the default) lets the scan-time classifier decide the
+   * lane without any author bias.
+   */
+  lane_hint: external_exports.enum(["fast", "full"]).optional()
+});
+var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
+var DEFAULT_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
+  "- [ ] `pnpm test` green (all tests passing).",
+  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
+  "- [ ] PR opened against `main` with CI green."
+].join("\n");
+var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
+function renderNarrativeSentence(narrative) {
+  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+}
+function renderNativeStoryBody(input) {
+  const lines = [`# ${input.title}`, ""];
+  lines.push("## Narrative", "");
+  lines.push(renderNarrativeSentence(input.narrative));
+  lines.push("");
+  lines.push("## Acceptance Criteria", "");
+  for (let i2 = 0; i2 < input.acceptance_criteria.length; i2++) {
+    const ac = input.acceptance_criteria[i2];
+    const tag = ac.kind === "integration" ? " (integration)" : "";
+    lines.push(`**AC${i2 + 1}${tag}:**`);
+    lines.push(ac.text);
+    lines.push(`${ac.verification.type}: ${ac.verification.target}`);
+    lines.push("");
+  }
+  lines.push("## Tasks", "");
+  for (const task of input.tasks) {
+    const nums = task.ac_refs.map((r) => r.replace(/^AC/i, "")).join(", ");
+    lines.push(`- ${task.text} (AC: ${nums})`);
+  }
+  lines.push("");
+  lines.push("## Cited Sources", "");
+  for (const src of input.cited_sources) {
+    lines.push(`- ${src}`);
+  }
+  lines.push("");
+  lines.push("## Implementation Notes", "");
+  lines.push(renderImplementationNotesBody(input));
+  lines.push("");
+  lines.push("## Dependencies", "");
+  if (input.depends_on.length > 0) {
+    lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
+    for (const dep of input.depends_on) {
+      lines.push(`- ${dep}`);
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+async function writeNativeStory(rawInput) {
+  const input = WriteNativeStoryInputSchema.parse(rawInput);
+  const targetRepoRoot = path37.resolve(input.targetRepoRoot);
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  if (workspace.activeAdapterName !== "native") {
+    throw new WrongAdapterError({
+      expectedAdapter: "native",
+      actualAdapter: workspace.activeAdapterName,
+      targetRepoRoot,
+      toolName: "writeNativeStory"
+    });
+  }
+  const result = await renderGateWriteNativeStory(input, targetRepoRoot);
+  try {
+    await scanSources({ targetRepoRoot });
+  } catch {
+  }
+  return result;
+}
+async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
+  const newUlid = ulid3();
+  const storiesDir = path37.join(targetRepoRoot, ".flow", "native-stories");
+  const absPath = path37.join(storiesDir, `${newUlid}.md`);
+  const ref = `native:${newUlid}`;
+  const candidate = inputToSourceStory(input, ref, absPath);
+  const pureResult = validateStoryAgainstDiscipline(candidate);
+  const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
+  violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
+  if (violations.length > 0) {
+    await emitFriction({
+      targetRepoRoot,
+      kind: "forced-fallback",
+      role: "author",
+      session_id: input.sessionUlid ?? "operator",
+      story_id: ref,
+      expected: "story passes all Tier-0 discipline checks",
+      observed: `DisciplineViolationError: ${violations.map((v) => v.code).join(", ")}`
+    });
+    throw new DisciplineViolationError({ violations });
+  }
+  const body = renderNativeStoryBody(input);
+  parseNativeStory(absPath, body);
+  await atomicWriteFile(absPath, body);
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "draft.authored",
+      session_id: input.sessionUlid ?? "operator",
+      agent,
+      story_id: ref,
+      data: { ref, title: input.title }
+    }
+  });
+  return { ref, path: absPath };
+}
+function renderImplementationNotesBody(input) {
+  const parts = [];
+  if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
+    parts.push(input.implementation_notes.trim());
+    parts.push("");
+  }
+  const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
+  parts.push("### Files touched", "", filesTouched, "");
+  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+  parts.push("### Definition of Done", "", dod, "");
+  const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
+  parts.push("### Risk", "", risk, "");
+  return parts.join("\n").trim();
+}
+function inputToSourceStory(input, ref, absPath) {
+  return {
+    ref,
+    title: input.title,
+    // The discipline validator scans the raw narrative string for implicit
+    // depends-on refs, so pass the canonical rendered sentence (10.2).
+    narrative: renderNarrativeSentence(input.narrative),
+    narrative_struct: input.narrative,
+    acceptance_criteria: input.acceptance_criteria,
+    depends_on: input.depends_on,
+    // Story 10.8: pass the full rendered implementation notes (including the
+    // three build-ready sub-sections with their defaults) so the discipline
+    // gate sees the same text the file will contain.
+    implementation_notes: renderImplementationNotesBody(input),
+    tasks: input.tasks,
+    cited_sources: input.cited_sources,
+    raw_path: absPath,
+    raw_frontmatter: { title: input.title, ref },
+    source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
+  };
+}
+
+// src/tools/read-backlog-inventory.ts
+var import_yaml21 = __toESM(require_dist2(), 1);
+import { promises as fs29 } from "node:fs";
+import * as path38 from "node:path";
+var ReadBacklogInventoryInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  /**
+   * Optional single-item filter. When set, only the entry whose `ref` matches
+   * is returned (the others are still scanned so `mode` stays accurate). The
+   * gate-1 judge workflow passes this so it fetches exactly the draft under
+   * judgement instead of relaying the whole backlog through a seam courier.
+   */
+  ref: external_exports.string().min(1).optional(),
+  /**
+   * When true, each returned entry is enriched with `specText` (the draft's full
+   * source markdown) and `riskTier` (the manifest's persisted `risk_tier`).
+   * Default false keeps the inventory lean for its planner/board/dashboard
+   * consumers — only the gate-1 judge workflow opts in, so the lens judges grade
+   * the real draft (not an empty `"(spec text not available)"` placeholder).
+   */
+  includeSpecText: external_exports.boolean().optional()
+});
+var ULID_PATTERN = /^[0-9A-Z]{26}$/;
+function extractH1Title(content, fallback) {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : fallback;
+}
+async function readBacklogInventory(rawInput) {
+  const input = ReadBacklogInventoryInputSchema.parse(rawInput);
+  const targetRepoRoot = path38.resolve(input.targetRepoRoot);
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  const isNative = workspace.activeAdapterName === "native";
+  const stateRoot = path38.join(targetRepoRoot, ".flow", "state");
+  const doneDir = path38.join(stateRoot, "done");
+  const inventory = [];
+  const seenRefs = /* @__PURE__ */ new Set();
+  for (const stateName of STATE_NAMES) {
+    const stateDir = path38.join(stateRoot, stateName);
+    let entries;
+    try {
+      entries = await fs29.readdir(stateDir);
+    } catch {
+      continue;
+    }
+    for (const filename of entries) {
+      if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
+      const absPath = path38.join(stateDir, filename);
+      const rawText = await fs29.readFile(absPath, "utf8");
+      const parsed = (0, import_yaml21.parse)(rawText);
+      const manifest = parseExecutionManifest(parsed, { absPath });
+      let depsReady = true;
+      for (const dep of manifest.depends_on) {
+        try {
+          await fs29.stat(path38.join(doneDir, `${dep}.yaml`));
+        } catch {
+          depsReady = false;
+          break;
+        }
+      }
+      const entry = {
+        ref: manifest.ref,
+        title: manifest.title,
+        state: stateName,
+        withdrawn: manifest.withdrawn,
+        ready: manifest.ready,
+        depsReady
+      };
+      if (input.includeSpecText && (!input.ref || manifest.ref === input.ref)) {
+        const specAbs = path38.isAbsolute(manifest.source_path) ? manifest.source_path : path38.join(targetRepoRoot, manifest.source_path);
+        try {
+          entry.specText = await fs29.readFile(specAbs, "utf8");
+        } catch {
+        }
+        if (manifest.risk_tier) entry.riskTier = manifest.risk_tier;
+      }
+      inventory.push(entry);
+      seenRefs.add(manifest.ref);
+    }
+  }
+  if (isNative) {
+    const nativeStoriesDir2 = path38.join(targetRepoRoot, ".flow", "native-stories");
+    let nativeFiles;
+    try {
+      nativeFiles = await fs29.readdir(nativeStoriesDir2);
+    } catch {
+      nativeFiles = [];
+    }
+    for (const filename of nativeFiles) {
+      if (!filename.endsWith(".md")) continue;
+      const basename6 = filename.slice(0, -3);
+      if (!ULID_PATTERN.test(basename6)) continue;
+      const ref = `native:${basename6}`;
+      if (seenRefs.has(ref)) continue;
+      const absPath = path38.join(nativeStoriesDir2, filename);
+      const content = await fs29.readFile(absPath, "utf8");
+      const title = extractH1Title(content, basename6);
+      const entry = {
+        ref,
+        title,
+        state: "native-source-only",
+        withdrawn: false,
+        ready: false,
+        depsReady: true
+      };
+      if (input.includeSpecText && (!input.ref || ref === input.ref)) {
+        entry.specText = content;
+      }
+      inventory.push(entry);
+    }
+  }
+  const mode = inventory.length === 0 ? "first-run" : "re-open";
+  const backlog_inventory = input.ref ? inventory.filter((e) => e.ref === input.ref) : inventory;
+  return { mode, backlog_inventory };
+}
+
+// src/tools/gather-retro-inputs.ts
+var TELEMETRY_FILE_REGEX = /\.jsonl$/;
+var MECHANICAL_FAILURE_THRESHOLD = 2;
+async function gatherRetroInputs(opts) {
+  const { targetRepoRoot, fireCountConfig } = opts;
+  const cycleState = opts.cycleState !== void 0 ? opts.cycleState : await readCycleState(targetRepoRoot);
+  const windowStartMs = cycleState ? Date.parse(cycleState.opened_at) : null;
+  const doneManifests = await gatherDoneManifests(targetRepoRoot, windowStartMs);
+  const telemetrySummary = await gatherTelemetry(targetRepoRoot, windowStartMs);
+  const priorProposals = await gatherPriorProposals(targetRepoRoot);
+  const ruleRegistry = await gatherRuleRegistry(targetRepoRoot);
+  let fireCountSignal = null;
+  if (ruleRegistry !== null) {
+    const registryTyped = ruleRegistry;
+    const result = computeFailureClassFireCounts(
+      { doneManifests, telemetrySummary, ruleRegistry: registryTyped },
+      fireCountConfig
+    );
+    fireCountSignal = {
+      promotionCandidates: result.promotionCandidates,
+      retirementCandidates: result.retirementCandidates
+    };
+  }
+  const recurringFriction = computeRecurringFriction(telemetrySummary.events);
+  const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
+  const threshold = opts.mechanicalFailureThreshold ?? MECHANICAL_FAILURE_THRESHOLD;
+  const mechanicalFailuresDrafted = await draftHardeningStories(
+    targetRepoRoot,
+    doneManifests,
+    threshold,
+    opts.sessionUlid
+  );
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
+}
+async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
+  const doneDir = path39.join(targetRepoRoot, ".flow", "state", "done");
+  let entries;
+  try {
+    entries = await fs30.readdir(doneDir);
+  } catch (err) {
+    if (isEnoent5(err)) {
+      return [];
+    }
+    throw err;
+  }
+  const manifestFiles = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
+  const manifests = [];
+  for (const file2 of manifestFiles) {
+    const absPath = path39.join(doneDir, file2);
+    if (windowStartMs !== null) {
+      const stat2 = await fs30.stat(absPath);
+      if (stat2.mtimeMs < windowStartMs) {
+        continue;
+      }
+    }
+    const raw = await fs30.readFile(absPath, "utf8");
+    const parsed = (0, import_yaml22.parse)(raw);
+    manifests.push(parseExecutionManifest(parsed, { absPath }));
+  }
+  return manifests;
+}
+async function gatherTelemetry(targetRepoRoot, windowStartMs) {
+  const telemetryDir = path39.join(targetRepoRoot, ".flow", "telemetry");
+  let entries;
+  try {
+    entries = await fs30.readdir(telemetryDir);
+  } catch (err) {
+    if (isEnoent5(err)) {
+      return { events: [], skipped_count: 0 };
+    }
+    throw err;
+  }
+  const files = entries.filter((f) => TELEMETRY_FILE_REGEX.test(f)).sort();
+  const events = [];
+  let skipped_count = 0;
+  for (const file2 of files) {
+    const absPath = path39.join(telemetryDir, file2);
+    const raw = await fs30.readFile(absPath, "utf8");
+    const lines = raw.split("\n");
+    for (const line of lines) {
+      if (line.trim() === "") {
+        continue;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        skipped_count++;
+        continue;
+      }
+      const result = TelemetryEventSchema.safeParse(parsed);
+      if (!result.success) {
+        skipped_count++;
+        continue;
+      }
+      if (windowStartMs !== null && Date.parse(result.data.ts) < windowStartMs) {
+        continue;
+      }
+      events.push(result.data);
+    }
+  }
+  return { events, skipped_count };
+}
+async function gatherPriorProposals(targetRepoRoot) {
+  const proposalsDir = path39.join(targetRepoRoot, ".flow", "retro-proposals");
+  let entries;
+  try {
+    entries = await fs30.readdir(proposalsDir);
+  } catch (err) {
+    if (isEnoent5(err)) {
+      return [];
+    }
+    throw err;
+  }
+  const proposals = entries.filter((f) => f.endsWith(".md")).map((f) => ({
+    path: path39.join(proposalsDir, f),
+    // The writer keys the filename by ISO timestamp (Story 6.3):
+    // `<isoTimestamp>.md`. Strip the `.md` suffix to recover it.
+    iso_timestamp: f.slice(0, -".md".length)
+  }));
+  proposals.sort((a2, b) => a2.iso_timestamp.localeCompare(b.iso_timestamp));
+  return proposals;
+}
+async function gatherRuleRegistry(targetRepoRoot) {
+  const registryPath = path39.join(
+    targetRepoRoot,
+    "docs",
+    "discipline-rules.yaml"
+  );
+  let raw;
+  try {
+    raw = await fs30.readFile(registryPath, "utf8");
+  } catch (err) {
+    if (isEnoent5(err)) {
+      return null;
+    }
+    throw err;
+  }
+  return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
+}
+async function draftHardeningStories(targetRepoRoot, doneManifests, threshold, sessionUlid) {
+  let workspace;
+  try {
+    workspace = await resolveWorkspace({ targetRepoRoot });
+  } catch {
+    return [];
+  }
+  if (workspace.activeAdapterName !== "native") {
+    return [];
+  }
+  const classCounts = /* @__PURE__ */ new Map();
+  for (const manifest of doneManifests) {
+    for (const lesson of manifest.lessons ?? []) {
+      if (lesson.kind === "pitfall" && lesson.failure_class) {
+        classCounts.set(
+          lesson.failure_class,
+          (classCounts.get(lesson.failure_class) ?? 0) + 1
+        );
+      }
+    }
+  }
+  const qualifying = [];
+  for (const [fc, count2] of classCounts) {
+    if (count2 >= threshold) {
+      qualifying.push({ failure_class: fc, count: count2 });
+    }
+  }
+  qualifying.sort((a2, b) => a2.failure_class.localeCompare(b.failure_class));
+  if (qualifying.length === 0) {
+    return [];
+  }
+  let existingHardeningClasses;
+  try {
+    const inventory = await readBacklogInventory({
+      targetRepoRoot
+    });
+    existingHardeningClasses = buildExistingHardeningSet(inventory.backlog_inventory);
+  } catch {
+    existingHardeningClasses = /* @__PURE__ */ new Set();
+  }
+  const drafted = [];
+  for (const { failure_class, count: count2 } of qualifying) {
+    if (existingHardeningClasses.has(failure_class)) {
+      continue;
+    }
+    const input = buildHardeningStoryInput(
+      failure_class,
+      count2,
+      targetRepoRoot,
+      sessionUlid
+    );
+    let result;
+    try {
+      result = await renderGateWriteNativeStory(input, targetRepoRoot, "author");
+    } catch {
+      continue;
+    }
+    drafted.push({
+      failure_class,
+      recurrence_count: count2,
+      hardening_story_ref: result.ref,
+      hardening_story_path: result.path
+    });
+  }
+  return drafted;
+}
+function buildExistingHardeningSet(inventory) {
+  const existing = /* @__PURE__ */ new Set();
+  const HARDENING_PREFIX = "[Hardening] Guard against ";
+  for (const item of inventory) {
+    if (item.state === "done" || item.withdrawn) {
+      continue;
+    }
+    if (item.title.startsWith(HARDENING_PREFIX)) {
+      const fc = item.title.slice(HARDENING_PREFIX.length).trim();
+      if (fc.length > 0) {
+        existing.add(fc);
+      }
+    }
+  }
+  return existing;
+}
+function buildHardeningStoryInput(failure_class, recurrence_count, targetRepoRoot, sessionUlid) {
+  const title = `[Hardening] Guard against ${failure_class}`;
+  const sanitizedFc = failure_class.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  return {
+    targetRepoRoot,
+    title,
+    narrative: {
+      role: "non-engineer operator",
+      want: `a code-level guard that prevents the recurring "${failure_class}" failure`,
+      so_that: `the team stops repeating this mechanical mistake (recurred ${recurrence_count} times this cycle)`
+    },
+    acceptance_criteria: [
+      {
+        text: `**Given** the retro has identified "${failure_class}" as a recurring failure class (${recurrence_count} occurrences), **When** a dev implements this hardening, **Then** a code guard exists that makes the "${failure_class}" failure detectable at build or test time.`,
+        kind: "integration",
+        verification: {
+          type: "vitest",
+          target: `plugins/flow/mcp-server/src/__tests__/hardening-${sanitizedFc}.test.ts`
+        }
+      }
+    ],
+    tasks: [
+      {
+        text: `Identify the code seam responsible for the "${failure_class}" failure class and add a deterministic guard (test, schema check, or runtime assertion) that catches it before it escapes to the dev loop.`,
+        ac_refs: ["AC1"]
+      }
+    ],
+    cited_sources: [
+      "plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts"
+    ],
+    depends_on: [],
+    sessionUlid: sessionUlid ?? "retro-loop"
+  };
+}
+function computeRecurringFriction(events) {
+  const RECURRING_THRESHOLD = 2;
+  const counts = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    if (event.type === "agent.friction") {
+      const frictionEvent = event;
+      const kind = frictionEvent.data.kind;
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+  }
+  const result = [];
+  for (const [kind, count2] of counts) {
+    if (count2 >= RECURRING_THRESHOLD) {
+      result.push({ kind, count: count2 });
+    }
+  }
+  result.sort((a2, b) => a2.kind.localeCompare(b.kind));
+  return result;
+}
+function isEnoent5(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/list-claimable-todos.ts
+var import_yaml23 = __toESM(require_dist2(), 1);
+import { promises as fs31 } from "node:fs";
+import * as path40 from "node:path";
+
+// src/lib/short-handle.ts
+function shortHandle(ref) {
+  const colon = ref.indexOf(":");
+  const localPart = colon === -1 ? ref : ref.slice(colon + 1);
+  if (ref.startsWith("native:")) {
+    return localPart.slice(0, 8);
+  }
+  return localPart;
+}
+
+// src/tools/list-claimable-todos.ts
+async function listClaimableTodos(opts) {
+  const { targetRepoRoot } = opts;
+  const stateRoot = path40.join(targetRepoRoot, ".flow", "state");
+  const todoDir = path40.join(stateRoot, "to-do");
+  const inProgressDir = path40.join(stateRoot, "in-progress");
+  const doneDir = path40.join(stateRoot, "done");
+  let todoEntries;
+  try {
+    todoEntries = await fs31.readdir(todoDir);
+  } catch (err) {
+    if (isEnoent6(err)) {
+      todoEntries = [];
+    } else {
+      throw err;
+    }
+  }
+  const yamlEntries = todoEntries.filter((f) => f.endsWith(".yaml")).sort();
+  const candidates = [];
+  for (const entry of yamlEntries) {
+    const absPath = path40.join(todoDir, entry);
+    let raw;
+    try {
+      raw = await fs31.readFile(absPath, "utf8");
+    } catch (err) {
+      if (isEnoent6(err)) {
+        continue;
+      }
+      throw err;
+    }
+    const parsed = (0, import_yaml23.parse)(raw);
+    const manifest = parseExecutionManifest(parsed, { absPath });
+    if (!isClaimable(manifest)) {
+      continue;
+    }
+    let depsReady = true;
+    for (const dep of manifest.depends_on) {
+      const depPath = path40.join(doneDir, `${dep}.yaml`);
+      try {
+        await fs31.stat(depPath);
+      } catch (err) {
+        if (isEnoent6(err)) {
+          depsReady = false;
+          break;
+        }
+        throw err;
+      }
+    }
+    candidates.push({
+      ref: manifest.ref,
+      shortHandle: shortHandle(manifest.ref),
+      title: manifest.title,
+      depends_on: manifest.depends_on,
+      depsReady,
+      ready: manifest.ready
+    });
+  }
+  let inProgressCount = 0;
+  try {
+    const inProgressEntries = await fs31.readdir(inProgressDir);
+    inProgressCount = inProgressEntries.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
+    ).length;
+  } catch (err) {
+    if (!isEnoent6(err)) {
+      throw err;
+    }
+  }
+  return { todos: candidates, inProgressCount };
+}
+function isEnoent6(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/mint-session-ulid.ts
+function mintSessionUlid() {
+  return { sessionUlid: ulid3() };
+}
+
+// src/tools/render-backlog-dashboard.ts
+function deriveEpic(ref) {
+  const colon = ref.indexOf(":");
+  const sourceId = colon === -1 ? ref : ref.slice(colon + 1);
+  const dot = sourceId.indexOf(".");
+  if (dot === -1) return null;
+  return sourceId.slice(0, dot);
+}
+function isClaimableEntry(entry) {
+  return entry.state === "to-do" && entry.ready === true && entry.depsReady === true && entry.withdrawn === false;
+}
+async function getBacklogDashboard(opts) {
+  const { backlog_inventory } = await readBacklogInventory({
+    targetRepoRoot: opts.targetRepoRoot
+  });
+  const entries = backlog_inventory.map((e) => ({
+    ref: e.ref,
+    title: e.title,
+    epic: deriveEpic(e.ref),
+    state: e.state,
+    withdrawn: e.withdrawn,
+    ready: e.ready,
+    claimable: isClaimableEntry(e)
+  }));
+  return { entries };
+}
+var NO_EPIC_HEADING = "(no epic)";
+function renderRow(entry) {
+  const readiness = entry.ready ? "ready" : "not ready";
+  const claim = entry.claimable ? "claimable" : "not claimable";
+  const withdrawn = entry.withdrawn ? " [withdrawn]" : "";
+  const handle = shortHandle(entry.ref);
+  return `  - [${handle}] ${entry.ref} \u2014 ${entry.title} [${entry.state}] (${readiness}, ${claim})${withdrawn}`;
+}
+function renderBacklogDashboard(snapshot) {
+  const lines = ["Backlog dashboard"];
+  if (snapshot.entries.length === 0) {
+    lines.push("  (backlog is empty \u2014 nothing here)");
+    return lines.join("\n");
+  }
+  const byEpic = /* @__PURE__ */ new Map();
+  for (const entry of snapshot.entries) {
+    const key = entry.epic;
+    const bucket = byEpic.get(key);
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      byEpic.set(key, [entry]);
+    }
+  }
+  const epicKeys = [...byEpic.keys()];
+  epicKeys.sort((a2, b) => {
+    if (a2 === b) return 0;
+    if (a2 === null) return 1;
+    if (b === null) return -1;
+    const na = Number(a2);
+    const nb = Number(b);
+    const aNum = !Number.isNaN(na);
+    const bNum = !Number.isNaN(nb);
+    if (aNum && bNum) return na - nb;
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return a2 < b ? -1 : 1;
+  });
+  for (const key of epicKeys) {
+    const heading = key === null ? NO_EPIC_HEADING : `Epic ${key}`;
+    lines.push(heading);
+    const rows = byEpic.get(key).slice().sort((a2, b) => a2.ref < b.ref ? -1 : a2.ref > b.ref ? 1 : 0);
+    for (const row of rows) {
+      lines.push(renderRow(row));
+    }
+  }
+  return lines.join("\n");
+}
+
+// src/tools/get-status.ts
+import * as path41 from "node:path";
+
+// src/schemas/status-report.ts
+var ULID_REGEX2 = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+var StatusReportSchema = external_exports.object({
+  pluginVersion: external_exports.string().regex(SEMVER_REGEX),
+  targetRepoRoot: external_exports.string().min(1),
+  adapter: external_exports.discriminatedUnion("state", [
+    external_exports.object({ state: external_exports.literal("ok"), name: external_exports.string().min(1) }),
+    external_exports.object({
+      state: external_exports.literal("mismatched"),
+      name: external_exports.string().min(1),
+      otherMatchingAdapters: external_exports.array(external_exports.string())
+    })
+  ]),
+  standards: external_exports.discriminatedUnion("state", [
+    external_exports.object({ state: external_exports.literal("ok"), path: external_exports.string().min(1) }),
+    external_exports.object({ state: external_exports.literal("missing"), path: external_exports.string().min(1) }),
+    external_exports.object({
+      state: external_exports.literal("malformed"),
+      path: external_exports.string().min(1),
+      zodMessage: external_exports.string().min(1)
+    })
+  ]),
+  cycle: external_exports.union([external_exports.literal("none"), external_exports.string().regex(ULID_REGEX2)])
+});
+
+// src/state/validate-active-adapter.ts
+var SCHEMA_MODULE2 = "mcp-server/src/schemas/workspace-config.ts";
+async function validateActiveAdapter(workspace, opts) {
+  const adapters2 = opts?.adapters ?? adapters;
+  const configuredMatches = await workspace.activeAdapter.detect(workspace.targetRepoRoot);
+  if (configuredMatches) {
+    return workspace;
+  }
+  const others = adapters2.filter((a2) => a2.name !== workspace.activeAdapterName);
+  const otherResults = await Promise.all(others.map((a2) => a2.detect(workspace.targetRepoRoot)));
+  const otherMatchingAdapters = others.filter((_, i2) => otherResults[i2] === true).map((a2) => a2.name);
+  throw new StaleWorkspaceConfigError({
+    targetRepoRoot: workspace.targetRepoRoot,
+    configuredAdapter: workspace.activeAdapterName,
+    otherMatchingAdapters,
+    schemaModule: SCHEMA_MODULE2
+  });
+}
+
+// src/tools/get-status.ts
+async function getStatus(opts) {
+  const pluginVersion = getPluginVersion();
+  const workspace = await resolveWorkspace({
+    targetRepoRoot: opts.targetRepoRoot,
+    adapters: opts.adapters
+  });
+  let adapterReport;
+  try {
+    await validateActiveAdapter(workspace, { adapters: opts.adapters });
+    adapterReport = { state: "ok", name: workspace.activeAdapterName };
+  } catch (err) {
+    if (err instanceof StaleWorkspaceConfigError) {
+      adapterReport = {
+        state: "mismatched",
+        name: workspace.activeAdapterName,
+        otherMatchingAdapters: err.otherMatchingAdapters
+      };
+    } else {
+      throw err;
+    }
+  }
+  const standardsPath = path41.join(workspace.targetRepoRoot, "docs", "standards.md");
+  let standardsReport;
+  try {
+    await lookupStandards(workspace.targetRepoRoot);
+    standardsReport = { state: "ok", path: standardsPath };
+  } catch (err) {
+    if (err instanceof StandardsDocMissingError) {
+      standardsReport = { state: "missing", path: standardsPath };
+    } else if (err instanceof StandardsDocMalformedError) {
+      standardsReport = {
+        state: "malformed",
+        path: standardsPath,
+        zodMessage: err.zodMessage
+      };
+    } else {
+      throw err;
+    }
+  }
+  const cycleState = await readCycleState(workspace.targetRepoRoot);
+  const report = {
+    pluginVersion,
+    targetRepoRoot: workspace.targetRepoRoot,
+    adapter: adapterReport,
+    standards: standardsReport,
+    cycle: cycleState ? cycleState.cycle_ulid : "none"
+  };
+  return StatusReportSchema.parse(report);
+}
+function renderStatus(report) {
+  return [
+    `flow v${report.pluginVersion}`,
+    `target repo: ${report.targetRepoRoot}`,
+    `adapter: ${report.adapter.name} (${report.adapter.state})`,
+    `standards: ${report.standards.state} \u2014 ${report.standards.path}`,
+    `cycle: ${report.cycle}`
+  ].join("\n");
+}
+
+// src/tools/open-cycle.ts
+var import_yaml24 = __toESM(require_dist2(), 1);
+import * as path42 from "node:path";
+function isoForFilename(iso) {
+  return iso.replace(/[:.]/g, "-");
+}
+async function openCycle(opts) {
+  const { targetRepoRoot } = opts;
+  const now = opts.now ?? (() => /* @__PURE__ */ new Date());
+  const openedAt = now().toISOString();
+  const cycleUlid = ulid3();
+  const priorCycle = await readCycleState(targetRepoRoot);
+  let archivePath = null;
+  if (priorCycle !== null) {
+    archivePath = await archivePriorCycle(targetRepoRoot, priorCycle, openedAt);
+  }
+  const newState = { cycle_ulid: cycleUlid, opened_at: openedAt };
+  await atomicWriteFile(
+    cycleStatePath(targetRepoRoot),
+    JSON.stringify(newState, null, 2) + "\n"
+  );
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      ts: openedAt,
+      type: "cycle.opened",
+      session_id: opts.sessionUlid ?? cycleUlid,
+      agent: "orchestrator",
+      data: {
+        cycle_ulid: cycleUlid,
+        prior_cycle_ulid: priorCycle?.cycle_ulid ?? null,
+        archived: archivePath !== null
+      }
+    }
+  });
+  return {
+    cycleUlid,
+    openedAt,
+    priorCycleUlid: priorCycle?.cycle_ulid ?? null,
+    archivePath
+  };
+}
+async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
+  const inputs = await gatherRetroInputs({
+    targetRepoRoot,
+    cycleState: priorCycle
+  });
+  const archiveRecord = {
+    cycle_ulid: priorCycle.cycle_ulid,
+    opened_at: priorCycle.opened_at,
+    closed_at: openedAt,
+    done_manifests: inputs.doneManifests,
+    retro_proposals: inputs.priorProposals.map((p) => ({
+      // Store repo-relative paths so the archive is portable.
+      path: path42.relative(targetRepoRoot, p.path),
+      iso_timestamp: p.iso_timestamp
+    })),
+    telemetry_summary: {
+      event_count: inputs.telemetrySummary.events.length,
+      skipped_count: inputs.telemetrySummary.skipped_count
+    }
+  };
+  const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
+  const absPath = path42.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
+  await atomicWriteFile(absPath, (0, import_yaml24.stringify)(archiveRecord, { lineWidth: 0 }));
+  return absPath;
+}
+
+// src/tools/get-team-snapshot.ts
+import { promises as fs33 } from "node:fs";
+import * as path44 from "node:path";
+
+// src/lib/team-stats.ts
+import { promises as fs32 } from "node:fs";
+import * as path43 from "node:path";
+var MONTH_BUCKET_REGEX = /^\d{4}-\d{2}\.jsonl$/;
+async function readTeamTelemetryStats(opts) {
+  const telemetryDir = path43.join(opts.targetRepoRoot, ".flow", "telemetry");
+  let entries;
+  try {
+    entries = await fs32.readdir(telemetryDir);
+  } catch (err) {
+    if (isEnoent7(err)) {
+      return { fireCountsByAgent: {}, malformedLines: 0, malformedFiles: 0 };
+    }
+    throw err;
+  }
+  const fireCountsByAgent = {};
+  let malformedLines = 0;
+  let malformedFiles = 0;
+  for (const entry of entries) {
+    if (!MONTH_BUCKET_REGEX.test(entry)) {
+      continue;
+    }
+    const filePath = path43.join(telemetryDir, entry);
+    const raw = await fs32.readFile(filePath, "utf8");
+    const lines = raw.split("\n");
+    let fileHasMalformation = false;
+    for (const line of lines) {
+      if (line.trim() === "") {
+        continue;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        malformedLines++;
+        fileHasMalformation = true;
+        continue;
+      }
+      const result = TelemetryEventSchema.safeParse(parsed);
+      if (!result.success) {
+        malformedLines++;
+        fileHasMalformation = true;
+        continue;
+      }
+      if (result.data.type === "agent.invoke") {
+        const agent = result.data.agent;
+        fireCountsByAgent[agent] = (fireCountsByAgent[agent] ?? 0) + 1;
+      }
+    }
+    if (fileHasMalformation) {
+      malformedFiles++;
+    }
+  }
+  return { fireCountsByAgent, malformedLines, malformedFiles };
+}
+function isEnoent7(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/schemas/team-snapshot.ts
+var KEBAB_ROLE_REGEX = /^[a-z0-9-]+$/;
+var KnowledgeEntrySchema = external_exports.object({
+  kind: external_exports.enum(LESSON_KINDS),
+  applies_when: external_exports.string().min(1),
+  detail: external_exports.string().min(1),
+  source_ref: external_exports.string().min(1).optional()
+}).strict();
+var TeamSnapshotRoleSchema = external_exports.discriminatedUnion("state", [
+  external_exports.object({
+    state: external_exports.literal("ok"),
+    role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
+    domain: external_exports.string().min(1),
+    fireCount: external_exports.number().int().nonnegative(),
+    knowledge: external_exports.array(KnowledgeEntrySchema)
+  }),
+  external_exports.object({
+    state: external_exports.literal("error"),
+    role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
+    error: external_exports.string().min(1)
+  })
+]);
+var TeamSnapshotSchema = external_exports.object({
+  roles: external_exports.array(TeamSnapshotRoleSchema),
+  knowledgeLimit: external_exports.number().int().positive(),
+  malformedTelemetryLines: external_exports.number().int().nonnegative(),
+  malformedTelemetryFiles: external_exports.number().int().nonnegative()
+}).strict();
+
+// src/tools/get-team-snapshot.ts
+async function getTeamSnapshot(opts) {
+  const { targetRepoRoot } = opts;
+  const knowledgeLimit = opts.knowledgeLimit ?? 3;
+  const teamDir = path44.join(targetRepoRoot, "team");
+  let dirEntries;
+  try {
+    dirEntries = await fs33.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent8(err)) {
+      const stats2 = await readTeamTelemetryStats({ targetRepoRoot });
+      return TeamSnapshotSchema.parse({
+        roles: [],
+        knowledgeLimit,
+        malformedTelemetryLines: stats2.malformedLines,
+        malformedTelemetryFiles: stats2.malformedFiles
+      });
+    }
+    throw err;
+  }
+  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
+  const roleIds = [];
+  for (const entry of dirEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) {
+      continue;
+    }
+    let stat2;
+    try {
+      stat2 = await fs33.stat(path44.join(teamDir, entry));
+    } catch {
+      continue;
+    }
+    if (!stat2.isDirectory()) {
+      continue;
+    }
+    roleIds.push(entry);
+  }
+  roleIds.sort();
+  const stats = await readTeamTelemetryStats({ targetRepoRoot });
+  const roles = [];
+  for (const role of roleIds) {
+    try {
+      const persona = await readPersona({ targetRepoRoot, role });
+      const knowledge = extractKnowledgeEntries(
+        persona.sections.Knowledge,
+        knowledgeLimit
+      );
+      roles.push({
+        state: "ok",
+        role,
+        domain: persona.domain,
+        fireCount: stats.fireCountsByAgent[role] ?? 0,
+        knowledge
+      });
+    } catch (err) {
+      if (err instanceof PersonaFileMalformedError) {
+        roles.push({
+          state: "error",
+          role,
+          error: err.message
+        });
+      } else if (err instanceof PersonaFileNotFoundError) {
+        console.warn(`[getTeamSnapshot] persona file for '${role}' vanished mid-snapshot \u2014 skipping`);
+      } else {
+        throw err;
+      }
+    }
+  }
+  return TeamSnapshotSchema.parse({
+    roles,
+    knowledgeLimit,
+    malformedTelemetryLines: stats.malformedLines,
+    malformedTelemetryFiles: stats.malformedFiles
+  });
+}
+var LESSON_BLOCK_PREFIX3 = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX3 = " -->";
+function extractKnowledgeEntries(knowledgeBody, limit) {
+  const structured = [];
+  const migrated = [];
+  for (const line of knowledgeBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX3) && trimmed.endsWith(LESSON_BLOCK_SUFFIX3)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX3.length, trimmed.length - LESSON_BLOCK_SUFFIX3.length).trim();
+      try {
+        const raw = JSON.parse(jsonStr);
+        if (raw !== null && typeof raw === "object" && "kind" in raw && "applies_when" in raw && "detail" in raw) {
+          const obj = raw;
+          const entry = {
+            kind: obj["kind"],
+            applies_when: String(obj["applies_when"]),
+            detail: String(obj["detail"]),
+            ...typeof obj["source_ref"] === "string" && obj["source_ref"].length > 0 ? { source_ref: obj["source_ref"] } : {}
+          };
+          structured.push(entry);
+        }
+      } catch {
+      }
+      continue;
+    }
+    const match = /^-\s+(.+?)\s*$/.exec(line);
+    if (match) {
+      migrated.push({
+        kind: "pattern",
+        applies_when: match[1],
+        detail: match[1]
+      });
+    }
+  }
+  const all = [...structured, ...migrated];
+  return all.slice(-limit).reverse();
+}
+function renderTeamSnapshot(snapshot) {
+  const { roles, knowledgeLimit, malformedTelemetryLines, malformedTelemetryFiles } = snapshot;
+  const lines = [];
+  lines.push(`flow team \u2014 ${roles.length} role(s)`);
+  lines.push("");
+  if (roles.length === 0) {
+    lines.push(
+      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:skip-hiring to hire the default roster."
+    );
+  } else {
+    for (let i2 = 0; i2 < roles.length; i2++) {
+      const role = roles[i2];
+      lines.push(role.role);
+      if (role.state === "error") {
+        lines.push(`  error: ${role.error}`);
+      } else {
+        lines.push(`  domain:      ${role.domain}`);
+        lines.push(`  fire count:  ${role.fireCount}`);
+        lines.push(`  knowledge (last ${knowledgeLimit}):`);
+        if (role.knowledge.length === 0) {
+          lines.push("    (no entries)");
+        } else {
+          for (const entry of role.knowledge) {
+            const provenance = entry.source_ref != null ? ` [${entry.source_ref}]` : "";
+            lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
+          }
+        }
+      }
+      if (i2 < roles.length - 1) {
+        lines.push("");
+      }
+    }
+  }
+  if (malformedTelemetryLines > 0) {
+    lines.push("");
+    lines.push(
+      `(${malformedTelemetryLines} malformed telemetry line(s) skipped across ${malformedTelemetryFiles} file(s))`
+    );
+  }
+  return lines.join("\n");
+}
+function isEnoent8(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/instantiate-persona.ts
+import { promises as fs36 } from "node:fs";
+import * as path47 from "node:path";
+
+// src/tools/read-catalogue.ts
+import { promises as fs34 } from "node:fs";
+import * as path45 from "node:path";
+async function readCatalogue(opts) {
+  const cataloguePath = path45.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
+  let raw;
+  try {
+    raw = await fs34.readFile(cataloguePath, "utf8");
+  } catch (err) {
+    if (isEnoent9(err)) {
+      throw new CatalogueRoleNotFoundError({
+        role: opts.role,
+        cataloguePath
+      });
+    }
+    throw err;
+  }
+  return parseCatalogueRole(raw, cataloguePath);
+}
+function isEnoent9(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/read-custom-role.ts
+import { promises as fs35 } from "node:fs";
+import * as path46 from "node:path";
+var KEBAB_CASE = /^[a-z0-9-]+$/;
+async function readCustomRole(opts) {
+  if (!KEBAB_CASE.test(opts.role)) {
+    throw new CatalogueShapeError({
+      sourcePath: `<custom-role:${opts.role}>`,
+      zodMessage: `role id '${opts.role}' does not match the required kebab-case shape /^[a-z0-9-]+$/`
+    });
+  }
+  const customPath = path46.join(
+    opts.targetRepoRoot,
+    "team",
+    "custom",
+    `${opts.role}.md`
+  );
+  let raw;
+  try {
+    raw = await fs35.readFile(customPath, "utf8");
+  } catch (err) {
+    if (isEnoent10(err)) {
+      throw new CatalogueRoleNotFoundError({
+        role: opts.role,
+        cataloguePath: customPath
+      });
+    }
+    throw err;
+  }
+  const parsed = parseCatalogueRole(raw, customPath);
+  if (parsed.role !== opts.role) {
+    throw new CatalogueShapeError({
+      sourcePath: customPath,
+      zodMessage: `frontmatter role '${parsed.role}' does not match filename '${opts.role}'`
+    });
+  }
+  return parsed;
+}
+function isEnoent10(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/instantiate-persona.ts
+async function instantiatePersona(opts) {
+  const clock = opts.clock ?? (() => /* @__PURE__ */ new Date());
+  const pluginVersion = opts.pluginVersion ?? getPluginVersion();
+  const customPath = path47.join(
+    opts.targetRepoRoot,
+    "team",
+    "custom",
+    `${opts.role}.md`
+  );
+  const cataloguePath = path47.join(
+    opts.pluginRoot,
+    "catalogue",
+    `${opts.role}.md`
+  );
+  let source = null;
+  try {
+    source = await readCustomRole({
+      targetRepoRoot: opts.targetRepoRoot,
+      role: opts.role
+    });
+  } catch (err) {
+    if (!(err instanceof CatalogueRoleNotFoundError)) {
+      throw err;
+    }
+  }
+  if (source === null) {
+    try {
+      source = await readCatalogue({
+        pluginRoot: opts.pluginRoot,
+        role: opts.role
+      });
+    } catch (err) {
+      if (err instanceof CatalogueRoleNotFoundError) {
+        throw new CatalogueRoleNotFoundError({
+          role: opts.role,
+          cataloguePath: `${customPath} or ${cataloguePath}`
+        });
+      }
+      throw err;
+    }
+  }
+  const personaPath = path47.join(
+    opts.targetRepoRoot,
+    "team",
+    opts.role,
+    "PERSONA.md"
+  );
+  let exists = false;
+  try {
+    await fs36.stat(personaPath);
+    exists = true;
+  } catch (err) {
+    if (!isEnoent11(err)) {
+      throw err;
+    }
+  }
+  if (exists) {
+    throw new PersonaAlreadyExistsError({
+      role: opts.role,
+      personaPath
+    });
+  }
+  const hiredAt = clock().toISOString();
+  const contents = renderPersonaFile({
+    catalogue: source,
+    hiredAt,
+    catalogueVersion: pluginVersion
+  });
+  await writeManagedFile({
+    absPath: personaPath,
+    contents,
+    targetRepoRoot: opts.targetRepoRoot,
+    mcpToolContext: { toolName: "instantiatePersona", role: opts.role }
+  });
+  return { path: personaPath };
+}
+function isEnoent11(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/lookup-role-by-domain.ts
+import { promises as fs37 } from "node:fs";
+import * as path48 from "node:path";
+async function lookupRoleByDomain(opts) {
+  const teamDir = path48.join(opts.targetRepoRoot, "team");
+  try {
+    await fs37.stat(teamDir);
+  } catch (err) {
+    if (isEnoent12(err)) {
+      return { role: null };
+    }
+    throw err;
+  }
+  const entries = await fs37.readdir(teamDir);
+  for (const entry of entries) {
+    if (entry === "custom" || entry === "_archived") continue;
+    const subPath = path48.join(teamDir, entry);
+    let isDir = false;
+    try {
+      const stat2 = await fs37.stat(subPath);
+      isDir = stat2.isDirectory();
+    } catch (err) {
+      if (isEnoent12(err)) continue;
+      throw err;
+    }
+    if (!isDir) continue;
+    let persona;
+    try {
+      persona = await readPersona({
+        targetRepoRoot: opts.targetRepoRoot,
+        role: entry
+      });
+    } catch (err) {
+      if (err instanceof PersonaFileNotFoundError) {
+        continue;
+      }
+      throw err;
+    }
+    if (persona.domain === opts.domain) {
+      return { role: persona.role };
+    }
+  }
+  return { role: null };
+}
+function isEnoent12(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+}
+
+// src/tools/mark-withdrawn.ts
+var import_yaml25 = __toESM(require_dist2(), 1);
+import { promises as fs38 } from "node:fs";
+import * as path49 from "node:path";
+var MarkWithdrawnInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  ref: external_exports.string().min(1)
+});
+function stripUndefined5(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== void 0)
+  );
+}
+function serialiseManifest(manifest) {
+  return (0, import_yaml25.stringify)(
+    stripUndefined5(manifest),
+    { lineWidth: 0 }
+  );
+}
+async function markWithdrawn(rawInput) {
+  const input = MarkWithdrawnInputSchema.parse(rawInput);
+  const targetRepoRoot = path49.resolve(input.targetRepoRoot);
+  const { ref } = input;
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  if (workspace.activeAdapterName === "native") {
+    throw new WrongAdapterError({
+      expectedAdapter: "non-native",
+      actualAdapter: workspace.activeAdapterName,
+      targetRepoRoot,
+      toolName: "markWithdrawn"
+    });
+  }
+  const stateRoot = path49.join(targetRepoRoot, ".flow", "state");
+  let foundState = null;
+  let foundAbsPath = null;
+  for (const stateName of STATE_NAMES) {
+    const candidate = path49.join(stateRoot, stateName, `${ref}.yaml`);
+    try {
+      await fs38.stat(candidate);
+      foundState = stateName;
+      foundAbsPath = candidate;
+      break;
+    } catch {
+    }
+  }
+  if (foundState === null || foundAbsPath === null) {
+    throw new ManifestNotFoundError({
+      ref,
+      expectedAbsPath: path49.join(stateRoot, "to-do", `${ref}.yaml`),
+      fromState: "to-do"
+    });
+  }
+  const rawText = await fs38.readFile(foundAbsPath, "utf8");
+  const parsed = (0, import_yaml25.parse)(rawText);
+  const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
+  if (manifest.withdrawn === true) {
+    return {
+      ref,
+      alreadyWithdrawn: true,
+      state: foundState
+    };
+  }
+  const updated = { ...manifest, withdrawn: true };
+  const yamlText = serialiseManifest(updated);
+  await atomicWriteFile(foundAbsPath, yamlText);
+  return {
+    ref,
+    alreadyWithdrawn: false,
+    state: foundState,
+    absPath: foundAbsPath
+  };
+}
+
+// src/tools/mark-story-ready.ts
+var import_yaml26 = __toESM(require_dist2(), 1);
+import { promises as fs39 } from "node:fs";
+import * as path50 from "node:path";
+var MarkStoryReadyInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  ref: external_exports.string().min(1),
+  ready: external_exports.boolean(),
+  /**
+   * Session id for the telemetry envelope. Optional — the operator running
+   * `/flow:ready` interactively has no orchestration session ULID. Defaults
+   * to a stable operator marker so the event still validates.
+   */
+  sessionUlid: external_exports.string().min(1).optional()
+});
+async function markStoryReady(rawInput) {
+  const input = MarkStoryReadyInputSchema.parse(rawInput);
+  const targetRepoRoot = path50.resolve(input.targetRepoRoot);
+  const { ref, ready } = input;
+  const sessionUlid = input.sessionUlid ?? "operator";
+  const stateRoot = path50.join(targetRepoRoot, ".flow", "state");
+  let foundState = null;
+  let foundAbsPath = null;
+  for (const stateName of STATE_NAMES) {
+    const candidate = path50.join(stateRoot, stateName, `${ref}.yaml`);
+    try {
+      await fs39.stat(candidate);
+      foundState = stateName;
+      foundAbsPath = candidate;
+      break;
+    } catch {
+    }
+  }
+  if (foundState === null || foundAbsPath === null) {
+    throw new NotAnEligibleBacklogItemError({ ref, foundState: null, reason: "not-found" });
+  }
+  if (foundState !== "to-do") {
+    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
+  }
+  const rawText = await fs39.readFile(foundAbsPath, "utf8");
+  const parsed = (0, import_yaml26.parse)(rawText);
+  const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
+  if (manifest.withdrawn === true) {
+    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "withdrawn" });
+  }
+  if (manifest.ready === ready) {
+    return { ref, ready, noop: true, state: foundState };
+  }
+  const updated = { ...manifest, ready };
+  const yamlText = serialiseManifest(updated);
+  await atomicWriteFile(foundAbsPath, yamlText);
+  await logTelemetryEvent({
+    targetRepoRoot,
+    event: {
+      type: "backlog.readiness_changed",
+      session_id: sessionUlid,
+      agent: "operator",
+      story_id: ref,
+      data: { ref, ready }
+    }
+  });
+  return { ref, ready, noop: false, state: foundState, absPath: foundAbsPath };
+}
+
+// src/tools/read-repo-signals.ts
+import { promises as fs40 } from "node:fs";
+import * as path51 from "node:path";
+
+// src/lib/repo-signal-detectors.ts
+var LANG_FILE_MAP = {
+  "package.json": "TypeScript",
+  "tsconfig.json": "TypeScript",
+  "pyproject.toml": "Python",
+  "requirements.txt": "Python",
+  "Cargo.toml": "Rust",
+  "go.mod": "Go"
+};
+var LANG_EXT_MAP = {
+  ".ts": "TypeScript",
+  ".tsx": "TypeScript",
+  ".js": "JavaScript",
+  ".jsx": "JavaScript",
+  ".py": "Python",
+  ".rs": "Rust",
+  ".go": "Go",
+  ".md": "Markdown"
+};
+var MANIFEST_FILENAMES = [
+  "package.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "pyproject.toml",
+  "requirements.txt",
+  "Cargo.toml",
+  "go.mod",
+  "Gemfile",
+  "build.gradle",
+  "pom.xml"
+];
+function detectLanguagesFromLayout(entries) {
+  const found = /* @__PURE__ */ new Set();
+  for (const entry of entries) {
+    const direct = LANG_FILE_MAP[entry];
+    if (direct) {
+      found.add(direct);
+      continue;
+    }
+    const dotIdx = entry.lastIndexOf(".");
+    if (dotIdx >= 0) {
+      const ext = entry.slice(dotIdx);
+      const lang = LANG_EXT_MAP[ext];
+      if (lang) found.add(lang);
+    }
+  }
+  return [...found].sort();
+}
+function detectDependencyManifests(entries) {
+  const set2 = new Set(entries);
+  return MANIFEST_FILENAMES.filter((name) => set2.has(name)).slice().sort();
+}
+function truncateReadmeExcerpt(raw, max = 500) {
+  const trimmed = raw.replace(/\s+$/, "");
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}\u2026`;
+}
+
+// src/schemas/repo-signals.ts
+var RepoSignalsSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1),
+  languages: external_exports.array(external_exports.string().min(1)),
+  topLevelLayout: external_exports.array(external_exports.string().min(1)),
+  readmeExcerpt: external_exports.string(),
+  recentCommitTitles: external_exports.array(external_exports.string()),
+  dependencyManifests: external_exports.array(external_exports.string().min(1))
+}).strict();
+
+// src/tools/read-repo-signals.ts
+async function readRepoSignals(opts) {
+  const dirents = await fs40.readdir(opts.targetRepoRoot, {
+    withFileTypes: true
+  });
+  const topLevelLayout = dirents.map((d) => d.name).filter((name) => !name.startsWith(".") || name === ".flow").sort();
+  let languages = detectLanguagesFromLayout(topLevelLayout);
+  if (languages.length === 0) {
+    const subEntries = await collectDepthOneManifests(opts.targetRepoRoot, dirents);
+    if (subEntries.length > 0) {
+      languages = detectLanguagesFromLayout(subEntries);
+    }
+  }
+  const dependencyManifests = detectDependencyManifests(topLevelLayout);
+  const readmePath = path51.join(opts.targetRepoRoot, "README.md");
+  let readmeExcerpt = "";
+  try {
+    const raw = await fs40.readFile(readmePath, "utf8");
+    readmeExcerpt = truncateReadmeExcerpt(raw);
+  } catch (err) {
+    if (!isEnoent13(err)) {
+      throw err;
+    }
+  }
+  const recentCommitTitles = await readRecentCommitTitles({
+    cwd: opts.targetRepoRoot,
+    limit: 5
+  });
+  const payload = {
+    targetRepoRoot: opts.targetRepoRoot,
+    languages,
+    topLevelLayout,
+    readmeExcerpt,
+    recentCommitTitles,
+    dependencyManifests
+  };
+  return RepoSignalsSchema.parse(payload);
+}
+async function collectDepthOneManifests(repoRoot, rootDirents) {
+  const found = [];
+  for (const dirent of rootDirents) {
+    if (!dirent.isDirectory()) continue;
+    if (dirent.name.startsWith(".") || dirent.name === "node_modules") continue;
+    try {
+      const children = await fs40.readdir(path51.join(repoRoot, dirent.name));
+      for (const child of children) {
+        found.push(child);
+      }
+    } catch {
+    }
+  }
+  return found;
+}
+function isEnoent13(err) {
+  return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
 // src/tools/validate-planner-backlog.ts

@@ -11,6 +11,7 @@ import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { validateStoryAgainstDiscipline } from "../validators/planning-discipline.js";
 import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 import { emitFriction } from "../lib/emit-friction.js";
+import { scanSources } from "./scan-sources.js";
 
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
@@ -256,7 +257,31 @@ export async function writeNativeStory(
   // runs while BMad is still the active adapter — you ingest first, cut over
   // second). Keeping the write body in one place means the two paths can never
   // diverge on what "a Tier-0-clean native story on disk" means.
-  return renderGateWriteNativeStory(input, targetRepoRoot);
+  const result = await renderGateWriteNativeStory(input, targetRepoRoot);
+
+  // Story native:01KT49G9B38NZ2QP16GY843KYK — auto-materialise the newly written
+  // story into the backlog immediately, so the operator does not need to run
+  // `/flow:scan` as a separate step after authoring.
+  //
+  // This call is placed here (in `writeNativeStory`, after the native-adapter
+  // guard) and NOT inside `renderGateWriteNativeStory`, so that the BMad→native
+  // ingest path (`bmadToNativeIngest`) does NOT trigger auto-materialisation —
+  // ingest runs while BMad is still the active adapter and the full backlog
+  // re-sync is done by a subsequent explicit `/flow:scan`.
+  //
+  // The scan is a best-effort supplement: if it fails for any reason (e.g. a
+  // concurrent scan is already running, or the FS is transiently unavailable),
+  // the story file is already on disk and a manual `/flow:scan` will pick it up.
+  // We swallow non-fatal errors here so that a scan hiccup never rolls back a
+  // successful write.
+  try {
+    await scanSources({ targetRepoRoot });
+  } catch {
+    // Non-fatal: the story file is already written. The operator can run
+    // `/flow:scan` manually to materialise the manifest if needed.
+  }
+
+  return result;
 }
 
 /**
