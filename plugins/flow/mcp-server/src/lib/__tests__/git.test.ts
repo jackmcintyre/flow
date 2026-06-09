@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assertNoNegativeFlags,
+  checkStagedArtifactLeakGate,
   gitCreateBranch,
   gitFetch,
   gitPush,
@@ -532,6 +533,143 @@ describe("stashWorkingTree", () => {
     });
     expect(result.stashed).toBe(false);
     expect(result.stderr).toContain("index.lock");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkStagedArtifactLeakGate (Story native:01KTN94QY1AQN98P0PG7GDRKXD)
+// AC2: gate rejects symlink / node_modules / machine-path artefacts
+// AC3: gate passes a clean source+test-only staged set
+// ---------------------------------------------------------------------------
+
+describe("checkStagedArtifactLeakGate (Story native:01KTN94QY1AQN98P0PG7GDRKXD)", () => {
+  // Helper: a lstat that always says "not a symlink" (a normal file/directory)
+  function notSymlink() {
+    return vi.fn(async () => ({ isSymbolicLink: () => false }));
+  }
+
+  // Helper: a lstat that says the given path is a symlink
+  function isSymlink(target: string) {
+    return vi.fn(async (p: string) => ({
+      isSymbolicLink: () => p === target || p.endsWith(`/${target}`),
+    }));
+  }
+
+  // Helper: a readFile that always returns empty content
+  function emptyReadFile() {
+    return vi.fn(async () => "");
+  }
+
+  // Helper: a readFile that returns machine-path content for the given path
+  function machinePathReadFile(triggerPath: string, content: string) {
+    return vi.fn(async (p: string) => (p.endsWith(triggerPath) ? content : ""));
+  }
+
+  // AC2 (i): a staged `node_modules` symlink is rejected
+  it("AC2 (i): rejects a staged node_modules symlink", async () => {
+    const lstatImpl = isSymlink("node_modules");
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: ["node_modules"],
+      lstatImpl,
+      readFileImpl: emptyReadFile(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // The node_modules check fires BEFORE the symlink check (path check first)
+      expect(result.offendingPath).toBe("node_modules");
+      expect(result.reason).toMatch(/dependency folder/i);
+    }
+  });
+
+  // AC2 (i) variant: a symlink that is NOT named node_modules is also rejected
+  it("AC2 (i): rejects any staged symlink, not just node_modules-named ones", async () => {
+    const lstatImpl = isSymlink("/repo/my-link");
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: ["my-link"],
+      lstatImpl,
+      readFileImpl: emptyReadFile(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.offendingPath).toBe("my-link");
+      expect(result.reason).toMatch(/symlink/i);
+    }
+  });
+
+  // AC2 (ii): a staged path under node_modules is rejected (even if not a symlink)
+  it("AC2 (ii): rejects a staged path under node_modules/", async () => {
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: ["node_modules/some-pkg/index.js"],
+      lstatImpl: notSymlink(),
+      readFileImpl: emptyReadFile(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.offendingPath).toBe("node_modules/some-pkg/index.js");
+      expect(result.reason).toMatch(/dependency folder/i);
+    }
+  });
+
+  // AC2 (iii): a file in dist/ containing an absolute /Users/.../ path is rejected
+  it("AC2 (iii): rejects a build artefact (dist/) containing a machine-specific absolute path", async () => {
+    const content = '{"_resolved":"file:///Users/alice/projects/my-pkg/dist/index.js"}';
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: ["dist/cli.js"],
+      lstatImpl: notSymlink(),
+      readFileImpl: machinePathReadFile("dist/cli.js", content),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.offendingPath).toBe("dist/cli.js");
+      expect(result.reason).toMatch(/machine-specific absolute path/i);
+    }
+  });
+
+  // AC2 (iii) variant: a lock file with /home/<name>/ is also rejected
+  it("AC2 (iii): rejects a lock file containing a /home/<name>/ absolute path", async () => {
+    const content = 'resolved "file:///home/bob/projects/local-pkg/index.js"';
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: ["yarn.lock"],
+      lstatImpl: notSymlink(),
+      readFileImpl: machinePathReadFile("yarn.lock", content),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.offendingPath).toBe("yarn.lock");
+      expect(result.reason).toMatch(/machine-specific absolute path/i);
+    }
+  });
+
+  // AC3: a clean source + test file set passes through unblocked
+  it("AC3: passes a clean source+test-only staged set (false-positive tripwire)", async () => {
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: [
+        "src/lib/git.ts",
+        "src/lib/__tests__/git.test.ts",
+        "README.md",
+      ],
+      lstatImpl: notSymlink(),
+      // Source files with /Users/.../ in comments or test literals must NOT trip the gate
+      readFileImpl: vi.fn(async () => "// see also /Users/alice/docs for context\n"),
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  // AC3 edge: an empty staged set passes immediately
+  it("AC3: passes an empty staged set", async () => {
+    const result = await checkStagedArtifactLeakGate({
+      targetRepoRoot: "/repo",
+      stagedPaths: [],
+      lstatImpl: notSymlink(),
+      readFileImpl: emptyReadFile(),
+    });
+    expect(result.ok).toBe(true);
   });
 });
 

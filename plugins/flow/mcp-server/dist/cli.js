@@ -10423,6 +10423,17 @@ var PrePrLeakDetectedError = class extends DomainError {
     this.sharedRootPath = opts.sharedRootPath;
   }
 };
+var PrePrStagedArtifactLeakError = class extends DomainError {
+  offendingPath;
+  reason;
+  constructor(opts) {
+    super(
+      `pre-PR staged-artifact gate stopped: ${opts.reason}. Offending path: "${opts.offendingPath}". NO pull request was opened. Remove the offending artifact and re-run. (Story native:01KTN94QY1AQN98P0PG7GDRKXD)`
+    );
+    this.offendingPath = opts.offendingPath;
+    this.reason = opts.reason;
+  }
+};
 var PrePrTestFailedError = class extends DomainError {
   exitCode;
   testCommand;
@@ -29507,6 +29518,7 @@ import * as path27 from "node:path";
 
 // src/lib/git.ts
 import * as path26 from "node:path";
+import { promises as fsPromises } from "node:fs";
 
 // ../node_modules/.pnpm/is-plain-obj@4.1.0/node_modules/is-plain-obj/index.js
 function isPlainObject2(value) {
@@ -36578,6 +36590,58 @@ async function checkSharedRootLeak(opts) {
   const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
   return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
+var MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"']+\//;
+function isBuildArtifactPath(p) {
+  const normalised = p.replace(/\\/g, "/");
+  if (/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(normalised)) {
+    return true;
+  }
+  if (/(?:^|\/)(?:dist|build|out|\.next|\.cache)\//.test(normalised)) {
+    return true;
+  }
+  return false;
+}
+async function checkStagedArtifactLeakGate(opts) {
+  const { targetRepoRoot, stagedPaths } = opts;
+  const lstat = opts.lstatImpl ?? ((p) => fsPromises.lstat(p));
+  const readFile3 = opts.readFileImpl ?? ((p) => fsPromises.readFile(p, "utf8"));
+  for (const relPath of stagedPaths) {
+    const segments = relPath.replace(/\\/g, "/").split("/");
+    if (segments[0] === "node_modules" || segments.includes("node_modules")) {
+      return {
+        ok: false,
+        offendingPath: relPath,
+        reason: `staged path "${relPath}" is inside a dependency folder (node_modules). Dependency folders must never be committed \u2014 add "node_modules" (bare, no trailing slash) to .gitignore so both directory and symlink forms are excluded`
+      };
+    }
+    const absPath = path26.isAbsolute(relPath) ? relPath : path26.join(targetRepoRoot, relPath);
+    try {
+      const stat2 = await lstat(absPath);
+      if (stat2.isSymbolicLink()) {
+        return {
+          ok: false,
+          offendingPath: relPath,
+          reason: `staged path "${relPath}" is a symlink. Symlinks to machine-local dependency folders (e.g. a node_modules symlink) bypass the "node_modules/" gitignore rule (which only ignores directories) and would break on any other machine. Remove the symlink before opening a PR`
+        };
+      }
+    } catch {
+    }
+    if (isBuildArtifactPath(relPath)) {
+      try {
+        const content = await readFile3(absPath);
+        if (MACHINE_ABSOLUTE_PATH_REGEX.test(content)) {
+          return {
+            ok: false,
+            offendingPath: relPath,
+            reason: `staged build/dependency artefact "${relPath}" contains a machine-specific absolute path (matching /Users/<name>/ or /home/<name>/). This path is only valid on the local machine and would cause the build to fail on any other machine. Regenerate the artefact after removing any local node_modules symlinks`
+          };
+        }
+      } catch {
+      }
+    }
+  }
+  return { ok: true };
+}
 
 // src/tools/create-smoke-scratch-repo.ts
 var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
@@ -38711,6 +38775,25 @@ async function runDevTerminalAction(opts) {
       ...execaImpl ? { execaImpl } : {}
     });
     committedPaths = dirty;
+    const artifactGateResult = await checkStagedArtifactLeakGate({
+      targetRepoRoot: gitRoot,
+      stagedPaths: committedPaths
+    });
+    if (!artifactGateResult.ok) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "staged paths contain only ordinary source and test files (no symlinks, no node_modules, no machine-specific absolute paths in build artefacts)",
+        observed: `pre-PR staged-artifact gate blocked: ${artifactGateResult.reason}`
+      });
+      throw new PrePrStagedArtifactLeakError({
+        offendingPath: artifactGateResult.offendingPath,
+        reason: artifactGateResult.reason
+      });
+    }
   }
   {
     await gitCreateBranch({

@@ -2261,6 +2261,38 @@ export class PrePrLeakDetectedError extends DomainError {
 }
 
 /**
+ * The pre-PR staged-artifact gate found a dependency-folder shortcut (symlink),
+ * a path under `node_modules`, or a committed file whose content contains a
+ * machine-specific absolute path. No pull request was opened.
+ *
+ * A symlink named `node_modules` is not a directory and therefore escapes the
+ * `node_modules/` gitignore rule; a committed file carrying an absolute
+ * `/Users/<name>/` or `/home/<name>/` path is machine-specific and must not
+ * ride along in a PR.
+ *
+ * Thrown BEFORE any push or PR is created (structurally identical to
+ * `PrePrBuildFailedError` / `PrePrLeakDetectedError`).
+ *
+ * (Story native:01KTN94QY1AQN98P0PG7GDRKXD)
+ */
+export class PrePrStagedArtifactLeakError extends DomainError {
+  readonly offendingPath: string;
+  readonly reason: string;
+
+  constructor(opts: { offendingPath: string; reason: string }) {
+    super(
+      `pre-PR staged-artifact gate stopped: ${opts.reason}. ` +
+        `Offending path: "${opts.offendingPath}". ` +
+        `NO pull request was opened. ` +
+        `Remove the offending artifact and re-run. ` +
+        `(Story native:01KTN94QY1AQN98P0PG7GDRKXD)`,
+    );
+    this.offendingPath = opts.offendingPath;
+    this.reason = opts.reason;
+  }
+}
+
+/**
  * The pre-PR test gate ran the project's full test suite and it exited
  * non-zero. No pull request was opened.
  * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)
