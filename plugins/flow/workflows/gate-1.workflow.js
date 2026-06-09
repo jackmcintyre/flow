@@ -244,42 +244,54 @@ const LENS_MODEL = {
   considered: 'opus',
 }
 
+// ---------------------------------------------------------------------------
+// Assemble the shared judge context ONCE — outside the per-lens fan-out loop.
+//
+// Story native:01KTKK5NQWTV4NHB37V7WC6AD8: building the shared prefix once
+// (persona + task preamble + spec + risk tier) and reusing it across all lenses
+// lets the Workflow runtime share the prompt cache across sibling agent() calls
+// rather than re-creating it five times at premium-model rates. The prefix is
+// byte-identical across all lens prompts; only the per-lens suffix (lens name,
+// role, rubric check, CLI command) differs. This is an assembly refactor —
+// each lens still receives the full persona, spec, and rubric (content-preserving).
+// ---------------------------------------------------------------------------
+
+const sanitisedRef = REF.replace(/:/g, '-')
+const riskLabel = riskTier || 'medium (fallback)'
+
+// Shared prefix — built ONCE, reused for every lens.
+const judgeSharedPrefix =
+  `${judgePersona}\n\n` +
+  `## Your task: grade a draft story against ONE lens\n\n` +
+  `You are a lens judge for the gate-1 panel. ` +
+  `Your ONLY job is to grade the draft below against your assigned lens, ` +
+  `then call the CLI tool to record your verdict. ` +
+  `You MUST call writeLensVerdict exactly once and then stop — do NOT edit any files, do NOT run any other commands.\n\n` +
+  `**Risk tier:** ${riskLabel}\n\n` +
+  `**Draft spec:**\n\`\`\`\n${specText}\n\`\`\`\n\n`
+
+log(`shared judge context assembled once for ref=${REF} (${judgePlan.lenses.length} lenses will reuse it)`)
+
 const judgeResults = await Promise.all(
   judgePlan.lenses.map(async (lens) => {
     // For full lane: role from lensRoles[lens] (the five standard names).
     // For fast lane: the combined 'structure+verifiability' lens uses the
     // 'generalist-reviewer' role as a fallback (lensRoles won't have this key).
     const role = lensRoles[lens] || lensRoles['structure'] || 'generalist-reviewer'
-    // Build persona for this lens's role
-    const personaResult = await seam(
-      `node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role })}'`,
-      `persona:${lens}`,
-      true,
-    )
-    const lensPersona = personaResult?.systemPrompt || judgePersona
 
     // Derive the verdict file path the judge MUST write to (mirrors lensVerdictFilePath
     // in judge-panel.ts — the panel reader expects exactly this path).
     // Path: <targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<sanitised-ref>/judge-<lens>.json
     // sanitiseRefForPathSegment replaces ':' with '-'; mirrors the TypeScript helper.
-    const sanitisedRef = REF.replace(/:/g, '-')
     const verdictFilePath = `${REPO}/.flow/state/sessions/${SU}/${sanitisedRef}/judge-${lens}.json`
 
-    // Spawn the judge as a one-shot subagent. The judge's ONLY load-bearing act is
-    // calling node CLI writeLensVerdict --json exactly once. Its reasoning is free;
-    // only the verdict FILE is authoritative (deterministic-seam discipline).
-    const judgePrompt =
-      `${lensPersona}\n\n` +
-      `## Your task: grade a draft story against ONE lens\n\n` +
-      `You are the **${lens}** lens judge for the gate-1 panel. ` +
-      `Your ONLY job is to grade the draft below against the ${lens.toUpperCase()} lens, ` +
-      `then call the CLI tool to record your verdict. ` +
-      `You MUST call writeLensVerdict exactly once and then stop — do NOT edit any files, do NOT run any other commands.\n\n` +
+    // Per-lens suffix — the only part that differs between lenses.
+    // Contains: lens name, assigned role, rubric check, CLI command.
+    // The sharedPrefix above already carries the persona, spec, and risk tier.
+    const lensSuffix =
       `**Lens:** ${lens}\n` +
       `**Your role:** ${role}\n` +
-      `**Rubric check:** ${LENS_RUBRIC[lens]}\n` +
-      `**Risk tier:** ${riskTier || 'medium (fallback)'}\n\n` +
-      `**Draft spec:**\n\`\`\`\n${specText || '(spec text not available)'}\n\`\`\`\n\n` +
+      `**Rubric check:** ${LENS_RUBRIC[lens]}\n\n` +
       `**Required action — call this command exactly once:**\n` +
       `\`\`\`\n` +
       `node ${CLI} writeLensVerdict --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref: REF, lens, role, pass: '<true|false>', missed: '<non-empty string: "nothing missed" on pass, specific gap on fail>' })}'\n` +
@@ -287,6 +299,12 @@ const judgeResults = await Promise.all(
       `Replace \`"<true|false>"\` with the boolean \`true\` or \`false\` (no quotes). ` +
       `Replace \`"<non-empty string: ...>"\` with a plain string (never empty — even on a pass, write "nothing missed" or a brief summary of what you verified). ` +
       `The verdict is written to: \`${verdictFilePath}\``
+
+    // Spawn the judge as a one-shot subagent. The judge's ONLY load-bearing act is
+    // calling node CLI writeLensVerdict --json exactly once. Its reasoning is free;
+    // only the verdict FILE is authoritative (deterministic-seam discipline).
+    // The judgePrompt = sharedPrefix (byte-identical across siblings) + lensSuffix.
+    const judgePrompt = judgeSharedPrefix + lensSuffix
 
     try {
       // Model is sourced from the resolved plan (judgePlan.perLensModel), not the
