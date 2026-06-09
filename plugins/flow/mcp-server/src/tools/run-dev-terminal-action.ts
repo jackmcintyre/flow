@@ -57,6 +57,7 @@ import {
   GhPrCreateFailedError,
   PrePrBuildFailedError,
   PrePrLeakDetectedError,
+  PrePrStagedArtifactLeakError,
   PrePrTestFailedError,
 } from "../errors.js";
 import { emitFriction } from "../lib/emit-friction.js";
@@ -65,6 +66,7 @@ import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
 import {
   checkSharedRootLeak,
+  checkStagedArtifactLeakGate,
   gitCommit,
   gitCreateBranch,
   gitFetch,
@@ -210,6 +212,32 @@ export async function runDevTerminalAction(opts: {
     // defect. We do NOT fall back to `["."]` (that would re-introduce the
     // git-add-everything hazard); the empty-commit guard in gitCommit surfaces it.
     committedPaths = dirty;
+
+    // (iv-b) Staged-artifact leak gate (Story native:01KTN94QY1AQN98P0PG7GDRKXD).
+    // Before committing, reject any staged path that is a symlink (node_modules
+    // symlinks bypass the `node_modules/` gitignore directory rule), any path
+    // under node_modules, or any build/dependency artefact carrying a
+    // machine-specific absolute path. Fail LOUD with a plain-language reason so
+    // no PR is ever opened with dependency-folder shortcuts or machine paths.
+    const artifactGateResult = await checkStagedArtifactLeakGate({
+      targetRepoRoot: gitRoot,
+      stagedPaths: committedPaths,
+    });
+    if (!artifactGateResult.ok) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "staged paths contain only ordinary source and test files (no symlinks, no node_modules, no machine-specific absolute paths in build artefacts)",
+        observed: `pre-PR staged-artifact gate blocked: ${artifactGateResult.reason}`,
+      });
+      throw new PrePrStagedArtifactLeakError({
+        offendingPath: artifactGateResult.offendingPath,
+        reason: artifactGateResult.reason,
+      });
+    }
   }
 
   {

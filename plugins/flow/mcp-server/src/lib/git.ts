@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { promises as fsPromises } from "node:fs";
 import { execa as defaultExeca } from "execa";
 import {
   GitCommitMessageMalformedError,
@@ -918,4 +919,160 @@ export async function filterGitIgnoredPaths(opts: {
   );
 
   return paths.filter((p) => !ignoredSet.has(p));
+}
+
+// ---------------------------------------------------------------------------
+// checkStagedArtifactLeakGate (Story native:01KTN94QY1AQN98P0PG7GDRKXD)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex matching machine-specific home-directory absolute paths of the form
+ * `/Users/<name>/` (macOS) or `/home/<name>/` (Linux/WSL). These must never
+ * appear in committed build/dependency artefacts.
+ *
+ * The check is intentionally narrow: it only fires on the path patterns that
+ * unambiguously indicate a local machine install root (not a legitimate source
+ * literal like `"/usr/bin/node"` which is stable across machines). The match
+ * requires at least one non-slash character after the home prefix to avoid a
+ * bare `/Users` or `/home` directory name triggering the gate.
+ */
+const MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"']+\//;
+
+/**
+ * Paths that are build/dependency artefacts and should be scanned for
+ * machine-specific absolute paths. Expressed as glob-style segment prefixes or
+ * exact names; matched against the repo-relative staged path (normalised to
+ * forward slashes).
+ */
+function isBuildArtifactPath(p: string): boolean {
+  const normalised = p.replace(/\\/g, "/");
+  // Dependency lock files and generated package metadata
+  if (/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(normalised)) {
+    return true;
+  }
+  // Build/dist output directories
+  if (/(?:^|\/)(?:dist|build|out|\.next|\.cache)\//.test(normalised)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Pre-PR staged-artifact gate: given the set of staged (dirty) repo-relative
+ * paths, reject any path that is:
+ *
+ *   (a) a symlink — a symlink named `node_modules` bypasses the `node_modules/`
+ *       gitignore rule (the trailing-slash rule only ignores directories); a
+ *       committed symlink to a machine-local path would break on any other
+ *       machine.
+ *
+ *   (b) a path named `node_modules` or any path under a `node_modules/` prefix —
+ *       dependency folders must never ride along in a PR.
+ *
+ *   (c) a build/dependency artefact (lock files, dist/ outputs) whose content
+ *       contains a machine-specific absolute path (`/Users/<name>/` or
+ *       `/home/<name>/`) — these arise when a local `node_modules` symlink or
+ *       a local build tool writes machine-absolute paths into a generated file.
+ *
+ * The absolute-path-in-file check is TIGHTLY SCOPED to build/dependency
+ * artefacts only (not arbitrary source or test files), so legitimate source
+ * files that mention a `/Users/...`-style string in a comment or test literal
+ * are NOT blocked.
+ *
+ * Returns `{ ok: true }` when nothing is found. Returns `{ ok: false,
+ * offendingPath, reason }` on the FIRST offending path found — the gate is
+ * fail-fast (one clear reason is more actionable than a long list).
+ *
+ * `lstatImpl` and `readFileImpl` are injectable test seams; production callers
+ * omit them (real `fs.lstat` / `fs.readFile` is used). On any `lstat`/
+ * `readFile` error the path is skipped (best-effort: a missing staged file is
+ * not the gate's concern).
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) is not relevant — this function does NOT spawn
+ * any subprocess; it uses only the Node.js `fs` module.
+ *
+ * (Story native:01KTN94QY1AQN98P0PG7GDRKXD)
+ */
+export async function checkStagedArtifactLeakGate(opts: {
+  targetRepoRoot: string;
+  stagedPaths: readonly string[];
+  /** Test seam: defaults to `fs.lstat`. */
+  lstatImpl?: (p: string) => Promise<{ isSymbolicLink(): boolean }>;
+  /** Test seam: defaults to `fs.readFile(p, "utf8")`. */
+  readFileImpl?: (p: string) => Promise<string>;
+}): Promise<
+  | { ok: true }
+  | { ok: false; offendingPath: string; reason: string }
+> {
+  const { targetRepoRoot, stagedPaths } = opts;
+  const lstat = opts.lstatImpl ?? ((p: string) => fsPromises.lstat(p));
+  const readFile =
+    opts.readFileImpl ??
+    ((p: string) => fsPromises.readFile(p, "utf8") as Promise<string>);
+
+  for (const relPath of stagedPaths) {
+    const segments = relPath.replace(/\\/g, "/").split("/");
+
+    // (b) node_modules path check — repo-relative path equal to or under node_modules
+    if (
+      segments[0] === "node_modules" ||
+      segments.includes("node_modules")
+    ) {
+      return {
+        ok: false,
+        offendingPath: relPath,
+        reason:
+          `staged path "${relPath}" is inside a dependency folder (node_modules). ` +
+          `Dependency folders must never be committed — add "node_modules" (bare, ` +
+          `no trailing slash) to .gitignore so both directory and symlink forms ` +
+          `are excluded`,
+      };
+    }
+
+    const absPath = path.isAbsolute(relPath)
+      ? relPath
+      : path.join(targetRepoRoot, relPath);
+
+    // (a) Symlink check
+    try {
+      const stat = await lstat(absPath);
+      if (stat.isSymbolicLink()) {
+        return {
+          ok: false,
+          offendingPath: relPath,
+          reason:
+            `staged path "${relPath}" is a symlink. Symlinks to machine-local ` +
+            `dependency folders (e.g. a node_modules symlink) bypass the ` +
+            `"node_modules/" gitignore rule (which only ignores directories) and ` +
+            `would break on any other machine. Remove the symlink before opening a PR`,
+        };
+      }
+    } catch {
+      // lstat failed (file missing, permission error) — skip, not our concern
+    }
+
+    // (c) Absolute-machine-path-in-file check — only for build/dependency artefacts
+    if (isBuildArtifactPath(relPath)) {
+      try {
+        const content = await readFile(absPath);
+        if (MACHINE_ABSOLUTE_PATH_REGEX.test(content)) {
+          return {
+            ok: false,
+            offendingPath: relPath,
+            reason:
+              `staged build/dependency artefact "${relPath}" contains a ` +
+              `machine-specific absolute path (matching /Users/<name>/ or ` +
+              `/home/<name>/). This path is only valid on the local machine and ` +
+              `would cause the build to fail on any other machine. Regenerate ` +
+              `the artefact after removing any local node_modules symlinks`,
+          };
+        }
+      } catch {
+        // readFile failed — skip
+      }
+    }
+  }
+
+  return { ok: true };
 }
