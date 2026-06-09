@@ -36590,7 +36590,7 @@ async function checkSharedRootLeak(opts) {
   const leakedPaths = dirtyInRoot.filter((p) => committedSet.has(p));
   return { leaked: leakedPaths.length > 0, paths: leakedPaths, sharedRootPath: sharedRoot };
 }
-var MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"']+\//;
+var MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"'<>]+\//;
 function isBuildArtifactPath(p) {
   const normalised = p.replace(/\\/g, "/");
   if (/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(normalised)) {
@@ -36633,7 +36633,7 @@ async function checkStagedArtifactLeakGate(opts) {
           return {
             ok: false,
             offendingPath: relPath,
-            reason: `staged build/dependency artefact "${relPath}" contains a machine-specific absolute path (matching /Users/<name>/ or /home/<name>/). This path is only valid on the local machine and would cause the build to fail on any other machine. Regenerate the artefact after removing any local node_modules symlinks`
+            reason: `staged build/dependency artefact "${relPath}" contains a machine-specific absolute path (home-directory path detected \u2014 matches the pattern for macOS /Users or Linux /home directories). This path is only valid on the local machine and would cause the build to fail on any other machine. Regenerate the artefact after removing any local node_modules symlinks`
           };
         }
       } catch {
@@ -38087,6 +38087,7 @@ function isEnoent7(err) {
 // src/tools/claim-next-story.ts
 var QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 var WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
+var WAITING_ON_UNMERGED_OVERLAP_LINE = "WAITING \u2014 ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
 async function claimNextStory(opts) {
   const { targetRepoRoot, sessionUlid } = opts;
   const chatLog = [];
@@ -38094,6 +38095,7 @@ async function claimNextStory(opts) {
   const readyCandidates = todos.filter((c3) => c3.depsReady && c3.ready);
   const overlapUniverse = readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
   const eligible = [];
+  const heldOnUnmergedOverlapRefs = [];
   for (const c3 of readyCandidates) {
     if (c3.depends_on.length > 0) {
       const allMerged = await areDependenciesMerged({
@@ -38111,11 +38113,25 @@ async function claimNextStory(opts) {
         deps: doneRefs,
         ...opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}
       });
-      if (!overlapMerged) continue;
+      if (!overlapMerged) {
+        heldOnUnmergedOverlapRefs.push(c3.ref);
+        continue;
+      }
     }
     eligible.push(c3);
   }
   if (eligible.length === 0 && inProgressCount === 0) {
+    if (heldOnUnmergedOverlapRefs.length > 0) {
+      const held = heldOnUnmergedOverlapRefs.join(", ");
+      chatLog.push(
+        `${WAITING_ON_UNMERGED_OVERLAP_LINE} Held: ${held}`
+      );
+      return {
+        next: "waiting-on-unmerged-overlap",
+        heldRefs: heldOnUnmergedOverlapRefs,
+        chatLog
+      };
+    }
     chatLog.push(QUEUE_DRAINED_LINE);
     return { next: "queue-drained", chatLog };
   }

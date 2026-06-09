@@ -42,6 +42,14 @@ export const QUEUE_DRAINED_LINE =
 export const WAITING_ON_IN_PROGRESS_LINE =
   "waiting on in-progress work — no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
 
+/**
+ * Verbatim waiting-on-unmerged-overlap line (Story native:01KTNH6N1E64W0EM3FS5A4B4TP) —
+ * do not paraphrase. Returned when every ready story is parked solely because it
+ * overlaps an approved-but-unmerged PR in done/. NOT a clean drain.
+ */
+export const WAITING_ON_UNMERGED_OVERLAP_LINE =
+  "WAITING — ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
+
 export interface ClaimNextStoryOptions {
   targetRepoRoot: string;
   sessionUlid: string;
@@ -62,7 +70,17 @@ export type ClaimNextStoryResult =
       chatLog: string[];
     }
   | { next: "queue-drained"; chatLog: string[] }
-  | { next: "waiting-on-in-progress"; chatLog: string[] };
+  | { next: "waiting-on-in-progress"; chatLog: string[] }
+  | {
+      /**
+       * Every ready story is parked solely because it overlaps an approved-but-unmerged
+       * pull request in done/. This is NOT a clean drain — the queue is not empty.
+       * `heldRefs` names the held story ref(s) so the operator knows what to wait for.
+       */
+      next: "waiting-on-unmerged-overlap";
+      heldRefs: string[];
+      chatLog: string[];
+    };
 
 /**
  * Claim the next ready story from the to-do queue.
@@ -115,6 +133,12 @@ export async function claimNextStory(
     readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
 
   const eligible: typeof readyCandidates = [];
+  // Track ready candidates that were dropped ONLY by the cited-source overlap gate
+  // against an unmerged done/ sibling (not by declared deps, not by a pending/in-progress
+  // blocker). These are the stories that produce a WAITING/parked outcome rather than a
+  // genuine clean drain.
+  const heldOnUnmergedOverlapRefs: string[] = [];
+
   for (const c of readyCandidates) {
     // (1) declared dependencies
     if (c.depends_on.length > 0) {
@@ -135,7 +159,12 @@ export async function claimNextStory(
         deps: doneRefs,
         ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
       });
-      if (!overlapMerged) continue; // earlier overlapping story approved but not merged
+      if (!overlapMerged) {
+        // This candidate is held SOLELY by an unmerged done/ overlap. Track it so
+        // the drain can report WAITING instead of false "queue-drained".
+        heldOnUnmergedOverlapRefs.push(c.ref);
+        continue;
+      }
     }
 
     eligible.push(c);
@@ -143,6 +172,20 @@ export async function claimNextStory(
 
   // Queue-drained check: no eligible candidates AND no in-progress.
   if (eligible.length === 0 && inProgressCount === 0) {
+    // If EVERY non-eligible ready candidate was dropped solely by the cited-source
+    // overlap gate against an unmerged done/ PR, we must NOT report a clean drain —
+    // the queue is not empty. Return the WAITING/parked outcome naming the held refs.
+    if (heldOnUnmergedOverlapRefs.length > 0) {
+      const held = heldOnUnmergedOverlapRefs.join(", ");
+      chatLog.push(
+        `${WAITING_ON_UNMERGED_OVERLAP_LINE} Held: ${held}`,
+      );
+      return {
+        next: "waiting-on-unmerged-overlap",
+        heldRefs: heldOnUnmergedOverlapRefs,
+        chatLog,
+      };
+    }
     chatLog.push(QUEUE_DRAINED_LINE);
     return { next: "queue-drained", chatLog };
   }

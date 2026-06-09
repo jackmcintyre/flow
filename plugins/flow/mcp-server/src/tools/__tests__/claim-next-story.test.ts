@@ -26,6 +26,7 @@ import {
   claimNextStory,
   QUEUE_DRAINED_LINE,
   WAITING_ON_IN_PROGRESS_LINE,
+  WAITING_ON_UNMERGED_OVERLAP_LINE,
 } from "../claim-next-story.js";
 import { markStoryReady } from "../mark-story-ready.js";
 import {
@@ -525,6 +526,9 @@ describe("cited-source overlap gate", () => {
     // A (earlier ref) is approved into done/ but its PR is unmerged; B (later
     // ref) cites the same file with no declared dependency. B must NOT be
     // claimed — it would build from a main lacking A's change and collide.
+    // Story native:01KTNH6N1E64W0EM3FS5A4B4TP: this case now returns
+    // waiting-on-unmerged-overlap (NOT queue-drained) so the operator sees the
+    // correct WAITING/parked signal rather than a false clean-drain all-clear.
     await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
 
@@ -534,8 +538,12 @@ describe("cited-source overlap gate", () => {
       isDependencyMerged: async () => false, // A's PR not merged
     });
 
-    // Nothing else claimable, nothing in-progress → queue-drained; B stays put.
-    expect(result.next).toBe("queue-drained");
+    // B is held by the overlap gate — returns WAITING, NOT queue-drained.
+    expect(result.next).toBe("waiting-on-unmerged-overlap");
+    if (result.next !== "waiting-on-unmerged-overlap") return;
+    expect(result.heldRefs).toContain(STORY_REF_B);
+
+    // B is still in to-do/ (held, not claimed).
     const stillTodo = await fs
       .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
       .then(() => true)
@@ -681,6 +689,127 @@ describe("AC3 — single-worker behaviour unchanged", () => {
     if (r1.next !== "spawn-dev") return;
     expect(r1.ref).toBe(STORY_REF_A);
     expect(r1.chatLog[0]).toBe(`claiming ${STORY_REF_A} — Test story ${STORY_REF_A}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING/parked when a ready story
+// is held solely by an unmerged overlapping PR in done/.
+//
+// Three AC boundaries:
+//   AC1 — held-on-unmerged-overlap: returns waiting-on-unmerged-overlap (drained:false)
+//          naming the held story ref, NOT a clean full-drain all-clear.
+//   AC2 — genuinely-empty: genuinely empty queue still returns queue-drained (drained:true),
+//          unchanged.
+//   AC3 — hold-still-fires: the overlap hold decision itself is preserved.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story held for unmerged overlapping PR", () => {
+  const SHARED_FILE = "plugins/flow/mcp-server/src/tools/claim-next-story.ts";
+
+  // AC1: the only ready story is held because it overlaps an unmerged done/ sibling.
+  it("AC1 — returns waiting-on-unmerged-overlap (not queue-drained) and names the held ref", async () => {
+    // STORY_REF_A (earlier) is approved into done/ but its PR is NOT merged.
+    // STORY_REF_B (later, ready) cites the same file — it must be held, not
+    // claimed, and the result must NOT be queue-drained.
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false, // A's PR not merged
+    });
+
+    // Must NOT be queue-drained.
+    expect(result.next).toBe("waiting-on-unmerged-overlap");
+    if (result.next !== "waiting-on-unmerged-overlap") return;
+
+    // Must name the held ref.
+    expect(result.heldRefs).toContain(STORY_REF_B);
+
+    // chatLog must carry the WAITING line.
+    expect(result.chatLog.some((l) => l.startsWith(WAITING_ON_UNMERGED_OVERLAP_LINE))).toBe(true);
+
+    // The held story must still be in to-do/ (never claimed).
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  // AC2: genuinely empty queue still returns queue-drained — the clean drain is unchanged.
+  it("AC2 — genuinely empty queue still returns queue-drained (drained path unchanged)", async () => {
+    // No stories at all — the queue is truly empty.
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+    });
+
+    expect(result.next).toBe("queue-drained");
+    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+
+  it("AC2 — returns queue-drained (not waiting) when all ready stories have unmet declared deps (no overlap hold)", async () => {
+    // A story blocked by an unmet declared dep — not an overlap hold.
+    // This must still be queue-drained, not waiting-on-unmerged-overlap.
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { depends_on: [DEP_REF] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false,
+    });
+
+    expect(result.next).toBe("queue-drained");
+    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+
+  // AC3: the overlap hold decision itself is unchanged — the held story is NOT claimed.
+  it("AC3 — the overlap hold decision is preserved: the held story is not claimed", async () => {
+    // Same setup as AC1 — overlap hold must still prevent claiming B.
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => false,
+    });
+
+    // The hold decision fires — we did NOT get spawn-dev.
+    expect(result.next).not.toBe("spawn-dev");
+
+    // B was never moved to in-progress.
+    const inProgressExists = await fs
+      .stat(path.join(inProgressDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(inProgressExists).toBe(false);
+
+    // B is still in to-do/ (held, not discarded).
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  it("once the overlapping PR merges, the held story is claimed normally", async () => {
+    // Same setup but now the PR merges → B is immediately claimable.
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => true, // A's PR merged → B may build
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
   });
 });
 
