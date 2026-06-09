@@ -35,6 +35,7 @@ import { PrePrBuildFailedError } from "../../errors.js";
 import {
   PROJECT_BUILD_COMMAND,
   PROJECT_BUILD_ARGS,
+  DEFAULT_BUILD_TEST_TIMEOUT_MS,
   deriveProjectBuildCwd,
 } from "../../lib/run-project-build.js";
 
@@ -124,6 +125,8 @@ interface RecordedCall {
 
 function makeStubExeca(opts: {
   buildShouldFail?: boolean;
+  /** Simulate a timeout: pnpm returns exitCode 1 with timedOut:true */
+  buildTimedOut?: boolean;
   recorded: RecordedCall[];
 }): ReturnType<typeof vi.fn> {
   return vi.fn(
@@ -131,7 +134,7 @@ function makeStubExeca(opts: {
       cmd: string,
       args: readonly string[],
       options?: Record<string, unknown>,
-    ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+    ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }> => {
       opts.recorded.push({
         cmd,
         args: [...args],
@@ -139,6 +142,15 @@ function makeStubExeca(opts: {
       });
 
       if (cmd === "pnpm") {
+        if (opts.buildTimedOut) {
+          // Simulate a timeout: execa terminates the process and sets timedOut:true.
+          return {
+            stdout: "",
+            stderr: "",
+            exitCode: 1,
+            timedOut: true,
+          };
+        }
         if (opts.buildShouldFail) {
           return {
             stdout: "src/sibling.ts(3,5): build stdout marker",
@@ -356,5 +368,134 @@ describe("AC3 — the gate runs the project's full build in the dev's working di
 
   it("deriveProjectBuildCwd joins plugins/flow onto the dev working dir", () => {
     expect(deriveProjectBuildCwd("/tmp/wt")).toBe(path.join("/tmp/wt", "plugins", "flow"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KTN5E6T75XKDX8A0SGBVPRYS — time-budget gate
+//
+// AC1 — a hung or crawling build past its budget ends promptly, the story
+//         is reported as failed with a clear timed-out reason, shown through
+//         the same channel (PrePrBuildFailedError) as any other build failure.
+// AC2 — a within-budget build is completely unaffected.
+// ---------------------------------------------------------------------------
+
+describe("AC1 (timeout) — a build that exceeds the budget fails with a clear timed-out reason (integration)", () => {
+  it("surfaces PrePrBuildFailedError with timedOut:true and a human-readable timeout reason", async () => {
+    const recorded: RecordedCall[] = [];
+    // Simulate a hung build: pnpm returns with timedOut:true.
+    const spy = makeStubExeca({ buildTimedOut: true, recorded });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        buildTestTimeoutMs: 5000,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    // The error is surfaced through the same channel as any other build failure.
+    expect(caught).toBeInstanceOf(PrePrBuildFailedError);
+    const e = caught as PrePrBuildFailedError;
+
+    // The error carries timedOut:true so callers can distinguish a timeout
+    // from a compile error.
+    expect(e.timedOut).toBe(true);
+
+    // The error message includes a clear timed-out reason naming the budget.
+    expect(e.message).toContain("timed out");
+    expect(e.message).toContain("5s");
+
+    // No PR was opened — the timeout routes through the same no-PR channel.
+    const ghCalls = recorded.filter((c) => c.cmd === "gh");
+    expect(ghCalls).toHaveLength(0);
+  });
+
+  it("does NOT open a PR when the build times out — same channel as a compile-error failure", async () => {
+    const recorded: RecordedCall[] = [];
+    const spy = makeStubExeca({ buildTimedOut: true, recorded });
+
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        buildTestTimeoutMs: 3000,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+    } catch {
+      // expected
+    }
+
+    // Verify NO gh call was made — the build timeout gate behaves exactly
+    // like a compile-error: no PR, no push.
+    const ghCalls = recorded.filter((c) => c.cmd === "gh");
+    expect(ghCalls).toHaveLength(0);
+    const pushCalls = recorded.filter(
+      (c) => c.cmd === "git" && c.args[2] === "push",
+    );
+    expect(pushCalls).toHaveLength(0);
+  });
+});
+
+describe("AC2 (timeout) — a within-budget build is completely unaffected (unit)", () => {
+  it("a build that completes before the budget opens the PR exactly as before", async () => {
+    const recorded: RecordedCall[] = [];
+    // pnpm returns success (no timeout, no failure).
+    const spy = makeStubExeca({ buildShouldFail: false, recorded });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      // A tight budget is set, but since the (stubbed) build returns immediately,
+      // it is never hit — the within-budget path is entirely unaffected.
+      buildTestTimeoutMs: 500,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    // The PR was opened normally.
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+
+    // PR-create was invoked exactly once — within-budget behaviour unchanged.
+    const ghPrCreateCalls = recorded.filter(
+      (c) => c.cmd === "gh" && c.args.includes("create"),
+    );
+    expect(ghPrCreateCalls).toHaveLength(1);
+  });
+
+  it("DEFAULT_BUILD_TEST_TIMEOUT_MS is a positive number (sensible default exists)", () => {
+    expect(DEFAULT_BUILD_TEST_TIMEOUT_MS).toBeGreaterThan(0);
+    // The default must be comfortably above a normal full-run duration (~10 min)
+    // — at minimum 10 minutes — and no more than 60 minutes so a hung build
+    // fails well before it can stall for an hour.
+    const TEN_MINUTES = 10 * 60 * 1000;
+    const ONE_HOUR = 60 * 60 * 1000;
+    expect(DEFAULT_BUILD_TEST_TIMEOUT_MS).toBeGreaterThanOrEqual(TEN_MINUTES);
+    expect(DEFAULT_BUILD_TEST_TIMEOUT_MS).toBeLessThan(ONE_HOUR);
   });
 });

@@ -959,6 +959,15 @@ export class PrePrBuildFailedError extends DomainError {
   readonly buildCwd: string;
   readonly stdout: string;
   readonly stderr: string;
+  /**
+   * `true` when the build was terminated because it exceeded the time budget.
+   * The `message` includes a human-readable "timed out after X s" reason so the
+   * operator knows to investigate a hung build rather than a compile error.
+   * (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)
+   */
+  readonly timedOut: boolean;
+  /** The time budget that was applied when `timedOut` is `true`. */
+  readonly timeoutMs: number;
 
   constructor(opts: {
     exitCode: number;
@@ -966,10 +975,20 @@ export class PrePrBuildFailedError extends DomainError {
     buildCwd: string;
     stdout: string;
     stderr: string;
+    timedOut?: boolean;
+    timeoutMs?: number;
   }) {
+    const timedOut = opts.timedOut ?? false;
+    const timeoutMs = opts.timeoutMs ?? 0;
+    const timeoutDetail = timedOut
+      ? `Build timed out after ${Math.round(timeoutMs / 1000)}s — the budget was exceeded. ` +
+        `Investigate whether the build is hung or unusually slow; consider raising ` +
+        `buildTestTimeoutMs if the project genuinely needs a longer budget. `
+      : "";
     super(
       `pre-PR build gate failed: '${opts.buildCommand}' (cwd: ${opts.buildCwd}) ` +
         `exited with code ${opts.exitCode}. No pull request was opened. ` +
+        timeoutDetail +
         `Fix the build and re-run — the gate runs the project's full build ` +
         `(the same whole-project type-check CI runs), so it catches breakage in ` +
         `files the story did not touch. ` +
@@ -981,6 +1000,8 @@ export class PrePrBuildFailedError extends DomainError {
     this.buildCwd = opts.buildCwd;
     this.stdout = opts.stdout;
     this.stderr = opts.stderr;
+    this.timedOut = timedOut;
+    this.timeoutMs = timeoutMs;
   }
 }
 
@@ -2250,6 +2271,15 @@ export class PrePrTestFailedError extends DomainError {
   readonly testCwd: string;
   readonly stdout: string;
   readonly stderr: string;
+  /**
+   * `true` when the test run was terminated because it exceeded the time budget.
+   * The `message` includes a human-readable "timed out after X s" reason.
+   * Mirrors `PrePrBuildFailedError.timedOut`.
+   * (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)
+   */
+  readonly timedOut: boolean;
+  /** The time budget that was applied when `timedOut` is `true`. */
+  readonly timeoutMs: number;
 
   constructor(opts: {
     exitCode: number;
@@ -2257,10 +2287,20 @@ export class PrePrTestFailedError extends DomainError {
     testCwd: string;
     stdout: string;
     stderr: string;
+    timedOut?: boolean;
+    timeoutMs?: number;
   }) {
+    const timedOut = opts.timedOut ?? false;
+    const timeoutMs = opts.timeoutMs ?? 0;
+    const timeoutDetail = timedOut
+      ? `Test run timed out after ${Math.round(timeoutMs / 1000)}s — the budget was exceeded. ` +
+        `Investigate whether the test suite is hung or unusually slow; consider raising ` +
+        `buildTestTimeoutMs if the project genuinely needs a longer budget. `
+      : "";
     super(
       `pre-PR test gate failed: '${opts.testCommand}' (cwd: ${opts.testCwd}) ` +
         `exited with code ${opts.exitCode}. No pull request was opened. ` +
+        timeoutDetail +
         `Fix the failing tests and re-run — the gate runs the project's full ` +
         `test suite so it catches regressions in files the story did not touch. ` +
         `stderr: ${opts.stderr || "(empty)"}. ` +
@@ -2272,5 +2312,7 @@ export class PrePrTestFailedError extends DomainError {
     this.testCwd = opts.testCwd;
     this.stdout = opts.stdout;
     this.stderr = opts.stderr;
+    this.timedOut = timedOut;
+    this.timeoutMs = timeoutMs;
   }
 }

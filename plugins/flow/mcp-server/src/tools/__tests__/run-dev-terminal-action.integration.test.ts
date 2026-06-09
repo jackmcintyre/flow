@@ -28,7 +28,9 @@ import {
   NegativeCapabilityDeniedError,
   PrePrLeakDetectedError,
   RebaseConflictError,
+  PrePrBuildFailedError,
 } from "../../errors.js";
+import { DEFAULT_BUILD_TEST_TIMEOUT_MS } from "../../lib/run-project-build.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -152,6 +154,10 @@ function makeStubExeca(opts: {
   ghStdout?: string;
   buildShouldFail?: boolean;
   testShouldFail?: boolean;
+  /** Simulate a build timeout: pnpm build returns exitCode 1 with timedOut:true */
+  buildTimedOut?: boolean;
+  /** Simulate a test timeout: pnpm test returns exitCode 1 with timedOut:true */
+  testTimedOut?: boolean;
   /**
    * Story native:01KT40THFTS10F9PT37KCW9PF4: when set, `git rebase <onto>`
    * returns a non-zero exit carrying this conflict output, so the wrapper aborts
@@ -165,7 +171,7 @@ function makeStubExeca(opts: {
       cmd: string,
       args: readonly string[],
       options?: Record<string, unknown>,
-    ): Promise<ExecaResult> => {
+    ): Promise<ExecaResult & { timedOut?: boolean }> => {
       // Story 8.17 / native:01KT3ER5E9ACCERHAEJ5NM94TH: the pre-PR build gate
       // spawns `pnpm build` and the test gate spawns `pnpm ... test`. Stub both
       // so the integration tests never spawn a real build/test run; default to
@@ -173,10 +179,16 @@ function makeStubExeca(opts: {
       if (cmd === "pnpm") {
         const isTestRun = args.some((a) => /test|vitest/.test(a));
         if (isTestRun) {
+          if (opts.testTimedOut) {
+            return { stdout: "", stderr: "", exitCode: 1, timedOut: true };
+          }
           if (opts.testShouldFail) {
             return { stdout: "", stderr: "1 failed", exitCode: 1 };
           }
           return { stdout: "test ok", stderr: "", exitCode: 0 };
+        }
+        if (opts.buildTimedOut) {
+          return { stdout: "", stderr: "", exitCode: 1, timedOut: true };
         }
         if (opts.buildShouldFail) {
           return { stdout: "", stderr: "tsc: error TS2339", exitCode: 1 };
@@ -1490,5 +1502,102 @@ describe("runDevTerminalAction — pre-PR leak gate (Story native:01KT47430Q4C73
     } finally {
       await wt.cleanup();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KTN5E6T75XKDX8A0SGBVPRYS — time budget (AC3)
+//
+// AC3: No per-run override → DEFAULT_BUILD_TEST_TIMEOUT_MS applies.
+//       Per-run override → the override is honoured instead.
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — time budget (Story native:01KTN5E6T75XKDX8A0SGBVPRYS AC3)", () => {
+  it("AC3a: applies the default budget when no override is supplied — a timed-out build is reported as a build failure", async () => {
+    // A timed-out build must surface PrePrBuildFailedError with timedOut:true,
+    // regardless of whether an override was supplied. When no override is given,
+    // the default budget is used internally.
+    const spy = makeStubExeca({ buildTimedOut: true });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        // No buildTestTimeoutMs — the default applies.
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(PrePrBuildFailedError);
+    const e = caught as PrePrBuildFailedError;
+    expect(e.timedOut).toBe(true);
+    // timeoutMs should reflect the default budget.
+    expect(e.timeoutMs).toBe(DEFAULT_BUILD_TEST_TIMEOUT_MS);
+  });
+
+  it("AC3b: honours a per-run override — the override budget is reflected in the error", async () => {
+    const CUSTOM_TIMEOUT = 30_000; // 30 s override
+    const spy = makeStubExeca({ buildTimedOut: true });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        buildTestTimeoutMs: CUSTOM_TIMEOUT,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(PrePrBuildFailedError);
+    const e = caught as PrePrBuildFailedError;
+    expect(e.timedOut).toBe(true);
+    // The override budget is reflected in the error so the operator can see
+    // which budget was in effect when the timeout fired.
+    expect(e.timeoutMs).toBe(CUSTOM_TIMEOUT);
+    // The message names the override budget in seconds.
+    expect(e.message).toContain("30s");
+  });
+
+  it("AC3c: a within-budget run (no timeout) is not affected by the budget being set", async () => {
+    // Even when a budget is configured, a healthy run that completes before the
+    // budget is completely unaffected — the PR opens normally.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      buildTestTimeoutMs: 60_000,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
   });
 });

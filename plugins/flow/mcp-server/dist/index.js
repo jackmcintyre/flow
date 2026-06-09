@@ -34838,15 +34838,29 @@ var PrePrBuildFailedError = class extends DomainError {
   buildCwd;
   stdout;
   stderr;
+  /**
+   * `true` when the build was terminated because it exceeded the time budget.
+   * The `message` includes a human-readable "timed out after X s" reason so the
+   * operator knows to investigate a hung build rather than a compile error.
+   * (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)
+   */
+  timedOut;
+  /** The time budget that was applied when `timedOut` is `true`. */
+  timeoutMs;
   constructor(opts) {
+    const timedOut = opts.timedOut ?? false;
+    const timeoutMs = opts.timeoutMs ?? 0;
+    const timeoutDetail = timedOut ? `Build timed out after ${Math.round(timeoutMs / 1e3)}s \u2014 the budget was exceeded. Investigate whether the build is hung or unusually slow; consider raising buildTestTimeoutMs if the project genuinely needs a longer budget. ` : "";
     super(
-      `pre-PR build gate failed: '${opts.buildCommand}' (cwd: ${opts.buildCwd}) exited with code ${opts.exitCode}. No pull request was opened. Fix the build and re-run \u2014 the gate runs the project's full build (the same whole-project type-check CI runs), so it catches breakage in files the story did not touch. stderr: ${opts.stderr || "(empty)"}. stdout: ${opts.stdout || "(empty)"}. (Story 8.17)`
+      `pre-PR build gate failed: '${opts.buildCommand}' (cwd: ${opts.buildCwd}) exited with code ${opts.exitCode}. No pull request was opened. ` + timeoutDetail + `Fix the build and re-run \u2014 the gate runs the project's full build (the same whole-project type-check CI runs), so it catches breakage in files the story did not touch. stderr: ${opts.stderr || "(empty)"}. stdout: ${opts.stdout || "(empty)"}. (Story 8.17)`
     );
     this.exitCode = opts.exitCode;
     this.buildCommand = opts.buildCommand;
     this.buildCwd = opts.buildCwd;
     this.stdout = opts.stdout;
     this.stderr = opts.stderr;
+    this.timedOut = timedOut;
+    this.timeoutMs = timeoutMs;
   }
 };
 var RebaseConflictError = class extends DomainError {
@@ -35338,15 +35352,29 @@ var PrePrTestFailedError = class extends DomainError {
   testCwd;
   stdout;
   stderr;
+  /**
+   * `true` when the test run was terminated because it exceeded the time budget.
+   * The `message` includes a human-readable "timed out after X s" reason.
+   * Mirrors `PrePrBuildFailedError.timedOut`.
+   * (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)
+   */
+  timedOut;
+  /** The time budget that was applied when `timedOut` is `true`. */
+  timeoutMs;
   constructor(opts) {
+    const timedOut = opts.timedOut ?? false;
+    const timeoutMs = opts.timeoutMs ?? 0;
+    const timeoutDetail = timedOut ? `Test run timed out after ${Math.round(timeoutMs / 1e3)}s \u2014 the budget was exceeded. Investigate whether the test suite is hung or unusually slow; consider raising buildTestTimeoutMs if the project genuinely needs a longer budget. ` : "";
     super(
-      `pre-PR test gate failed: '${opts.testCommand}' (cwd: ${opts.testCwd}) exited with code ${opts.exitCode}. No pull request was opened. Fix the failing tests and re-run \u2014 the gate runs the project's full test suite so it catches regressions in files the story did not touch. stderr: ${opts.stderr || "(empty)"}. stdout: ${opts.stdout || "(empty)"}. (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)`
+      `pre-PR test gate failed: '${opts.testCommand}' (cwd: ${opts.testCwd}) exited with code ${opts.exitCode}. No pull request was opened. ` + timeoutDetail + `Fix the failing tests and re-run \u2014 the gate runs the project's full test suite so it catches regressions in files the story did not touch. stderr: ${opts.stderr || "(empty)"}. stdout: ${opts.stdout || "(empty)"}. (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)`
     );
     this.exitCode = opts.exitCode;
     this.testCommand = opts.testCommand;
     this.testCwd = opts.testCwd;
     this.stdout = opts.stdout;
     this.stderr = opts.stderr;
+    this.timedOut = timedOut;
+    this.timeoutMs = timeoutMs;
   }
 };
 
@@ -51598,6 +51626,7 @@ async function loadRolePermissions(opts) {
 
 // src/lib/run-project-build.ts
 import * as path61 from "node:path";
+var DEFAULT_BUILD_TEST_TIMEOUT_MS = 20 * 60 * 1e3;
 var PROJECT_BUILD_COMMAND = "pnpm";
 var PROJECT_BUILD_ARGS = ["build"];
 function deriveProjectBuildCwd(devWorkingDir) {
@@ -51606,16 +51635,21 @@ function deriveProjectBuildCwd(devWorkingDir) {
 async function runProjectBuild(opts) {
   const execaImpl = opts.execaImpl ?? execa;
   const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
   const result = await execaImpl(PROJECT_BUILD_COMMAND, [...PROJECT_BUILD_ARGS], {
     cwd,
-    reject: false
+    reject: false,
+    ...timeoutMs > 0 ? { timeout: timeoutMs } : {}
   });
+  const timedOut = "timedOut" in result && typeof result.timedOut === "boolean" ? result.timedOut : false;
   return {
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode: timedOut ? typeof result.exitCode === "number" && result.exitCode !== 0 ? result.exitCode : 1 : typeof result.exitCode === "number" ? result.exitCode : 1,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     cwd,
-    commandLine: `${PROJECT_BUILD_COMMAND} ${PROJECT_BUILD_ARGS.join(" ")}`
+    commandLine: `${PROJECT_BUILD_COMMAND} ${PROJECT_BUILD_ARGS.join(" ")}`,
+    timedOut,
+    timeoutMs
   };
 }
 var PROJECT_TEST_COMMAND = "pnpm";
@@ -51623,16 +51657,21 @@ var PROJECT_TEST_ARGS = ["test"];
 async function runProjectTests(opts) {
   const execaImpl = opts.execaImpl ?? execa;
   const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
   const result = await execaImpl(PROJECT_TEST_COMMAND, [...PROJECT_TEST_ARGS], {
     cwd,
-    reject: false
+    reject: false,
+    ...timeoutMs > 0 ? { timeout: timeoutMs } : {}
   });
+  const timedOut = "timedOut" in result && typeof result.timedOut === "boolean" ? result.timedOut : false;
   return {
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode: timedOut ? typeof result.exitCode === "number" && result.exitCode !== 0 ? result.exitCode : 1 : typeof result.exitCode === "number" ? result.exitCode : 1,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     cwd,
-    commandLine: `${PROJECT_TEST_COMMAND} ${PROJECT_TEST_ARGS.join(" ")}`
+    commandLine: `${PROJECT_TEST_COMMAND} ${PROJECT_TEST_ARGS.join(" ")}`,
+    timedOut,
+    timeoutMs
   };
 }
 
@@ -51651,6 +51690,7 @@ async function runDevTerminalAction(opts) {
   } = opts;
   const base = opts.base ?? "main";
   const useWorktree = opts.worktree !== false;
+  const buildTestTimeoutMs = opts.buildTestTimeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
   const execaImpl = opts.execaImpl;
   if (!CONVENTIONAL_COMMIT_TYPES.includes(type)) {
     throw new ConventionalCommitTypeUnknownError({
@@ -51714,9 +51754,11 @@ async function runDevTerminalAction(opts) {
     }
     const buildResult = await runProjectBuild({
       devWorkingDir: gitRoot,
+      timeoutMs: buildTestTimeoutMs,
       ...execaImpl ? { execaImpl } : {}
     });
     if (buildResult.exitCode !== 0) {
+      const buildObserved = buildResult.timedOut ? `pre-PR build gate timed out after ${Math.round(buildResult.timeoutMs / 1e3)}s (budget exceeded)` : `pre-PR build gate failed (exit ${buildResult.exitCode})`;
       await emitFriction({
         targetRepoRoot,
         kind: "forced-fallback",
@@ -51724,21 +51766,25 @@ async function runDevTerminalAction(opts) {
         session_id: sessionUlid,
         story_id: ref,
         expected: "pnpm build exits 0 (no type errors)",
-        observed: `pre-PR build gate failed (exit ${buildResult.exitCode})`
+        observed: buildObserved
       });
       throw new PrePrBuildFailedError({
         exitCode: buildResult.exitCode,
         buildCommand: buildResult.commandLine,
         buildCwd: buildResult.cwd,
         stdout: buildResult.stdout,
-        stderr: buildResult.stderr
+        stderr: buildResult.stderr,
+        timedOut: buildResult.timedOut,
+        timeoutMs: buildResult.timeoutMs
       });
     }
     const testResult = await runProjectTests({
       devWorkingDir: gitRoot,
+      timeoutMs: buildTestTimeoutMs,
       ...execaImpl ? { execaImpl } : {}
     });
     if (testResult.exitCode !== 0) {
+      const testObserved = testResult.timedOut ? `pre-PR test gate timed out after ${Math.round(testResult.timeoutMs / 1e3)}s (budget exceeded)` : `pre-PR test gate failed (exit ${testResult.exitCode})`;
       await emitFriction({
         targetRepoRoot,
         kind: "forced-fallback",
@@ -51746,14 +51792,16 @@ async function runDevTerminalAction(opts) {
         session_id: sessionUlid,
         story_id: ref,
         expected: "pnpm test exits 0 (no failing tests)",
-        observed: `pre-PR test gate failed (exit ${testResult.exitCode})`
+        observed: testObserved
       });
       throw new PrePrTestFailedError({
         exitCode: testResult.exitCode,
         testCommand: testResult.commandLine,
         testCwd: testResult.cwd,
         stdout: testResult.stdout,
-        stderr: testResult.stderr
+        stderr: testResult.stderr,
+        timedOut: testResult.timedOut,
+        timeoutMs: testResult.timeoutMs
       });
     }
     if (useWorktree) {
@@ -55334,7 +55382,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "runDevTerminalAction",
-    description: "Dev subagent terminal action: creates a story branch, commits in conventional-commits format, pushes to origin, and opens a PR via gh pr create with a machine-readable body (story link, ACs checklist mirrored from the spec) followed by a free-form summary. Refuses --no-verify, --force, --force-with-lease unconditionally. Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4.",
+    description: "Dev subagent terminal action: creates a story branch, commits in conventional-commits format, pushes to origin, and opens a PR via gh pr create with a machine-readable body (story link, ACs checklist mirrored from the spec) followed by a free-form summary. Refuses --no-verify, --force, --force-with-lease unconditionally. Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4. buildTestTimeoutMs: optional per-run time budget (ms) for the build/test gates; defaults to 20 min. A hung or crawling build that exceeds the budget is terminated and reported as a build failure with a clear timed-out reason. (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)",
     inputSchema: {
       type: "object",
       properties: {
@@ -55346,7 +55394,11 @@ function registerAllTools(server) {
         summary: { type: "string" },
         manifestPath: { type: "string" },
         sessionUlid: { type: "string" },
-        base: { type: "string" }
+        base: { type: "string" },
+        buildTestTimeoutMs: {
+          type: "number",
+          description: "Per-run time budget (milliseconds) for the build/test gates. Defaults to 1 200 000 (20 min). Set to 0 to disable the budget."
+        }
       },
       required: [
         "targetRepoRoot",
@@ -55369,7 +55421,8 @@ function registerAllTools(server) {
         summary: external_exports.string(),
         manifestPath: external_exports.string().min(1),
         sessionUlid: external_exports.string().min(1),
-        base: external_exports.string().min(1).optional()
+        base: external_exports.string().min(1).optional(),
+        buildTestTimeoutMs: external_exports.number().nonnegative().optional()
       }).parse(args);
       try {
         const result = await runDevTerminalAction(parsed);

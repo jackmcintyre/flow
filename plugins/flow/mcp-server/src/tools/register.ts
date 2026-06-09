@@ -1465,7 +1465,11 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "pushes to origin, and opens a PR via gh pr create with a machine-readable body (story link, ACs " +
       "checklist mirrored from the spec) followed by a free-form summary. " +
       "Refuses --no-verify, --force, --force-with-lease unconditionally. " +
-      "Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4.",
+      "Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4. " +
+      "buildTestTimeoutMs: optional per-run time budget (ms) for the build/test gates; " +
+      "defaults to 20 min. A hung or crawling build that exceeds the budget is terminated " +
+      "and reported as a build failure with a clear timed-out reason. " +
+      "(Story native:01KTN5E6T75XKDX8A0SGBVPRYS)",
     inputSchema: {
       type: "object",
       properties: {
@@ -1478,6 +1482,12 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         manifestPath: { type: "string" },
         sessionUlid: { type: "string" },
         base: { type: "string" },
+        buildTestTimeoutMs: {
+          type: "number",
+          description:
+            "Per-run time budget (milliseconds) for the build/test gates. " +
+            "Defaults to 1 200 000 (20 min). Set to 0 to disable the budget.",
+        },
       },
       required: [
         "targetRepoRoot",
@@ -1502,6 +1512,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           manifestPath: z.string().min(1),
           sessionUlid: z.string().min(1),
           base: z.string().min(1).optional(),
+          buildTestTimeoutMs: z.number().nonnegative().optional(),
         })
         .parse(args);
       try {

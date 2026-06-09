@@ -84,7 +84,7 @@ import { readManifest } from "../lib/manifest-io.js";
 import { devOutcomeFilePath } from "../lib/read-dev-outcome-file.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
-import { runProjectBuild, runProjectTests } from "../lib/run-project-build.js";
+import { runProjectBuild, runProjectTests, DEFAULT_BUILD_TEST_TIMEOUT_MS } from "../lib/run-project-build.js";
 import { execa as defaultExeca } from "execa";
 
 export interface DevTerminalActionResult {
@@ -123,6 +123,14 @@ const ROLE = "generalist-dev";
  *                             `false` to commit in `targetRepoRoot` with
  *                             `git add .` (legacy Story 4.4 path; used by that
  *                             story's integration tests).
+ * @param opts.buildTestTimeoutMs
+ *                             Per-run time budget (milliseconds) for the
+ *                             build/test gates. Defaults to
+ *                             `DEFAULT_BUILD_TEST_TIMEOUT_MS` (20 min). A run
+ *                             that exceeds this budget is terminated and reported
+ *                             as a build failure with a clear timed-out reason.
+ *                             Set to `0` to disable the budget (not recommended).
+ *                             (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)
  * @param opts.execaImpl       Optional test seam (production callers omit this).
  */
 export async function runDevTerminalAction(opts: {
@@ -136,6 +144,8 @@ export async function runDevTerminalAction(opts: {
   sessionUlid: string;
   base?: string;
   worktree?: boolean;
+  /** Per-run time budget for build/test gates. Defaults to `DEFAULT_BUILD_TEST_TIMEOUT_MS`. */
+  buildTestTimeoutMs?: number;
   execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult> {
   const {
@@ -150,6 +160,7 @@ export async function runDevTerminalAction(opts: {
   } = opts;
   const base = opts.base ?? "main";
   const useWorktree = opts.worktree !== false;
+  const buildTestTimeoutMs = opts.buildTestTimeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
   const execaImpl = opts.execaImpl;
 
   // (i) Validate conventional-commits type BEFORE any subprocess spawn.
@@ -280,12 +291,16 @@ export async function runDevTerminalAction(opts: {
     // / PR-create, so a failing build never even reaches origin.
     const buildResult = await runProjectBuild({
       devWorkingDir: gitRoot,
+      timeoutMs: buildTestTimeoutMs,
       ...(execaImpl ? { execaImpl } : {}),
     });
     if (buildResult.exitCode !== 0) {
       // Emit forced-fallback friction before re-raising the build failure.
       // Fail-soft: the original error propagates unchanged whether or not
       // the telemetry write succeeds.
+      const buildObserved = buildResult.timedOut
+        ? `pre-PR build gate timed out after ${Math.round(buildResult.timeoutMs / 1000)}s (budget exceeded)`
+        : `pre-PR build gate failed (exit ${buildResult.exitCode})`;
       await emitFriction({
         targetRepoRoot,
         kind: "forced-fallback",
@@ -293,7 +308,7 @@ export async function runDevTerminalAction(opts: {
         session_id: sessionUlid,
         story_id: ref,
         expected: "pnpm build exits 0 (no type errors)",
-        observed: `pre-PR build gate failed (exit ${buildResult.exitCode})`,
+        observed: buildObserved,
       });
       throw new PrePrBuildFailedError({
         exitCode: buildResult.exitCode,
@@ -301,6 +316,8 @@ export async function runDevTerminalAction(opts: {
         buildCwd: buildResult.cwd,
         stdout: buildResult.stdout,
         stderr: buildResult.stderr,
+        timedOut: buildResult.timedOut,
+        timeoutMs: buildResult.timeoutMs,
       });
     }
 
@@ -312,12 +329,16 @@ export async function runDevTerminalAction(opts: {
     // PrePrTestFailedError and NO PR is opened.
     const testResult = await runProjectTests({
       devWorkingDir: gitRoot,
+      timeoutMs: buildTestTimeoutMs,
       ...(execaImpl ? { execaImpl } : {}),
     });
     if (testResult.exitCode !== 0) {
       // Emit forced-fallback friction before re-raising the test failure.
       // Fail-soft: the original error propagates unchanged whether or not
       // the telemetry write succeeds.
+      const testObserved = testResult.timedOut
+        ? `pre-PR test gate timed out after ${Math.round(testResult.timeoutMs / 1000)}s (budget exceeded)`
+        : `pre-PR test gate failed (exit ${testResult.exitCode})`;
       await emitFriction({
         targetRepoRoot,
         kind: "forced-fallback",
@@ -325,7 +346,7 @@ export async function runDevTerminalAction(opts: {
         session_id: sessionUlid,
         story_id: ref,
         expected: "pnpm test exits 0 (no failing tests)",
-        observed: `pre-PR test gate failed (exit ${testResult.exitCode})`,
+        observed: testObserved,
       });
       throw new PrePrTestFailedError({
         exitCode: testResult.exitCode,
@@ -333,6 +354,8 @@ export async function runDevTerminalAction(opts: {
         testCwd: testResult.cwd,
         stdout: testResult.stdout,
         stderr: testResult.stderr,
+        timedOut: testResult.timedOut,
+        timeoutMs: testResult.timeoutMs,
       });
     }
 
