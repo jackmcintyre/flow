@@ -38031,31 +38031,54 @@ async function claimNextStory(opts) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
     return { next: "waiting-on-in-progress", chatLog };
   }
-  const candidate = eligible[0];
-  const { ref, title } = candidate;
-  const displayTitle = title ?? "<title-unavailable>";
-  chatLog.push(`claiming ${ref} \u2014 ${displayTitle}`);
-  const claimResult = await claimStory({
-    targetRepoRoot,
-    ref,
-    sessionUlid,
-    role: "orchestrator"
+  for (const candidate of eligible) {
+    const { ref, title } = candidate;
+    const displayTitle = title ?? "<title-unavailable>";
+    chatLog.push(`claiming ${ref} \u2014 ${displayTitle}`);
+    let claimSucceeded = false;
+    try {
+      await claimStory({
+        targetRepoRoot,
+        ref,
+        sessionUlid,
+        role: "orchestrator"
+      });
+      claimSucceeded = true;
+    } catch (err) {
+      if (err instanceof ManifestNotFoundError && err.fromState === "to-do") {
+        chatLog.push(
+          `${ref} already claimed by another worker \u2014 skipping to next candidate`
+        );
+        continue;
+      }
+      throw err;
+    }
+    if (claimSucceeded) {
+      const manifestPath = path39.resolve(
+        targetRepoRoot,
+        ".flow",
+        "state",
+        "in-progress",
+        `${ref}.yaml`
+      );
+      return {
+        next: "spawn-dev",
+        ref,
+        title: displayTitle,
+        manifestPath,
+        chatLog
+      };
+    }
+  }
+  const { inProgressCount: refreshedInProgress } = await listClaimableTodos({
+    targetRepoRoot
   });
-  const manifestPath = path39.resolve(
-    targetRepoRoot,
-    ".flow",
-    "state",
-    "in-progress",
-    `${ref}.yaml`
-  );
-  void claimResult;
-  return {
-    next: "spawn-dev",
-    ref,
-    title: displayTitle,
-    manifestPath,
-    chatLog
-  };
+  if (refreshedInProgress > 0) {
+    chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    return { next: "waiting-on-in-progress", chatLog };
+  }
+  chatLog.push(QUEUE_DRAINED_LINE);
+  return { next: "queue-drained", chatLog };
 }
 
 // src/tools/process-dev-transcript.ts
