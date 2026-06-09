@@ -17,7 +17,7 @@ Nothing you propose here can be built until it has been judged and blessed. A dr
 This seam reuses the existing native-authoring machinery rather than rebuilding it:
 - the draft is written by the same `writeNativeStory` path the planner uses,
 - validated by the same authoring-time discipline checks (Story 3.5), enforced **fail-closed at the write tool** — a violating draft is impossible, not merely discouraged,
-- materialised into the backlog by the same `/flow:scan`,
+- **auto-materialised into the backlog immediately** by `writeNativeStory` itself — no separate `/flow:scan` step is needed after authoring,
 - defaulted **not-ready** by the Story 9.1 brake.
 
 What is new is this thin operator surface plus a lean single-draft author subagent. The author is deliberately simpler than the full planner: one feature in, one draft out — no four-step elicitation loop, no whole-backlog review. For an interactive multi-story planning conversation, use `/flow:plan` instead.
@@ -46,7 +46,7 @@ A target repo with `.flow/config.yaml` resolved to a **`native`** adapter. (The 
 7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report to the operator:
    - the draft's **short handle** (first 8 characters of the ULID for native refs) alongside the full **ref** — e.g. `[01KT1NR9] native:01KT1NR9F6133VHY601SF3BD5N`. Display the short handle as the primary identifier; include the full ref for completeness.
    - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and blessed),
-   - the next step: run `/flow:scan` to materialise the draft into a backlog manifest (if not already), then `/flow:ready` to bless it once it has been judged.
+   - the next step: run `/flow:ready` to bless it once it has been judged. The draft is already in the backlog (materialisation is automatic — no `/flow:scan` is needed). `/flow:scan` remains available to re-sync if the story file is edited directly afterwards.
 
 8. **Inline approval prompt.** If a judge panel grade has been surfaced for the newly drafted story (i.e., `/flow:judge` was run in this same session and its verdict is visible in the conversation), immediately present the grade summary to the operator and ask a single yes/no question before the skill exits:
 

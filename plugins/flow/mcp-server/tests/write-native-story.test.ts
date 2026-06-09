@@ -199,12 +199,15 @@ it("AC5(c) — scanSources creates manifest under .flow/state/to-do/ with adapte
     depends_on: [storyA.ref],
   });
 
-  // Run scanSources.
+  // Run scanSources — both stories were auto-materialised by writeNativeStory
+  // (Story native:01KT49G9B38NZ2QP16GY843KYK), so the manual scan sees them as
+  // unchanged (idempotency invariant). The manifests on disk are the test target.
   const scanResult = await scanSources({ targetRepoRoot: scratch });
 
   expect(scanResult.adapterName).toBe("native");
-  expect(scanResult.createdRefs).toContain(storyA.ref);
-  expect(scanResult.createdRefs).toContain(storyB.ref);
+  // Both refs already materialised → show as unchanged, not created.
+  expect(scanResult.unchangedRefs).toContain(storyA.ref);
+  expect(scanResult.unchangedRefs).toContain(storyB.ref);
 
   // Verify manifest for story A.
   const manifestPathA = path.join(scratch, ".flow", "state", "to-do", `${storyA.ref}.yaml`);
