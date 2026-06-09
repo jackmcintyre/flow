@@ -936,7 +936,7 @@ export async function filterGitIgnoredPaths(opts: {
  * requires at least one non-slash character after the home prefix to avoid a
  * bare `/Users` or `/home` directory name triggering the gate.
  */
-const MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"']+\//;
+const MACHINE_ABSOLUTE_PATH_REGEX = /\/(Users|home)\/[^/\s"'<>]+\//;
 
 /**
  * Paths that are build/dependency artefacts and should be scanned for
@@ -1062,8 +1062,9 @@ export async function checkStagedArtifactLeakGate(opts: {
             offendingPath: relPath,
             reason:
               `staged build/dependency artefact "${relPath}" contains a ` +
-              `machine-specific absolute path (matching /Users/<name>/ or ` +
-              `/home/<name>/). This path is only valid on the local machine and ` +
+              `machine-specific absolute path (home-directory path detected — ` +
+              `matches the pattern for macOS /Users or Linux /home directories). ` +
+              `This path is only valid on the local machine and ` +
               `would cause the build to fail on any other machine. Regenerate ` +
               `the artefact after removing any local node_modules symlinks`,
           };

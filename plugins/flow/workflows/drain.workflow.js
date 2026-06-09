@@ -512,7 +512,16 @@ async function drainWorker(workerId) {
     // 'queue-drained' is the happy unattended path; any other non-spawn-dev
     // outcome (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
     const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${claimIdx}`)
-    if (!claim || claim.next !== 'spawn-dev') { recordReason(claim?.next || claim?._parseError || 'claim-failed'); return }
+    if (!claim || claim.next !== 'spawn-dev') {
+      // waiting-on-unmerged-overlap: a ready story is parked solely because it
+      // overlaps an approved-but-unmerged PR in done/. This is NOT a clean drain —
+      // surface it as WAITING so the operator is not misled into thinking the queue is empty.
+      if (claim?.next === 'waiting-on-unmerged-overlap') {
+        const held = Array.isArray(claim.heldRefs) ? claim.heldRefs.join(', ') : '(unknown)'
+        log(`WAITING — ready story held for an unmerged overlapping pull request. Held: ${held}`)
+      }
+      recordReason(claim?.next || claim?._parseError || 'claim-failed'); return
+    }
     const { ref, title, manifestPath } = claim
     log(`claimed ${ref} — ${title} (worker ${workerId})`)
     // FAST-LANE ROUTING (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): resolve the
@@ -562,7 +571,7 @@ return {
   sessionUlid: SU,
   drainedReason,
   // True ONLY on a genuine full drain (queue emptied). Hitting the cap,
-  // waiting-on-in-progress, or any claim error is NOT a drain.
+  // waiting-on-in-progress, waiting-on-unmerged-overlap, or any claim error is NOT a drain.
   drained: drainedReason === 'queue-drained',
   resumed,
   completed,
