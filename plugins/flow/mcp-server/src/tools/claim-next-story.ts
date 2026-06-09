@@ -32,6 +32,7 @@ import {
   loadOverlapUniverse,
   findOverlapBlockers,
 } from "../lib/cited-source-overlap.js";
+import { ManifestNotFoundError } from "../errors.js";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE =
@@ -153,39 +154,75 @@ export async function claimNextStory(
     return { next: "waiting-on-in-progress", chatLog };
   }
 
-  // Pick the first candidate in ref-alphabetical order (preserved from listTodos).
-  const candidate = eligible[0]!;
-  const { ref, title } = candidate;
-  const displayTitle = title ?? "<title-unavailable>";
+  // Walk the eligible candidates in ref-alphabetical order (preserved from listTodos).
+  // On a lost-race (ManifestNotFoundError from claimStory with fromState "to-do"),
+  // another concurrent worker already claimed this story — skip to the next candidate
+  // and try again rather than halting the run. Any other error is a genuine failure
+  // and propagates immediately to preserve the no-silent-failure contract.
+  for (const candidate of eligible) {
+    const { ref, title } = candidate;
+    const displayTitle = title ?? "<title-unavailable>";
 
-  // Print claiming line BEFORE claim call.
-  chatLog.push(`claiming ${ref} — ${displayTitle}`);
+    // Print claiming line BEFORE claim call.
+    chatLog.push(`claiming ${ref} — ${displayTitle}`);
 
-  // Claim the story atomically.
-  const claimResult = await claimStory({
+    let claimSucceeded = false;
+    try {
+      // Claim the story atomically.
+      await claimStory({
+        targetRepoRoot,
+        ref,
+        sessionUlid,
+        role: "orchestrator",
+      });
+      claimSucceeded = true;
+    } catch (err) {
+      // A ManifestNotFoundError from the to-do/ state means another concurrent
+      // worker already renamed this story out of to-do/ (lost the rename race).
+      // Skip to the next eligible candidate — do NOT halt the run.
+      if (
+        err instanceof ManifestNotFoundError &&
+        err.fromState === "to-do"
+      ) {
+        chatLog.push(
+          `${ref} already claimed by another worker — skipping to next candidate`,
+        );
+        continue;
+      }
+      // Any other error is a genuine claim failure — propagate immediately.
+      throw err;
+    }
+
+    if (claimSucceeded) {
+      // Derive manifest path (absolute — needed by the inner cycle tools).
+      const manifestPath = path.resolve(
+        targetRepoRoot,
+        ".flow",
+        "state",
+        "in-progress",
+        `${ref}.yaml`,
+      );
+
+      return {
+        next: "spawn-dev",
+        ref,
+        title: displayTitle,
+        manifestPath,
+        chatLog,
+      };
+    }
+  }
+
+  // All eligible candidates were lost to concurrent workers. Re-evaluate the
+  // queue state: if anything is now in-progress (claimed by the winners), wait
+  // rather than falsely reporting the queue as drained.
+  const { inProgressCount: refreshedInProgress } = await listClaimableTodos({
     targetRepoRoot,
-    ref,
-    sessionUlid,
-    role: "orchestrator",
   });
-
-  // Derive manifest path (absolute — needed by the inner cycle tools).
-  const manifestPath = path.resolve(
-    targetRepoRoot,
-    ".flow",
-    "state",
-    "in-progress",
-    `${ref}.yaml`,
-  );
-
-  // Sanity-check: the claim result path and derived path should match.
-  void claimResult;
-
-  return {
-    next: "spawn-dev",
-    ref,
-    title: displayTitle,
-    manifestPath,
-    chatLog,
-  };
+  if (refreshedInProgress > 0) {
+    chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    return { next: "waiting-on-in-progress", chatLog };
+  }
+  chatLog.push(QUEUE_DRAINED_LINE);
+  return { next: "queue-drained", chatLog };
 }
