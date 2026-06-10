@@ -771,10 +771,12 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
   });
 });
 
-describe("runDevTerminalAction — manifest not mutated (AC3h)", () => {
-  it("(3h) manifest is bytewise unchanged after successful run", async () => {
-    const before = await fs.readFile(ctx.manifestPath, "utf8");
-
+describe("runDevTerminalAction — manifest PR identifier recorded (AC3h / native:01KTNJ6QVZWVF407QEJPZSDTZK)", () => {
+  it("(3h) pr_number and pr_branch are stamped onto the in-progress manifest after successful run", async () => {
+    // Story native:01KTNJ6QVZWVF407QEJPZSDTZK: runDevTerminalAction now records
+    // the real PR number and branch onto the in-progress manifest so that the
+    // dep-merge-check can use `gh pr view <prNumber>` instead of a title-derived
+    // slug probe (which fails when the real branch name differs from the slug).
     const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
     await runDevTerminalAction({
       targetRepoRoot: ctx.repoRoot,
@@ -789,8 +791,11 @@ describe("runDevTerminalAction — manifest not mutated (AC3h)", () => {
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
+    // FAKE_PR_URL = "https://github.com/owner/repo/pull/42" → prNumber = 42.
     const after = await fs.readFile(ctx.manifestPath, "utf8");
-    expect(after).toBe(before);
+    expect(after).toContain("pr_number: 42");
+    // pr_branch is the buildBranchSlug of {ref, title}.
+    expect(after).toContain("pr_branch:");
   });
 });
 

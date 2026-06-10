@@ -17,10 +17,18 @@
  * and human-merged (medium/high-risk) PRs, and is independent of the merge
  * method (squash / rebase / merge-commit all report the PR as MERGED).
  *
- * The PR is located deterministically: the dev's branch name is a pure
- * function of `{ref, title}` via `buildBranchSlug`, and the dependency's
- * `done/` manifest carries both, so we reproduce the exact head branch and ask
- * `gh pr list --head <branch> --state merged`.
+ * **Primary probe (Story native:01KTNJ6QVZWVF407QEJPZSDTZK):** when the
+ * dependency's `done/` manifest carries a `pr_number` field recorded at
+ * PR-open time by `runDevTerminalAction`, we use `gh pr view <prNumber>`
+ * to ask whether the PR is merged. This survives title changes and manual
+ * ships (where the real branch name differs from the current-title-derived
+ * slug). The recorded `pr_number` is the source of truth.
+ *
+ * **Fallback probe (legacy manifests):** when no `pr_number` is recorded (old
+ * manifests pre-dating the field, or stories shipped before this change), we
+ * reproduce the head branch from `{ref, title}` via `buildBranchSlug` and ask
+ * `gh pr list --head <branch> --state merged` (the original behaviour). This
+ * path is retained so legacy done-manifests do not regress.
  *
  * **Fail-safe:** any failure to *prove* a dependency merged — an un-renderable
  * slug, a `gh` error (missing CLI, auth, network), or unparseable output —
@@ -40,6 +48,14 @@ import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 /**
  * True iff the dependency's PR is merged into the trunk on GitHub.
  *
+ * Primary probe: when `prNumber` is supplied (recorded onto the manifest at
+ * PR-open time), uses `gh pr view <prNumber> --json state` to ask whether
+ * the PR state is `"MERGED"`. This is correct regardless of the branch name.
+ *
+ * Fallback probe: when `prNumber` is absent (legacy manifest), reproduces the
+ * head branch from `{ref, title}` via `buildBranchSlug` and calls
+ * `gh pr list --head <branch> --state merged`.
+ *
  * Returns `false` (conservative) on any inability to prove the merge — see the
  * file-level fail-safe note.
  */
@@ -50,11 +66,42 @@ export async function isDependencyPrMerged(opts: {
   ref: string;
   /** The dependency's title (from its `done/` manifest) — needed to reproduce the branch slug. */
   title: string;
+  /**
+   * The real GitHub PR number recorded on the manifest at PR-open time
+   * (Story native:01KTNJ6QVZWVF407QEJPZSDTZK). When present, the primary
+   * `gh pr view` probe is used instead of the slug-based fallback.
+   */
+  prNumber?: number;
   /** Test seam — production callers omit it and the real `execa` is used. */
   execaImpl?: typeof defaultExeca;
 }): Promise<boolean> {
   const execaImpl = opts.execaImpl ?? defaultExeca;
 
+  // Primary probe: use the recorded PR number when available.
+  if (opts.prNumber !== undefined) {
+    try {
+      const result = await execaImpl(
+        "gh",
+        ["pr", "view", String(opts.prNumber), "--json", "state"],
+        { cwd: opts.targetRepoRoot },
+      );
+      const stdout = (result.stdout ?? "").trim();
+      if (stdout === "") return false;
+      const parsed: unknown = JSON.parse(stdout);
+      return (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "state" in parsed &&
+        (parsed as { state: unknown }).state === "MERGED"
+      );
+    } catch {
+      // gh missing / auth / network / non-zero exit / unparseable JSON →
+      // conservative not-merged (never let a dependent build blind).
+      return false;
+    }
+  }
+
+  // Fallback probe: legacy manifests without pr_number — reproduce the branch slug.
   let branch: string;
   try {
     branch = buildBranchSlug({ ref: opts.ref, title: opts.title });
@@ -83,12 +130,16 @@ export async function isDependencyPrMerged(opts: {
 /**
  * Single-dependency merge probe: given a dependency ref already present in
  * `done/`, read its manifest (for the title needed to reproduce the branch
- * slug) and ask whether its PR is merged. Injectable via `isMerged` for tests.
+ * slug and the `pr_number` for the primary probe) and ask whether its PR is
+ * merged. Injectable via `isMerged` for tests.
  */
 export type SingleDependencyMergedCheck = (opts: {
   targetRepoRoot: string;
   ref: string;
   title: string;
+  /** Recorded PR number from the manifest — present for stories shipped after
+   *  Story native:01KTNJ6QVZWVF407QEJPZSDTZK; absent for legacy manifests. */
+  prNumber?: number;
 }) => Promise<boolean>;
 
 /**
@@ -132,16 +183,18 @@ export async function areDependenciesMerged(opts: {
     }
 
     let title: string;
+    let prNumber: number | undefined;
     try {
       const manifest = parseExecutionManifest(yamlParse(raw) as unknown, { absPath: depPath });
       title = manifest.title;
+      prNumber = manifest.pr_number;
     } catch {
       // Malformed done manifest — cannot reproduce the branch. Conservative false.
       seen.set(dep, false);
       return false;
     }
 
-    const merged = await isMerged({ targetRepoRoot: opts.targetRepoRoot, ref: dep, title });
+    const merged = await isMerged({ targetRepoRoot: opts.targetRepoRoot, ref: dep, title, prNumber });
     seen.set(dep, merged);
     if (!merged) return false;
   }

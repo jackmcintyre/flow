@@ -5,6 +5,10 @@
  * {ref, title} and asks `gh pr list --head <branch> --state merged`. It returns
  * true iff a merged PR exists, and FAIL-SAFE false on any gh/parse failure.
  *
+ * Primary probe (Story native:01KTNJ6QVZWVF407QEJPZSDTZK): when `prNumber` is
+ * supplied, uses `gh pr view <prNumber> --json state` so the check is correct
+ * even when the real branch name differs from the title-derived slug.
+ *
  * `areDependenciesMerged` reads each dep's `done/` manifest for its title, then
  * defers to a (mockable) per-dep merge probe; it short-circuits false on the
  * first unmerged / missing / malformed dependency.
@@ -63,13 +67,67 @@ describe("isDependencyPrMerged", () => {
     const { impl } = fakeExeca({ stdout: "not json" });
     expect(await isDependencyPrMerged({ ...base, execaImpl: impl })).toBe(false);
   });
+
+  // AC3 — primary probe via recorded pr_number
+  it("(AC3) uses `gh pr view <prNumber>` when prNumber is supplied, not the slug probe", async () => {
+    // Return a MERGED state response from `gh pr view`.
+    const { impl, calls } = fakeExeca({ stdout: JSON.stringify({ state: "MERGED" }) });
+    const merged = await isDependencyPrMerged({ ...base, prNumber: 99, execaImpl: impl });
+    expect(merged).toBe(true);
+    // Must call `gh pr view <prNumber>` — the number-based probe, not pr list --head.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[0]).toBe("pr");
+    expect(calls[0]!.args[1]).toBe("view");
+    expect(calls[0]!.args[2]).toBe("99");
+    expect(calls[0]!.args).not.toContain("--head");
+  });
+
+  it("(AC3) returns false via primary probe when gh pr view reports OPEN state", async () => {
+    const { impl } = fakeExeca({ stdout: JSON.stringify({ state: "OPEN" }) });
+    expect(await isDependencyPrMerged({ ...base, prNumber: 99, execaImpl: impl })).toBe(false);
+  });
+
+  it("(AC3) returns false via primary probe when gh pr view reports CLOSED state", async () => {
+    const { impl } = fakeExeca({ stdout: JSON.stringify({ state: "CLOSED" }) });
+    expect(await isDependencyPrMerged({ ...base, prNumber: 99, execaImpl: impl })).toBe(false);
+  });
+
+  it("(AC4) FAIL-SAFE: primary probe returns false when gh throws (unverifiable)", async () => {
+    const { impl } = fakeExeca({ throws: true });
+    expect(await isDependencyPrMerged({ ...base, prNumber: 99, execaImpl: impl })).toBe(false);
+  });
+
+  it("(AC4) FAIL-SAFE: primary probe returns false on unparseable gh output (unverifiable)", async () => {
+    const { impl } = fakeExeca({ stdout: "not json at all" });
+    expect(await isDependencyPrMerged({ ...base, prNumber: 99, execaImpl: impl })).toBe(false);
+  });
+
+  it("(AC3) real branch name differs from title-slug but recorded prNumber confirms merged", async () => {
+    // Simulate the concrete bug: the real branch was shipped with a different slug
+    // (e.g. via /ship-story), so `pr list --head <title-slug>` would return [].
+    // The primary `pr view` probe uses the recorded number, not the title slug.
+    const { impl, calls } = fakeExeca({ stdout: JSON.stringify({ state: "MERGED" }) });
+    const merged = await isDependencyPrMerged({
+      targetRepoRoot: "/repo",
+      ref: "native:01KT3FKYB7AAAAAAAAAAAAAAAA",
+      // Title that would produce a different slug than the real shipped branch:
+      title: "Guarantee the .crew symlink never appears in a story's pull request",
+      prNumber: 123,
+      execaImpl: impl,
+    });
+    expect(merged).toBe(true);
+    // Confirmed: used pr view with the number, not a head slug.
+    expect(calls[0]!.args[1]).toBe("view");
+    expect(calls[0]!.args[2]).toBe("123");
+    expect(calls[0]!.args).not.toContain("--head");
+  });
 });
 
 describe("areDependenciesMerged", () => {
   let tmpRoot: string;
   let doneDir: string;
 
-  function makeDoneManifest(ref: string): string {
+  function makeDoneManifest(ref: string, extra: Record<string, unknown> = {}): string {
     return yamlStringify(
       {
         ref,
@@ -83,13 +141,14 @@ describe("areDependenciesMerged", () => {
         narrative: "As a dev, I want to test.",
         withdrawn: false,
         ready: true,
+        ...extra,
       },
       { lineWidth: 0 },
     );
   }
 
-  async function seedDone(ref: string): Promise<void> {
-    await atomicWriteFile(path.join(doneDir, `${ref}.yaml`), makeDoneManifest(ref));
+  async function seedDone(ref: string, extra: Record<string, unknown> = {}): Promise<void> {
+    await atomicWriteFile(path.join(doneDir, `${ref}.yaml`), makeDoneManifest(ref, extra));
   }
 
   beforeEach(async () => {
@@ -160,6 +219,62 @@ describe("areDependenciesMerged", () => {
       deps: ["native:01HZDEP000000000000000099"], // never seeded
       isMerged: async () => true,
     });
+    expect(merged).toBe(false);
+  });
+
+  // AC3 — pr_number is read from the done/ manifest and forwarded to isMerged
+  it("(AC3) forwards pr_number from the done/ manifest to the isMerged probe", async () => {
+    const dep = "native:01HZDEP000000000000000001";
+    // Seed with a recorded pr_number (simulating a story shipped with the new code path).
+    await seedDone(dep, { pr_number: 42 });
+
+    const probed: Array<{ ref: string; title: string; prNumber?: number }> = [];
+    const merged = await areDependenciesMerged({
+      targetRepoRoot: tmpRoot,
+      deps: [dep],
+      isMerged: async ({ ref, title, prNumber }) => {
+        probed.push({ ref, title, prNumber });
+        return true;
+      },
+    });
+
+    expect(merged).toBe(true);
+    expect(probed).toHaveLength(1);
+    expect(probed[0]!.prNumber).toBe(42);
+    expect(probed[0]!.ref).toBe(dep);
+  });
+
+  // AC3 — legacy manifests without pr_number still work (prNumber is undefined)
+  it("(AC3) passes prNumber=undefined for legacy done/ manifests without pr_number", async () => {
+    const dep = "native:01HZDEP000000000000000002";
+    // Seed WITHOUT pr_number (legacy manifest).
+    await seedDone(dep);
+
+    const probed: Array<{ prNumber?: number }> = [];
+    const merged = await areDependenciesMerged({
+      targetRepoRoot: tmpRoot,
+      deps: [dep],
+      isMerged: async ({ prNumber }) => {
+        probed.push({ prNumber });
+        return true;
+      },
+    });
+
+    expect(merged).toBe(true);
+    expect(probed[0]!.prNumber).toBeUndefined();
+  });
+
+  // AC4 — conservative fail-safe preserved
+  it("(AC4) FAIL-SAFE: returns false when isMerged returns false (genuinely un-merged)", async () => {
+    const dep = "native:01HZDEP000000000000000003";
+    await seedDone(dep, { pr_number: 55 });
+
+    const merged = await areDependenciesMerged({
+      targetRepoRoot: tmpRoot,
+      deps: [dep],
+      isMerged: async () => false, // not yet merged
+    });
+
     expect(merged).toBe(false);
   });
 });
