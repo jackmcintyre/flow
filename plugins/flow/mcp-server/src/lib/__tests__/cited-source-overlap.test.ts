@@ -5,18 +5,28 @@
  *    hand-built universes.
  *  - `loadOverlapUniverse` reads real fixture dirs with `node:fs` (no mocking),
  *    matching the project convention.
+ *
+ * AC1 / AC2 integration: the end-to-end combination of `findOverlapBlockers` +
+ * `areDependenciesMerged` that the `claimNextStory` claim loop drives. Tests in
+ * the "overlap + merge-gate integration" describe block verify that:
+ *   - AC1: a done/ blocker whose PR is confirmed merged via the recorded
+ *     `pr_number` probe releases the held story (the later story becomes eligible).
+ *   - AC2: a done/ blocker whose PR is NOT yet merged continues to hold the later
+ *     story even when its done/ manifest is present.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../managed-fs.js";
 import {
   findOverlapBlockers,
   loadOverlapUniverse,
   type OverlapStory,
 } from "../cited-source-overlap.js";
+import { areDependenciesMerged } from "../dep-merge-check.js";
 
 const A = "native:01J9P0K2N3MZX0YV4S5RTQ4AAA";
 const B = "native:01J9P0K2N3MZX0YV4S5RTQ4BBB";
@@ -160,5 +170,151 @@ describe("loadOverlapUniverse", () => {
     const universe = await loadOverlapUniverse(root);
     // The good manifest is still loaded; the malformed one is silently skipped.
     expect(universe.map((s) => s.ref)).toEqual([B]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overlap + merge-gate integration (AC1 / AC2)
+//
+// Simulates the decision the claimNextStory loop makes:
+//   1. findOverlapBlockers → discovers done/ refs that need a merge check.
+//   2. areDependenciesMerged (with the isMerged seam) → decides whether to
+//      release or continue holding the later story.
+//
+// AC1: done/ blocker with a recorded pr_number that is confirmed merged →
+//      the later story is RELEASED (isMerged returns true → eligible).
+// AC2: done/ blocker whose PR is genuinely NOT merged →
+//      the later story is HELD (isMerged returns false → not eligible).
+// ---------------------------------------------------------------------------
+
+describe("overlap + merge-gate integration (AC1 / AC2)", () => {
+  let root: string;
+  let doneDir: string;
+  let todoDir: string;
+
+  function makeDoneManifest(ref: string, prNumber?: number): string {
+    const base: Record<string, unknown> = {
+      ref,
+      status: "done",
+      adapter: "native",
+      source_path: `.flow/native-stories/${ref}.yaml`,
+      source_hash: "a".repeat(64),
+      depends_on: [],
+      acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+      title: `Title for ${ref}`,
+      narrative: "As a dev, I want to test.",
+      withdrawn: false,
+      ready: true,
+      cited_sources: [FILE_X],
+    };
+    if (prNumber !== undefined) {
+      base["pr_number"] = prNumber;
+    }
+    return yamlStringify(base, { lineWidth: 0 });
+  }
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "flow-overlap-merge-"));
+    doneDir = path.join(root, ".flow", "state", "done");
+    todoDir = path.join(root, ".flow", "state", "to-do");
+    await fs.mkdir(doneDir, { recursive: true });
+    await fs.mkdir(todoDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("(AC1) releases a later story when the done/ blocker's PR is confirmed merged (even if real branch != title slug)", async () => {
+    // A: earlier story, done, with a recorded pr_number (real branch may differ from title slug).
+    // B: later story, to-do, cites the same file.
+    await atomicWriteFile(
+      path.join(doneDir, `${A}.yaml`),
+      makeDoneManifest(A, 123), // pr_number=123 recorded
+    );
+    await atomicWriteFile(
+      path.join(todoDir, `${B}.yaml`),
+      `ref: "${B}"\nready: true\ncited_sources:\n  - ${FILE_X}\n`,
+    );
+
+    const universe = await loadOverlapUniverse(root);
+    const { pendingRefs, doneRefs } = findOverlapBlockers(universe, B);
+
+    // A is a done/ blocker for B.
+    expect(pendingRefs).toEqual([]);
+    expect(doneRefs).toEqual([A]);
+
+    // isMerged seam returns true (PR 123 is merged — confirmed via recorded pr_number).
+    // In production this is isDependencyPrMerged with the real gh probe.
+    const allMerged = await areDependenciesMerged({
+      targetRepoRoot: root,
+      deps: doneRefs,
+      isMerged: async ({ prNumber }) => {
+        // The merge-check received the recorded pr_number from the done/ manifest.
+        expect(prNumber).toBe(123);
+        return true; // confirmed merged
+      },
+    });
+
+    // B is RELEASED: the blocker is merged, so the later story may be built.
+    expect(allMerged).toBe(true);
+  });
+
+  it("(AC2) continues to hold a later story when the done/ blocker's PR is genuinely NOT merged", async () => {
+    // A: earlier story in done/, but its PR has NOT been merged yet.
+    // B: later story to-do, cites the same file.
+    await atomicWriteFile(
+      path.join(doneDir, `${A}.yaml`),
+      makeDoneManifest(A, 456), // pr_number recorded but NOT merged
+    );
+    await atomicWriteFile(
+      path.join(todoDir, `${B}.yaml`),
+      `ref: "${B}"\nready: true\ncited_sources:\n  - ${FILE_X}\n`,
+    );
+
+    const universe = await loadOverlapUniverse(root);
+    const { doneRefs } = findOverlapBlockers(universe, B);
+
+    expect(doneRefs).toEqual([A]);
+
+    // isMerged seam returns false (PR 456 is NOT yet merged).
+    const allMerged = await areDependenciesMerged({
+      targetRepoRoot: root,
+      deps: doneRefs,
+      isMerged: async () => false, // not merged
+    });
+
+    // B remains HELD: the blocker's PR has not landed, so B must wait.
+    expect(allMerged).toBe(false);
+  });
+
+  it("(AC1) handles legacy done/ blocker without pr_number — isMerged receives undefined", async () => {
+    // Legacy manifest: no pr_number recorded (story shipped before this change).
+    // The slug-based fallback probe runs (via isDependencyPrMerged with prNumber=undefined).
+    await atomicWriteFile(
+      path.join(doneDir, `${A}.yaml`),
+      makeDoneManifest(A), // no pr_number → legacy path
+    );
+    await atomicWriteFile(
+      path.join(todoDir, `${B}.yaml`),
+      `ref: "${B}"\nready: true\ncited_sources:\n  - ${FILE_X}\n`,
+    );
+
+    const universe = await loadOverlapUniverse(root);
+    const { doneRefs } = findOverlapBlockers(universe, B);
+    expect(doneRefs).toEqual([A]);
+
+    const probed: Array<{ prNumber?: number }> = [];
+    await areDependenciesMerged({
+      targetRepoRoot: root,
+      deps: doneRefs,
+      isMerged: async ({ prNumber }) => {
+        probed.push({ prNumber });
+        return true; // pretend merged via slug probe
+      },
+    });
+
+    // Legacy path: prNumber is undefined → slug-based fallback will be used in production.
+    expect(probed[0]!.prNumber).toBeUndefined();
   });
 });

@@ -82,7 +82,7 @@ import {
   composePrBody,
   wrapCommitBody,
 } from "../lib/pr-body.js";
-import { readManifest } from "../lib/manifest-io.js";
+import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { devOutcomeFilePath } from "../lib/read-dev-outcome-file.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
@@ -514,7 +514,35 @@ export async function runDevTerminalAction(opts: {
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2),
     );
 
-    // (xiv) Return success. The dev's worktree is owned by the runtime's
+    // (xiv) Record the real PR identifier onto the in-progress manifest
+    // (Story native:01KTNJ6QVZWVF407QEJPZSDTZK). The merge-readiness check
+    // in dep-merge-check.ts reads pr_number from the done/ manifest to verify
+    // merge status via `gh pr view <prNumber>` — a probe that is correct even
+    // when the real branch name differs from the current-title-derived slug
+    // (title change, /ship-story manual ship with a different branch convention,
+    // etc.). Writing it here (to in-progress/) means it survives the
+    // completeStory field-spread into done/ automatically.
+    //
+    // Best-effort: a failure to stamp the manifest must never block the PR that
+    // has already been created, so we swallow errors here. The slug-based
+    // fallback probe in dep-merge-check.ts covers the case where this write
+    // did not happen (legacy path, crash between PR-create and manifest update).
+    try {
+      const inProgressManifestPath = path.join(
+        ledgerRoot,
+        ".flow",
+        "state",
+        "in-progress",
+        `${ref}.yaml`,
+      );
+      const currentManifest = await readManifest(inProgressManifestPath);
+      const updatedManifest = { ...currentManifest, pr_number: prNumber, pr_branch: branch };
+      await writeManifest(inProgressManifestPath, updatedManifest);
+    } catch {
+      // Best-effort — PR already opened; do not block the return.
+    }
+
+    // (xv) Return success. The dev's worktree is owned by the runtime's
     // per-agent `isolation: 'worktree'` primitive (or, in tests, by the caller),
     // so this tool does NOT tear it down — a failed flow can therefore never
     // revert a concurrently-running sibling flow's in-flight work (8.20 AC4).

@@ -37210,7 +37210,32 @@ var ExecutionManifestSchema = external_exports.object({
    *
    * Added in Story native:01KTKJXP6DWN5YHKVG96DH16V0.
    */
-  detector_confirmed_dead: external_exports.boolean().optional()
+  detector_confirmed_dead: external_exports.boolean().optional(),
+  /**
+   * The real GitHub pull-request number recorded at the moment the story's
+   * PR was opened by `runDevTerminalAction` (Story native:01KTNJ6QVZWVF407QEJPZSDTZK).
+   *
+   * Used by the dependency-merge check (`dep-merge-check.ts`) to ask GitHub
+   * whether the PR is merged via `gh pr view <prNumber>`, which is correct
+   * even when the real branch name differs from the current-title-derived
+   * branch slug (e.g. after a title change or a manual ship via `/ship-story`
+   * with a different branch convention). The slug-based probe is retained as
+   * a fallback for legacy manifests that pre-date this field.
+   *
+   * Optional and additive: old manifests parse unchanged. Written only on
+   * `in-progress/` manifests at PR-open time; survives the `completeStory`
+   * field-spread into `done/` automatically.
+   */
+  pr_number: external_exports.number().int().positive().optional(),
+  /**
+   * The real head branch name recorded at the moment the story's PR was
+   * opened by `runDevTerminalAction` (Story native:01KTNJ6QVZWVF407QEJPZSDTZK).
+   *
+   * Stored alongside `pr_number` for human-readable diagnostics and as a
+   * secondary lookup key when the primary `pr_number` probe is unavailable.
+   * Optional and additive.
+   */
+  pr_branch: external_exports.string().min(1).optional()
 }).strict();
 function parseExecutionManifest(input, opts) {
   const result = ExecutionManifestSchema.safeParse(input);
@@ -51032,6 +51057,21 @@ ${opts.summary}`;
 // src/lib/dep-merge-check.ts
 async function isDependencyPrMerged(opts) {
   const execaImpl = opts.execaImpl ?? execa;
+  if (opts.prNumber !== void 0) {
+    try {
+      const result = await execaImpl(
+        "gh",
+        ["pr", "view", String(opts.prNumber), "--json", "state"],
+        { cwd: opts.targetRepoRoot }
+      );
+      const stdout = (result.stdout ?? "").trim();
+      if (stdout === "") return false;
+      const parsed = JSON.parse(stdout);
+      return typeof parsed === "object" && parsed !== null && "state" in parsed && parsed.state === "MERGED";
+    } catch {
+      return false;
+    }
+  }
   let branch;
   try {
     branch = buildBranchSlug({ ref: opts.ref, title: opts.title });
@@ -51071,14 +51111,16 @@ async function areDependenciesMerged(opts) {
       return false;
     }
     let title;
+    let prNumber;
     try {
       const manifest = parseExecutionManifest((0, import_yaml27.parse)(raw), { absPath: depPath });
       title = manifest.title;
+      prNumber = manifest.pr_number;
     } catch {
       seen.set(dep, false);
       return false;
     }
-    const merged = await isMerged({ targetRepoRoot: opts.targetRepoRoot, ref: dep, title });
+    const merged = await isMerged({ targetRepoRoot: opts.targetRepoRoot, ref: dep, title, prNumber });
     seen.set(dep, merged);
     if (!merged) return false;
   }
@@ -52001,6 +52043,19 @@ async function runDevTerminalAction(opts) {
       devOutcomePath,
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2)
     );
+    try {
+      const inProgressManifestPath = path62.join(
+        ledgerRoot,
+        ".flow",
+        "state",
+        "in-progress",
+        `${ref}.yaml`
+      );
+      const currentManifest = await readManifest(inProgressManifestPath);
+      const updatedManifest = { ...currentManifest, pr_number: prNumber, pr_branch: branch };
+      await writeManifest(inProgressManifestPath, updatedManifest);
+    } catch {
+    }
     return {
       ok: true,
       branch,

@@ -401,6 +401,33 @@ export const ExecutionManifestSchema = z
      * Added in Story native:01KTKJXP6DWN5YHKVG96DH16V0.
      */
     detector_confirmed_dead: z.boolean().optional(),
+
+    /**
+     * The real GitHub pull-request number recorded at the moment the story's
+     * PR was opened by `runDevTerminalAction` (Story native:01KTNJ6QVZWVF407QEJPZSDTZK).
+     *
+     * Used by the dependency-merge check (`dep-merge-check.ts`) to ask GitHub
+     * whether the PR is merged via `gh pr view <prNumber>`, which is correct
+     * even when the real branch name differs from the current-title-derived
+     * branch slug (e.g. after a title change or a manual ship via `/ship-story`
+     * with a different branch convention). The slug-based probe is retained as
+     * a fallback for legacy manifests that pre-date this field.
+     *
+     * Optional and additive: old manifests parse unchanged. Written only on
+     * `in-progress/` manifests at PR-open time; survives the `completeStory`
+     * field-spread into `done/` automatically.
+     */
+    pr_number: z.number().int().positive().optional(),
+
+    /**
+     * The real head branch name recorded at the moment the story's PR was
+     * opened by `runDevTerminalAction` (Story native:01KTNJ6QVZWVF407QEJPZSDTZK).
+     *
+     * Stored alongside `pr_number` for human-readable diagnostics and as a
+     * secondary lookup key when the primary `pr_number` probe is unavailable.
+     * Optional and additive.
+     */
+    pr_branch: z.string().min(1).optional(),
   })
   .strict();
 
