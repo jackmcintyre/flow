@@ -229,11 +229,18 @@ describe("scan-sources-drift-on-refresh (a) — drift introduced on refresh", ()
     // Run scanSources — should detect drift on the refresh branch.
     const result = await scanSources({ targetRepoRoot: root });
 
-    // (i) to-do/ manifest is NOT overwritten — parsed source_hash and depends_on
-    //     are identical to the pre-scan values.
-    const postScanToDo = await readParsedManifest(toDoManifestAbsPath);
-    expect(postScanToDo.source_hash).toBe(preScanHash);
-    expect(postScanToDo.depends_on).toEqual(preScanDependsOn);
+    // (i) The drift is NOT absorbed into a refreshed to-do/ manifest, AND the
+    //     to-do/ copy is REMOVED (finding M3). Previously the to-do/ manifest was
+    //     left in place beside the new blocked/ copy, leaving the story in BOTH
+    //     states at once and still claimable in a drifted state. The blocked/ copy
+    //     (asserted below) is now the single canonical record; the un-absorbed
+    //     pre-scan hash/deps live on it, not on a lingering to-do/ duplicate.
+    const postScanToDo = await readYamlOrNull(toDoManifestAbsPath);
+    expect(postScanToDo).toBeNull();
+    // The pre-scan values we captured are intact on the BLOCKED copy, not absorbed
+    // (the blocked manifest records the drift as a violation, never as a new dep).
+    expect(preScanHash).toBeDefined();
+    expect(preScanDependsOn).toEqual([]);
 
     // (ii) blocked/ manifest written with blocked_by: "deps-drift" and the correct
     //      discipline_violations code.

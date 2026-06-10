@@ -28751,6 +28751,7 @@ async function scanSources(opts) {
             activeAdapterName,
             targetRepoRoot
           );
+          await fs12.unlink(absToDoPath);
           result.skippedRefs.push({
             ref: story.ref,
             reason: "discipline-violation",
@@ -28932,9 +28933,11 @@ async function writeNativeStory(rawInput) {
   const result = await renderGateWriteNativeStory(input, targetRepoRoot);
   try {
     await scanSources({ targetRepoRoot });
-  } catch {
+    return { ...result, materialised: true };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ...result, materialised: false, materialiseWarning: reason };
   }
-  return result;
 }
 async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
   const newUlid = ulid3();
@@ -36570,12 +36573,7 @@ async function listDirtyPaths(opts) {
     const xy = rec.slice(0, 2);
     const p = rec.slice(3);
     if (xy[0] === "R" || xy[0] === "C") {
-      const dest = records[i2 + 1];
-      if (dest !== void 0) {
-        out.push(dest);
-        i2++;
-        continue;
-      }
+      if (records[i2 + 1] !== void 0) i2++;
     }
     out.push(p);
   }
@@ -38130,6 +38128,7 @@ function isEnoent7(err) {
 var QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 var WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
 var WAITING_ON_UNMERGED_OVERLAP_LINE = "WAITING \u2014 ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
+var WAITING_ON_UNMERGED_DEPENDENCY_LINE = "WAITING \u2014 ready story held for an unmerged declared dependency. Stop here or wait for the dependency PR to merge.";
 async function claimNextStory(opts) {
   const { targetRepoRoot, sessionUlid } = opts;
   const chatLog = [];
@@ -38138,6 +38137,7 @@ async function claimNextStory(opts) {
   const overlapUniverse = readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
   const eligible = [];
   const heldOnUnmergedOverlapRefs = [];
+  const heldOnUnmergedDepRefs = [];
   for (const c3 of readyCandidates) {
     if (c3.depends_on.length > 0) {
       const allMerged = await areDependenciesMerged({
@@ -38145,7 +38145,10 @@ async function claimNextStory(opts) {
         deps: c3.depends_on,
         ...opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}
       });
-      if (!allMerged) continue;
+      if (!allMerged) {
+        heldOnUnmergedDepRefs.push(c3.ref);
+        continue;
+      }
     }
     const { pendingRefs, doneRefs } = findOverlapBlockers(overlapUniverse, c3.ref);
     if (pendingRefs.length > 0) continue;
@@ -38171,6 +38174,15 @@ async function claimNextStory(opts) {
       return {
         next: "waiting-on-unmerged-overlap",
         heldRefs: heldOnUnmergedOverlapRefs,
+        chatLog
+      };
+    }
+    if (heldOnUnmergedDepRefs.length > 0) {
+      const held = heldOnUnmergedDepRefs.join(", ");
+      chatLog.push(`${WAITING_ON_UNMERGED_DEPENDENCY_LINE} Held: ${held}`);
+      return {
+        next: "waiting-on-unmerged-dependency",
+        heldRefs: heldOnUnmergedDepRefs,
         chatLog
       };
     }

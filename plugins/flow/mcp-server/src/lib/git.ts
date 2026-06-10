@@ -719,12 +719,12 @@ export async function listDirtyPaths(opts: {
     const xy = rec.slice(0, 2);
     const p = rec.slice(3);
     if (xy[0] === "R" || xy[0] === "C") {
-      const dest = records[i + 1];
-      if (dest !== undefined) {
-        out.push(dest);
-        i++;
-        continue;
-      }
+      // git status --porcelain -z encodes a rename/copy as TWO NUL records:
+      // the first holds the NEW (destination) path after `XY<space>`, and the
+      // NEXT NUL-record holds the ORIGINAL (source) path. We want the NEW path
+      // — keep `p` and consume the original record (finding D3: the previous
+      // code pushed the original and dropped the new path, exactly backwards).
+      if (records[i + 1] !== undefined) i++;
     }
     out.push(p);
   }

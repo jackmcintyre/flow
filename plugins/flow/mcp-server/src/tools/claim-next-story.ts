@@ -50,6 +50,15 @@ export const WAITING_ON_IN_PROGRESS_LINE =
 export const WAITING_ON_UNMERGED_OVERLAP_LINE =
   "WAITING — ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
 
+/**
+ * Verbatim waiting-on-unmerged-dependency line (review finding B4) — the twin of
+ * the overlap hold above. Returned when every ready story is parked SOLELY because
+ * a DECLARED dependency's PR is approved-but-unmerged. Without this the
+ * declared-dep hold falls through to a false "queue drained". NOT a clean drain.
+ */
+export const WAITING_ON_UNMERGED_DEPENDENCY_LINE =
+  "WAITING — ready story held for an unmerged declared dependency. Stop here or wait for the dependency PR to merge.";
+
 export interface ClaimNextStoryOptions {
   targetRepoRoot: string;
   sessionUlid: string;
@@ -78,6 +87,16 @@ export type ClaimNextStoryResult =
        * `heldRefs` names the held story ref(s) so the operator knows what to wait for.
        */
       next: "waiting-on-unmerged-overlap";
+      heldRefs: string[];
+      chatLog: string[];
+    }
+  | {
+      /**
+       * Twin of the overlap hold (finding B4): every ready story is parked solely
+       * because a DECLARED dependency's PR is approved-but-unmerged. Also NOT a
+       * clean drain. `heldRefs` names the held story ref(s).
+       */
+      next: "waiting-on-unmerged-dependency";
       heldRefs: string[];
       chatLog: string[];
     };
@@ -138,6 +157,10 @@ export async function claimNextStory(
   // blocker). These are the stories that produce a WAITING/parked outcome rather than a
   // genuine clean drain.
   const heldOnUnmergedOverlapRefs: string[] = [];
+  // Track ready candidates dropped ONLY because a DECLARED dependency's PR is not
+  // yet merged (review finding B4 — the twin of the overlap hold). Without this
+  // an all-deps-blocked queue reports a false clean drain.
+  const heldOnUnmergedDepRefs: string[] = [];
 
   for (const c of readyCandidates) {
     // (1) declared dependencies
@@ -147,7 +170,12 @@ export async function claimNextStory(
         deps: c.depends_on,
         ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
       });
-      if (!allMerged) continue;
+      if (!allMerged) {
+        // Held solely by an unmerged declared dependency — track it so the drain
+        // reports WAITING instead of a false "queue-drained" (finding B4).
+        heldOnUnmergedDepRefs.push(c.ref);
+        continue;
+      }
     }
 
     // (2) cited-source overlap
@@ -183,6 +211,17 @@ export async function claimNextStory(
       return {
         next: "waiting-on-unmerged-overlap",
         heldRefs: heldOnUnmergedOverlapRefs,
+        chatLog,
+      };
+    }
+    // Twin of the above (finding B4): every ready candidate dropped solely by an
+    // unmerged DECLARED dependency. Also NOT a clean drain — surface WAITING.
+    if (heldOnUnmergedDepRefs.length > 0) {
+      const held = heldOnUnmergedDepRefs.join(", ");
+      chatLog.push(`${WAITING_ON_UNMERGED_DEPENDENCY_LINE} Held: ${held}`);
+      return {
+        next: "waiting-on-unmerged-dependency",
+        heldRefs: heldOnUnmergedDepRefs,
         chatLog,
       };
     }

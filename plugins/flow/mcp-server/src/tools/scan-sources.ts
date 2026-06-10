@@ -788,6 +788,12 @@ export async function scanSources(opts: {
             activeAdapterName,
             targetRepoRoot,
           );
+          // Remove the to-do/ copy now that the blocked/ copy exists (finding M3).
+          // Without this the story lives in BOTH states at once and the to-do copy
+          // stays claimable — a story that drifted into blocked could still build.
+          // Mirrors the promotion path's write-then-unlink (line ~600); non-atomic
+          // by the same contract, the startup guard recovers a stranded pair.
+          await fs.unlink(absToDoPath);
           result.skippedRefs.push({
             ref: story.ref,
             reason: "discipline-violation",

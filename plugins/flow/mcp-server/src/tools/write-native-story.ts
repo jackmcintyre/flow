@@ -106,6 +106,17 @@ export type WriteNativeStoryInput = z.infer<typeof WriteNativeStoryInputSchema>;
 export interface WriteNativeStoryOutput {
   ref: string;
   path: string;
+  /**
+   * Whether the auto-materialise scan that follows the write succeeded (finding
+   * D9). `true` → the story is in the backlog. `false` → the file is on disk but
+   * the scan hiccupped; `materialiseWarning` carries the reason and the operator
+   * must run `/flow:scan` manually. Absent on the ingest path (which never
+   * auto-materialises). Previously a scan failure was swallowed silently, so
+   * `/flow:author` reported success even when the story never entered the backlog.
+   */
+  materialised?: boolean;
+  /** Present only when `materialised === false`: the swallowed scan error. */
+  materialiseWarning?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,12 +287,16 @@ export async function writeNativeStory(
   // successful write.
   try {
     await scanSources({ targetRepoRoot });
-  } catch {
+    return { ...result, materialised: true };
+  } catch (err) {
     // Non-fatal: the story file is already written. The operator can run
-    // `/flow:scan` manually to materialise the manifest if needed.
+    // `/flow:scan` manually to materialise the manifest if needed. But we no
+    // longer swallow this silently (finding D9) — surface `materialised: false`
+    // plus the reason so `/flow:author` can warn instead of reporting a clean
+    // success for a story that never entered the backlog.
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ...result, materialised: false, materialiseWarning: reason };
   }
-
-  return result;
 }
 
 /**
