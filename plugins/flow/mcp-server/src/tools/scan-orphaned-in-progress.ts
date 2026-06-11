@@ -168,6 +168,16 @@ export async function scanOrphanedInProgress(
       continue;
     }
 
+    // Skip manifests that were DELIBERATELY paused or blocked by the builder.
+    // A populated `blocked_by` field is the authoritative marker that the story
+    // was parked intentionally (e.g. `needs-human-decision`) rather than abandoned
+    // by a crash. Sweeping these as crash orphans would silently re-run a builder's
+    // deliberate pause, defeating the pause mechanism entirely. Reason-less manifests
+    // (no `blocked_by`) are still treated as genuine crash orphans (AC4).
+    if (manifest.blocked_by !== undefined) {
+      continue;
+    }
+
     // This manifest is an orphan.
     const staleUlid = manifest.claimed_by;
     const transcriptPath = path.join(
