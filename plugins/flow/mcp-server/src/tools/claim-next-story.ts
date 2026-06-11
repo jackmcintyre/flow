@@ -153,12 +153,21 @@ export async function claimNextStory(
   //
   //  (2) Cited-source overlap gate: two stories with NO declared edge still
   //      collide if they edit the same file. We treat an overlapping
-  //      `cited_sources` entry as an implicit dependency — a candidate is parked
-  //      while any EARLIER-ordered story citing the same file is still in flight
-  //      (`to-do`/`in-progress` → never merged → always blocks) or approved but
-  //      not yet merged (`done/` → verified via the merge check). The later
-  //      story then builds on top of the earlier one instead of blind. See
-  //      `cited-source-overlap.ts` (the #300/#301 silent-integration-bug fix).
+  //      `cited_sources` entry as an implicit dependency. A candidate is parked
+  //      while any overlapping story is IN FLIGHT or unmerged, regardless of
+  //      claim order:
+  //       - Earlier-ordered overlapping stories in to-do/ (blessed) or in-progress/
+  //         always block (no merged PR yet).
+  //       - Earlier-ordered overlapping stories in done/ block until their PR is
+  //         merged (verified via the merge check).
+  //       - Later-ordered overlapping stories in in-progress/ also block — if a
+  //         later story was approved/claimed first (out-of-order), letting the
+  //         earlier story also start would produce a blind concurrent build.
+  //       - Later-ordered overlapping stories in done/ also block until merged.
+  //       - Later-ordered unstarted to-do/ stories do NOT block the earlier story
+  //         (asymmetric rule for unstarted pairs prevents deadlock).
+  //      See `cited-source-overlap.ts` (the #300/#301 silent-integration-bug fix
+  //      extended to cover out-of-order approvals).
   //
   // Candidates with no dependencies AND no cited-source overlap skip every `gh`
   // call. The overlap universe is loaded once per pass (in-memory matching).

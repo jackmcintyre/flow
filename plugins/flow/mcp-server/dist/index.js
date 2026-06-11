@@ -51197,15 +51197,28 @@ function findOverlapBlockers(universe, ref) {
   const cited = self2?.citedSources ?? [];
   if (cited.length === 0) return { pendingRefs: [], doneRefs: [] };
   const citedSet = new Set(cited);
-  const blockers = universe.filter(
-    (s) => s.ref !== ref && s.ref < ref && // earlier in claim order goes first (asymmetric → no deadlock)
-    (s.location !== "to-do" || s.ready) && // an unblessed todo may never ship → never block
-    s.citedSources.some((p) => citedSet.has(p))
-  );
-  return {
-    pendingRefs: blockers.filter((s) => s.location !== "done").map((s) => s.ref),
-    doneRefs: blockers.filter((s) => s.location === "done").map((s) => s.ref)
-  };
+  const pendingRefs = [];
+  const doneRefs = [];
+  for (const s of universe) {
+    if (s.ref === ref) continue;
+    if (!s.citedSources.some((p) => citedSet.has(p))) continue;
+    if (s.ref < ref) {
+      if (s.location === "to-do") {
+        if (s.ready) pendingRefs.push(s.ref);
+      } else if (s.location === "in-progress") {
+        pendingRefs.push(s.ref);
+      } else {
+        doneRefs.push(s.ref);
+      }
+    } else {
+      if (s.location === "in-progress") {
+        pendingRefs.push(s.ref);
+      } else if (s.location === "done") {
+        doneRefs.push(s.ref);
+      }
+    }
+  }
+  return { pendingRefs, doneRefs };
 }
 function isEnoent14(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
