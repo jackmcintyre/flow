@@ -173,12 +173,12 @@ describe("per-story checkout path keying (AC3)", () => {
     expect(result.worktreePath).toContain(expectedSlug);
   });
 
-  it("path contains the review-worktree segment followed by the story slug", async () => {
+  it("path contains the review-<slug>-worktree segment", async () => {
     const result = await materialiseFor(STORY_REF_A, PR_NUMBER_A, FAKE_HEAD_REF_OID_A);
 
     const expectedSlug = sanitiseRefForPathSegment(STORY_REF_A);
-    const expectedSuffix = path.join("review-worktree", expectedSlug);
-    expect(result.worktreePath).toContain(expectedSuffix);
+    // New convention: review-<slug>-worktree (outside the project folder).
+    expect(result.worktreePath).toContain(`review-${expectedSlug}-worktree`);
   });
 });
 
@@ -289,13 +289,12 @@ describe("cleanup scope isolation (AC4)", () => {
   it("cleanup removes only the per-story folder, not the shared parent", async () => {
     const result = await materialiseFor(STORY_REF_A, PR_NUMBER_A, FAKE_HEAD_REF_OID_A);
 
+    // New convention: shared parent is <parent>/.flow-worktrees/<sessionUlid>
+    // (one level up from tmpRoot, under .flow-worktrees/<sessionUlid>).
     const sharedParent = path.join(
-      tmpRoot,
-      ".flow",
-      "state",
-      "sessions",
+      path.dirname(tmpRoot),
+      ".flow-worktrees",
       SESSION_ULID,
-      "review-worktree",
     );
 
     // Parent must exist before cleanup (it was created as part of mkdir -p).
@@ -328,12 +327,9 @@ describe("cleanup scope isolation (AC4)", () => {
 
     // The shared parent directory still exists.
     const sharedParent = path.join(
-      tmpRoot,
-      ".flow",
-      "state",
-      "sessions",
+      path.dirname(tmpRoot),
+      ".flow-worktrees",
       SESSION_ULID,
-      "review-worktree",
     );
     const stat = await fs.stat(sharedParent);
     expect(stat.isDirectory()).toBe(true);

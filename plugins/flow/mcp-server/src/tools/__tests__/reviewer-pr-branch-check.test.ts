@@ -358,8 +358,9 @@ describe("AC3(c): artifact missing on pr-head branch → status: fail", () => {
     if (ac1!.applicability !== "runnable-artifact-check") return;
     expect(ac1!.status).toBe("fail");
     expect(ac1!.reason).toContain("ENOENT");
-    // The path in the reason should reference the review-worktree, not targetRepoRoot directly.
-    expect(ac1!.reason).toContain("review-worktree");
+    // The path in the reason should reference the out-of-project review worktree,
+    // not targetRepoRoot directly (new convention: outside the main project folder).
+    expect(ac1!.reason).not.toContain(tmpRoot);
   });
 });
 
@@ -382,18 +383,16 @@ describe("AC3(d): review-worktree is torn down after session completes", () => {
       execaImpl: execaStub,
     });
 
-    // The per-story worktree path — keyed on the sanitised story ref
-    // (native:01JTEST5260000000000000001 → native_01JTEST5260000000000000001).
-    // Story native:01KTSQQQ00PTHY7YP8XP5SX31G: per-story subfolder under review-worktree/.
+    // The per-story worktree path — now lives OUTSIDE the main project folder
+    // under <parent>/.flow-worktrees/<sessionUlid>/review-<slug>-worktree
+    // (native:01KTSR2GJ78FJY2RXRGH2D59HC: out-of-project location family).
+    // sanitiseRefForPathSegment replaces ':' with '_'.
     const storySlug = STORY_REF.replace(/[^A-Za-z0-9._-]/g, "_");
     const worktreePath = path.join(
-      tmpRoot,
-      ".flow",
-      "state",
-      "sessions",
+      path.dirname(tmpRoot),
+      ".flow-worktrees",
       SESSION_ULID,
-      "review-worktree",
-      storySlug,
+      `review-${storySlug}-worktree`,
     );
 
     // Worktree should be gone after cleanup.
@@ -411,17 +410,14 @@ describe("AC3(e): stale worktree at review-worktree/ is reaped before new worktr
     await buildFlowFixture(tmpRoot);
 
     // Simulate stale worktree: create the directory at the per-story path.
-    // Story native:01KTSQQQ00PTHY7YP8XP5SX31G: stale reaping targets the per-story
-    // subfolder (review-worktree/<slug>/), NOT the shared parent.
+    // New convention (native:01KTSR2GJ78FJY2RXRGH2D59HC): stale path is now OUTSIDE
+    // the main project folder, under <parent>/.flow-worktrees/<sessionUlid>/review-<slug>-worktree.
     const storySlug = STORY_REF.replace(/[^A-Za-z0-9._-]/g, "_");
     const worktreePath = path.join(
-      tmpRoot,
-      ".flow",
-      "state",
-      "sessions",
+      path.dirname(tmpRoot),
+      ".flow-worktrees",
       SESSION_ULID,
-      "review-worktree",
-      storySlug,
+      `review-${storySlug}-worktree`,
     );
     await fs.mkdir(worktreePath, { recursive: true });
     await atomicWriteFile(path.join(worktreePath, "stale.txt"), "stale data\n");
@@ -445,7 +441,7 @@ describe("AC3(e): stale worktree at review-worktree/ is reaped before new worktr
     if (ac1!.applicability !== "runnable-artifact-check") return;
     expect(ac1!.status).toBe("pass");
 
-    // The worktree should be cleaned up after session completes (same path as above).
+    // The worktree should be cleaned up after session completes (same out-of-project path).
     await expect(fs.access(worktreePath)).rejects.toThrow();
   });
 });

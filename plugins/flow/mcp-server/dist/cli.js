@@ -39206,6 +39206,20 @@ function slugifyStandardsCriterion(name) {
 // src/lib/materialise-pr-branch-worktree.ts
 import * as path48 from "node:path";
 import * as fs34 from "node:fs/promises";
+function reviewWorktreesRoot(targetRepoRoot, sessionUlid) {
+  return path48.join(
+    path48.dirname(targetRepoRoot),
+    ".flow-worktrees",
+    sessionUlid
+  );
+}
+function reviewWorktreePath(targetRepoRoot, sessionUlid, storyRef) {
+  const storySlug = sanitiseRefForPathSegment(storyRef);
+  return path48.join(
+    reviewWorktreesRoot(targetRepoRoot, sessionUlid),
+    `review-${storySlug}-worktree`
+  );
+}
 async function runGit(args, cwd, execaImpl) {
   const result = await execaImpl("git", args, { cwd, reject: false });
   return {
@@ -39263,16 +39277,8 @@ async function materialisePrBranchWorktree(opts) {
       `[materialise-pr-branch-worktree] git fetch origin ${headRefName} failed (exit ${fetchResult.exitCode}): ${fetchResult.stderr}`
     );
   }
-  const storySlug = sanitiseRefForPathSegment(storyRef);
-  const worktreePath = path48.join(
-    targetRepoRoot,
-    ".flow",
-    "state",
-    "sessions",
-    sessionUlid,
-    "review-worktree",
-    storySlug
-  );
+  const worktreePath = reviewWorktreePath(targetRepoRoot, sessionUlid, storyRef);
+  await fs34.mkdir(path48.dirname(worktreePath), { recursive: true });
   let staleExists = false;
   try {
     await fs34.access(worktreePath);
@@ -39294,6 +39300,7 @@ async function materialisePrBranchWorktree(opts) {
       );
       try {
         await fs34.rm(worktreePath, { recursive: true, force: true });
+        await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
         setupLog.push(
           `[materialise-pr-branch-worktree] stale path removed via fs.rm.`
         );
@@ -39305,6 +39312,21 @@ async function materialisePrBranchWorktree(opts) {
     } else {
       setupLog.push(
         `[materialise-pr-branch-worktree] stale worktree removed successfully.`
+      );
+    }
+  } else {
+    const pruneResult = await runGit(
+      ["worktree", "prune"],
+      targetRepoRoot,
+      execaImpl
+    );
+    if (pruneResult.exitCode !== 0) {
+      setupLog.push(
+        `[materialise-pr-branch-worktree] git worktree prune failed (exit ${pruneResult.exitCode}): ${pruneResult.stderr}. Proceeding \u2014 add may still succeed if no dangling registration existed.`
+      );
+    } else {
+      setupLog.push(
+        `[materialise-pr-branch-worktree] git worktree prune completed (cleared any dangling registrations).`
       );
     }
   }
@@ -39329,8 +39351,13 @@ async function materialisePrBranchWorktree(opts) {
     );
     if (removeResult.exitCode !== 0) {
       warnings.push(
-        `[materialise-pr-branch-worktree] cleanup: git worktree remove ${worktreePath} --force failed (exit ${removeResult.exitCode}): ${removeResult.stderr}. Worktree is left under ${worktreePath} \u2014 operator can run 'git worktree prune' to clean up.`
+        `[materialise-pr-branch-worktree] cleanup: git worktree remove ${worktreePath} --force failed (exit ${removeResult.exitCode}): ${removeResult.stderr}. Worktree is left at ${worktreePath} \u2014 operator can run 'git worktree prune' to clean up.`
       );
+      try {
+        await fs34.rm(worktreePath, { recursive: true, force: true });
+        await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
+      } catch {
+      }
     }
     return { warnings };
   }

@@ -1,9 +1,10 @@
 /**
- * `materialisePrBranchWorktree` — Story 5.26, hardened in native:01KTSQQQ00PTHY7YP8XP5SX31G.
+ * `materialisePrBranchWorktree` — Story 5.26, hardened in native:01KTSQQQ00PTHY7YP8XP5SX31G,
+ * relocated outside project folder in native:01KTSR2GJ78FJY2RXRGH2D59HC.
  *
  * Fetches the PR's head ref via the existing `gh` wrapper (respecting
  * the reviewer role's `gh_allow` allowlist) and materialises it into a
- * temporary git worktree under the session directory. Returns the
+ * temporary git worktree OUTSIDE the main project checkout. Returns the
  * worktree path and a cleanup callback per AC5.
  *
  * Behavioural contract:
@@ -11,10 +12,16 @@
  *     existing `gh` wrapper (NOT raw execa — the wrapper enforces allowlists).
  *   - Runs `git fetch origin <headRefName>` to ensure the sha is in the
  *     local object DB (the PR's head may be newly pushed).
- *   - Worktree path: `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/review-worktree/<sanitised-storyRef>/`.
+ *   - Worktree path: `<parent>/.flow-worktrees/<sessionUlid>/review-<sanitised-storyRef>-worktree`.
+ *     Sits OUTSIDE targetRepoRoot (a sibling of the checkout), following the same
+ *     convention as dev-story worktrees (native:01KTSR2GJ78FJY2RXRGH2D59HC AC1/AC4).
  *     Keyed on the story ref so two concurrent reviews for different stories
  *     resolve to distinct folders (native:01KTSQQQ00PTHY7YP8XP5SX31G).
- *   - Stale-worktree reaping: if the per-story path already exists, attempts
+ *   - Self-heal dangling registrations: if the worktree path is NOT on disk but
+ *     git still has a stale registration pointing there (i.e. the folder was
+ *     hand-deleted), runs `git worktree prune` to clear the dangling entry before
+ *     `git worktree add` (native:01KTSR2GJ78FJY2RXRGH2D59HC AC3).
+ *   - Stale-worktree reaping: if the per-story path already EXISTS on disk, attempts
  *     `git worktree remove <path> --force` first; only ever targets the
  *     requesting story's own folder, never a sibling's checkout or the
  *     shared parent directory.
@@ -80,6 +87,51 @@ export interface MateriaisePrBranchWorktreeOpts {
    * `loadRolePermissions` file read so tests can inject a minimal stub.
    */
   permissionsOverride?: RolePermissions;
+}
+
+// ---------------------------------------------------------------------------
+// Path helpers (exported so tests and future reapers can resolve the path
+// deterministically without calling the full materialise function).
+// ---------------------------------------------------------------------------
+
+/**
+ * The base directory that holds ALL of a session's review worktrees — a sibling
+ * of the checkout under `<parent>/.flow-worktrees/<sessionUlid>`.
+ *
+ * Mirrors `devStoryWorktreesRoot` from `dev-story-worktree.ts` so both
+ * builder and reviewer checkouts follow one location family.
+ *
+ * @internal — use `reviewWorktreePath` for the full per-story path.
+ */
+function reviewWorktreesRoot(
+  targetRepoRoot: string,
+  sessionUlid: string,
+): string {
+  return path.join(
+    path.dirname(targetRepoRoot),
+    ".flow-worktrees",
+    sessionUlid,
+  );
+}
+
+/**
+ * The worktree path for one story review in one session.
+ *
+ * Lives OUTSIDE `targetRepoRoot` so the review's test run resolves the PR's
+ * own tools and dependencies, never those of the main project folder.
+ *
+ * Exported for tests and future stale-reap tooling.
+ */
+export function reviewWorktreePath(
+  targetRepoRoot: string,
+  sessionUlid: string,
+  storyRef: string,
+): string {
+  const storySlug = sanitiseRefForPathSegment(storyRef);
+  return path.join(
+    reviewWorktreesRoot(targetRepoRoot, sessionUlid),
+    `review-${storySlug}-worktree`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -183,37 +235,48 @@ export async function materialisePrBranchWorktree(
   }
 
   // -------------------------------------------------------------------------
-  // Step 4: Compute worktree path — per-story to isolate concurrent reviews.
+  // Step 4: Compute worktree path — per-story, OUTSIDE targetRepoRoot.
   //
-  // Key the path on the sanitised story ref so two reviews running at the
-  // same time resolve to two distinct folders and neither can trample the
-  // other's in-flight checkout (native:01KTSQQQ00PTHY7YP8XP5SX31G).
-  // The sanitisation logic is the same as for reviewer-result.json, so the
-  // two namespaced paths always agree on the on-disk segment.
+  // Lives in `<parent>/.flow-worktrees/<sessionUlid>/review-<slug>-worktree`
+  // alongside dev-story worktrees (native:01KTSR2GJ78FJY2RXRGH2D59HC AC1/AC4),
+  // so the review's test run resolves the PR's own tools and dependencies and
+  // never those of the main project folder.
+  //
+  // Keyed on the sanitised story ref so two reviews running at the same time
+  // resolve to two distinct folders and neither can trample the other's
+  // in-flight checkout (native:01KTSQQQ00PTHY7YP8XP5SX31G).
   // -------------------------------------------------------------------------
-  const storySlug = sanitiseRefForPathSegment(storyRef);
-  const worktreePath = path.join(
-    targetRepoRoot,
-    ".flow",
-    "state",
-    "sessions",
-    sessionUlid,
-    "review-worktree",
-    storySlug,
-  );
+  const worktreePath = reviewWorktreePath(targetRepoRoot, sessionUlid, storyRef);
+
+  // Ensure the parent directory exists before we attempt worktree add (mirrors
+  // dev-story-worktree.ts which also mkdir -p's before the add).
+  await fs.mkdir(path.dirname(worktreePath), { recursive: true });
 
   // -------------------------------------------------------------------------
-  // Step 5: Stale-worktree reaping (AC3e) — if path already exists, remove it.
+  // Step 5: Stale-worktree reaping + dangling-registration self-heal.
+  //
+  // Two distinct cases:
+  //
+  // Case A (folder EXISTS on disk): a previous run left the path populated.
+  //   → git worktree remove --force, fall back to fs.rm.
+  //
+  // Case B (folder MISSING but git registration PRESENT — "dangling"): the
+  //   folder was hand-deleted but git still has a record pointing there.
+  //   `git worktree add` would fail with "already registered".
+  //   → git worktree prune so git removes the dangling entry (native:01KTSR2GJ78FJY2RXRGH2D59HC AC3).
+  //
+  // Both cases are checked before proceeding to `git worktree add`.
   // -------------------------------------------------------------------------
   let staleExists = false;
   try {
     await fs.access(worktreePath);
     staleExists = true;
   } catch {
-    // Path does not exist — nothing to reap.
+    // Path does not exist — check for a dangling registration (Case B).
   }
 
   if (staleExists) {
+    // Case A: folder is on disk — try to remove it via git, then fs.rm.
     setupLog.push(
       `[materialise-pr-branch-worktree] stale worktree detected at ${worktreePath}; reaping.`,
     );
@@ -232,6 +295,8 @@ export async function materialisePrBranchWorktree(
       // Attempt 2: plain fs.rm (handles manually-created or crashed-mid-add paths).
       try {
         await fs.rm(worktreePath, { recursive: true, force: true });
+        // Prune any dangling registration left after fs.rm.
+        await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
         setupLog.push(
           `[materialise-pr-branch-worktree] stale path removed via fs.rm.`,
         );
@@ -244,6 +309,30 @@ export async function materialisePrBranchWorktree(
     } else {
       setupLog.push(
         `[materialise-pr-branch-worktree] stale worktree removed successfully.`,
+      );
+    }
+  } else {
+    // Case B: folder is absent — prune any dangling git registration that may
+    // remain from a previous hand-delete, so `git worktree add` does not fail
+    // with "already registered" (native:01KTSR2GJ78FJY2RXRGH2D59HC AC3).
+    // `git worktree prune` is idempotent and safe to run when there is nothing
+    // to prune; the only risk is collateral over-reach, but git only prunes
+    // registrations whose paths no longer exist — live sibling worktrees are
+    // never disturbed.
+    const pruneResult = await runGit(
+      ["worktree", "prune"],
+      targetRepoRoot,
+      execaImpl,
+    );
+    if (pruneResult.exitCode !== 0) {
+      setupLog.push(
+        `[materialise-pr-branch-worktree] git worktree prune failed ` +
+          `(exit ${pruneResult.exitCode}): ${pruneResult.stderr}. ` +
+          `Proceeding — add may still succeed if no dangling registration existed.`,
+      );
+    } else {
+      setupLog.push(
+        `[materialise-pr-branch-worktree] git worktree prune completed (cleared any dangling registrations).`,
       );
     }
   }
@@ -280,8 +369,15 @@ export async function materialisePrBranchWorktree(
       warnings.push(
         `[materialise-pr-branch-worktree] cleanup: git worktree remove ${worktreePath} --force ` +
           `failed (exit ${removeResult.exitCode}): ${removeResult.stderr}. ` +
-          `Worktree is left under ${worktreePath} — operator can run 'git worktree prune' to clean up.`,
+          `Worktree is left at ${worktreePath} — operator can run 'git worktree prune' to clean up.`,
       );
+      // Belt-and-braces: fs.rm + prune so the path does not accumulate across runs.
+      try {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+        await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
+      } catch {
+        // Already reported above — don't shadow with a secondary error.
+      }
     }
     return { warnings };
   }
