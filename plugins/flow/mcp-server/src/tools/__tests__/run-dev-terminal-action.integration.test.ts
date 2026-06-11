@@ -1517,6 +1517,97 @@ describe("runDevTerminalAction — pre-PR leak gate (Story native:01KT47430Q4C73
 //       Per-run override → the override is honoured instead.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Story native:01KTSR1YKQFFFCY8KB5B0148M2 — branch reuse on crash retry (AC2)
+//
+// When a story's work branch already exists (created on a prior attempt that
+// crashed before completing), runDevTerminalAction must pick up the existing
+// branch and proceed to commit/push/PR instead of dying on a
+// "branch already exists" error.
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — branch reuse on crash retry (Story native:01KTSR1YKQFFFCY8KB5B0148M2 AC2)", () => {
+  it("AC2: resumes on the existing branch and opens the PR when the branch was already created", async () => {
+    // Simulate: the branch was created on the first attempt but the run crashed
+    // before pushing. The `rev-parse` probe returns success (branch exists), so
+    // gitCreateBranch falls through to plain `checkout` instead of `checkout -b`.
+    const branchName = "story/" + REF.toLowerCase().replace(/[^a-z0-9]/g, "-");
+
+    // Pre-create the branch in the real local repo so the existence probe finds it.
+    await realExeca("git", ["-C", ctx.repoRoot, "checkout", "-b", branchName]);
+    // Switch back to the base branch so runDevTerminalAction can check out the
+    // story branch again as if resuming from the start.
+    await realExeca("git", ["-C", ctx.repoRoot, "checkout", "-"]);
+
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    // This must succeed — the "already exists" path reuses the branch.
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+    expect(result.branch).toMatch(/^story\//);
+
+    // Verify the final working branch matches the pre-existing story branch.
+    const branchResult = await realExeca(
+      "git",
+      ["-C", ctx.repoRoot, "branch", "--show-current"],
+      { reject: false },
+    );
+    expect(branchResult.stdout.trim()).toBe(result.branch);
+  });
+
+  it("AC2: branch-reuse path: runDevTerminalAction succeeds when starting on a pre-existing branch", async () => {
+    // Determine the branch name that runDevTerminalAction will compute for this
+    // ref+title pair (mirrors buildBranchSlug logic so the pre-created branch
+    // matches exactly what the impl will look for).
+    const { buildBranchSlug } = await import("../../lib/pr-body.js");
+    const branchForRef = buildBranchSlug({ ref: REF, title: TITLE });
+
+    // Pre-create the branch (simulating a first attempt that crashed after
+    // branch creation but before the rest of the run), then switch back to
+    // the base branch so the retry starts from main.
+    await realExeca("git", ["-C", ctx.repoRoot, "checkout", "-b", branchForRef]);
+    const { promises: fs2 } = await import("node:fs");
+    await fs2.writeFile(
+      path.join(ctx.repoRoot, "src", "crash-retry-file.ts"),
+      "export const z = 3;\n",
+    );
+    await realExeca("git", ["-C", ctx.repoRoot, "checkout", "-"]);
+
+    // This run must not throw even though the branch already exists.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+    // The PR branch must be the same story branch — no duplicate was created.
+    expect(result.branch).toBe(branchForRef);
+  });
+});
+
 describe("runDevTerminalAction — time budget (Story native:01KTN5E6T75XKDX8A0SGBVPRYS AC3)", () => {
   it("AC3a: applies the default budget when no override is supplied — a timed-out build is reported as a build failure", async () => {
     // A timed-out build must surface PrePrBuildFailedError with timedOut:true,

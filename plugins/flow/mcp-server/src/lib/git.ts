@@ -320,15 +320,22 @@ export async function gitCommit(opts: {
 // ---------------------------------------------------------------------------
 
 /**
- * Create and check out a new branch in the target repo.
+ * Create and check out a branch in the target repo, reusing it if it already
+ * exists (reuse-or-create semantics).
  *
  * The branch name MUST match `^story/[a-z0-9-]+$` — a defence-in-depth
  * check that guards against callers bypassing `buildBranchSlug`. Throws
- * `GitBranchNameMalformedError` BEFORE any spawn on regex failure.
+ * `GitBranchNameMalformedError` BEFORE any spawn on regex failure (AC4).
  *
- * Runs `git -C <root> checkout -b <branchName>`.
+ * - First attempt: creates a new branch with `git checkout -b <branchName>`.
+ * - Second round / crash retry: if the branch already exists
+ *   (`refs/heads/<branchName>` is present), switches to it with
+ *   `git checkout <branchName>` instead of failing with "already exists".
  *
- * (Story 4.4 Task 2.1)
+ * The mutating checkout step is wrapped in `retryGitOnLockContention` so the
+ * same lock-race tolerance applies to both the create and reuse paths.
+ *
+ * (Story 4.4 Task 2.1 / Story native:01KTSR1YKQFFFCY8KB5B0148M2)
  */
 export async function gitCreateBranch(opts: {
   targetRepoRoot: string;
@@ -345,12 +352,35 @@ export async function gitCreateBranch(opts: {
     throw new GitBranchNameMalformedError({ branchName });
   }
 
-  // `checkout -b` creates a ref in the shared `.git`; under concurrent drains
-  // that ref creation can lose a lock race. Retry on transient contention.
-  await retryGitOnLockContention(
-    () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
-    sleep,
+  // Check whether the branch already exists by verifying its ref. Using
+  // `rev-parse --verify --quiet` avoids any ambiguity about remote vs. local
+  // refs — we check `refs/heads/<branch>` specifically so we never mistake a
+  // remote-tracking ref or tag for an existing local branch.
+  const existsResult = await execaImpl(
+    "git",
+    ["-C", targetRepoRoot, "rev-parse", "--verify", "--quiet", `refs/heads/${branchName}`],
+    { reject: false },
   );
+
+  const branchAlreadyExists = existsResult.exitCode === 0;
+
+  if (branchAlreadyExists) {
+    // Reuse path: branch was already created on a prior attempt (second round
+    // of changes or crash retry). Switch onto it with plain `checkout` so we
+    // don't create a duplicate.
+    await retryGitOnLockContention(
+      () => execaImpl("git", ["-C", targetRepoRoot, "checkout", branchName]),
+      sleep,
+    );
+  } else {
+    // First-time path: create the branch exactly as before.
+    // `checkout -b` creates a ref in the shared `.git`; under concurrent drains
+    // that ref creation can lose a lock race. Retry on transient contention.
+    await retryGitOnLockContention(
+      () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
+      sleep,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

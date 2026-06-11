@@ -102,18 +102,93 @@ describe("assertNoNegativeFlags", () => {
 // ---------------------------------------------------------------------------
 
 describe("gitCreateBranch", () => {
-  it("runs git checkout -b with a valid branch name", async () => {
-    const spy = makeOkStub();
+  // ---------------------------------------------------------------------------
+  // AC3: first-time create — branch does NOT yet exist
+  // ---------------------------------------------------------------------------
+
+  it("AC3: first-time create — runs git checkout -b when the branch does not exist", async () => {
+    // The existence probe (rev-parse) returns exit code 1 (branch absent),
+    // so the implementation falls through to `checkout -b`.
+    const spy = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      // rev-parse probe: branch does not exist → exitCode 1
+      if (args[2] === "rev-parse") {
+        return { stdout: "", stderr: "", exitCode: 1 };
+      }
+      // All other git calls succeed.
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
     await gitCreateBranch({
       targetRepoRoot: "/tmp/repo",
       branchName: "story/4-4-terminal-action",
       execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
     });
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]).toEqual([
-      "git",
-      ["-C", "/tmp/repo", "checkout", "-b", "story/4-4-terminal-action"],
-    ]);
+    // The final checkout call must use `-b` (create, not switch).
+    const checkoutCall = spy.mock.calls.find(
+      (c) => (c[1] as readonly string[])[2] === "checkout",
+    );
+    expect(checkoutCall).toBeDefined();
+    expect(checkoutCall![1]).toContain("-b");
+    expect(checkoutCall![1]).toContain("story/4-4-terminal-action");
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC1: second-round reuse — branch already exists
+  // ---------------------------------------------------------------------------
+
+  it("AC1: second-round reuse — switches to existing branch without -b when branch already exists", async () => {
+    // The existence probe returns exit code 0 (branch present),
+    // so the implementation must use plain `checkout` (no -b).
+    const spy = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      if (args[2] === "rev-parse") {
+        return { stdout: "abc123", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    await gitCreateBranch({
+      targetRepoRoot: "/tmp/repo",
+      branchName: "story/second-round",
+      execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
+    });
+    // The checkout call must NOT contain -b.
+    const checkoutCall = spy.mock.calls.find(
+      (c) => (c[1] as readonly string[])[2] === "checkout",
+    );
+    expect(checkoutCall).toBeDefined();
+    expect(checkoutCall![1]).not.toContain("-b");
+    expect(checkoutCall![1]).toContain("story/second-round");
+  });
+
+  it("AC1: second-round reuse — completes without error (does not throw 'already exists')", async () => {
+    // Simulate the branch already existing. The function must resolve cleanly.
+    const spy = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      if (args[2] === "rev-parse") {
+        return { stdout: "abc123", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    await expect(
+      gitCreateBranch({
+        targetRepoRoot: "/tmp/repo",
+        branchName: "story/crash-retry",
+        execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC4: malformed branch name refused BEFORE any spawn
+  // ---------------------------------------------------------------------------
+
+  it("AC4: throws GitBranchNameMalformedError for non-story/ prefix BEFORE spawn", async () => {
+    const spy = vi.fn();
+    await expect(
+      gitCreateBranch({
+        targetRepoRoot: "/tmp/repo",
+        branchName: "feature/my-feature",
+        execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
+      }),
+    ).rejects.toBeInstanceOf(GitBranchNameMalformedError);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("Task 2.1: throws GitBranchNameMalformedError for non-story/ prefix BEFORE spawn", async () => {
@@ -146,6 +221,19 @@ describe("gitCreateBranch", () => {
       gitCreateBranch({
         targetRepoRoot: "/tmp/repo",
         branchName: "story/",
+        execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
+      }),
+    ).rejects.toBeInstanceOf(GitBranchNameMalformedError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("AC4: throws GitBranchNameMalformedError for malformed name — safety guard fires before existence probe", async () => {
+    // The spy must NOT be called at all — the name guard fires before any git spawn.
+    const spy = vi.fn();
+    await expect(
+      gitCreateBranch({
+        targetRepoRoot: "/tmp/repo",
+        branchName: "story/UPPER_CASE",
         execaImpl: spy as unknown as Parameters<typeof gitCreateBranch>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GitBranchNameMalformedError);

@@ -36449,10 +36449,23 @@ async function gitCreateBranch(opts) {
   if (!STORY_BRANCH_REGEX.test(branchName)) {
     throw new GitBranchNameMalformedError({ branchName });
   }
-  await retryGitOnLockContention(
-    () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
-    sleep
+  const existsResult = await execaImpl(
+    "git",
+    ["-C", targetRepoRoot, "rev-parse", "--verify", "--quiet", `refs/heads/${branchName}`],
+    { reject: false }
   );
+  const branchAlreadyExists = existsResult.exitCode === 0;
+  if (branchAlreadyExists) {
+    await retryGitOnLockContention(
+      () => execaImpl("git", ["-C", targetRepoRoot, "checkout", branchName]),
+      sleep
+    );
+  } else {
+    await retryGitOnLockContention(
+      () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
+      sleep
+    );
+  }
 }
 async function gitPush(opts) {
   const { targetRepoRoot, branchName } = opts;
