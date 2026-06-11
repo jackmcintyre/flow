@@ -119,6 +119,25 @@ export async function markStoryReady(
     return { ref, ready, noop: true, state: foundState };
   }
 
+  // Step 4b: Re-verify the manifest is still in to-do/ immediately before the
+  // write — closing the TOCTOU window where claimNextStory can move the
+  // manifest to in-progress/ between our Step-1 scan (above) and the write
+  // below.  If the file has disappeared from foundAbsPath the claim beat us;
+  // abort without writing so the run's in-progress copy is the only copy.
+  //
+  // Note: there is a residual sub-millisecond race between this re-stat and
+  // atomicWriteFile below.  The re-stat shrinks the window dramatically; the
+  // full elimination would require routing the flip through the state-machine's
+  // rename-conditioned write, which is deferred because the current tool writes
+  // in-place (no directory move).  For the interim fix the re-stat is the
+  // minimum safe guard.
+  try {
+    await fs.stat(foundAbsPath);
+  } catch {
+    // The file has moved out of to-do/ (most likely claimed by the dev loop).
+    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
+  }
+
   // Step 5: Flip `ready`, re-serialise via the SAME path as the withdraw tool,
   // and write back atomically. MUST NOT modify any field other than `ready`,
   // and MUST NOT move the manifest between state directories.

@@ -41215,6 +41215,11 @@ async function markStoryReady(rawInput) {
   if (manifest.ready === ready) {
     return { ref, ready, noop: true, state: foundState };
   }
+  try {
+    await fs43.stat(foundAbsPath);
+  } catch {
+    throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
+  }
   const updated = { ...manifest, ready };
   const yamlText = serialiseManifest(updated);
   await atomicWriteFile(foundAbsPath, yamlText);
