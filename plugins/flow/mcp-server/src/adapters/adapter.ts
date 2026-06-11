@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { RejectedFile } from "../lib/expected-work-counters.js";
 
 /**
  * Planning-adapter contract.
@@ -43,6 +44,21 @@ export interface PlanningAdapter {
    * @see _bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md § Story 3.5
    */
   validateAgainstDiscipline(story: SourceStory): SourceStory | DisciplineViolation;
+
+  /**
+   * Return the count of all regular files seen in the adapter's stories
+   * directory on the most recent `listSourceStories()` call, plus any files
+   * that were seen but could not be used (e.g. because their filename did not
+   * match the expected pattern).
+   *
+   * Optional — adapters that do not implement file-level listing (e.g. BMad)
+   * may omit this. `scanSources` uses the result to populate the
+   * expected-work counters summary (Story native:01KTSR3E7FE61XB2PN8VJ24289).
+   *
+   * The result is a snapshot of the most recent listing — it must be called
+   * AFTER `listSourceStories()` to reflect the same directory pass.
+   */
+  getListingStats?(): { filesSeenCount: number; filesRejected: RejectedFile[] };
 }
 
 /**

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { DisciplineViolation, PlanningAdapter, SourceStory } from "../adapter.js";
 import { validateStoryAgainstDiscipline } from "../../validators/planning-discipline.js";
 import { parseNativeStory } from "./parse-native-story.js";
+import type { RejectedFile } from "../../lib/expected-work-counters.js";
 
 /**
  * Native planning adapter — v1 implementation (Story 3.4).
@@ -36,6 +37,12 @@ type NativeContext = {
 let currentContext: NativeContext | undefined;
 
 /**
+ * Snapshot of the most recent `listSourceStories()` listing pass — populated
+ * once per call and exposed via `getListingStats()`.
+ */
+let lastListingStats: { filesSeenCount: number; filesRejected: RejectedFile[] } | undefined;
+
+/**
  * Configure the bound `targetRepo` context the adapter's list/read/resolve
  * methods operate against. Called by `resolveWorkspace` (via the adapter
  * branch in workspace-resolver.ts) and by tests.
@@ -47,6 +54,7 @@ export function configureNativeAdapter(ctx: NativeContext): void {
 /** Reset the bound context — primarily for test cleanup. */
 export function resetNativeAdapter(): void {
   currentContext = undefined;
+  lastListingStats = undefined;
 }
 
 function requireContext(): NativeContext {
@@ -63,21 +71,45 @@ function nativeStoriesDir(targetRepo: string): string {
   return path.join(targetRepo, NATIVE_STORIES_SUBDIR);
 }
 
-async function listNativeStoryFiles(storiesDir: string): Promise<string[]> {
+/**
+ * Result of listing native story files — includes both the usable paths and
+ * any files that were seen but rejected (e.g. bad filename format).
+ */
+export interface ListNativeStoryFilesResult {
+  /** Absolute paths to files that matched the ULID filename pattern. */
+  paths: string[];
+  /**
+   * Total number of regular files seen in the directory (matching and
+   * non-matching). Used by `scanSources` to compute the "files seen" counter
+   * for the expected-work summary.
+   */
+  filesSeenCount: number;
+  /** Files that were visible but could not be used. */
+  filesRejected: RejectedFile[];
+}
+
+async function listNativeStoryFiles(storiesDir: string): Promise<ListNativeStoryFilesResult> {
   let entries;
   try {
     entries = await fs.readdir(storiesDir, { withFileTypes: true });
   } catch {
-    return [];
+    return { paths: [], filesSeenCount: 0, filesRejected: [] };
   }
-  const out: string[] = [];
+  const paths: string[] = [];
+  const filesRejected: RejectedFile[] = [];
+  let filesSeenCount = 0;
   for (const e of entries) {
-    if (e.isFile() && NATIVE_FILENAME_RE.test(e.name)) {
-      out.push(path.join(storiesDir, e.name));
+    if (!e.isFile()) continue;
+    // Only count regular files (not dirs, symlinks, etc.).
+    filesSeenCount++;
+    if (NATIVE_FILENAME_RE.test(e.name)) {
+      paths.push(path.join(storiesDir, e.name));
+    } else {
+      filesRejected.push({ filename: e.name, reason: "bad-filename" });
     }
     // No subdirectory recursion per spec Task 1.6.
   }
-  return out;
+  return { paths, filesSeenCount, filesRejected };
 }
 
 function parseRef(ref: string): { ulid: string } | null {
@@ -112,9 +144,14 @@ export const NativeAdapter: PlanningAdapter = {
   async listSourceStories(): Promise<SourceStory[]> {
     const ctx = requireContext();
     const storiesDir = nativeStoriesDir(ctx.targetRepo);
-    const files = await listNativeStoryFiles(storiesDir);
+    const listing = await listNativeStoryFiles(storiesDir);
+    // Persist the listing stats for getListingStats().
+    lastListingStats = {
+      filesSeenCount: listing.filesSeenCount,
+      filesRejected: listing.filesRejected,
+    };
     const results: SourceStory[] = [];
-    for (const file of files) {
+    for (const file of listing.paths) {
       const contents = await fs.readFile(file, "utf8");
       // Per-file parse resilience (Story 10.3): a single malformed native file
       // must NOT abort the whole scan — that would be a live-backlog outage (one
@@ -137,6 +174,15 @@ export const NativeAdapter: PlanningAdapter = {
     // Sort by ULID (lexicographic = chronological for ULIDs).
     results.sort((a, b) => a.ref.localeCompare(b.ref));
     return results;
+  },
+
+  /**
+   * Return the file-level listing stats from the most recent
+   * `listSourceStories()` call. This is used by `scanSources` to populate
+   * the expected-work counters summary (Story native:01KTSR3E7FE61XB2PN8VJ24289).
+   */
+  getListingStats(): { filesSeenCount: number; filesRejected: RejectedFile[] } {
+    return lastListingStats ?? { filesSeenCount: 0, filesRejected: [] };
   },
 
   async readSourceStory(ref: string): Promise<SourceStory> {

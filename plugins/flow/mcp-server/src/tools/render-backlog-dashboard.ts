@@ -26,6 +26,10 @@ import {
   type BacklogInventoryEntry,
 } from "./read-backlog-inventory.js";
 import { shortHandle } from "../lib/short-handle.js";
+import {
+  renderExpectedWorkCounters,
+  type HeldRef,
+} from "../lib/expected-work-counters.js";
 
 /**
  * One row of the dashboard snapshot — a backlog item with its epic, state, and
@@ -55,6 +59,13 @@ interface BacklogDashboardEntry {
  */
 export interface BacklogDashboardSnapshot {
   entries: BacklogDashboardEntry[];
+  /**
+   * Story native:01KTSR3E7FE61XB2PN8VJ24289: held refs computed from live
+   * inventory state. Entries that are in `to-do/` but not claimable (due to
+   * readiness brake, unmet deps, etc.) are listed here so the dashboard renders
+   * the shared expected-work counter line.
+   */
+  refsHeld: HeldRef[];
 }
 
 /**
@@ -110,7 +121,20 @@ export async function getBacklogDashboard(opts: {
     claimable: isClaimableEntry(e),
   }));
 
-  return { entries };
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: build held-refs from to-do entries
+  // that are NOT claimable, so the dashboard's expected-work counter line reflects
+  // the same population the drain would encounter on the next claim pass.
+  const refsHeld: HeldRef[] = backlog_inventory
+    .filter((e) => e.state === "to-do" && !isClaimableEntry(e) && !e.withdrawn)
+    .map((e): HeldRef => {
+      if (!e.ready) return { ref: e.ref, reason: "not-ready" };
+      if (!e.depsReady) return { ref: e.ref, reason: "deps-not-done" };
+      // depsReady && ready but still not claimable — shouldn't normally occur
+      // (isClaimableEntry requires both), but handle defensively.
+      return { ref: e.ref, reason: "deps-not-done" };
+    });
+
+  return { entries, refsHeld };
 }
 
 /** Sentinel epic heading for entries whose ref carries no epic. */
@@ -137,6 +161,17 @@ function renderRow(entry: BacklogDashboardEntry): string {
  */
 export function renderBacklogDashboard(snapshot: BacklogDashboardSnapshot): string {
   const lines: string[] = ["Backlog dashboard"];
+
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: expected-work counters header line.
+  // Always present (including all-zero) so the operator sees an explicit "all
+  // clear" rather than the absence of a line.
+  lines.push(
+    renderExpectedWorkCounters({
+      filesSeenCount: 0, // dashboard does not have file-level visibility
+      filesRejected: [],
+      refsHeld: snapshot.refsHeld,
+    }),
+  );
 
   if (snapshot.entries.length === 0) {
     lines.push("  (backlog is empty — nothing here)");
