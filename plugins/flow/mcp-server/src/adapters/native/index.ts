@@ -75,7 +75,7 @@ function nativeStoriesDir(targetRepo: string): string {
  * Result of listing native story files — includes both the usable paths and
  * any files that were seen but rejected (e.g. bad filename format).
  */
-export interface ListNativeStoryFilesResult {
+interface ListNativeStoryFilesResult {
   /** Absolute paths to files that matched the ULID filename pattern. */
   paths: string[];
   /**
