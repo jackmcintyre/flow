@@ -45,7 +45,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
-import { ManifestNotFoundError } from "../errors.js";
+import { InProgressHandEditError, ManifestNotFoundError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import {
@@ -103,19 +103,80 @@ export async function claimStory(opts: {
   // If the ref is already in in-progress/ (re-entry), call the hand-edit guard
   // and let any thrown InProgressHandEditError propagate. The guard loads the
   // claim-time sidecar internally; no baseline-derivation call is needed here.
+  //
+  // Exception — crash-recovery re-baseline (this story, AC3):
+  // If the guard throws InProgressHandEditError with changedFields: ["_snapshot_missing"]
+  // AND the manifest already carries a claimed_by (meaning it was fully claimed in an
+  // earlier run that crashed between snapshot-write and completion), re-establish the
+  // snapshot from the on-disk manifest so the story is resumable rather than wedged
+  // forever. This re-baseline is safe because:
+  //   • It only fires when the sidecar is absent — the guard would return ok otherwise.
+  //   • It requires claimed_by to be present, distinguishing it from the gap scenario
+  //     (winner still running, claimed_by not yet written), which must propagate so
+  //     claimNextStory can treat it as a concurrent lost race.
+  //   • A genuine operator hand-edit (real field drift, not just missing sidecar)
+  //     still surfaces the full changed-field list and propagates as InProgressHandEditError.
+  let crashRecoveryRebaselined = false;
   try {
     await fs.stat(absInProgressPath);
     // File exists — ref is already in in-progress/. Guard against hand-edits.
     await detectInProgressHandEdit({ targetRepoRoot, ref });
+    // Guard passed — the story was already claimed and is clean. Fall through to
+    // the to-do/ load so it throws ManifestNotFoundError(fromState:"to-do"), which
+    // claimNextStory catches as a concurrent lost-race signal. This preserves the
+    // original re-entry contract.
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") {
       // File does not exist in in-progress/ — proceed with normal claim from to-do/.
+    } else if (
+      err instanceof InProgressHandEditError &&
+      err.changedFields.length === 1 &&
+      err.changedFields[0] === "_snapshot_missing"
+    ) {
+      // Snapshot-missing-only. Read the manifest to check whether claimed_by is set.
+      //
+      // Two sub-cases:
+      //
+      // (a) claimed_by PRESENT — crash-recovery case (AC3 of this story):
+      //     The claim completed in a prior run (rename + field-rewrite both finished)
+      //     but the snapshot write was interrupted before it landed. Re-establish the
+      //     snapshot so the story is resumable rather than permanently wedged.
+      //
+      // (b) claimed_by ABSENT — concurrent gap case (AC1/AC2 of this story):
+      //     The winner is still between the atomic rename and its field-rewrite
+      //     (claimed_by not yet written). Propagate so claimNextStory treats this as
+      //     a concurrent lost race and skips to the next candidate.
+      const rawInProgress = await fs.readFile(absInProgressPath, "utf8");
+      const parsedInProgress = yamlParse(rawInProgress) as unknown;
+      const inProgressManifest = parseExecutionManifest(parsedInProgress, {
+        absPath: absInProgressPath,
+      });
+
+      if (inProgressManifest.claimed_by) {
+        // Sub-case (a): claimed_by present → crash recovery. Re-establish snapshot.
+        await writeInProgressSnapshot({
+          targetRepoRoot,
+          ref,
+          manifest: inProgressManifest,
+        });
+        crashRecoveryRebaselined = true;
+      } else {
+        // Sub-case (b): claimed_by absent → gap scenario. Propagate as lost race.
+        throw err;
+      }
     } else {
-      // Propagate InProgressHandEditError or ManifestNotFoundError from
-      // detectInProgressHandEdit, or any other error.
+      // Propagate InProgressHandEditError (real field drift), ManifestNotFoundError,
+      // or any other error.
       throw err;
     }
+  }
+
+  // Crash-recovery re-baseline succeeded — the snapshot is now written and the
+  // story is resumable. Return early so the caller (e.g. the drain's orphan-
+  // recovery path) can proceed with building the already-claimed story.
+  if (crashRecoveryRebaselined) {
+    return { ref, absPath: absInProgressPath };
   }
 
   // Step 2: Load the to-do/ manifest.

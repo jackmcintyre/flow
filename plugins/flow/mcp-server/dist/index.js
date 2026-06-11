@@ -37477,15 +37477,35 @@ async function claimStory(opts) {
   const stateRoot = path9.join(targetRepoRoot, ".flow", "state");
   const absToDoPath = path9.join(stateRoot, "to-do", `${ref}.yaml`);
   const absInProgressPath = path9.join(stateRoot, "in-progress", `${ref}.yaml`);
+  let crashRecoveryRebaselined = false;
   try {
     await fs8.stat(absInProgressPath);
     await detectInProgressHandEdit({ targetRepoRoot, ref });
   } catch (err) {
     const code = err?.code;
     if (code === "ENOENT") {
+    } else if (err instanceof InProgressHandEditError && err.changedFields.length === 1 && err.changedFields[0] === "_snapshot_missing") {
+      const rawInProgress = await fs8.readFile(absInProgressPath, "utf8");
+      const parsedInProgress = (0, import_yaml7.parse)(rawInProgress);
+      const inProgressManifest = parseExecutionManifest(parsedInProgress, {
+        absPath: absInProgressPath
+      });
+      if (inProgressManifest.claimed_by) {
+        await writeInProgressSnapshot({
+          targetRepoRoot,
+          ref,
+          manifest: inProgressManifest
+        });
+        crashRecoveryRebaselined = true;
+      } else {
+        throw err;
+      }
     } else {
       throw err;
     }
+  }
+  if (crashRecoveryRebaselined) {
+    return { ref, absPath: absInProgressPath };
   }
   let rawText;
   try {
@@ -51340,6 +51360,12 @@ async function claimNextStory(opts) {
       claimSucceeded = true;
     } catch (err) {
       if (err instanceof ManifestNotFoundError && err.fromState === "to-do") {
+        chatLog.push(
+          `${ref} already claimed by another worker \u2014 skipping to next candidate`
+        );
+        continue;
+      }
+      if (err instanceof InProgressHandEditError && err.changedFields.length === 1 && err.changedFields[0] === "_snapshot_missing") {
         chatLog.push(
           `${ref} already claimed by another worker \u2014 skipping to next candidate`
         );
