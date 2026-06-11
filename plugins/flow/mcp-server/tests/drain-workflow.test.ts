@@ -113,6 +113,37 @@ describe("Story 8.5 — drain workflow integrity", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Review fix-now batch (2026-06-11) — structural anchors for the three
+// workflow-level fixes. The drain script can't be unit-executed here, so these
+// assert the load-bearing tokens are present (same approach as the suite above).
+// ---------------------------------------------------------------------------
+
+describe("review fix-now batch — drain workflow anchors", () => {
+  it("B2: a rework-exhausted story lands in the blocked bucket (never vanishes)", () => {
+    // After the rework loop falls through without a green verdict, the story must
+    // be pushed to `blocked` with a `rework-exhausted` reason — not silently
+    // dropped from every result bucket.
+    expect(SRC).toContain("rework-exhausted");
+    expect(SRC).toMatch(/verdict\?\.next !== 'done-ready-for-merge'/);
+  });
+
+  it("D5: spawning with an empty persona fails loud (no unguarded agent)", () => {
+    // An empty dev/reviewer persona would drop the evidence-only discipline; the
+    // drain must throw rather than spawn an unguarded agent.
+    expect(SRC).toContain("empty generalist-dev persona");
+    expect(SRC).toContain("empty generalist-reviewer persona");
+    expect(SRC).toMatch(/if \(!devPersona\.trim\(\)\) throw/);
+    expect(SRC).toMatch(/if \(!reviewerPersona\.trim\(\)\) throw/);
+  });
+
+  it("B4: a declared-dependency hold surfaces WAITING, not a clean drain", () => {
+    // The drain must recognise the new claimNextStory outcome and log WAITING so a
+    // queue held by an unmerged declared dependency is not reported as drained.
+    expect(SRC).toContain("waiting-on-unmerged-dependency");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2 + AC3 structural-anchor tests.
 //
 // AC2: the drain reads each claimed story's persisted lane and sets the dev/reviewer

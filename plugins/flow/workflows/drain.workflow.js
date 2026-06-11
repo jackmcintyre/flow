@@ -222,6 +222,13 @@ log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded
 // would otherwise hand back — just the persona system prompt, no story context).
 const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true))?.systemPrompt || ''
 const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:reviewer', true))?.systemPrompt || ''
+// FAIL LOUD on an empty persona (finding D5). A seam error or a missing
+// systemPrompt would otherwise let every story spawn dev/reviewer with NO
+// discipline rules — silently dropping the evidence-only contract these prompts
+// carry. The persona is a structural prerequisite for the whole run, so stop now
+// with a clear message rather than build/review unguarded.
+if (!devPersona.trim()) throw new Error('drain: empty generalist-dev persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn dev without its discipline rules')
+if (!reviewerPersona.trim()) throw new Error('drain: empty generalist-reviewer persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn reviewer without its discipline rules')
 
 const completed = [], merged = [], pausedForHuman = [], blocked = [], resumed = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
@@ -381,6 +388,15 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' }); return
   }
 
+  // REWORK EXHAUSTED (B2): the loop fell through without a green verdict —
+  // MAX_REWORK NEEDS-CHANGES rounds in a row (each `continue`d above). Without
+  // this guard the story lands in NO result bucket and silently vanishes from
+  // the run summary, which promises every story lands in exactly one bucket.
+  // Record it as blocked so the stories that most need a human actually surface.
+  if (verdict?.next !== 'done-ready-for-merge') {
+    blocked.push({ ref, blocked_by: 'rework-exhausted', rounds: MAX_REWORK }); return
+  }
+
   // GATE — only on a green verdict. risk-tier x agreement x threshold; the tool
   // performs the merge or applies the needs-human label. Stage-1 expects
   // pause-needs-human (no agreement history yet) -> a human merges.
@@ -519,6 +535,13 @@ async function drainWorker(workerId) {
       if (claim?.next === 'waiting-on-unmerged-overlap') {
         const held = Array.isArray(claim.heldRefs) ? claim.heldRefs.join(', ') : '(unknown)'
         log(`WAITING — ready story held for an unmerged overlapping pull request. Held: ${held}`)
+      }
+      // waiting-on-unmerged-dependency: twin of the overlap hold (finding B4) — a
+      // ready story is parked solely because a declared dependency's PR is not yet
+      // merged. Also NOT a clean drain — surface it as WAITING, not queue-drained.
+      if (claim?.next === 'waiting-on-unmerged-dependency') {
+        const held = Array.isArray(claim.heldRefs) ? claim.heldRefs.join(', ') : '(unknown)'
+        log(`WAITING — ready story held for an unmerged declared dependency. Held: ${held}`)
       }
       recordReason(claim?.next || claim?._parseError || 'claim-failed'); return
     }

@@ -27,6 +27,7 @@ import {
   QUEUE_DRAINED_LINE,
   WAITING_ON_IN_PROGRESS_LINE,
   WAITING_ON_UNMERGED_OVERLAP_LINE,
+  WAITING_ON_UNMERGED_DEPENDENCY_LINE,
 } from "../claim-next-story.js";
 import { markStoryReady } from "../mark-story-ready.js";
 import {
@@ -248,8 +249,17 @@ describe("(a) spawn-dev — eligible (depsReady: true) story in to-do/", () => {
       isDependencyMerged: async () => false,
     });
 
-    // Nothing else is claimable and nothing is in-progress → queue-drained.
-    expect(result.next).toBe("queue-drained");
+    // B4 fix: the dependent is held SOLELY by an approved-but-UNMERGED declared
+    // dependency. This is NOT a clean drain — surfacing queue-drained here would
+    // lie to the operator that the queue is empty when work is actually waiting
+    // on them to merge the dependency's PR. Expect the WAITING outcome naming the
+    // held ref, mirroring the cited-source overlap hold (#325).
+    expect(result.next).toBe("waiting-on-unmerged-dependency");
+    if (result.next !== "waiting-on-unmerged-dependency") return;
+    expect(result.heldRefs).toContain(STORY_REF_A);
+    expect(
+      result.chatLog.some((l) => l.startsWith(WAITING_ON_UNMERGED_DEPENDENCY_LINE)),
+    ).toBe(true);
 
     // The dependent is still sitting in to-do/ (never claimed).
     const stillTodo = await fs
