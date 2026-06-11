@@ -16,6 +16,10 @@ import {
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
 import { STATE_NAMES, type StateName } from "../state/manifest-state-machine.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
+import {
+  renderExpectedWorkCounters,
+  type RejectedFile,
+} from "../lib/expected-work-counters.js";
 
 /**
  * Result returned by `scanSources`. All five ref arrays are disjoint.
@@ -56,6 +60,18 @@ export interface ScanResult {
    * Each entry carries the symmetric-difference detail for the rendered output.
    */
   depsDriftRefs: Array<{ ref: string; proseRefs: string[]; manifestRefs: string[] }>;
+  /**
+   * Story native:01KTSR3E7FE61XB2PN8VJ24289: total files the adapter saw in the
+   * stories directory on this scan pass (including rejected ones). Zero when the
+   * adapter does not support `getListingStats()` (e.g. BMad).
+   */
+  filesSeenCount: number;
+  /**
+   * Story native:01KTSR3E7FE61XB2PN8VJ24289: files that were visible to the
+   * adapter but could not be used (e.g. bad filename). Empty when the adapter
+   * does not support `getListingStats()`.
+   */
+  filesRejected: RejectedFile[];
 }
 
 /**
@@ -112,6 +128,16 @@ export function renderScanResult(result: ScanResult): string {
   } else {
     lines.push(`blocked:   0 ref(s)`);
   }
+
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: expected-work counters line.
+  // Always emitted (including the all-zero case) so an "all clear" is explicit.
+  lines.push(
+    renderExpectedWorkCounters({
+      filesSeenCount: result.filesSeenCount,
+      filesRejected: result.filesRejected,
+      refsHeld: [], // scan does not track held refs — that is the claim step's domain
+    }),
+  );
 
   return lines.join("\n");
 }
@@ -454,6 +480,15 @@ export async function scanSources(opts: {
   // Step 2: List source stories from the active adapter.
   const sourceStories = await activeAdapter.listSourceStories();
 
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: collect file-level listing stats
+  // from adapters that support the optional seam. BMad/unknown adapters without
+  // getListingStats() get zeros — the summary still emits the all-zero line so
+  // the format is consistent across adapter types.
+  const listingStats = activeAdapter.getListingStats?.() ?? {
+    filesSeenCount: 0,
+    filesRejected: [],
+  };
+
   const result: ScanResult = {
     targetRepoRoot,
     adapterName: activeAdapterName,
@@ -463,6 +498,8 @@ export async function scanSources(opts: {
     skippedRefs: [],
     blockedRefs: [],
     depsDriftRefs: [],
+    filesSeenCount: listingStats.filesSeenCount,
+    filesRejected: listingStats.filesRejected,
   };
 
   const stateRoot = path.join(targetRepoRoot, ".flow", "state");

@@ -26000,6 +26000,7 @@ function deriveUlidFromPath(absPath) {
 var NATIVE_FILENAME_RE = /^[0-9A-HJKMNP-TV-Z]{26}\.md$/;
 var NATIVE_STORIES_SUBDIR = path6.join(".flow", "native-stories");
 var currentContext2;
+var lastListingStats;
 function configureNativeAdapter(ctx) {
   currentContext2 = { targetRepo: path6.resolve(ctx.targetRepo) };
 }
@@ -26019,15 +26020,21 @@ async function listNativeStoryFiles(storiesDir) {
   try {
     entries = await fs5.readdir(storiesDir, { withFileTypes: true });
   } catch {
-    return [];
+    return { paths: [], filesSeenCount: 0, filesRejected: [] };
   }
-  const out = [];
+  const paths = [];
+  const filesRejected = [];
+  let filesSeenCount = 0;
   for (const e of entries) {
-    if (e.isFile() && NATIVE_FILENAME_RE.test(e.name)) {
-      out.push(path6.join(storiesDir, e.name));
+    if (!e.isFile()) continue;
+    filesSeenCount++;
+    if (NATIVE_FILENAME_RE.test(e.name)) {
+      paths.push(path6.join(storiesDir, e.name));
+    } else {
+      filesRejected.push({ filename: e.name, reason: "bad-filename" });
     }
   }
-  return out;
+  return { paths, filesSeenCount, filesRejected };
 }
 function parseRef2(ref) {
   const m = /^native:([0-9A-HJKMNP-TV-Z]{26})$/.exec(ref);
@@ -26058,9 +26065,13 @@ var NativeAdapter = {
   async listSourceStories() {
     const ctx = requireContext2();
     const storiesDir = nativeStoriesDir(ctx.targetRepo);
-    const files = await listNativeStoryFiles(storiesDir);
+    const listing = await listNativeStoryFiles(storiesDir);
+    lastListingStats = {
+      filesSeenCount: listing.filesSeenCount,
+      filesRejected: listing.filesRejected
+    };
     const results = [];
-    for (const file2 of files) {
+    for (const file2 of listing.paths) {
       const contents = await fs5.readFile(file2, "utf8");
       try {
         results.push(parseNativeStory(file2, contents));
@@ -26073,6 +26084,14 @@ var NativeAdapter = {
     }
     results.sort((a2, b) => a2.ref.localeCompare(b.ref));
     return results;
+  },
+  /**
+   * Return the file-level listing stats from the most recent
+   * `listSourceStories()` call. This is used by `scanSources` to populate
+   * the expected-work counters summary (Story native:01KTSR3E7FE61XB2PN8VJ24289).
+   */
+  getListingStats() {
+    return lastListingStats ?? { filesSeenCount: 0, filesRejected: [] };
   },
   async readSourceStory(ref) {
     const ctx = requireContext2();
@@ -28347,6 +28366,31 @@ function isClaimable(manifest) {
   return manifest.withdrawn === false && manifest.status === "to-do";
 }
 
+// src/lib/expected-work-counters.ts
+function renderExpectedWorkCounters(counters) {
+  const { filesSeenCount, filesRejected, refsHeld } = counters;
+  const lines = [];
+  const rejectedCount = filesRejected.length;
+  if (rejectedCount === 0) {
+    lines.push(
+      `expected-work: ${filesSeenCount} file(s) seen, 0 rejected, ${refsHeld.length} held`
+    );
+  } else {
+    lines.push(
+      `expected-work: ${filesSeenCount} file(s) seen, ${rejectedCount} rejected, ${refsHeld.length} held`
+    );
+    for (const f of filesRejected) {
+      lines.push(`  rejected: ${f.filename} (${f.reason})`);
+    }
+  }
+  if (refsHeld.length > 0) {
+    for (const h2 of refsHeld) {
+      lines.push(`  held: ${h2.ref} (${h2.reason})`);
+    }
+  }
+  return lines.join("\n");
+}
+
 // src/tools/scan-sources.ts
 async function statOrNull2(absPath) {
   try {
@@ -28496,6 +28540,10 @@ async function scanSources(opts) {
   const { activeAdapter, activeAdapterName, targetRepoRoot } = workspace;
   const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
   const sourceStories = await activeAdapter.listSourceStories();
+  const listingStats = activeAdapter.getListingStats?.() ?? {
+    filesSeenCount: 0,
+    filesRejected: []
+  };
   const result = {
     targetRepoRoot,
     adapterName: activeAdapterName,
@@ -28504,7 +28552,9 @@ async function scanSources(opts) {
     unchangedRefs: [],
     skippedRefs: [],
     blockedRefs: [],
-    depsDriftRefs: []
+    depsDriftRefs: [],
+    filesSeenCount: listingStats.filesSeenCount,
+    filesRejected: listingStats.filesRejected
   };
   const stateRoot = path16.join(targetRepoRoot, ".flow", "state");
   {
@@ -38244,11 +38294,21 @@ async function claimNextStory(opts) {
   } catch {
   }
   const { todos, inProgressCount } = await listClaimableTodos({ targetRepoRoot });
+  const notReadyRefs = [];
+  const depsNotDoneRefs = [];
+  for (const c3 of todos) {
+    if (!c3.depsReady) {
+      depsNotDoneRefs.push(c3.ref);
+    } else if (!c3.ready) {
+      notReadyRefs.push(c3.ref);
+    }
+  }
   const readyCandidates = todos.filter((c3) => c3.depsReady && c3.ready);
   const overlapUniverse = readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
   const eligible = [];
   const heldOnUnmergedOverlapRefs = [];
   const heldOnUnmergedDepRefs = [];
+  const heldOnPendingOverlapRefs = [];
   for (const c3 of readyCandidates) {
     if (c3.depends_on.length > 0) {
       const allMerged = await areDependenciesMerged({
@@ -38262,7 +38322,10 @@ async function claimNextStory(opts) {
       }
     }
     const { pendingRefs, doneRefs } = findOverlapBlockers(overlapUniverse, c3.ref);
-    if (pendingRefs.length > 0) continue;
+    if (pendingRefs.length > 0) {
+      heldOnPendingOverlapRefs.push(c3.ref);
+      continue;
+    }
     if (doneRefs.length > 0) {
       const overlapMerged = await areDependenciesMerged({
         targetRepoRoot,
@@ -38276,11 +38339,37 @@ async function claimNextStory(opts) {
     }
     eligible.push(c3);
   }
+  function buildHeldRefs() {
+    const held = [];
+    for (const ref of depsNotDoneRefs) {
+      held.push({ ref, reason: "deps-not-done" });
+    }
+    for (const ref of notReadyRefs) {
+      held.push({ ref, reason: "not-ready" });
+    }
+    for (const ref of heldOnPendingOverlapRefs) {
+      held.push({ ref, reason: "pending-overlap" });
+    }
+    for (const ref of heldOnUnmergedOverlapRefs) {
+      held.push({ ref, reason: "unmerged-overlap" });
+    }
+    for (const ref of heldOnUnmergedDepRefs) {
+      held.push({ ref, reason: "unmerged-dependency" });
+    }
+    return held;
+  }
   if (eligible.length === 0 && inProgressCount === 0) {
     if (heldOnUnmergedOverlapRefs.length > 0) {
       const held = heldOnUnmergedOverlapRefs.join(", ");
       chatLog.push(
         `${WAITING_ON_UNMERGED_OVERLAP_LINE} Held: ${held}`
+      );
+      chatLog.push(
+        renderExpectedWorkCounters({
+          filesSeenCount: 0,
+          filesRejected: [],
+          refsHeld: buildHeldRefs()
+        })
       );
       return {
         next: "waiting-on-unmerged-overlap",
@@ -38291,6 +38380,13 @@ async function claimNextStory(opts) {
     if (heldOnUnmergedDepRefs.length > 0) {
       const held = heldOnUnmergedDepRefs.join(", ");
       chatLog.push(`${WAITING_ON_UNMERGED_DEPENDENCY_LINE} Held: ${held}`);
+      chatLog.push(
+        renderExpectedWorkCounters({
+          filesSeenCount: 0,
+          filesRejected: [],
+          refsHeld: buildHeldRefs()
+        })
+      );
       return {
         next: "waiting-on-unmerged-dependency",
         heldRefs: heldOnUnmergedDepRefs,
@@ -38298,10 +38394,24 @@ async function claimNextStory(opts) {
       };
     }
     chatLog.push(QUEUE_DRAINED_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs()
+      })
+    );
     return { next: "queue-drained", chatLog };
   }
   if (eligible.length === 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs()
+      })
+    );
     return { next: "waiting-on-in-progress", chatLog };
   }
   for (const candidate of eligible) {
@@ -38354,9 +38464,23 @@ async function claimNextStory(opts) {
   });
   if (refreshedInProgress > 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs()
+      })
+    );
     return { next: "waiting-on-in-progress", chatLog };
   }
   chatLog.push(QUEUE_DRAINED_LINE);
+  chatLog.push(
+    renderExpectedWorkCounters({
+      filesSeenCount: 0,
+      filesRejected: [],
+      refsHeld: buildHeldRefs()
+    })
+  );
   return { next: "queue-drained", chatLog };
 }
 

@@ -34,6 +34,10 @@ import {
 } from "../lib/cited-source-overlap.js";
 import { InProgressHandEditError, ManifestNotFoundError } from "../errors.js";
 import { writeSessionHeartbeat } from "../lib/session-liveness.js";
+import {
+  renderExpectedWorkCounters,
+  type HeldRef,
+} from "../lib/expected-work-counters.js";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE =
@@ -139,6 +143,18 @@ export async function claimNextStory(
   // satisfied is still NOT claimed until the operator marks it `ready: true`
   // via the markStoryReady tool (the /flow:ready skill). This is the single
   // chokepoint the drain hits, so the gate lives here in the claim entry point.
+  //
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: also track the two pre-filter hold
+  // categories so every hold reason is represented in the expected-work summary.
+  const notReadyRefs: string[] = [];
+  const depsNotDoneRefs: string[] = [];
+  for (const c of todos) {
+    if (!c.depsReady) {
+      depsNotDoneRefs.push(c.ref);
+    } else if (!c.ready) {
+      notReadyRefs.push(c.ref);
+    }
+  }
   const readyCandidates = todos.filter((c) => c.depsReady && c.ready);
 
   // Two gates park a candidate that would otherwise build BLIND to a change it
@@ -184,6 +200,11 @@ export async function claimNextStory(
   // yet merged (review finding B4 — the twin of the overlap hold). Without this
   // an all-deps-blocked queue reports a false clean drain.
   const heldOnUnmergedDepRefs: string[] = [];
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: track ready candidates dropped
+  // because an EARLIER cited-source overlap is still in-flight (to-do or
+  // in-progress). These don't produce a WAITING outcome themselves (they just
+  // continue) but they DO contribute to the held-work summary.
+  const heldOnPendingOverlapRefs: string[] = [];
 
   for (const c of readyCandidates) {
     // (1) declared dependencies
@@ -203,7 +224,11 @@ export async function claimNextStory(
 
     // (2) cited-source overlap
     const { pendingRefs, doneRefs } = findOverlapBlockers(overlapUniverse, c.ref);
-    if (pendingRefs.length > 0) continue; // earlier overlapping story still in flight
+    if (pendingRefs.length > 0) {
+      // Earlier overlapping story still in flight — track for the held summary.
+      heldOnPendingOverlapRefs.push(c.ref);
+      continue;
+    }
     if (doneRefs.length > 0) {
       const overlapMerged = await areDependenciesMerged({
         targetRepoRoot,
@@ -221,6 +246,30 @@ export async function claimNextStory(
     eligible.push(c);
   }
 
+  // Story native:01KTSR3E7FE61XB2PN8VJ24289: build the aggregate held-refs list
+  // for the expected-work counters summary. Combines all hold reasons so the
+  // operator sees a single count of "what is held and why" rather than only the
+  // highest-priority hold category.
+  function buildHeldRefs(): HeldRef[] {
+    const held: HeldRef[] = [];
+    for (const ref of depsNotDoneRefs) {
+      held.push({ ref, reason: "deps-not-done" });
+    }
+    for (const ref of notReadyRefs) {
+      held.push({ ref, reason: "not-ready" });
+    }
+    for (const ref of heldOnPendingOverlapRefs) {
+      held.push({ ref, reason: "pending-overlap" });
+    }
+    for (const ref of heldOnUnmergedOverlapRefs) {
+      held.push({ ref, reason: "unmerged-overlap" });
+    }
+    for (const ref of heldOnUnmergedDepRefs) {
+      held.push({ ref, reason: "unmerged-dependency" });
+    }
+    return held;
+  }
+
   // Queue-drained check: no eligible candidates AND no in-progress.
   if (eligible.length === 0 && inProgressCount === 0) {
     // If EVERY non-eligible ready candidate was dropped solely by the cited-source
@@ -230,6 +279,13 @@ export async function claimNextStory(
       const held = heldOnUnmergedOverlapRefs.join(", ");
       chatLog.push(
         `${WAITING_ON_UNMERGED_OVERLAP_LINE} Held: ${held}`,
+      );
+      chatLog.push(
+        renderExpectedWorkCounters({
+          filesSeenCount: 0,
+          filesRejected: [],
+          refsHeld: buildHeldRefs(),
+        }),
       );
       return {
         next: "waiting-on-unmerged-overlap",
@@ -242,6 +298,13 @@ export async function claimNextStory(
     if (heldOnUnmergedDepRefs.length > 0) {
       const held = heldOnUnmergedDepRefs.join(", ");
       chatLog.push(`${WAITING_ON_UNMERGED_DEPENDENCY_LINE} Held: ${held}`);
+      chatLog.push(
+        renderExpectedWorkCounters({
+          filesSeenCount: 0,
+          filesRejected: [],
+          refsHeld: buildHeldRefs(),
+        }),
+      );
       return {
         next: "waiting-on-unmerged-dependency",
         heldRefs: heldOnUnmergedDepRefs,
@@ -249,6 +312,13 @@ export async function claimNextStory(
       };
     }
     chatLog.push(QUEUE_DRAINED_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs(),
+      }),
+    );
     return { next: "queue-drained", chatLog };
   }
 
@@ -256,6 +326,13 @@ export async function claimNextStory(
   // progress further (all remaining todos are deps-blocked on in-progress work).
   if (eligible.length === 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs(),
+      }),
+    );
     return { next: "waiting-on-in-progress", chatLog };
   }
 
@@ -343,8 +420,22 @@ export async function claimNextStory(
   });
   if (refreshedInProgress > 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
+    chatLog.push(
+      renderExpectedWorkCounters({
+        filesSeenCount: 0,
+        filesRejected: [],
+        refsHeld: buildHeldRefs(),
+      }),
+    );
     return { next: "waiting-on-in-progress", chatLog };
   }
   chatLog.push(QUEUE_DRAINED_LINE);
+  chatLog.push(
+    renderExpectedWorkCounters({
+      filesSeenCount: 0,
+      filesRejected: [],
+      refsHeld: buildHeldRefs(),
+    }),
+  );
   return { next: "queue-drained", chatLog };
 }

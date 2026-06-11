@@ -215,6 +215,7 @@ describe("backlog dashboard AC3 — renderer is a pure function of the snapshot"
         claimable: false,
       },
     ],
+    refsHeld: [],
   };
 
   it("returns byte-identical output for the same snapshot across two calls", () => {
@@ -266,6 +267,7 @@ describe("backlog dashboard AC3 — renderer is a pure function of the snapshot"
           claimable: true,
         },
       ],
+      refsHeld: [],
     };
 
     const text = renderBacklogDashboard(nativeSnapshot);
