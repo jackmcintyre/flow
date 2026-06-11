@@ -34,7 +34,12 @@ const SOURCE_HASH = "a".repeat(64);
 
 function makeManifestYaml(
   ref: string,
-  opts: { claimed_by?: string; omitClaimedBy?: boolean; drain_resume_attempts?: number } = {},
+  opts: {
+    claimed_by?: string;
+    omitClaimedBy?: boolean;
+    drain_resume_attempts?: number;
+    blocked_by?: string;
+  } = {},
 ): string {
   const manifest: Record<string, unknown> = {
     ref,
@@ -55,6 +60,9 @@ function makeManifestYaml(
   }
   if (opts.drain_resume_attempts !== undefined) {
     manifest["drain_resume_attempts"] = opts.drain_resume_attempts;
+  }
+  if (opts.blocked_by !== undefined) {
+    manifest["blocked_by"] = opts.blocked_by;
   }
   return yamlStringify(manifest, { lineWidth: 0 });
 }
@@ -80,7 +88,12 @@ async function seedDevOutcome(
 async function seedInProgressManifest(
   stateRoot: string,
   ref: string,
-  opts?: { claimed_by?: string; omitClaimedBy?: boolean; drain_resume_attempts?: number },
+  opts?: {
+    claimed_by?: string;
+    omitClaimedBy?: boolean;
+    drain_resume_attempts?: number;
+    blocked_by?: string;
+  },
 ): Promise<string> {
   const dir = path.join(stateRoot, "in-progress");
   await fs.mkdir(dir, { recursive: true });
@@ -513,5 +526,104 @@ describe("scanOrphanedInProgress — claim-time snapshot sidecar skipped", () =>
     expect(result.orphans).toHaveLength(1);
     expect(result.orphans[0]!.ref).toBe(ref);
     expect(result.orphans[0]!.staleUlid).toBe(STALE_ULID_A);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (story native:01KTSQXTDXGG53RMPMH904TZRV): deliberately paused/blocked
+// manifests are skipped by the crash-recovery sweep.
+//
+// A story the builder deliberately paused (e.g. `needs-human-decision`) carries
+// a populated `blocked_by` field. The next run's sweep must NOT return it as a
+// recoverable orphan — the pause must survive across run boundaries. A
+// reason-less crash orphan (AC4) must still be returned unchanged.
+// ---------------------------------------------------------------------------
+
+describe("scanOrphanedInProgress — deliberately paused story skipped (AC1)", () => {
+  // Test seam: avoid a real `gh pr list` call.
+  const noOpenPrExeca = (async () => ({ stdout: "[]" })) as unknown as typeof import("execa").execa;
+
+  it("does NOT return a story that carries a blocked_by reason as a recoverable orphan (AC1)", async () => {
+    const ref = "native:01JVWX2PAUSED00000000001A";
+    // The story was deliberately paused: it has a stale claimed_by AND a blocked_by.
+    await seedInProgressManifest(stateRoot, ref, {
+      claimed_by: STALE_ULID_A,
+      blocked_by: "needs-human-decision",
+    });
+
+    const result = await scanOrphanedInProgress({
+      targetRepoRoot: tmpDir,
+      sessionUlid: CURRENT_SESSION_ULID,
+      execaImpl: noOpenPrExeca,
+    });
+
+    // The paused story must be invisible to the sweep — it stays paused.
+    expect(result.orphans).toHaveLength(0);
+  });
+
+  it("skips stories paused with any blocked_by reason (not only needs-human-decision)", async () => {
+    const ref = "native:01JVWX2PAUSED00000000002B";
+    await seedInProgressManifest(stateRoot, ref, {
+      claimed_by: STALE_ULID_A,
+      blocked_by: "orphan-no-transcript",
+    });
+
+    const result = await scanOrphanedInProgress({
+      targetRepoRoot: tmpDir,
+      sessionUlid: CURRENT_SESSION_ULID,
+      execaImpl: noOpenPrExeca,
+    });
+
+    expect(result.orphans).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC4 (story native:01KTSQXTDXGG53RMPMH904TZRV): the new skip rule is narrow.
+//
+// A reason-less orphan (no blocked_by, stale claimed_by, dead session) must
+// still be surfaced by the sweep. The new guard must only filter deliberate
+// pauses, not genuine crash orphans.
+// ---------------------------------------------------------------------------
+
+describe("scanOrphanedInProgress — reason-less crash orphan still surfaced (AC4)", () => {
+  // Test seam: avoid a real `gh pr list` call.
+  const noOpenPrExeca = (async () => ({ stdout: "[]" })) as unknown as typeof import("execa").execa;
+
+  it("returns a reason-less orphan (no blocked_by) as before (AC4)", async () => {
+    const ref = "native:01JVWX2CRASHORPHAN000001A";
+    // No blocked_by — a genuine crash orphan.
+    await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+
+    const result = await scanOrphanedInProgress({
+      targetRepoRoot: tmpDir,
+      sessionUlid: CURRENT_SESSION_ULID,
+      execaImpl: noOpenPrExeca,
+    });
+
+    expect(result.orphans).toHaveLength(1);
+    expect(result.orphans[0]!.ref).toBe(ref);
+  });
+
+  it("returns the reason-less crash orphan while skipping the paused sibling (AC1 + AC4 together)", async () => {
+    const refPaused = "native:01JVWX2PAUSED00000000003C";
+    const refCrash = "native:01JVWX2CRASHORPHAN000002B";
+    // Paused story — has a blocked_by reason.
+    await seedInProgressManifest(stateRoot, refPaused, {
+      claimed_by: STALE_ULID_A,
+      blocked_by: "needs-human-decision",
+    });
+    // Genuine crash orphan — no blocked_by.
+    await seedInProgressManifest(stateRoot, refCrash, { claimed_by: STALE_ULID_B });
+
+    const result = await scanOrphanedInProgress({
+      targetRepoRoot: tmpDir,
+      sessionUlid: CURRENT_SESSION_ULID,
+      execaImpl: noOpenPrExeca,
+    });
+
+    // Only the crash orphan surfaces; the paused story is invisible.
+    expect(result.orphans).toHaveLength(1);
+    expect(result.orphans[0]!.ref).toBe(refCrash);
   });
 });

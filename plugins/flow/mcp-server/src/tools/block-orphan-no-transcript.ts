@@ -23,7 +23,7 @@
  */
 
 import * as path from "node:path";
-import { moveBetweenStates } from "../state/manifest-state-machine.js";
+import { moveBetweenStates, removeInProgressSnapshot } from "../state/manifest-state-machine.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 
 export interface BlockOrphanNoTranscriptResult {
@@ -39,8 +39,27 @@ export interface BlockOrphanNoTranscriptOptions {
 /**
  * Block an orphaned in-progress manifest that has no persisted transcript.
  *
- * Moves the manifest from `in-progress/` to `blocked/` and stamps
- * `blocked_by: "orphan-no-transcript"`.
+ * Makes blocking a **clean state change**: moves the manifest from `in-progress/`
+ * to `blocked/`, stamps `blocked_by: "orphan-no-transcript"`, clears the stale
+ * `claimed_by`, updates the `status` to `"blocked"`, and removes the claim-time
+ * sidecar snapshot (`<ref>.snapshot.yaml`). After this call the manifest reads back
+ * without contradiction — the documented recovery (move back to `to-do/`) yields a
+ * manifest the claim loop will offer and can be claimed again.
+ *
+ * **Why the extra steps matter (B3):** the original implementation moved the manifest
+ * and stamped `blocked_by` but left `claimed_by` populated and `status: "in-progress"`,
+ * plus left the snapshot sidecar behind. A manifest moved back to `to-do/` by the
+ * documented recovery still looked claimed/in-progress, so `claimNextStory` never
+ * offered it — the story was stuck forever. This fix makes the blocked state genuinely
+ * clean so the recovery path works as documented.
+ *
+ * **Ordering:** Remove the sidecar first (best-effort, cannot block the move). Move
+ * the manifest (atomic rename — authoritative state transition). Then read-and-write
+ * the blocked manifest to clear `claimed_by`, update `status`, and stamp `blocked_by`.
+ * If the read-write fails after the move, the manifest lands in `blocked/` without
+ * the full stamp — recoverable by the operator (matches the existing failure pattern
+ * established by `processDevTranscript`'s grammar-drift branch). No compound primitive
+ * is introduced.
  *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.ref - Manifest ref (e.g. `"native:01HZ..."` or `"bmad:1.1"`).
@@ -56,7 +75,12 @@ export async function blockOrphanNoTranscript(
 ): Promise<BlockOrphanNoTranscriptResult> {
   const { targetRepoRoot, ref, staleUlid } = opts;
 
-  // Step 1: Move from in-progress/ to blocked/ via the canonical primitive.
+  // Step 1: Remove the claim-time sidecar snapshot (best-effort).
+  // This must happen BEFORE the manifest move because `removeInProgressSnapshot`
+  // targets `in-progress/<ref>.snapshot.yaml`. A missing sidecar is not an error.
+  await removeInProgressSnapshot({ targetRepoRoot, ref });
+
+  // Step 2: Move from in-progress/ to blocked/ via the canonical primitive.
   // moveBetweenStates throws ManifestNotFoundError on ENOENT.
   await moveBetweenStates({
     targetRepoRoot,
@@ -65,7 +89,7 @@ export async function blockOrphanNoTranscript(
     to: "blocked",
   });
 
-  // Step 2: Load the now-blocked manifest.
+  // Step 3: Load the now-blocked manifest.
   const absBlockedPath = path.join(
     targetRepoRoot,
     ".flow",
@@ -75,14 +99,19 @@ export async function blockOrphanNoTranscript(
   );
   const manifest = await readManifest(absBlockedPath);
 
-  // Step 3: Stamp blocked_by.
+  // Step 4: Write the clean blocked state — stamp blocked_by, update status,
+  // and clear the stale claimed_by so the manifest reads back without contradiction.
+  // A blocked manifest must not carry a claim so that moving it back to to-do/
+  // (the documented recovery) yields a genuinely claimable manifest.
+  const { claimed_by: _clearClaim, ...manifestWithoutClaim } = manifest;
   const updatedManifest = {
-    ...manifest,
+    ...manifestWithoutClaim,
+    status: "blocked" as const,
     blocked_by: "orphan-no-transcript" as const,
   };
   await writeManifest(absBlockedPath, updatedManifest);
 
-  // Step 4: Return the verbatim AC3 chat log line.
+  // Step 5: Return the verbatim AC3 chat log line.
   const chatLog: string[] = [
     `[blocked] ${ref} — orphan-no-transcript: no persisted transcript for session ${staleUlid}; manual recovery required`,
   ];

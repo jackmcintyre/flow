@@ -41036,6 +41036,9 @@ async function scanOrphanedInProgress(opts) {
     if (claimingSessionAlive) {
       continue;
     }
+    if (manifest.blocked_by !== void 0) {
+      continue;
+    }
     const staleUlid = manifest.claimed_by;
     const transcriptPath = path57.join(
       sessionsDir,
@@ -41147,6 +41150,7 @@ async function reattachOrphan(opts) {
 import * as path59 from "node:path";
 async function blockOrphanNoTranscript(opts) {
   const { targetRepoRoot, ref, staleUlid } = opts;
+  await removeInProgressSnapshot({ targetRepoRoot, ref });
   await moveBetweenStates({
     targetRepoRoot,
     ref,
@@ -41161,8 +41165,10 @@ async function blockOrphanNoTranscript(opts) {
     `${ref}.yaml`
   );
   const manifest = await readManifest(absBlockedPath);
+  const { claimed_by: _clearClaim, ...manifestWithoutClaim } = manifest;
   const updatedManifest = {
-    ...manifest,
+    ...manifestWithoutClaim,
+    status: "blocked",
     blocked_by: "orphan-no-transcript"
   };
   await writeManifest(absBlockedPath, updatedManifest);
