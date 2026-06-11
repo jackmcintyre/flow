@@ -52167,6 +52167,7 @@ async function materialisePrBranchWorktree(opts) {
     targetRepoRoot,
     sessionUlid,
     prNumber,
+    storyRef,
     role = "generalist-reviewer",
     pluginRootOverride
   } = opts;
@@ -52210,13 +52211,15 @@ async function materialisePrBranchWorktree(opts) {
       `[materialise-pr-branch-worktree] git fetch origin ${headRefName} failed (exit ${fetchResult.exitCode}): ${fetchResult.stderr}`
     );
   }
+  const storySlug = sanitiseRefForPathSegment(storyRef);
   const worktreePath = path64.join(
     targetRepoRoot,
     ".flow",
     "state",
     "sessions",
     sessionUlid,
-    "review-worktree"
+    "review-worktree",
+    storySlug
   );
   let staleExists = false;
   try {
@@ -52501,6 +52504,7 @@ async function runReviewerSession(opts) {
     targetRepoRoot,
     sessionUlid,
     prNumber,
+    storyRef: ref,
     role,
     execaImpl,
     pluginRootOverride: pluginRoot,

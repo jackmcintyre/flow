@@ -1,5 +1,5 @@
 /**
- * `materialisePrBranchWorktree` — Story 5.26.
+ * `materialisePrBranchWorktree` — Story 5.26, hardened in native:01KTSQQQ00PTHY7YP8XP5SX31G.
  *
  * Fetches the PR's head ref via the existing `gh` wrapper (respecting
  * the reviewer role's `gh_allow` allowlist) and materialises it into a
@@ -11,14 +11,19 @@
  *     existing `gh` wrapper (NOT raw execa — the wrapper enforces allowlists).
  *   - Runs `git fetch origin <headRefName>` to ensure the sha is in the
  *     local object DB (the PR's head may be newly pushed).
- *   - Worktree path: `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/review-worktree/`.
- *   - Stale-worktree reaping: if the path already exists, attempts
- *     `git worktree remove <path> --force` first (AC3e).
+ *   - Worktree path: `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/review-worktree/<sanitised-storyRef>/`.
+ *     Keyed on the story ref so two concurrent reviews for different stories
+ *     resolve to distinct folders (native:01KTSQQQ00PTHY7YP8XP5SX31G).
+ *   - Stale-worktree reaping: if the per-story path already exists, attempts
+ *     `git worktree remove <path> --force` first; only ever targets the
+ *     requesting story's own folder, never a sibling's checkout or the
+ *     shared parent directory.
  *   - `git worktree add <path> <headRefOid>` — uses the sha (immutable),
  *     not the branch name.
  *   - Returns `{ worktreePath, headRefName, headRefOid, setupLog, cleanup }`.
  *   - `cleanup()` does `git worktree remove <path> --force`, catches errors,
  *     returns them as warnings (per AC5) — cleanup failures are NOT fatal.
+ *     cleanup() only ever removes the per-story folder, never the shared parent.
  *   - On any `gh` failure: throws `ReviewerPrBranchFetchError` (AC4).
  *     Never falls back silently to the local filesystem.
  */
@@ -30,6 +35,7 @@ import { gh } from "./gh.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "./plugin-root.js";
 import { ReviewerPrBranchFetchError } from "../errors.js";
+import { sanitiseRefForPathSegment } from "./read-reviewer-result-file.js";
 import type { RolePermissions } from "../schemas/role-permissions.js";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +59,17 @@ export interface MateriaisePrBranchWorktreeOpts {
   targetRepoRoot: string;
   sessionUlid: string;
   prNumber: number;
+  /**
+   * The story ref being reviewed (e.g. `"native:01HZ..."`).
+   *
+   * Used to key the review-checkout folder so two concurrent reviews for
+   * different stories resolve to distinct folders and neither can trample the
+   * other's in-flight copy (native:01KTSQQQ00PTHY7YP8XP5SX31G).
+   *
+   * Required.  The colon and any other path-unsafe characters are sanitised
+   * the same way as the reviewer-result file path (see `sanitiseRefForPathSegment`).
+   */
+  storyRef: string;
   role?: string;
   /** Test seam — production callers do not pass this. */
   execaImpl?: typeof defaultExeca;
@@ -94,6 +111,7 @@ export async function materialisePrBranchWorktree(
     targetRepoRoot,
     sessionUlid,
     prNumber,
+    storyRef,
     role = "generalist-reviewer",
     pluginRootOverride,
   } = opts;
@@ -165,8 +183,15 @@ export async function materialisePrBranchWorktree(
   }
 
   // -------------------------------------------------------------------------
-  // Step 4: Compute worktree path.
+  // Step 4: Compute worktree path — per-story to isolate concurrent reviews.
+  //
+  // Key the path on the sanitised story ref so two reviews running at the
+  // same time resolve to two distinct folders and neither can trample the
+  // other's in-flight checkout (native:01KTSQQQ00PTHY7YP8XP5SX31G).
+  // The sanitisation logic is the same as for reviewer-result.json, so the
+  // two namespaced paths always agree on the on-disk segment.
   // -------------------------------------------------------------------------
+  const storySlug = sanitiseRefForPathSegment(storyRef);
   const worktreePath = path.join(
     targetRepoRoot,
     ".flow",
@@ -174,6 +199,7 @@ export async function materialisePrBranchWorktree(
     "sessions",
     sessionUlid,
     "review-worktree",
+    storySlug,
   );
 
   // -------------------------------------------------------------------------

@@ -562,6 +562,7 @@ export async function runReviewerSession(
     targetRepoRoot,
     sessionUlid,
     prNumber,
+    storyRef: ref,
     role,
     execaImpl,
     pluginRootOverride: pluginRoot,
