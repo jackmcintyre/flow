@@ -382,6 +382,10 @@ describe("AC3(d): review-worktree is torn down after session completes", () => {
       execaImpl: execaStub,
     });
 
+    // The per-story worktree path — keyed on the sanitised story ref
+    // (native:01JTEST5260000000000000001 → native_01JTEST5260000000000000001).
+    // Story native:01KTSQQQ00PTHY7YP8XP5SX31G: per-story subfolder under review-worktree/.
+    const storySlug = STORY_REF.replace(/[^A-Za-z0-9._-]/g, "_");
     const worktreePath = path.join(
       tmpRoot,
       ".flow",
@@ -389,6 +393,7 @@ describe("AC3(d): review-worktree is torn down after session completes", () => {
       "sessions",
       SESSION_ULID,
       "review-worktree",
+      storySlug,
     );
 
     // Worktree should be gone after cleanup.
@@ -405,7 +410,10 @@ describe("AC3(e): stale worktree at review-worktree/ is reaped before new worktr
     const { headRefOid } = await seedGitRepo(tmpRoot, { prHeadHasArtifact: true });
     await buildFlowFixture(tmpRoot);
 
-    // Simulate stale worktree: create the directory manually.
+    // Simulate stale worktree: create the directory at the per-story path.
+    // Story native:01KTSQQQ00PTHY7YP8XP5SX31G: stale reaping targets the per-story
+    // subfolder (review-worktree/<slug>/), NOT the shared parent.
+    const storySlug = STORY_REF.replace(/[^A-Za-z0-9._-]/g, "_");
     const worktreePath = path.join(
       tmpRoot,
       ".flow",
@@ -413,6 +421,7 @@ describe("AC3(e): stale worktree at review-worktree/ is reaped before new worktr
       "sessions",
       SESSION_ULID,
       "review-worktree",
+      storySlug,
     );
     await fs.mkdir(worktreePath, { recursive: true });
     await atomicWriteFile(path.join(worktreePath, "stale.txt"), "stale data\n");
