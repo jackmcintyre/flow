@@ -54,6 +54,7 @@ import {
   gitLockBackoffMs,
   defaultGitLockSleep,
 } from "./git.js";
+import { isSessionAlive } from "./session-liveness.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -340,9 +341,16 @@ export async function reapStaleDevStoryWorktrees(opts: {
   targetRepoRoot: string;
   currentSessionUlid: string;
   execaImpl?: typeof defaultExeca;
+  /**
+   * Test seam for liveness checks — production callers omit this.
+   * Receives `(targetRepoRoot, sessionUlid)` and returns whether the session
+   * is still alive. When omitted, the real `isSessionAlive` is used.
+   */
+  isSessionAliveImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<boolean>;
 }): Promise<ReapStaleDevStoryWorktreesResult> {
   const { targetRepoRoot, currentSessionUlid } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const aliveCheck = opts.isSessionAliveImpl ?? isSessionAlive;
   const reaped: string[] = [];
   const warnings: string[] = [];
 
@@ -382,6 +390,27 @@ export async function reapStaleDevStoryWorktrees(opts: {
     const inLiveSession = path.relative(liveSessionDir, wt);
     if (!inLiveSession.startsWith("..") && !path.isAbsolute(inLiveSession)) {
       continue;
+    }
+
+    // Before reaping this worktree, verify the owning session is dead.
+    // The session ULID is the first path segment of the relative path from
+    // worktreesParent: <worktreesParent>/<owningSessionUlid>/dev-<ref>-worktree.
+    // If the owning session is still alive (its pid is running and its
+    // heartbeat is fresh), leave the worktree in place — a live dev is
+    // still editing inside it. Only reap worktrees whose owning session is
+    // confirmed dead.
+    //
+    // Fail-safe: aliveCheck returns false when liveness cannot be determined
+    // (missing/malformed heartbeat, filesystem error), so a genuinely crashed
+    // run's worktrees are still reaped even when no heartbeat was written.
+    const relSegments = rel.split(path.sep);
+    const owningSessionUlid = relSegments[0];
+    if (owningSessionUlid) {
+      const ownerAlive = await aliveCheck(targetRepoRoot, owningSessionUlid);
+      if (ownerAlive) {
+        // The owning session is still alive — skip this worktree.
+        continue;
+      }
     }
 
     const remove = await runGit(

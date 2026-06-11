@@ -27,11 +27,14 @@ export async function reapStaleWorktrees(opts: {
   targetRepoRoot: string;
   sessionUlid: string;
   execaImpl?: typeof defaultExeca;
+  /** Test seam — production callers omit this. */
+  isSessionAliveImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<boolean>;
 }): Promise<ReapStaleWorktreesResult> {
   const { reaped, warnings } = await reapStaleDevStoryWorktrees({
     targetRepoRoot: opts.targetRepoRoot,
     currentSessionUlid: opts.sessionUlid,
     ...(opts.execaImpl ? { execaImpl: opts.execaImpl } : {}),
+    ...(opts.isSessionAliveImpl ? { isSessionAliveImpl: opts.isSessionAliveImpl } : {}),
   });
   return { reaped, warnings };
 }
