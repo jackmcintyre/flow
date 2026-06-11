@@ -33,6 +33,7 @@ import {
   findOverlapBlockers,
 } from "../lib/cited-source-overlap.js";
 import { ManifestNotFoundError } from "../errors.js";
+import { writeSessionHeartbeat } from "../lib/session-liveness.js";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE =
@@ -117,6 +118,19 @@ export async function claimNextStory(
 ): Promise<ClaimNextStoryResult> {
   const { targetRepoRoot, sessionUlid } = opts;
   const chatLog: string[] = [];
+
+  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The drain
+  // calls claimNextStory once per story, immediately before the long dev build,
+  // so refreshing here keeps this session visible as alive across the build that
+  // follows. Combined with the post-build refresh in processDevTranscript, the
+  // longest gap between refreshes is a single build (bounded by the 20-min build
+  // timeout), comfortably inside the 30-min staleness window. Fail-soft: a missed
+  // heartbeat must never block a claim — the next seam refreshes it.
+  try {
+    await writeSessionHeartbeat(targetRepoRoot, sessionUlid);
+  } catch {
+    /* best-effort liveness refresh; never blocks claiming */
+  }
 
   const { todos, inProgressCount } = await listClaimableTodos({ targetRepoRoot });
 

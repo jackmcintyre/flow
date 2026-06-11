@@ -50990,7 +50990,7 @@ async function bmadToNativeIngestTool(rawInput) {
 }
 
 // src/tools/claim-next-story.ts
-import * as path56 from "node:path";
+import * as path57 from "node:path";
 
 // src/lib/dep-merge-check.ts
 import { promises as fs42 } from "node:fs";
@@ -51186,6 +51186,67 @@ function isEnoent14(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
+// src/lib/session-liveness.ts
+import * as path56 from "node:path";
+import { promises as fs44 } from "node:fs";
+var HEARTBEAT_STALE_MS = 30 * 6e4;
+function heartbeatFilePath(targetRepoRoot, sessionUlid) {
+  return path56.join(
+    targetRepoRoot,
+    ".flow",
+    "state",
+    "sessions",
+    sessionUlid,
+    "heartbeat.json"
+  );
+}
+async function writeSessionHeartbeat(targetRepoRoot, sessionUlid) {
+  const filePath = heartbeatFilePath(targetRepoRoot, sessionUlid);
+  const payload = {
+    pid: process.pid,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  await atomicWriteFile(filePath, JSON.stringify(payload));
+}
+async function isSessionAlive(targetRepoRoot, sessionUlid, opts) {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const killImpl = opts?.killImpl ?? ((pid2, signal) => process.kill(pid2, signal));
+  const filePath = heartbeatFilePath(targetRepoRoot, sessionUlid);
+  let raw;
+  try {
+    raw = await fs44.readFile(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (typeof payload !== "object" || payload === null || typeof payload["pid"] !== "number" || typeof payload["updatedAt"] !== "string") {
+    return false;
+  }
+  const { pid, updatedAt } = payload;
+  const updatedAtMs = new Date(updatedAt).getTime();
+  if (!Number.isFinite(updatedAtMs)) {
+    return false;
+  }
+  if (nowMs - updatedAtMs > HEARTBEAT_STALE_MS) {
+    return false;
+  }
+  try {
+    killImpl(pid, 0);
+    return true;
+  } catch (err) {
+    const code = err.code;
+    if (code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
 // src/tools/claim-next-story.ts
 var QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 var WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
@@ -51194,6 +51255,10 @@ var WAITING_ON_UNMERGED_DEPENDENCY_LINE = "WAITING \u2014 ready story held for a
 async function claimNextStory(opts) {
   const { targetRepoRoot, sessionUlid } = opts;
   const chatLog = [];
+  try {
+    await writeSessionHeartbeat(targetRepoRoot, sessionUlid);
+  } catch {
+  }
   const { todos, inProgressCount } = await listClaimableTodos({ targetRepoRoot });
   const readyCandidates = todos.filter((c3) => c3.depsReady && c3.ready);
   const overlapUniverse = readyCandidates.length > 0 ? await loadOverlapUniverse(targetRepoRoot) : [];
@@ -51278,7 +51343,7 @@ async function claimNextStory(opts) {
       throw err;
     }
     if (claimSucceeded) {
-      const manifestPath = path56.resolve(
+      const manifestPath = path57.resolve(
         targetRepoRoot,
         ".flow",
         "state",
@@ -51306,7 +51371,7 @@ async function claimNextStory(opts) {
 }
 
 // src/tools/process-dev-transcript.ts
-import * as path58 from "node:path";
+import * as path59 from "node:path";
 
 // src/skills/handoff-parser.ts
 var HANDOFF_PHRASE_TEMPLATE = "Handoff to reviewer \u2014 story <story-id> ready for review.";
@@ -51330,10 +51395,10 @@ function parseHandoff(transcript, expectedRef) {
 }
 
 // src/lib/read-dev-outcome-file.ts
-import { promises as fs44 } from "node:fs";
-import * as path57 from "node:path";
+import { promises as fs45 } from "node:fs";
+import * as path58 from "node:path";
 function devOutcomeFilePath(targetRepoRoot, sessionUlid, ref) {
-  return path57.join(
+  return path58.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -51347,7 +51412,7 @@ async function readDevOutcomeFile(targetRepoRoot, sessionUlid, ref) {
   const filePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
   let raw;
   try {
-    raw = await fs44.readFile(filePath, "utf8");
+    raw = await fs45.readFile(filePath, "utf8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") {
@@ -51409,7 +51474,11 @@ async function processDevTranscript(opts) {
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
   const execaImpl = opts.execaImpl ?? execa;
   const chatLog = [];
-  const manifestPath = path58.resolve(
+  try {
+    await writeSessionHeartbeat(targetRepoRoot, sessionUlid);
+  } catch {
+  }
+  const manifestPath = path59.resolve(
     targetRepoRoot,
     ".flow",
     "state",
@@ -51573,12 +51642,12 @@ async function processReviewerTranscript(opts) {
 }
 
 // src/tools/run-dev-terminal-action.ts
-import * as path62 from "node:path";
+import * as path63 from "node:path";
 
 // src/lib/extract-acs-from-spec.ts
-import { promises as fs45 } from "node:fs";
+import { promises as fs46 } from "node:fs";
 async function extractAcsFromSpec(specPath) {
-  const raw = await fs45.readFile(specPath, "utf8");
+  const raw = await fs46.readFile(specPath, "utf8");
   const lines = raw.split("\n");
   const AC_HEADING_RE = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
   const results = [];
@@ -51607,8 +51676,8 @@ async function extractAcsFromSpec(specPath) {
 
 // src/lib/gh-error-map.ts
 var import_yaml29 = __toESM(require_dist2(), 1);
-import { promises as fs46 } from "node:fs";
-import * as path59 from "node:path";
+import { promises as fs47 } from "node:fs";
+import * as path60 from "node:path";
 
 // src/schemas/gh-error-map.ts
 var GhErrorMapEntrySchema = external_exports.object({
@@ -51623,7 +51692,7 @@ var GhErrorMapSchema = external_exports.object({
 // src/lib/gh-error-map.ts
 var cache = /* @__PURE__ */ new Map();
 async function parseGhErrorMap(filePath) {
-  const raw = await fs46.readFile(filePath, "utf8");
+  const raw = await fs47.readFile(filePath, "utf8");
   const parsed = (0, import_yaml29.parse)(raw);
   const result = GhErrorMapSchema.safeParse(parsed);
   if (!result.success) {
@@ -51667,7 +51736,7 @@ async function parseGhErrorMap(filePath) {
   return { entries };
 }
 async function loadGhErrorMap(pluginRoot) {
-  const absPath = path59.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
+  const absPath = path60.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
   const cached2 = cache.get(absPath);
   if (cached2 !== void 0) {
     return cached2;
@@ -51733,8 +51802,8 @@ async function gh(opts) {
 
 // src/state/load-role-permissions.ts
 var import_yaml30 = __toESM(require_dist2(), 1);
-import { promises as fs47 } from "node:fs";
-import * as path60 from "node:path";
+import { promises as fs48 } from "node:fs";
+import * as path61 from "node:path";
 
 // src/schemas/role-permissions.ts
 var RolePermissionsSchema = external_exports.object({
@@ -51752,10 +51821,10 @@ function formatZodIssues5(issues) {
   return `${dottedPath}: ${first.message}`;
 }
 async function loadRolePermissions(opts) {
-  const specPath = path60.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
+  const specPath = path61.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
   let raw;
   try {
-    raw = await fs47.readFile(specPath, "utf8");
+    raw = await fs48.readFile(specPath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") {
       throw new RolePermissionsMissingError({ role: opts.role, specPath });
@@ -51782,12 +51851,12 @@ async function loadRolePermissions(opts) {
 }
 
 // src/lib/run-project-build.ts
-import * as path61 from "node:path";
+import * as path62 from "node:path";
 var DEFAULT_BUILD_TEST_TIMEOUT_MS = 20 * 60 * 1e3;
 var PROJECT_BUILD_COMMAND = "pnpm";
 var PROJECT_BUILD_ARGS = ["build"];
 function deriveProjectBuildCwd(devWorkingDir) {
-  return path61.join(devWorkingDir, "plugins", "flow");
+  return path62.join(devWorkingDir, "plugins", "flow");
 }
 async function runProjectBuild(opts) {
   const execaImpl = opts.execaImpl ?? execa;
@@ -51857,7 +51926,7 @@ async function runDevTerminalAction(opts) {
   }
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
-  const specPath = path62.isAbsolute(manifest.source_path) ? manifest.source_path : path62.join(targetRepoRoot, manifest.source_path);
+  const specPath = path63.isAbsolute(manifest.source_path) ? manifest.source_path : path63.join(targetRepoRoot, manifest.source_path);
   const acs = await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
@@ -52008,7 +52077,7 @@ async function runDevTerminalAction(opts) {
       role: ROLE,
       ...execaImpl ? { execaImpl } : {}
     });
-    const specPathForPr = path62.isAbsolute(manifest.source_path) ? path62.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
+    const specPathForPr = path63.isAbsolute(manifest.source_path) ? path63.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
     const prBody = composePrBody({
       ref,
       specPath: specPathForPr,
@@ -52056,7 +52125,7 @@ async function runDevTerminalAction(opts) {
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2)
     );
     try {
-      const inProgressManifestPath = path62.join(
+      const inProgressManifestPath = path63.join(
         ledgerRoot,
         ".flow",
         "state",
@@ -52078,13 +52147,13 @@ async function runDevTerminalAction(opts) {
 }
 
 // src/tools/run-reviewer-session.ts
-import * as path64 from "node:path";
-import * as fs49 from "node:fs/promises";
+import * as path65 from "node:path";
+import * as fs50 from "node:fs/promises";
 import { accessSync } from "node:fs";
 
 // src/lib/materialise-pr-branch-worktree.ts
-import * as path63 from "node:path";
-import * as fs48 from "node:fs/promises";
+import * as path64 from "node:path";
+import * as fs49 from "node:fs/promises";
 async function runGit(args, cwd, execaImpl) {
   const result = await execaImpl("git", args, { cwd, reject: false });
   return {
@@ -52141,7 +52210,7 @@ async function materialisePrBranchWorktree(opts) {
       `[materialise-pr-branch-worktree] git fetch origin ${headRefName} failed (exit ${fetchResult.exitCode}): ${fetchResult.stderr}`
     );
   }
-  const worktreePath = path63.join(
+  const worktreePath = path64.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -52151,7 +52220,7 @@ async function materialisePrBranchWorktree(opts) {
   );
   let staleExists = false;
   try {
-    await fs48.access(worktreePath);
+    await fs49.access(worktreePath);
     staleExists = true;
   } catch {
   }
@@ -52169,7 +52238,7 @@ async function materialisePrBranchWorktree(opts) {
         `[materialise-pr-branch-worktree] git worktree remove failed (exit ${reapResult.exitCode}): ${reapResult.stderr}. Falling back to fs.rm for unregistered stale path.`
       );
       try {
-        await fs48.rm(worktreePath, { recursive: true, force: true });
+        await fs49.rm(worktreePath, { recursive: true, force: true });
         setupLog.push(
           `[materialise-pr-branch-worktree] stale path removed via fs.rm.`
         );
@@ -52240,9 +52309,9 @@ function classifyAc(bodyLines) {
   return { applicability: "manual-check-required" };
 }
 async function runArtifactCheck(index, tag, artifactPath, checkRoot) {
-  const resolved = path64.resolve(checkRoot, artifactPath);
+  const resolved = path65.resolve(checkRoot, artifactPath);
   try {
-    await fs49.access(resolved);
+    await fs50.access(resolved);
     return {
       index,
       tag,
@@ -52274,23 +52343,23 @@ function capString(s) {
   return s.slice(0, STDOUT_STDERR_CAP) + TRUNCATION_MARKER;
 }
 function findPackageRoot(opts) {
-  const checkRootAbs = path64.resolve(opts.checkRoot);
-  let dir = path64.dirname(opts.testFilePathAbs);
-  const isWithinCheckRoot = (d) => d === checkRootAbs || d.startsWith(checkRootAbs + path64.sep);
+  const checkRootAbs = path65.resolve(opts.checkRoot);
+  let dir = path65.dirname(opts.testFilePathAbs);
+  const isWithinCheckRoot = (d) => d === checkRootAbs || d.startsWith(checkRootAbs + path65.sep);
   while (isWithinCheckRoot(dir)) {
     try {
-      accessSync(path64.join(dir, "package.json"));
+      accessSync(path65.join(dir, "package.json"));
       return { ok: true, packageRoot: dir };
     } catch {
     }
-    const parent = path64.dirname(dir);
+    const parent = path65.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return { ok: false };
 }
 async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoot, execaImpl) {
-  const testFilePathAbs = path64.resolve(checkRoot, testFilePath);
+  const testFilePathAbs = path65.resolve(checkRoot, testFilePath);
   const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
   if (!pkgRoot.ok) {
     return {
@@ -52530,7 +52599,7 @@ async function runReviewerSession(opts) {
     });
   }
   const resultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
-  await fs49.mkdir(path64.dirname(resultFilePath), { recursive: true });
+  await fs50.mkdir(path65.dirname(resultFilePath), { recursive: true });
   const fileProjection = {
     sessionUlid,
     ref,
@@ -52558,7 +52627,7 @@ async function runReviewerSession(opts) {
 }
 
 // src/tools/post-reviewer-comments.ts
-import * as path65 from "node:path";
+import * as path66 from "node:path";
 
 // src/lib/compose-reviewer-summary.ts
 function composeVerdictLine(result) {
@@ -52696,7 +52765,7 @@ async function stampRiskTierOnManifest(targetRepoRoot, ref, riskTier) {
   if (riskTier === void 0) {
     return;
   }
-  const manifestPath = path65.join(
+  const manifestPath = path66.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -53066,8 +53135,8 @@ async function processReviewerYield(opts) {
 }
 
 // src/tools/compute-agreement.ts
-import * as path66 from "node:path";
-import { promises as fs50 } from "node:fs";
+import * as path67 from "node:path";
+import { promises as fs51 } from "node:fs";
 
 // src/lib/agreement.ts
 function isAgreement(verdict, mergeAction) {
@@ -53103,13 +53172,13 @@ async function computeAgreement(opts) {
       reason: "must be a positive integer"
     });
   }
-  const telemetryDir = path66.join(targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path67.join(targetRepoRoot, ".flow", "telemetry");
   let jsonlFiles;
   try {
     if (readTelemetryDirImpl) {
       jsonlFiles = await readTelemetryDirImpl(telemetryDir);
     } else {
-      const entries = await fs50.readdir(telemetryDir, { withFileTypes: true });
+      const entries = await fs51.readdir(telemetryDir, { withFileTypes: true });
       jsonlFiles = entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name).sort();
     }
   } catch (err) {
@@ -53125,8 +53194,8 @@ async function computeAgreement(opts) {
   const mergeActions = [];
   let malformed_lines = 0;
   for (const filename of jsonlFiles) {
-    const filePath = path66.join(telemetryDir, filename);
-    const raw = readFileImpl ? await readFileImpl(filePath) : await fs50.readFile(filePath, "utf8");
+    const filePath = path67.join(telemetryDir, filename);
+    const raw = readFileImpl ? await readFileImpl(filePath) : await fs51.readFile(filePath, "utf8");
     for (const rawLine of raw.split("\n")) {
       const line = rawLine.trim();
       if (line === "") {
@@ -53243,8 +53312,8 @@ async function recordSkillInvoke(opts) {
 }
 
 // src/tools/run-auto-merge-gate.ts
-import * as path67 from "node:path";
-import { promises as fs51 } from "node:fs";
+import * as path68 from "node:path";
+import { promises as fs52 } from "node:fs";
 var import_yaml31 = __toESM(require_dist2(), 1);
 
 // src/lib/auto-merge-gate.ts
@@ -53297,10 +53366,10 @@ var AutoMergeGateResultSchema = external_exports.object({
   chatLog: external_exports.array(external_exports.string())
 }).strict();
 async function loadWorkspaceConfig(targetRepoRoot) {
-  const configPath = path67.join(targetRepoRoot, ".flow", "config.yaml");
+  const configPath = path68.join(targetRepoRoot, ".flow", "config.yaml");
   let raw;
   try {
-    raw = await fs51.readFile(configPath, "utf8");
+    raw = await fs52.readFile(configPath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") {
       return PluginSettingsSchema.parse({});
@@ -53413,7 +53482,7 @@ async function runAutoMergeGate(opts) {
     pluginSettings = pluginSettings ?? await loadWorkspaceConfigFn(opts.targetRepoRoot);
     provisional_trust = pluginSettings.provisional_trust;
   }
-  const manifestPath = path67.join(
+  const manifestPath = path68.join(
     opts.targetRepoRoot,
     ".flow",
     "state",
@@ -53573,9 +53642,9 @@ async function runAutoMergeGate(opts) {
 }
 
 // src/tools/create-smoke-scratch-repo.ts
-import { promises as fs52 } from "node:fs";
+import { promises as fs53 } from "node:fs";
 import * as os from "node:os";
-import * as path68 from "node:path";
+import * as path69 from "node:path";
 var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
   /** Short kebab-case label embedded in the scratch directory name. */
   label: external_exports.string().regex(/^[a-z0-9-]+$/, "label must be kebab-case (lowercase letters, digits, hyphens)").min(1),
@@ -53585,28 +53654,28 @@ var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
 async function createSmokeScratchRepo(opts) {
   const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
   const { label, parentDir } = parsed;
-  const standardsTemplatePath = path68.resolve(
+  const standardsTemplatePath = path69.resolve(
     getPluginRoot(),
     "docs",
     "standards-example.md"
   );
-  const scratchRoot = await fs52.mkdtemp(
-    path68.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
+  const scratchRoot = await fs53.mkdtemp(
+    path69.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
   );
   await gitInitWithEmptyCommit({ cwd: scratchRoot });
   await writeManagedFile({
-    absPath: path68.join(scratchRoot, ".flow", "config.yaml"),
+    absPath: path69.join(scratchRoot, ".flow", "config.yaml"),
     contents: "adapter: native\nstandards: {}\n",
     targetRepoRoot: scratchRoot
   });
-  const standardsContents = await fs52.readFile(standardsTemplatePath, "utf8");
+  const standardsContents = await fs53.readFile(standardsTemplatePath, "utf8");
   await writeManagedFile({
-    absPath: path68.join(scratchRoot, ".flow", "standards.md"),
+    absPath: path69.join(scratchRoot, ".flow", "standards.md"),
     contents: standardsContents,
     targetRepoRoot: scratchRoot
   });
   const cleanup = async () => {
-    await fs52.rm(scratchRoot, { recursive: true, force: true });
+    await fs53.rm(scratchRoot, { recursive: true, force: true });
   };
   return { scratchRoot, cleanup };
 }
@@ -53615,61 +53684,6 @@ async function createSmokeScratchRepo(opts) {
 var import_yaml32 = __toESM(require_dist2(), 1);
 import { promises as fs54 } from "node:fs";
 import * as path70 from "node:path";
-
-// src/lib/session-liveness.ts
-import * as path69 from "node:path";
-import { promises as fs53 } from "node:fs";
-var HEARTBEAT_STALE_MS = 5 * 6e4;
-function heartbeatFilePath(targetRepoRoot, sessionUlid) {
-  return path69.join(
-    targetRepoRoot,
-    ".flow",
-    "state",
-    "sessions",
-    sessionUlid,
-    "heartbeat.json"
-  );
-}
-async function isSessionAlive(targetRepoRoot, sessionUlid, opts) {
-  const nowMs = opts?.nowMs ?? Date.now();
-  const killImpl = opts?.killImpl ?? ((pid2, signal) => process.kill(pid2, signal));
-  const filePath = heartbeatFilePath(targetRepoRoot, sessionUlid);
-  let raw;
-  try {
-    raw = await fs53.readFile(filePath, "utf8");
-  } catch {
-    return false;
-  }
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return false;
-  }
-  if (typeof payload !== "object" || payload === null || typeof payload["pid"] !== "number" || typeof payload["updatedAt"] !== "string") {
-    return false;
-  }
-  const { pid, updatedAt } = payload;
-  const updatedAtMs = new Date(updatedAt).getTime();
-  if (!Number.isFinite(updatedAtMs)) {
-    return false;
-  }
-  if (nowMs - updatedAtMs > HEARTBEAT_STALE_MS) {
-    return false;
-  }
-  try {
-    killImpl(pid, 0);
-    return true;
-  } catch (err) {
-    const code = err.code;
-    if (code === "EPERM") {
-      return true;
-    }
-    return false;
-  }
-}
-
-// src/tools/scan-orphaned-in-progress.ts
 async function scanOrphanedInProgress(opts) {
   const { targetRepoRoot, sessionUlid } = opts;
   const execaImpl = opts.execaImpl ?? execa;

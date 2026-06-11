@@ -37,12 +37,24 @@
  * dead verdict), not false dead. A missed recovery of a truly dead run is
  * recoverable on the next sweep; force-deleting a live run's work is not.
  *
- * ### Staleness window
+ * ### Refresh model & staleness window
  *
- * `HEARTBEAT_STALE_MS` (default 5 minutes) must be comfortably larger than the
- * `HEARTBEAT_REFRESH_INTERVAL_MS` (default 60 seconds) the caller uses to
- * refresh the heartbeat, so transient load lag never produces a false-dead
- * verdict. A 5x safety margin is the floor; the defaults give 5×.
+ * The drain has no background timer (it runs as a sequential workflow and is
+ * suspended inside long `agent()` build calls), so the heartbeat is NOT refreshed
+ * on a fixed interval. Instead it is refreshed EVENT-DRIVEN through the drain's
+ * own per-story seams: an initial write when the run starts (the reap/recover
+ * seam), then again on every `claimNextStory` (before a build) and every
+ * `processDevTranscript` (after a build). The longest possible gap between two
+ * refreshes is therefore exactly ONE dev build, which is hard-bounded by the
+ * build timeout (`DEFAULT_BUILD_TEST_TIMEOUT_MS` = 20 min — the build is killed
+ * at that point and the post-build seam refreshes).
+ *
+ * `HEARTBEAT_STALE_MS` (30 min) must comfortably exceed that one-build ceiling so
+ * a live drain mid-build is never falsely judged dead (the dangerous direction —
+ * a false-dead verdict force-deletes a live run's work). 30 min = 1.5× the 20-min
+ * build ceiling. Erring large is safe here: a false-ALIVE verdict only delays
+ * recovery of a genuinely dead run until the window lapses (the next sweep gets
+ * it), whereas a false-dead corrupts live work.
  */
 
 import * as path from "node:path";
@@ -53,21 +65,21 @@ import { atomicWriteFile } from "./managed-fs.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-/** How often (ms) the drain should refresh the heartbeat while running. */
-export const HEARTBEAT_REFRESH_INTERVAL_MS = 60_000; // 1 minute
-
 /**
- * How old (ms) the heartbeat timestamp must be before we consider the session
- * dead. Must be comfortably larger than HEARTBEAT_REFRESH_INTERVAL_MS.
- * 5 minutes = 5 × the refresh interval (safety margin).
+ * How old (ms) the heartbeat timestamp may be before we consider the session
+ * dead. Internal: the drain refreshes the heartbeat through its per-story seams,
+ * so the longest gap between refreshes is one dev build (hard-bounded by the
+ * 20-min build timeout). 30 min = 1.5× that ceiling — comfortably larger so a
+ * live drain mid-build is never judged dead. See the module doc for the
+ * event-driven refresh model and the false-dead-vs-false-alive rationale.
  */
-export const HEARTBEAT_STALE_MS = 5 * 60_000; // 5 minutes
+const HEARTBEAT_STALE_MS = 30 * 60_000; // 30 minutes
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface HeartbeatPayload {
+interface HeartbeatPayload {
   /** PID of the process that owns this session. */
   pid: number;
   /** ISO-8601 timestamp of when this heartbeat was last written/refreshed. */
@@ -84,7 +96,7 @@ export interface HeartbeatPayload {
  * Lives alongside dev-transcript.txt and dev-outcome.json under the session
  * directory: `.flow/state/sessions/<ulid>/heartbeat.json`.
  */
-export function heartbeatFilePath(
+function heartbeatFilePath(
   targetRepoRoot: string,
   sessionUlid: string,
 ): string {
