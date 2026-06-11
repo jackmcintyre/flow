@@ -32,7 +32,7 @@ import {
   loadOverlapUniverse,
   findOverlapBlockers,
 } from "../lib/cited-source-overlap.js";
-import { ManifestNotFoundError } from "../errors.js";
+import { InProgressHandEditError, ManifestNotFoundError } from "../errors.js";
 import { writeSessionHeartbeat } from "../lib/session-liveness.js";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
@@ -279,6 +279,23 @@ export async function claimNextStory(
       if (
         err instanceof ManifestNotFoundError &&
         err.fromState === "to-do"
+      ) {
+        chatLog.push(
+          `${ref} already claimed by another worker — skipping to next candidate`,
+        );
+        continue;
+      }
+      // An InProgressHandEditError whose ONLY changed field is "_snapshot_missing"
+      // signals a concurrent lost race in the narrow rename→snapshot gap (this story,
+      // AC1/AC2): another worker claimed the story atomically but has not yet written
+      // its claim-time snapshot. The story is NOT ours — skip to the next candidate
+      // rather than halting the run with a misleading "someone hand-edited" message.
+      // A genuine hand-edit (any real field drift) still carries more than one field
+      // in changedFields and MUST propagate so it surfaces to the operator.
+      if (
+        err instanceof InProgressHandEditError &&
+        err.changedFields.length === 1 &&
+        err.changedFields[0] === "_snapshot_missing"
       ) {
         chatLog.push(
           `${ref} already claimed by another worker — skipping to next candidate`,
