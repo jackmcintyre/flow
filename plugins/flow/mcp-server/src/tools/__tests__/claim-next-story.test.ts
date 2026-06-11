@@ -576,16 +576,44 @@ describe("cited-source overlap gate", () => {
     expect(result.ref).toBe(STORY_REF_B);
   });
 
-  it("does NOT block the EARLIER story on a later overlapping unmerged story (asymmetric → no deadlock)", async () => {
-    // B (later ref) is the unmerged done story; A (earlier ref) cites the same
-    // file. A goes first regardless of B — only the later story ever waits.
+  it("(AC2 / order-independent fix) blocks the EARLIER story when a LATER overlapping story is in done/ but NOT merged", async () => {
+    // B (later ref) reached done/ first (approved/built out-of-order); its PR is
+    // not yet merged. A (earlier ref) cites the same file and is being claimed.
+    // Before this fix, A was NOT blocked (s.ref < ref guard ignored B).
+    // After this fix, A must wait until B's PR merges — both stories can no longer
+    // build blindly against the same baseline at once.
     await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED] });
     await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false,
+      isDependencyMerged: async () => false, // B's PR NOT merged
+    });
+
+    // A is held by the overlap gate — returns WAITING, not spawn-dev.
+    expect(result.next).toBe("waiting-on-unmerged-overlap");
+    if (result.next !== "waiting-on-unmerged-overlap") return;
+    expect(result.heldRefs).toContain(STORY_REF_A);
+
+    // A is still in to-do/ (held, not claimed).
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_A}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  it("(AC2 / order-independent fix) releases the EARLIER story once the LATER overlapping done/ story IS merged", async () => {
+    // Same setup as above, but B's PR is confirmed merged.
+    // A should now be free to start.
+    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED] });
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      isDependencyMerged: async () => true, // B's PR merged → A may build
     });
 
     expect(result.next).toBe("spawn-dev");
@@ -605,6 +633,26 @@ describe("cited-source overlap gate", () => {
     expect(result.next).toBe("waiting-on-in-progress");
     const stillTodo = await fs
       .stat(path.join(todoDir, `${STORY_REF_B}.yaml`))
+      .then(() => true)
+      .catch(() => false);
+    expect(stillTodo).toBe(true);
+  });
+
+  it("(AC2 / order-independent fix) parks the EARLIER to-do story while a LATER overlapping story is in-progress", async () => {
+    // B (later ref) is already in-progress (approved out-of-order).
+    // A (earlier ref) cites the same file and is being claimed.
+    // Before this fix, A would not be blocked. After the fix, A must wait.
+    await seedInProgressStory(
+      makeInProgressManifest(STORY_REF_B, { cited_sources: [SHARED] }),
+    );
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
+
+    const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+
+    // A is blocked by the in-progress later-ordered story B.
+    expect(result.next).toBe("waiting-on-in-progress");
+    const stillTodo = await fs
+      .stat(path.join(todoDir, `${STORY_REF_A}.yaml`))
       .then(() => true)
       .catch(() => false);
     expect(stillTodo).toBe(true);

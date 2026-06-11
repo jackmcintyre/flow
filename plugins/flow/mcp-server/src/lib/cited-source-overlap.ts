@@ -47,14 +47,22 @@ export interface OverlapStory {
 
 export interface OverlapBlockers {
   /**
-   * Earlier-ordered overlapping stories in `to-do/` (blessed) or `in-progress/`.
-   * Neither has a merged PR yet, so each unconditionally blocks the candidate.
+   * Overlapping stories that unconditionally block the candidate because they
+   * have no merged PR yet. This includes:
+   *   - Earlier-ordered stories in `to-do/` (blessed) or `in-progress/`.
+   *   - Later-ordered stories in `in-progress/` (already actively building
+   *     against the shared file — letting an earlier story also start would
+   *     produce a blind concurrent build).
+   * Neither category has a merged PR yet, so each unconditionally blocks the
+   * candidate.
    */
   pendingRefs: string[];
   /**
-   * Earlier-ordered overlapping stories in `done/`. These are approved but may
-   * not be merged yet — the caller blocks the candidate only for the ones whose
-   * PR is not proven merged (via the GitHub-backed merge check).
+   * Overlapping stories in `done/`. These are approved but may not be merged
+   * yet — the caller blocks the candidate only for the ones whose PR is not
+   * proven merged (via the GitHub-backed merge check). Includes both
+   * earlier-ordered and later-ordered done/ stories (a later story that
+   * reached done/ is heading for the trunk; the candidate must wait).
    */
   doneRefs: string[];
 }
@@ -126,10 +134,37 @@ export async function loadOverlapUniverse(
 
 /**
  * Find the stories that must merge before `ref` may be claimed because they cite
- * an overlapping source file and sort earlier in claim order. Pure in-memory —
- * load the universe once per pass and call this per candidate.
+ * an overlapping source file. Pure in-memory — load the universe once per pass
+ * and call this per candidate.
  *
  * A candidate with no `cited_sources` (e.g. a non-native story) has no blockers.
+ *
+ * **Blocker rules (order-aware):**
+ *
+ * 1. Earlier-ordered (`s.ref < ref`) overlapping blessed `to-do/` or
+ *    `in-progress/` stories always block — they haven't merged yet and sort
+ *    before the candidate (asymmetric: exactly one of a not-yet-started pair is
+ *    claimable → no deadlock).
+ *
+ * 2. Earlier-ordered overlapping `done/` stories block until their PR is merged
+ *    (caller verifies via GitHub-backed merge check).
+ *
+ * 3. **Later-ordered (`s.ref > ref`) overlapping `in-progress/` stories also
+ *    block.** A later story can already be building against the shared file if it
+ *    was approved or claimed first. Letting the earlier story also start would
+ *    create a blind concurrent build — both stories would build from the same
+ *    `origin/main` baseline and produce a silent integration hazard on merge.
+ *    A story that is already `in-progress/` will progress to done/merge, so
+ *    waiting on it is bounded and self-releasing (no cycle/deadlock).
+ *
+ * 4. **Later-ordered overlapping `done/` stories also block** (until their PR is
+ *    merged, same as rule 2). If a later story reached done/ it is heading for the
+ *    trunk; the earlier candidate must wait for that merge just like any other
+ *    in-flight overlap.
+ *
+ * 5. Later-ordered overlapping `to-do/` (unstarted) stories do NOT block, even if
+ *    blessed. The asymmetric rule (rule 1) stays in place for unstarted work to
+ *    prevent deadlock: if both A and B are unstarted, only B waits for A.
  */
 export function findOverlapBlockers(
   universe: readonly OverlapStory[],
@@ -140,20 +175,40 @@ export function findOverlapBlockers(
   if (cited.length === 0) return { pendingRefs: [], doneRefs: [] };
   const citedSet = new Set(cited);
 
-  const blockers = universe.filter(
-    (s) =>
-      s.ref !== ref &&
-      s.ref < ref && // earlier in claim order goes first (asymmetric → no deadlock)
-      (s.location !== "to-do" || s.ready) && // an unblessed todo may never ship → never block
-      s.citedSources.some((p) => citedSet.has(p)),
-  );
+  const pendingRefs: string[] = [];
+  const doneRefs: string[] = [];
 
-  return {
-    pendingRefs: blockers
-      .filter((s) => s.location !== "done")
-      .map((s) => s.ref),
-    doneRefs: blockers.filter((s) => s.location === "done").map((s) => s.ref),
-  };
+  for (const s of universe) {
+    if (s.ref === ref) continue;
+    if (!s.citedSources.some((p) => citedSet.has(p))) continue;
+
+    if (s.ref < ref) {
+      // Earlier-ordered story: classic asymmetric rule.
+      // Blessed to-do/ and in-progress/ → unconditional block (pendingRefs).
+      // done/ → conditional on merge (doneRefs).
+      // Unblessed to-do/ → skip (may never ship).
+      if (s.location === "to-do") {
+        if (s.ready) pendingRefs.push(s.ref);
+        // else: unblessed → skip
+      } else if (s.location === "in-progress") {
+        pendingRefs.push(s.ref);
+      } else {
+        // done/
+        doneRefs.push(s.ref);
+      }
+    } else {
+      // Later-ordered story (s.ref > ref): only block when already IN FLIGHT.
+      // to-do/ (even blessed) → skip — asymmetric rule prevents deadlock.
+      if (s.location === "in-progress") {
+        pendingRefs.push(s.ref);
+      } else if (s.location === "done") {
+        doneRefs.push(s.ref);
+      }
+      // to-do/ → no block
+    }
+  }
+
+  return { pendingRefs, doneRefs };
 }
 
 function isEnoent(err: unknown): boolean {
