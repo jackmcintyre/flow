@@ -101,14 +101,43 @@ export async function gh(opts: {
   const execaOpts: { input?: string; cwd?: string } = {};
   if (opts.input !== undefined) execaOpts.input = opts.input;
   if (opts.cwd !== undefined) execaOpts.cwd = opts.cwd;
-  const result =
-    Object.keys(execaOpts).length > 0
-      ? await execaImpl("gh", [...segments, ...args], execaOpts)
-      : await execaImpl("gh", [...segments, ...args]);
 
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const exitCode = result.exitCode ?? 0;
+  // Capture the result without letting execa's rejection propagate.
+  // When the spawned process exits non-zero, execa throws an ExecaError that
+  // carries `.exitCode` and `.stderr`.  The classification block below must
+  // see that result — if we let the throw propagate the classifier never runs
+  // and recoverable failures (rate-limit, transient network) become raw crashes.
+  // Happy-path (exit 0) and pre-spawn checks (gh_allow, assertNoNegativeFlags)
+  // are unchanged. (Story native:01KTSR1HYG02PDVGGM7382ZSR6 AC1/AC2)
+  let rawResult: { stdout: string; stderr: string; exitCode: number };
+  try {
+    const r =
+      Object.keys(execaOpts).length > 0
+        ? await execaImpl("gh", [...segments, ...args], execaOpts)
+        : await execaImpl("gh", [...segments, ...args]);
+    rawResult = {
+      stdout: r.stdout ?? "",
+      stderr: r.stderr ?? "",
+      exitCode: r.exitCode ?? 0,
+    };
+  } catch (execErr) {
+    // ExecaError on non-zero exit: extract exitCode + stderr so the classifier
+    // can inspect them.  Any other thrown value (e.g. ENOENT when `gh` is
+    // missing) is re-thrown as-is — that is a fatal environment problem, not
+    // a GitHub API error.
+    const e = execErr as Record<string, unknown>;
+    const execExitCode = typeof e["exitCode"] === "number" ? e["exitCode"] : undefined;
+    if (execExitCode === undefined) {
+      throw execErr;
+    }
+    rawResult = {
+      stdout: typeof e["stdout"] === "string" ? e["stdout"] : "",
+      stderr: typeof e["stderr"] === "string" ? e["stderr"] : "",
+      exitCode: execExitCode,
+    };
+  }
+
+  const { stdout, stderr, exitCode } = rawResult;
 
   // Post-result classification: on non-zero exit, check the error map.
   // Raises GhRecoverableError on a mapped class; returns normally on unmapped
