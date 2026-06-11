@@ -17,6 +17,7 @@
 
 import { execa as defaultExeca } from "execa";
 import { reapStaleDevStoryWorktrees } from "../lib/dev-story-worktree.js";
+import { writeSessionHeartbeat } from "../lib/session-liveness.js";
 
 export interface ReapStaleWorktreesResult {
   reaped: string[];
@@ -27,11 +28,25 @@ export async function reapStaleWorktrees(opts: {
   targetRepoRoot: string;
   sessionUlid: string;
   execaImpl?: typeof defaultExeca;
+  /** Test seam — production callers omit this. */
+  isSessionAliveImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<boolean>;
 }): Promise<ReapStaleWorktreesResult> {
+  // INITIAL HEARTBEAT (Story native:01KTSQWJ — the liveness WRITE side). This is
+  // the drain's first session-bearing seam in the recover phase, so establishing
+  // the heartbeat here makes this run visible as alive BEFORE it does any long
+  // work (a concurrently-starting second drain must not treat us as a dead orphan
+  // while our first build is in flight). Fail-soft: a heartbeat write must never
+  // break reaping — a missed write just means the next per-story seam refreshes it.
+  try {
+    await writeSessionHeartbeat(opts.targetRepoRoot, opts.sessionUlid);
+  } catch {
+    /* best-effort: liveness is refreshed again on the next claim/build seam */
+  }
   const { reaped, warnings } = await reapStaleDevStoryWorktrees({
     targetRepoRoot: opts.targetRepoRoot,
     currentSessionUlid: opts.sessionUlid,
     ...(opts.execaImpl ? { execaImpl: opts.execaImpl } : {}),
+    ...(opts.isSessionAliveImpl ? { isSessionAliveImpl: opts.isSessionAliveImpl } : {}),
   });
   return { reaped, warnings };
 }

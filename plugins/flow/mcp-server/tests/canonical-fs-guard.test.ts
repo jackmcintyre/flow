@@ -140,6 +140,16 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // (scripts/audit-tool-reachability.mjs) is a read-only reporter that writes
   // nothing — it performs zero fs writes itself.
   path.join(SRC_DIR, "tools", "__tests__", "audit-tool-reachability.test.ts"),
+  // Story native:01KTSQWJ62C4XQBDK4NXTEPQC0: liveness-before-reclaim integration
+  // tests seed in-progress manifest YAML fixtures directly to tmpdir via raw
+  // fs.writeFile/mkdir to exercise the liveness gate in scanOrphanedInProgress.
+  // Test file only; the production scan tool performs no raw fs writes.
+  path.join(SRC_DIR, "tools", "__tests__", "liveness-before-reclaim.test.ts"),
+  // Story native:01KTSQWJ62C4XQBDK4NXTEPQC0: reap-stale-worktrees-liveness unit
+  // tests seed manifest and heartbeat fixtures directly to tmpdir via raw
+  // fs.writeFile/mkdir to exercise the liveness gate in reapStaleDevStoryWorktrees.
+  // Test file only; the production reaper performs no raw fs writes.
+  path.join(SRC_DIR, "lib", "__tests__", "reap-stale-worktrees-liveness.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

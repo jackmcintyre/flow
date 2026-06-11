@@ -29,6 +29,7 @@ import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
 import { buildBranchSlug } from "../lib/pr-body.js";
 import { execa as defaultExeca } from "execa";
+import { writeSessionHeartbeat } from "../lib/session-liveness.js";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -122,6 +123,17 @@ export async function processDevTranscript(
   const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
   const chatLog: string[] = [];
+
+  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The drain
+  // calls processDevTranscript right after the long dev build returns, so this is
+  // the post-build refresh that bounds the longest gap between heartbeats to a
+  // single build (the pre-build refresh is in claimNextStory). Fail-soft: a missed
+  // heartbeat must never affect the handoff parse / verdict.
+  try {
+    await writeSessionHeartbeat(targetRepoRoot, sessionUlid);
+  } catch {
+    /* best-effort liveness refresh; never affects transcript processing */
+  }
 
   const manifestPath = path.resolve(
     targetRepoRoot,

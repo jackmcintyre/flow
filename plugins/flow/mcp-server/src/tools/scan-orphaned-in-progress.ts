@@ -25,6 +25,7 @@ import { execa as defaultExeca } from "execa";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { buildBranchSlug } from "../lib/pr-body.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
+import { isSessionAlive } from "../lib/session-liveness.js";
 
 interface OrphanedManifest {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
@@ -73,6 +74,12 @@ export interface ScanOrphanedInProgressOptions {
   sessionUlid: string;
   /** Test seam — production callers omit this. */
   execaImpl?: typeof defaultExeca;
+  /**
+   * Test seam for liveness checks — production callers omit this.
+   * Receives `(targetRepoRoot, sessionUlid)` and returns whether the session
+   * is still alive. When omitted, the real `isSessionAlive` is used.
+   */
+  isSessionAliveImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<boolean>;
 }
 
 /**
@@ -92,6 +99,7 @@ export async function scanOrphanedInProgress(
 ): Promise<ScanOrphanedInProgressResult> {
   const { targetRepoRoot, sessionUlid } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const aliveCheck = opts.isSessionAliveImpl ?? isSessionAlive;
   const inProgressDir = path.join(targetRepoRoot, ".flow", "state", "in-progress");
   const sessionsDir = path.join(targetRepoRoot, ".flow", "state", "sessions");
 
@@ -142,6 +150,21 @@ export async function scanOrphanedInProgress(
 
     // Skip manifests claimed by the current session.
     if (manifest.claimed_by === sessionUlid) {
+      continue;
+    }
+
+    // Before treating this manifest as an orphan, verify the claiming session
+    // is actually dead. If it is still alive (its heartbeat is fresh and its
+    // pid is still running) the manifest belongs to an in-flight run — leave
+    // it alone. Only confirmed-dead sessions produce genuine orphans.
+    //
+    // Fail-safe: isSessionAlive returns false when liveness cannot be
+    // determined (missing/malformed heartbeat, filesystem error). This
+    // preserves the existing recovery behaviour for all truly crashed runs
+    // while protecting any concurrently-live run.
+    const claimingSessionAlive = await aliveCheck(targetRepoRoot, manifest.claimed_by);
+    if (claimingSessionAlive) {
+      // The owning run is still alive — skip silently (not an orphan).
       continue;
     }
 
