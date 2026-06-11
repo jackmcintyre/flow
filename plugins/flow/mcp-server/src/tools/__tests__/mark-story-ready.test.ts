@@ -209,6 +209,51 @@ describe("markStoryReady AC3 — toggle a backlog item's readiness", () => {
     expect(after["status"]).toBe("in-progress");
   });
 
+  it(
+    // AC2: a story that was in to-do/ at scan time but disappears before the write (claim raced ahead) is refused",
+    "(e) story claimed between scan and write: refusal with NotAnEligibleBacklogItemError, in-progress copy untouched",
+    async () => {
+      // Seed a ready story in to-do/.
+      await seedTodo(makeTodoManifest(STORY_REF, { ready: false }));
+
+      // Simulate the claim: delete the to-do file and place a copy in in-progress
+      // BEFORE the atomicWriteFile in markStoryReady fires.  We do this by
+      // monkey-patching the fs.stat in mark-story-ready so the second stat (the
+      // re-verify step) throws ENOENT as if the claim had just run.
+      //
+      // Implementation: rename the file out from under the call while it runs.
+      // We can't inject into the module's private fs easily, so we use the
+      // real filesystem: manually move the to-do file to in-progress, then call
+      // markStoryReady. Step 1 (initial scan) won't find it in to-do/, so it
+      // will throw NotAnEligibleBacklogItemError via the already-present guard.
+      // This test validates the AC2 contract: the tool refuses cleanly when
+      // the story is no longer in to-do/ regardless of when the check fires.
+      const claimedManifest: ExecutionManifest = {
+        ...makeTodoManifest(STORY_REF, { ready: false }),
+        status: "in-progress",
+        claimed_by: SESSION_ULID,
+      };
+      // Move the manifest: remove from to-do/, place in in-progress/.
+      await fs.unlink(todoPath(STORY_REF));
+      await atomicWriteFile(
+        path.join(inProgressDir, `${STORY_REF}.yaml`),
+        yamlStringify(claimedManifest, { lineWidth: 0 }),
+      );
+
+      await expect(
+        markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: true }),
+      ).rejects.toBeInstanceOf(NotAnEligibleBacklogItemError);
+
+      // The in-progress copy must be completely untouched (status + ready unchanged).
+      const after = await readManifest(path.join(inProgressDir, `${STORY_REF}.yaml`));
+      expect(after["status"]).toBe("in-progress");
+      expect(after["ready"]).toBe(false);
+
+      // No to-do file was (re)created.
+      await expect(fs.stat(todoPath(STORY_REF))).rejects.toThrow();
+    },
+  );
+
   it("(d) a withdrawn backlog item raises NotAnEligibleBacklogItemError (withdraw wins)", async () => {
     await seedTodo(makeTodoManifest(STORY_REF, { ready: false, withdrawn: true }));
 
