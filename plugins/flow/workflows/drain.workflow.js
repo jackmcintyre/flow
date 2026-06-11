@@ -45,6 +45,11 @@ const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResum
 // maxRework / maxResume knobs. Default 2; clamp a non-positive/garbage value to 1
 // so the loop is never spawned with zero workers (which would never drain).
 const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency > 0 ? A.maxConcurrency : 2
+// Re-poll delay (ms) when a worker sees waiting-on-in-progress (Story native:01KTSQXBVE4WEJ2PQKVNHVFPS6).
+// A worker waits this long before re-checking the queue, so it does not spin hot
+// while a sibling story is still building. Default: 2000 ms for production runs.
+// Tests pass 0 (or a very small value) so the harness does not slow down.
+const REPOLL_DELAY_MS = Number.isInteger(A.repollDelayMs) && A.repollDelayMs >= 0 ? A.repollDelayMs : 2000
 // Execution model for the dev and reviewer subagents (FU6). Default: 'sonnet' so
 // overnight drains use the cheaper model without hand-editing the workflow.
 // Override per-run by passing devReviewerModel: 'opus' (or any model string) in
@@ -529,6 +534,26 @@ async function drainWorker(workerId) {
     // outcome (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
     const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${claimIdx}`)
     if (!claim || claim.next !== 'spawn-dev') {
+      // waiting-on-in-progress (Story native:01KTSQXBVE4WEJ2PQKVNHVFPS6): a
+      // sibling story is still building and the only reason nothing is claimable
+      // right now is that its dependent work is blocked waiting for it to finish.
+      // This is NOT a terminal outcome — wait a bounded interval and loop back to
+      // re-attempt the claim. Once the sibling settles, claimNextStory will return
+      // either spawn-dev (the dependent is now claimable) or queue-drained (no work
+      // remains), both of which terminate the worker normally.
+      //
+      // Loop-safety: REPOLL_DELAY_MS bounds the busy-wait so the worker cannot spin
+      // hot. The natural terminator is the sibling settling; if it crashes instead
+      // of finishing cleanly, drainWorker's per-story catch buckets it as `blocked`,
+      // which frees the in-progress slot, so the next re-poll resolves to
+      // queue-drained and the worker stops. Do NOT call recordReason here — this is
+      // a transient re-poll signal, not a terminal drain outcome.
+      if (claim?.next === 'waiting-on-in-progress') {
+        log(`WAITING — worker ${workerId} found no claimable story (a sibling is still in progress); re-polling in ${REPOLL_DELAY_MS}ms`)
+        if (REPOLL_DELAY_MS > 0) await new Promise(resolve => setTimeout(resolve, REPOLL_DELAY_MS))
+        claimsStarted-- // un-reserve the slot: this loop iteration did not claim a story
+        continue
+      }
       // waiting-on-unmerged-overlap: a ready story is parked solely because it
       // overlaps an approved-but-unmerged PR in done/. This is NOT a clean drain —
       // surface it as WAITING so the operator is not misled into thinking the queue is empty.
