@@ -61,7 +61,13 @@ type AutoMergeGateReason =
   // permission, or a transient API failure). The gate folds the failure into
   // pause-needs-human rather than throwing, keeping its stdout JSON-only so the
   // drain's seam never breaks; a human completes the merge.
-  | "merge-failed";
+  | "merge-failed"
+  // Emitted by `runAutoMergeGate` (NOT `decideAutoMerge`): the CI-status poll
+  // could not read the check results for a reason unrelated to checks still
+  // being in flight (e.g. permissions error, unexpected API response). Kept
+  // distinct from `ci-not-green` so the operator knows the read itself failed.
+  // (Story native:01KTSR1HYG02PDVGGM7382ZSR6 AC3/AC4)
+  | "ci-status-unreadable";
 
 export interface DecideAutoMergeInput {
   /** The manifest's `risk_tier` field. May be `undefined` for legacy manifests. */

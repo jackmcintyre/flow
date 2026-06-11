@@ -38790,10 +38790,27 @@ async function gh(opts) {
   const execaOpts = {};
   if (opts.input !== void 0) execaOpts.input = opts.input;
   if (opts.cwd !== void 0) execaOpts.cwd = opts.cwd;
-  const result = Object.keys(execaOpts).length > 0 ? await execaImpl("gh", [...segments, ...args], execaOpts) : await execaImpl("gh", [...segments, ...args]);
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const exitCode = result.exitCode ?? 0;
+  let rawResult;
+  try {
+    const r = Object.keys(execaOpts).length > 0 ? await execaImpl("gh", [...segments, ...args], execaOpts) : await execaImpl("gh", [...segments, ...args]);
+    rawResult = {
+      stdout: r.stdout ?? "",
+      stderr: r.stderr ?? "",
+      exitCode: r.exitCode ?? 0
+    };
+  } catch (execErr) {
+    const e = execErr;
+    const execExitCode = typeof e["exitCode"] === "number" ? e["exitCode"] : void 0;
+    if (execExitCode === void 0) {
+      throw execErr;
+    }
+    rawResult = {
+      stdout: typeof e["stdout"] === "string" ? e["stdout"] : "",
+      stderr: typeof e["stderr"] === "string" ? e["stderr"] : "",
+      exitCode: execExitCode
+    };
+  }
+  const { stdout, stderr, exitCode } = rawResult;
   if (exitCode !== 0) {
     const errorMap = await loadGhErrorMap(pluginRoot);
     const errorClass = classifyGhError({ exitCode, stderr }, errorMap);
@@ -40354,6 +40371,7 @@ var AutoMergeGateReasonSchema = external_exports.enum([
   "high-risk",
   "no-tier-no-signal",
   "ci-not-green",
+  "ci-status-unreadable",
   "merge-failed"
 ]);
 var AutoMergeGateResultSchema = external_exports.object({
@@ -40416,7 +40434,7 @@ function classifyCiRollup(rollup) {
 async function waitForCiGreen(opts) {
   const start = Date.now();
   for (; ; ) {
-    let stdout = "";
+    let stdout;
     try {
       const r = await gh({
         role: opts.role,
@@ -40427,7 +40445,15 @@ async function waitForCiGreen(opts) {
         pluginRootOverride: opts.pluginRoot
       });
       stdout = r.stdout;
-    } catch {
+    } catch (ghErr) {
+      const isRecoverable = ghErr instanceof GhRecoverableError;
+      if (!isRecoverable) {
+        const reason = ghErr instanceof Error ? ghErr.message : String(ghErr);
+        return { kind: "ci-status-unreadable", reason };
+      }
+      if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
+      await new Promise((resolve19) => setTimeout(resolve19, CI_GATE_POLL_INTERVAL_MS));
+      continue;
     }
     let rollup = [];
     try {
@@ -40435,8 +40461,9 @@ async function waitForCiGreen(opts) {
       if (Array.isArray(parsed.statusCheckRollup)) {
         rollup = parsed.statusCheckRollup;
       }
-    } catch {
-      rollup = [];
+    } catch (parseErr) {
+      const reason = parseErr instanceof Error ? `failed to parse statusCheckRollup: ${parseErr.message}` : "failed to parse statusCheckRollup";
+      return { kind: "ci-status-unreadable", reason };
     }
     const state = classifyCiRollup(rollup);
     if (state === "green") return "green";
@@ -40576,10 +40603,16 @@ async function runAutoMergeGate(opts) {
       execaImpl,
       pluginRoot
     });
-    ciLog.push(`ci gate: ${ciState}`);
-    if (ciState !== "green") {
+    if (typeof ciState === "object" && ciState.kind === "ci-status-unreadable") {
+      ciLog.push(`ci gate: ci-status-unreadable (${ciState.reason})`);
       decision = "pause-needs-human";
-      reason = "ci-not-green";
+      reason = "ci-status-unreadable";
+    } else {
+      ciLog.push(`ci gate: ${ciState}`);
+      if (ciState !== "green") {
+        decision = "pause-needs-human";
+        reason = "ci-not-green";
+      }
     }
   }
   const chatLine = composeChatLine(decision, reason);

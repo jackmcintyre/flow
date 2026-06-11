@@ -50,7 +50,7 @@ import { loadRolePermissions } from "../state/load-role-permissions.js";
 import type { RolePermissions } from "../schemas/role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { gh } from "../lib/gh.js";
-import { AutoMergeGateThresholdInvalidError } from "../errors.js";
+import { AutoMergeGateThresholdInvalidError, GhRecoverableError } from "../errors.js";
 import { PluginSettingsSchema } from "../schemas/workspace-config.js";
 import type { PluginSettings } from "../schemas/workspace-config.js";
 
@@ -67,6 +67,7 @@ const AutoMergeGateReasonSchema = z.enum([
   "high-risk",
   "no-tier-no-signal",
   "ci-not-green",
+  "ci-status-unreadable",
   "merge-failed",
 ]);
 
@@ -194,8 +195,25 @@ async function loadWorkspaceConfig(targetRepoRoot: string): Promise<PluginSettin
 // CI gate (Stage-2): never auto-merge a PR whose CI is not green
 // ---------------------------------------------------------------------------
 
-/** Outcome of the CI gate poll. */
-type CiGateState = "green" | "failed" | "pending-timeout";
+/**
+ * Outcome of the CI gate poll.
+ *
+ * - `green`           — every check passed.
+ * - `failed`          — at least one check explicitly failed.
+ * - `pending-timeout` — checks still running when the deadline elapsed (healthy slow build).
+ * - `ci-status-unreadable` — the CI status could not be fetched for a reason unrelated to
+ *                            checks still being in flight (e.g. permissions, bad config, API
+ *                            error). Kept distinct from `pending-timeout` so callers can tell
+ *                            the operator the *real* reason instead of reporting CI-not-green.
+ *                            The `unreadableReason` field carries the underlying cause.
+ *
+ * Story native:01KTSR1HYG02PDVGGM7382ZSR6 AC3/AC4
+ */
+export type CiGateState =
+  | "green"
+  | "failed"
+  | "pending-timeout"
+  | { kind: "ci-status-unreadable"; reason: string };
 
 const CI_GATE_TIMEOUT_MS = 300_000; // 5 min — covers the ~90s build with headroom
 const CI_GATE_POLL_INTERVAL_MS = 15_000;
@@ -257,9 +275,22 @@ export function classifyCiRollup(rollup: Array<Record<string, unknown>>): "green
 
 /**
  * Poll `gh pr view <pr> --json statusCheckRollup` until CI is green or failed,
- * or the timeout elapses. Transient gh errors are treated as pending (retry).
- * Returns "pending-timeout" if still pending at the deadline — the caller
- * downgrades to pause-needs-human (fail-safe).
+ * or the timeout elapses.
+ *
+ * Error handling distinguishes two cases:
+ * - A `GhRecoverableError` (rate-limit, transient network) is treated as a
+ *   momentary read failure and retried until the deadline — the checks are
+ *   still running, we just couldn't see them right now.
+ * - Any other error (permissions failure, bad API response, JSON parse error)
+ *   is treated as "CI status unreadable" and returned immediately as a
+ *   `{ kind: "ci-status-unreadable", reason }` result, distinct from
+ *   "pending-timeout", so the caller can report the real cause to the operator
+ *   rather than falsely claiming CI is not green.
+ *
+ * Returns "pending-timeout" only when checks are genuinely still running and
+ * the deadline elapsed — a slow-but-healthy build.
+ *
+ * Story native:01KTSR1HYG02PDVGGM7382ZSR6 AC3/AC4
  */
 async function waitForCiGreen(opts: {
   prNumber: number;
@@ -270,7 +301,7 @@ async function waitForCiGreen(opts: {
 }): Promise<CiGateState> {
   const start = Date.now();
   for (;;) {
-    let stdout = "";
+    let stdout: string | undefined;
     try {
       const r = await gh({
         role: opts.role,
@@ -281,17 +312,37 @@ async function waitForCiGreen(opts: {
         pluginRootOverride: opts.pluginRoot,
       });
       stdout = r.stdout;
-    } catch {
-      // transient — treat as pending and retry until the deadline
+    } catch (ghErr) {
+      // GhRecoverableError (rate-limit, transient network): treat as a momentary
+      // read failure — retry until the deadline as the checks may still be running.
+      // Any other error (permissions, configuration, unexpected) is "unreadable":
+      // report the real reason immediately instead of silently polling to timeout
+      // and then returning pending-timeout (which downstream misreads as CI failed).
+      const isRecoverable = ghErr instanceof GhRecoverableError;
+      if (!isRecoverable) {
+        const reason = ghErr instanceof Error ? ghErr.message : String(ghErr);
+        return { kind: "ci-status-unreadable", reason };
+      }
+      // Recoverable — fall through to deadline check and retry.
+      if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
+      await new Promise((resolve) => setTimeout(resolve, CI_GATE_POLL_INTERVAL_MS));
+      continue;
     }
+
     let rollup: Array<Record<string, unknown>> = [];
     try {
       const parsed = JSON.parse(stdout) as { statusCheckRollup?: unknown };
       if (Array.isArray(parsed.statusCheckRollup)) {
         rollup = parsed.statusCheckRollup as Array<Record<string, unknown>>;
       }
-    } catch {
-      rollup = [];
+    } catch (parseErr) {
+      // Could not parse the GitHub response — this is an unreadable status, not
+      // a "checks still pending" situation.
+      const reason =
+        parseErr instanceof Error
+          ? `failed to parse statusCheckRollup: ${parseErr.message}`
+          : "failed to parse statusCheckRollup";
+      return { kind: "ci-status-unreadable", reason };
     }
     const state = classifyCiRollup(rollup);
     if (state === "green") return "green";
@@ -525,9 +576,16 @@ export async function runAutoMergeGate(
   // ------------------------------------------------------------------
   // Step 8a: CI gate (Stage-2). Never auto-merge a PR whose CI is not green.
   // Only runs when the risk gate said auto-merge; polls GitHub checks and, on
-  // failure or timeout, downgrades to pause-needs-human (reason ci-not-green) —
-  // fail-safe. The risk decision is preserved through dryRun (above); this gate
-  // is a hard precondition on the real merge.
+  // failure or timeout, downgrades to pause-needs-human — fail-safe.
+  //
+  // Reason assignment:
+  //   "ci-not-green"        — checks explicitly failed, or still pending at deadline
+  //   "ci-status-unreadable" — the check-status poll failed for a non-transient reason
+  //                            (e.g. permissions, bad API response). Kept distinct so
+  //                            the operator knows it was the read that failed, not CI.
+  //
+  // The risk decision is preserved through dryRun (above); this gate is a hard
+  // precondition on the real merge. (Story native:01KTSR1HYG02PDVGGM7382ZSR6 AC3/AC4)
   // ------------------------------------------------------------------
   const ciLog: string[] = [];
   if (decision === "auto-merge") {
@@ -538,10 +596,16 @@ export async function runAutoMergeGate(
       execaImpl,
       pluginRoot,
     });
-    ciLog.push(`ci gate: ${ciState}`);
-    if (ciState !== "green") {
+    if (typeof ciState === "object" && ciState.kind === "ci-status-unreadable") {
+      ciLog.push(`ci gate: ci-status-unreadable (${ciState.reason})`);
       decision = "pause-needs-human";
-      reason = "ci-not-green";
+      reason = "ci-status-unreadable";
+    } else {
+      ciLog.push(`ci gate: ${ciState}`);
+      if (ciState !== "green") {
+        decision = "pause-needs-human";
+        reason = "ci-not-green";
+      }
     }
   }
 
