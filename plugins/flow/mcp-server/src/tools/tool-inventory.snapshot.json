@@ -48,6 +48,7 @@
   "runReviewerSession",
   "scanOrphanedInProgress",
   "scanSources",
+  "summariseRetroProposal",
   "validatePlannerBacklog",
   "writeLensVerdict",
   "writeNativeStory",

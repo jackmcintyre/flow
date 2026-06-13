@@ -61,6 +61,7 @@ import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
 import { resolveJudgePlan } from "./resolve-judge-plan.js";
 import { resolveBuildPlan } from "./resolve-build-plan.js";
+import { summariseRetroProposal } from "./summarise-retro-proposal.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2726,6 +2727,67 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
       };
+    },
+  });
+
+  // Story native:01KTZGEW6TSC6M84P9KJ7FD96S — summariseRetroProposal: read-only
+  // summary tool for the /flow:retro skill. After the retro-analyst subagent
+  // emits the locked handoff phrase 'Handoff to operator — retro proposal ready
+  // for review at <path>', the skill calls this tool on that path to obtain a
+  // structured per-proposal summary for inline rendering.
+  //
+  // The tool reads the file, splits its YAML frontmatter, parses it through
+  // parseRetroProposalFile (the same canonical reader locate-proposal.ts uses),
+  // and returns { absPath, totalCount, noProposals, proposals[] } where each
+  // proposal entry carries { type, rationale, id }. No writes, no network.
+  // This ensures the inline summary and the file cannot disagree — both derive
+  // from the same frontmatter source of truth.
+  server.registerTool({
+    name: "summariseRetroProposal",
+    description:
+      "Read-only summary tool for the /flow:retro skill " +
+      "(Story native:01KTZGEW6TSC6M84P9KJ7FD96S). Accepts the absolute path of a " +
+      "retro-proposal file written by writeRetroProposal, reads its YAML frontmatter, " +
+      "parses it through the canonical parseRetroProposalFile, and returns a structured " +
+      "per-proposal summary for inline rendering. Returns { absPath, totalCount, " +
+      "noProposals, proposals: [{ type, rationale, id }] }. When noProposals is true " +
+      "the skill MUST render a plain 'no recommended changes this cycle' statement. " +
+      "No writes, no mutations — strictly read-only. " +
+      "Throws MalformedRetroProposalError if the file's frontmatter fails schema validation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        absPath: {
+          type: "string",
+          description:
+            "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md).",
+        },
+      },
+      required: ["absPath"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({ absPath: z.string().min(1) })
+          .parse(args);
+        const result = await summariseRetroProposal(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 }

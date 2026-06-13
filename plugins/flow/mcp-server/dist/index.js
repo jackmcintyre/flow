@@ -6880,12 +6880,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs61, exportName) {
+    function addFormats(ajv, list, fs62, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs61[f]);
+        ajv.addFormat(f, fs62[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -13771,14 +13771,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs61 = this.flowScalar(this.type);
+              const fs62 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map2.items.push({ start, key: fs61, sep: [] });
+                map2.items.push({ start, key: fs62, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs61);
+                this.stack.push(fs62);
               } else {
-                Object.assign(it, { key: fs61, sep: [] });
+                Object.assign(it, { key: fs62, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -13906,13 +13906,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs61 = this.flowScalar(this.type);
+              const fs62 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs61, sep: [] });
+                fc.items.push({ start: [], key: fs62, sep: [] });
               else if (it.sep)
-                this.stack.push(fs61);
+                this.stack.push(fs62);
               else
-                Object.assign(it, { key: fs61, sep: [] });
+                Object.assign(it, { key: fs62, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -15975,7 +15975,7 @@ var require_windows = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/windows.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs61 = __require("fs");
+    var fs62 = __require("fs");
     function checkPathExt(path79, options) {
       var pathext = options.pathExt !== void 0 ? options.pathExt : process.env.PATHEXT;
       if (!pathext) {
@@ -16000,12 +16000,12 @@ var require_windows = __commonJS({
       return checkPathExt(path79, options);
     }
     function isexe(path79, options, cb) {
-      fs61.stat(path79, function(er, stat2) {
+      fs62.stat(path79, function(er, stat2) {
         cb(er, er ? false : checkStat(stat2, path79, options));
       });
     }
     function sync(path79, options) {
-      return checkStat(fs61.statSync(path79), path79, options);
+      return checkStat(fs62.statSync(path79), path79, options);
     }
   }
 });
@@ -16015,14 +16015,14 @@ var require_mode = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/mode.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs61 = __require("fs");
+    var fs62 = __require("fs");
     function isexe(path79, options, cb) {
-      fs61.stat(path79, function(er, stat2) {
+      fs62.stat(path79, function(er, stat2) {
         cb(er, er ? false : checkStat(stat2, options));
       });
     }
     function sync(path79, options) {
-      return checkStat(fs61.statSync(path79), options);
+      return checkStat(fs62.statSync(path79), options);
     }
     function checkStat(stat2, options) {
       return stat2.isFile() && checkMode(stat2, options);
@@ -16046,7 +16046,7 @@ var require_mode = __commonJS({
 // ../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/index.js
 var require_isexe = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/index.js"(exports, module) {
-    var fs61 = __require("fs");
+    var fs62 = __require("fs");
     var core;
     if (process.platform === "win32" || global.TESTING_WINDOWS) {
       core = require_windows();
@@ -16310,16 +16310,16 @@ var require_shebang_command = __commonJS({
 var require_readShebang = __commonJS({
   "../node_modules/.pnpm/cross-spawn@7.0.6/node_modules/cross-spawn/lib/util/readShebang.js"(exports, module) {
     "use strict";
-    var fs61 = __require("fs");
+    var fs62 = __require("fs");
     var shebangCommand = require_shebang_command();
     function readShebang(command) {
       const size = 150;
       const buffer = Buffer.alloc(size);
       let fd;
       try {
-        fd = fs61.openSync(command, "r");
-        fs61.readSync(fd, buffer, 0, size, 0);
-        fs61.closeSync(fd);
+        fd = fs62.openSync(command, "r");
+        fs62.readSync(fd, buffer, 0, size, 0);
+        fs62.closeSync(fd);
       } catch (e) {
       }
       return shebangCommand(buffer.toString());
@@ -54915,6 +54915,28 @@ async function resolveBuildPlan(opts) {
   };
 }
 
+// src/tools/summarise-retro-proposal.ts
+var import_yaml35 = __toESM(require_dist2(), 1);
+import { promises as fs60 } from "node:fs";
+async function summariseRetroProposal(opts) {
+  const { absPath } = opts;
+  const raw = await fs60.readFile(absPath, "utf8");
+  const { frontmatterRaw } = splitFrontmatter(raw, absPath);
+  const parsedYaml = (0, import_yaml35.parse)(frontmatterRaw);
+  const file2 = parseRetroProposalFile(parsedYaml);
+  const proposals = file2.proposals.map((p) => ({
+    type: p.type,
+    rationale: p.rationale,
+    id: p.id
+  }));
+  return {
+    absPath,
+    totalCount: proposals.length,
+    noProposals: proposals.length === 0,
+    proposals
+  };
+}
+
 // src/tools/register.ts
 function registerAllTools(server) {
   server.registerTool({
@@ -56882,10 +56904,46 @@ function registerAllTools(server) {
       };
     }
   });
+  server.registerTool({
+    name: "summariseRetroProposal",
+    description: "Read-only summary tool for the /flow:retro skill (Story native:01KTZGEW6TSC6M84P9KJ7FD96S). Accepts the absolute path of a retro-proposal file written by writeRetroProposal, reads its YAML frontmatter, parses it through the canonical parseRetroProposalFile, and returns a structured per-proposal summary for inline rendering. Returns { absPath, totalCount, noProposals, proposals: [{ type, rationale, id }] }. When noProposals is true the skill MUST render a plain 'no recommended changes this cycle' statement. No writes, no mutations \u2014 strictly read-only. Throws MalformedRetroProposalError if the file's frontmatter fails schema validation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        absPath: {
+          type: "string",
+          description: "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md)."
+        }
+      },
+      required: ["absPath"]
+    },
+    handler: async (args) => {
+      try {
+        const parsed = external_exports.object({ absPath: external_exports.string().min(1) }).parse(args);
+        const result = await summariseRetroProposal(parsed);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }]
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: err.name, message: err.message })
+              }
+            ],
+            isError: true
+          };
+        }
+        throw err;
+      }
+    }
+  });
 }
 
 // src/lib/lifecycle-log.ts
-import * as fs60 from "node:fs";
+import * as fs61 from "node:fs";
 import * as path78 from "node:path";
 import * as os2 from "node:os";
 import { execSync } from "node:child_process";
@@ -56916,8 +56974,8 @@ function createLifecycleLog(opts) {
   let disabled = false;
   let stream = null;
   try {
-    fs60.mkdirSync(path78.dirname(logPath), { recursive: true });
-    stream = fs60.createWriteStream(logPath, { flags: "a" });
+    fs61.mkdirSync(path78.dirname(logPath), { recursive: true });
+    stream = fs61.createWriteStream(logPath, { flags: "a" });
     stream.on("error", () => {
       disabled = true;
       stream = null;
@@ -56949,7 +57007,7 @@ function createLifecycleLog(opts) {
   function logSync(event, fields) {
     if (disabled) return;
     try {
-      fs60.appendFileSync(logPath, buildLine(event, fields));
+      fs61.appendFileSync(logPath, buildLine(event, fields));
     } catch {
     }
   }
