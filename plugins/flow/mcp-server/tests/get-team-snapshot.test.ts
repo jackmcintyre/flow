@@ -646,7 +646,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
     // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier) = 51 total.
     // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver) = 52 total.
     // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver) = 53 total.
-    expect(result.tools.length).toBe(53);
+    // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary) = 54 total.
+    expect(result.tools.length).toBe(54);
 
     await client.close();
     await server.close();

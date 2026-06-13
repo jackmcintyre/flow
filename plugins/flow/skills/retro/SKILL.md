@@ -1,7 +1,7 @@
 ---
 name: flow:retro
 description: "Run the cycle-level retro-analyst over the cycle's done manifests, telemetry, prior proposals, and rule registry to produce one retro-proposal markdown file."
-allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task]
+allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/6-2-retro-skill-and-retro-analyst-subagent.md § AC1 -->
@@ -47,7 +47,15 @@ The retro works against **any adapter**. There is no branch on adapter name — 
    ```
    The subagent reasons over the bundle and calls `writeRetroProposal` exactly once. The skill does NOT call `writeRetroProposal` itself — that is the analyst's only write affordance.
 
-5. **Exit condition.** The retro-analyst subagent emits the locked terminal handoff phrase: `Handoff to operator — retro proposal ready for review at <path>`. When that phrase appears, surface the proposal path to the operator and exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
+5. **Exit condition.** The retro-analyst subagent emits the locked terminal handoff phrase: `Handoff to operator — retro proposal ready for review at <path>`. When that phrase appears:
+   a. Extract the `<path>` from the handoff phrase.
+   b. Call `summariseRetroProposal({ absPath: <path> })` — this reads the written file and returns `{ totalCount, noProposals, proposals: [{ type, rationale, id }] }`.
+   c. Render the summary inline to the operator:
+      - If `noProposals` is true: "This cycle yielded no recommended changes."
+      - Otherwise: list each proposal as "- **\<type\>** (\<id\>): \<rationale\>" and conclude with "Total: \<totalCount\> proposal(s). Proposal file: \<path\>."
+   d. Exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
+
+   **Do NOT** relay the summary from the subagent's prose — always call `summariseRetroProposal` on the written file path so the inline summary is derived from the same frontmatter source of truth as the file itself.
 
 # Failure modes
 

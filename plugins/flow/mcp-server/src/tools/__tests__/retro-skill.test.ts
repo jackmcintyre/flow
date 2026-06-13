@@ -20,7 +20,13 @@
  *   valid events plus one corrupted line, and two prior proposals. Calls
  *   `gatherRetroInputs` and asserts the returned bundle shape. (AC4 half 2)
  *
- * Both halves are pure deterministic — no LLM invocation, no network.
+ * Half 3 — summariseRetroProposal integration test (AC1):
+ *   Writes a real proposal file (via writeRetroProposal) and asserts that
+ *   summariseRetroProposal returns a structured summary whose proposal entries
+ *   match the written frontmatter — the operator-facing output includes a
+ *   per-proposal type+rationale, not just the file path.
+ *
+ * All halves are pure deterministic — no LLM invocation, no network.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -29,8 +35,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify as yamlStringify } from "yaml";
+import { parse as yamlParse } from "yaml";
 import { loadRolePermissions } from "../../state/load-role-permissions.js";
 import { gatherRetroInputs } from "../gather-retro-inputs.js";
+import { writeRetroProposal } from "../write-retro-proposal.js";
+import { summariseRetroProposal } from "../summarise-retro-proposal.js";
+import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
 
 // ---------------------------------------------------------------------------
 // Resolve the real plugin root from this file's location.
@@ -294,5 +304,147 @@ describe("gatherRetroInputs — fixture cycle bundle (AC4)", () => {
     expect(bundle.telemetrySummary.skipped_count).toBe(0);
     expect(bundle.priorProposals).toEqual([]);
     expect(bundle.ruleRegistry).toBe(null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Half 3: summariseRetroProposal integration test (AC1).
+// Story native:01KTZGEW6TSC6M84P9KJ7FD96S — operator output carries the
+// per-proposal summary from the written file, not just the file path.
+// ---------------------------------------------------------------------------
+
+describe("summariseRetroProposal — skill-path integration (AC1)", () => {
+  let tmpRoot3: string;
+
+  beforeEach(async () => {
+    tmpRoot3 = await fs.mkdtemp(path.join(os.tmpdir(), "retro-summarise-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot3, { recursive: true, force: true });
+  });
+
+  const ULID_S1 = "01HZS0AA00000000000000SK01";
+  const ULID_S2 = "01HZS0AA00000000000000SK02";
+  const ISO_S = "2026-06-13T11:00:00.000Z";
+
+  it("returns per-proposal type+rationale+id from the written file (AC1)", async () => {
+    const proposals = [
+      {
+        type: "rule",
+        id: ULID_S1,
+        created_at: ISO_S,
+        rationale: "Dev skipped the handoff phrase twice in this cycle.",
+        text: "Emit the handoff phrase verbatim as the final line.",
+        target_failure_class: "handoff-grammar",
+        recommended_promotion_level: "must",
+      },
+      {
+        type: "team-change",
+        id: ULID_S2,
+        created_at: ISO_S,
+        rationale: "Security audit failures keep recurring across stories.",
+        action: "hire",
+        target_role: "security-reviewer",
+        justification: "Four fires in the last cycle.",
+        predicted_impact: { affected_failure_classes: ["security-audit"] },
+      },
+    ];
+
+    // Simulate the retro-analyst subagent writing the proposal file.
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot3,
+      isoTimestamp: ISO_S,
+      proposals,
+    });
+
+    // The retro skill extracts the path from the handoff phrase and calls
+    // summariseRetroProposal on it — simulate that call here.
+    const summary = await summariseRetroProposal({ absPath });
+
+    // AC1: operator-facing output includes a readable per-proposal summary
+    // (each proposal's type + a one-line rationale + the total count).
+    expect(summary.totalCount).toBe(2);
+    expect(summary.noProposals).toBe(false);
+    expect(summary.proposals).toHaveLength(2);
+
+    // Type and rationale fields must match the written file's frontmatter.
+    expect(summary.proposals[0]!.type).toBe("rule");
+    expect(summary.proposals[0]!.rationale).toBe(
+      "Dev skipped the handoff phrase twice in this cycle.",
+    );
+    expect(summary.proposals[0]!.id).toBe(ULID_S1);
+
+    expect(summary.proposals[1]!.type).toBe("team-change");
+    expect(summary.proposals[1]!.rationale).toBe(
+      "Security audit failures keep recurring across stories.",
+    );
+    expect(summary.proposals[1]!.id).toBe(ULID_S2);
+  });
+
+  it("summary proposal set is identical to the file's frontmatter proposal set (AC3 crosscheck)", async () => {
+    const proposals = [
+      {
+        type: "skill-create",
+        id: ULID_S1,
+        created_at: ISO_S,
+        rationale: "Reusable pre-flight checklist for dev spawns.",
+        proposed_path: ".flow/skills/pre-flight.md",
+        frontmatter_description: "Run the pre-flight checklist before every story claim.",
+        body: "# Pre-flight\n\nStep 1.\nStep 2.\n",
+      },
+    ];
+
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot3,
+      isoTimestamp: ISO_S,
+      proposals,
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+
+    // Read back the file's frontmatter directly and verify parity.
+    const raw = await fs.readFile(absPath, "utf8");
+    const rest = raw.slice("---\n".length);
+    const closeIdx = rest.indexOf("\n---\n");
+    const frontmatterRaw = rest.slice(0, closeIdx + 1);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatterRaw) as unknown);
+
+    // The summary's proposal set must be identical to the frontmatter's.
+    expect(summary.proposals.length).toBe(fileShape.proposals.length);
+    for (let i = 0; i < fileShape.proposals.length; i++) {
+      const fp = fileShape.proposals[i]!;
+      const sp = summary.proposals[i]!;
+      expect(sp.type).toBe(fp.type);
+      expect(sp.id).toBe(fp.id);
+      expect(sp.rationale).toBe(fp.rationale);
+    }
+  });
+
+  it("retro skill SKILL.md includes summariseRetroProposal in allowed_tools", async () => {
+    // Load the production SKILL.md frontmatter and verify the tool is registered
+    // as an allowed tool so the skill can call it after the subagent hands off.
+    const skillPath = path.resolve(REAL_PLUGIN_ROOT, "skills", "retro", "SKILL.md");
+    const raw = await fs.readFile(skillPath, "utf8");
+    // Extract the first frontmatter block (between the first two '---' lines).
+    const lines = raw.split("\n");
+    const fmLines: string[] = [];
+    let inFm = false;
+    let closed = false;
+    for (const line of lines) {
+      if (!inFm && line === "---") {
+        inFm = true;
+        continue;
+      }
+      if (inFm && !closed) {
+        if (line === "---") {
+          closed = true;
+          break;
+        }
+        fmLines.push(line);
+      }
+    }
+    const fm = yamlParse(fmLines.join("\n")) as { allowed_tools?: string[] };
+    expect(fm.allowed_tools).toContain("summariseRetroProposal");
   });
 });

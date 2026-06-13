@@ -638,3 +638,136 @@ describe("writeRetroProposal — durability recommendation integration (AC1)", (
     expect(result.durabilityRecommendations).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// summariseRetroProposal — AC2 (empty cycle) + AC3 (parity with frontmatter)
+// (Story native:01KTZGEW6TSC6M84P9KJ7FD96S)
+// ---------------------------------------------------------------------------
+
+import { summariseRetroProposal } from "../summarise-retro-proposal.js";
+
+const ISO3 = "2026-06-13T09:00:00.000Z";
+
+describe("summariseRetroProposal — AC2: empty-cycle states no changes", () => {
+  it("returns noProposals:true and totalCount:0 for an empty proposals file", async () => {
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO3,
+      proposals: [],
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+
+    expect(summary.absPath).toBe(absPath);
+    expect(summary.totalCount).toBe(0);
+    expect(summary.noProposals).toBe(true);
+    expect(summary.proposals).toHaveLength(0);
+  });
+
+  it("produces a summary the skill can render as 'no recommended changes'", async () => {
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO3,
+      proposals: [],
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+
+    // The skill checks noProposals and renders the no-changes statement.
+    // Verify the flag is present and truthful (AC2).
+    expect(summary.noProposals).toBe(true);
+    // proposals array is empty — the skill must not iterate it.
+    expect(summary.proposals).toEqual([]);
+  });
+});
+
+describe("summariseRetroProposal — AC3: parity with frontmatter proposal set", () => {
+  const ULID_D = "01HZRETR0000000000000000D4";
+  const ULID_E = "01HZRETR0000000000000000E5";
+  const ISO4 = "2026-06-13T10:00:00.000Z";
+
+  it("summary proposal set equals the file's frontmatter proposal set (type+id+rationale)", async () => {
+    const proposals = [
+      {
+        type: "rule" as const,
+        id: ULID_D,
+        created_at: ISO4,
+        rationale: "Handoff grammar must be verbatim.",
+        text: "Emit handoff phrase verbatim.",
+        target_failure_class: "handoff-grammar",
+        recommended_promotion_level: "must" as const,
+      },
+      {
+        type: "team-change" as const,
+        id: ULID_E,
+        created_at: ISO4,
+        rationale: "Security patterns keep surfacing.",
+        action: "hire" as const,
+        target_role: "security-reviewer",
+        justification: "Three fires in two cycles.",
+        predicted_impact: { affected_failure_classes: ["security-audit"] },
+      },
+    ];
+
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO4,
+      proposals,
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+
+    // AC3: the summary's proposal set must equal the file's frontmatter proposal set.
+    // Read back the frontmatter directly for comparison.
+    const raw = await fs.readFile(absPath, "utf8");
+    const { frontmatter } = await readWrittenFile(absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+
+    expect(summary.totalCount).toBe(fileShape.proposals.length);
+    expect(summary.noProposals).toBe(false);
+    expect(summary.proposals).toHaveLength(fileShape.proposals.length);
+
+    // Every entry in the summary maps 1:1 to the file's frontmatter proposals.
+    for (let i = 0; i < fileShape.proposals.length; i++) {
+      const fp = fileShape.proposals[i]!;
+      const sp = summary.proposals[i]!;
+      expect(sp.type).toBe(fp.type);
+      expect(sp.id).toBe(fp.id);
+      expect(sp.rationale).toBe(fp.rationale);
+    }
+
+    void raw; // suppress unused-variable warning
+  });
+
+  it("noProposals is false when proposals list is non-empty", async () => {
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO4,
+      proposals: [
+        {
+          type: "rule",
+          id: ULID_D,
+          created_at: ISO4,
+          rationale: "A rationale.",
+          text: "A rule.",
+          target_failure_class: "some-class",
+          recommended_promotion_level: "should",
+        },
+      ],
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+    expect(summary.noProposals).toBe(false);
+    expect(summary.totalCount).toBe(1);
+    expect(summary.proposals[0]!.type).toBe("rule");
+    expect(summary.proposals[0]!.rationale).toBe("A rationale.");
+  });
+
+  it("throws when absPath does not exist", async () => {
+    await expect(
+      summariseRetroProposal({
+        absPath: path.join(tmpRoot, ".flow", "retro-proposals", "nonexistent.md"),
+      }),
+    ).rejects.toThrow();
+  });
+});
