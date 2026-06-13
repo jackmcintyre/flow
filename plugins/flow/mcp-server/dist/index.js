@@ -50772,6 +50772,16 @@ async function markStoryReady(rawInput) {
   const updated = { ...manifest, ready };
   const yamlText = serialiseManifest(updated);
   await atomicWriteFile(foundAbsPath, yamlText);
+  for (const stateName of STATE_NAMES) {
+    if (stateName === "to-do") continue;
+    try {
+      await fs40.stat(path51.join(stateRoot, stateName, `${ref}.yaml`));
+    } catch {
+      continue;
+    }
+    await fs40.rm(foundAbsPath, { force: true });
+    throw new NotAnEligibleBacklogItemError({ ref, foundState: stateName, reason: "not-in-to-do" });
+  }
   await logTelemetryEvent({
     targetRepoRoot,
     event: {
