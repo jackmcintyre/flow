@@ -697,12 +697,15 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
     expect(parsed).toHaveProperty("standardsByCriterionId");
   });
 
-  it("a passing artifact + passing vitest + manual AC: recommendedVerdict === 'BLOCKED'", async () => {
+  it("a passing artifact + passing vitest + manual AC: recommendedVerdict === 'NEEDS CHANGES'", async () => {
     // Story 10.1: the manual AC can no longer be a markerless native AC on disk
     // (parseNativeStory rejects it). Stub extractAcsFromSpec to return the three
     // canonical ACs — artifact (pass), vitest (pass), manual — so the reviewer's
-    // "any manual-check-required → BLOCKED" rule is exercised. AC1 artifact and
-    // AC2 vitest both pass; AC3 is manual → BLOCKED per spec §3f rule 2.
+    // "any manual-check-required → NEEDS CHANGES" rule is exercised.
+    // Story native:01KV06ZGHHM1MZ2DS2HENXQG7N (unbacked-criterion gate):
+    //   A criterion with no resolvable evidence marker (manual-check-required) is
+    //   treated as "unbacked" and yields NEEDS CHANGES, not BLOCKED. The reviewer
+    //   explicitly refuses approval rather than signalling an operational stall.
     const spy = await stubExtractAcsManual([
       ["**Given** the artifact, **When** checked, **Then** present.", "artifact: hello-a.txt"],
       ["**Given** the vitest, **When** run, **Then** passes.", "vitest: fixture passing test"],
@@ -715,10 +718,9 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
       const raw = await fs.readFile(expectedFilePath(), "utf8");
       const parsed = JSON.parse(raw) as ReviewerResultFileShape;
 
-      // AC3 is manual-check-required → BLOCKED per spec §3f rule 2
-      // (any manual-check-required → BLOCKED unless all are runnable-*)
-      expect(parsed.recommendedVerdict).toBe("BLOCKED");
-      expect(result.recommendedVerdict).toBe("BLOCKED");
+      // AC3 is manual-check-required → NEEDS CHANGES (unbacked criterion, not operational blocker)
+      expect(parsed.recommendedVerdict).toBe("NEEDS CHANGES");
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
     } finally {
       spy.mockRestore();
     }
@@ -737,11 +739,13 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
     expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
   });
 
-  it("all-manual-check fixture: recommendedVerdict === 'BLOCKED'", async () => {
+  it("all-manual-check fixture: recommendedVerdict === 'NEEDS CHANGES'", async () => {
     // Story 10.1: a native story whose every AC is markerless is now invalid to
     // parseNativeStory, so we exercise the all-manual case via an
     // extractAcsFromSpec stub (the on-disk fixture stays a valid native story
-    // for readSourceStory). Both ACs are markerless → manual → BLOCKED.
+    // for readSourceStory). Both ACs are markerless → manual-check-required.
+    // Story native:01KV06ZGHHM1MZ2DS2HENXQG7N (unbacked-criterion gate):
+    //   All ACs have no resolvable evidence marker → all are unbacked → NEEDS CHANGES.
     const spy = await stubExtractAcsManual([
       ["**Given** something, **When** reviewed, **Then** it is correct."],
       ["**Given** something else, **When** reviewed, **Then** it is also correct."],
@@ -753,8 +757,8 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
       const raw = await fs.readFile(expectedFilePath(), "utf8");
       const parsed = JSON.parse(raw) as ReviewerResultFileShape;
 
-      expect(parsed.recommendedVerdict).toBe("BLOCKED");
-      expect(result.recommendedVerdict).toBe("BLOCKED");
+      expect(parsed.recommendedVerdict).toBe("NEEDS CHANGES");
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
     } finally {
       spy.mockRestore();
     }
@@ -936,6 +940,169 @@ describe("friction telemetry — AC2: missing artifact (ENOENT) → missing-cite
       expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
     } finally {
       frictionSpy.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KV06ZGHHM1MZ2DS2HENXQG7N — unbacked-criterion gate
+//
+// AC1: Any criterion presented as covered but not backed by resolving evidence
+//      (missing marker, or a failing check) must be flagged as unbacked, named
+//      in the outcome, and prevent an approved verdict.
+//      Any criterion fully backed (passing test, existing artifact) must let
+//      the pull request proceed toward approval.
+//
+// AC2: A criterion with NO covering evidence at all (no marker) is treated as
+//      unbacked → NEEDS CHANGES, not passed over to approval.
+//
+// Tests are structured by the task-list coverage matrix:
+//   T1: missing marker → unbacked → NEEDS CHANGES
+//   T2: failing test marker → NEEDS CHANGES (exercised; named by AC result reason)
+//   T3: passing test marker → no objection; all-pass → READY FOR MERGE
+//   T4: existing artifact → no objection; all-pass → READY FOR MERGE
+//   T5: criterion with no marker at all → unbacked → NEEDS CHANGES (AC2 pinning)
+// ---------------------------------------------------------------------------
+
+describe("unbacked-criterion gate — AC1: missing or failing marker prevents approval", () => {
+  it("T1: criterion with missing marker (manual-check-required) → unbacked → NEEDS CHANGES", async () => {
+    // Stub a single AC with no marker — simulates a spec AC with no vitest:/artifact: line.
+    // The presenter implies it is covered, but there is no resolvable evidence marker.
+    const spy = await stubExtractAcsManual([
+      ["**Given** some criterion, **When** checked, **Then** it passes."],
+    ]);
+    try {
+      const result = await callSession();
+
+      // The criterion is unbacked (manual-check-required) → NEEDS CHANGES.
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+      // The acResult names the criterion via its applicability and reason.
+      expect(result.acResults[1]).toBeDefined();
+      expect(result.acResults[1]!.applicability).toBe("manual-check-required");
+      expect(result.acResults[1]!.reason).toContain("manual check required");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("T2: failing test marker → reviewer names it as failed → NEEDS CHANGES", async () => {
+    // An AC with a vitest: marker whose test fails → status: fail → NEEDS CHANGES.
+    // The criterion is presented as covered but the evidence does not resolve.
+    const spy = await stubExtractAcsManual([
+      ["**Given** a test, **When** run, **Then** it passes.", "vitest: fixture passing test"],
+    ]);
+    const failingStub = makeDiscriminatingStub({ vitest: { exitCode: 1, stderr: "1 failed" }, get tmpRoot() { return tmpRoot; } });
+    try {
+      const result = await callSession({ execaImpl: failingStub });
+
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+      expect(result.acResults[1]).toBeDefined();
+      expect(result.acResults[1]!.applicability).toBe("runnable-vitest");
+      if (result.acResults[1]!.applicability !== "runnable-vitest") return;
+      expect(result.acResults[1]!.status).toBe("fail");
+      // The reason names the specific failing filter.
+      expect(result.acResults[1]!.reason).toContain("fixture passing test");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("T3: passing test marker → no objection → READY FOR MERGE (single-AC, all pass)", async () => {
+    // A single AC with a vitest: marker that passes → all evidence resolves → READY FOR MERGE.
+    const spy = await stubExtractAcsManual([
+      ["**Given** a test, **When** run, **Then** it passes.", "vitest: fixture passing test"],
+    ]);
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
+    try {
+      const result = await callSession({ execaImpl: passingStub });
+
+      expect(result.recommendedVerdict).toBe("READY FOR MERGE");
+      expect(result.acResults[1]).toBeDefined();
+      if (result.acResults[1]!.applicability !== "runnable-vitest") {
+        expect(result.acResults[1]!.applicability).toBe("runnable-vitest");
+        return;
+      }
+      expect(result.acResults[1]!.status).toBe("pass");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("T4: existing artifact → no objection → READY FOR MERGE (single-AC, all pass)", async () => {
+    // A single AC with an artifact: marker pointing to an existing file → READY FOR MERGE.
+    // hello-a.txt is present in the fixture (buildFixture writes it to tmpRoot).
+    // The worktree stub copies tmpRoot files into the worktree, so the artifact resolves.
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact exists, **When** checked, **Then** present.", "artifact: hello-a.txt"],
+    ]);
+    try {
+      const result = await callSession();
+
+      expect(result.recommendedVerdict).toBe("READY FOR MERGE");
+      expect(result.acResults[1]).toBeDefined();
+      expect(result.acResults[1]!.applicability).toBe("runnable-artifact-check");
+      if (result.acResults[1]!.applicability !== "runnable-artifact-check") return;
+      expect(result.acResults[1]!.status).toBe("pass");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("T5 (AC2 pin): criterion with no covering evidence at all → unbacked → NEEDS CHANGES, not approval slip-through", async () => {
+    // AC2 specifically pins the fall-through risk: a criterion that cites no
+    // covering evidence at all (no vitest:/artifact: line) must not slip through
+    // to an approved verdict. It must be treated as unbacked → NEEDS CHANGES.
+    //
+    // Two ACs: AC1 passes (backed), AC2 has no marker (unbacked).
+    // The verdict must be NEEDS CHANGES (not READY FOR MERGE) because AC2 has no
+    // resolvable evidence even though AC1 is fully backed.
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact exists, **When** checked, **Then** present.", "artifact: hello-a.txt"],
+      ["**Given** this criterion, **When** checked, **Then** it holds."],
+    ]);
+    try {
+      const result = await callSession();
+
+      // AC1 is backed and passes; AC2 has no marker → unbacked.
+      // The verdict MUST be NEEDS CHANGES — AC2 must NOT slip through to approval.
+      expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+
+      // AC1: backed artifact, passes.
+      expect(result.acResults[1]).toBeDefined();
+      expect(result.acResults[1]!.applicability).toBe("runnable-artifact-check");
+      if (result.acResults[1]!.applicability === "runnable-artifact-check") {
+        expect(result.acResults[1]!.status).toBe("pass");
+      }
+
+      // AC2: unbacked — no marker → manual-check-required.
+      expect(result.acResults[2]).toBeDefined();
+      expect(result.acResults[2]!.applicability).toBe("manual-check-required");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("unbacked-criterion gate — AC1: all backed and passing → approval proceeds", () => {
+  it("both artifact (passing) and vitest (passing) → READY FOR MERGE", async () => {
+    // Two ACs: artifact (present) + vitest (exit 0). Both resolve → no unbacked
+    // criteria → READY FOR MERGE.
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact, **When** checked, **Then** present.", "artifact: hello-a.txt"],
+      ["**Given** the test, **When** run, **Then** passes.", "vitest: fixture passing test"],
+    ]);
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
+    try {
+      const result = await callSession({ execaImpl: passingStub });
+
+      expect(result.recommendedVerdict).toBe("READY FOR MERGE");
+
+      // No unbacked criteria.
+      const values = Object.values(result.acResults);
+      expect(values.every((r) => r.applicability !== "manual-check-required")).toBe(true);
+      expect(values.every((r) => (r as { status?: string }).status !== "fail")).toBe(true);
+    } finally {
+      spy.mockRestore();
     }
   });
 });

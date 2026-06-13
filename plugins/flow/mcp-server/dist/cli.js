@@ -39730,11 +39730,11 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
 }
 function deriveRecommendedVerdict(acResults) {
   const values = Object.values(acResults);
-  if (values.some((r) => r.status === "fail")) {
-    return "NEEDS CHANGES";
-  }
-  if (values.length === 0 || values.some((r) => r.applicability === "manual-check-required")) {
+  if (values.length === 0) {
     return "BLOCKED";
+  }
+  if (values.some((r) => r.status === "fail") || values.some((r) => r.applicability === "manual-check-required")) {
+    return "NEEDS CHANGES";
   }
   return "READY FOR MERGE";
 }
@@ -40401,7 +40401,7 @@ async function processReviewerTranscript(opts) {
     blocked_by: "reviewer-verdict-blocked"
   });
   chatLog.push(
-    `reviewer verdict: BLOCKED \u2014 story ${ref} blocked. reviewer-result.json carries recommendedVerdict BLOCKED (empty ACs or manual-check-required). Human operator must review before this story can proceed.`
+    `reviewer verdict: BLOCKED \u2014 story ${ref} blocked. reviewer-result.json carries recommendedVerdict BLOCKED (no ACs declared in source story). Human operator must review before this story can proceed.`
   );
   return { next: "done-blocked-reviewer-blocked", chatLog };
 }
