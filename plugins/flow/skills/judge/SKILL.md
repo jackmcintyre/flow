@@ -1,6 +1,6 @@
 ---
 name: flow:judge
-description: "Run the diverse-lens judge panel over a drafted story and report the per-lens verdict to the operator. Grades quality against the rubric; it does not bless the draft."
+description: "Run the diverse-lens judge panel over a drafted story and report the per-lens verdict to the operator. Grades quality against the rubric; it does not approve the draft."
 allowed_tools: [Task, getStatus, readBacklogInventory, buildPersonaSpawnPrompt, writeLensVerdict, aggregateJudgePanel]
 ---
 
@@ -10,7 +10,7 @@ allowed_tools: [Task, getStatus, readBacklogInventory, buildPersonaSpawnPrompt, 
 
 # What this skill does
 
-This is the **Tier 1** half of gate 1 — the judge panel that grades a *drafted* story's **quality** against the rubric (`_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md`). Story 9.2 produces a Tier-0-clean draft; this skill runs the panel that judges whether the draft is good enough to be blessed.
+This is the **Tier 1** half of gate 1 — the judge panel that grades a *drafted* story's **quality** against the rubric (`_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md`). Story 9.2 produces a Tier-0-clean draft; this skill runs the panel that judges whether the draft is good enough to be approved.
 
 The panel spawns **one judge per Tier-1 lens** — **Structure, Verifiability, Discipline, Domain, Considered** — each from a **different role**. Lens diversity is non-negotiable: a panel that shares the author's blind spots rubber-stamps (that scar is documented, and it is the whole reason no two lenses share a judge). Each judge emits a per-lens verdict `{lens, pass, missed}` to a **file** (via `writeLensVerdict`), reusing the deterministic verdict-capture pattern the reviewer already uses. The panel reads the **files**, never a judge's transcript.
 
@@ -34,11 +34,11 @@ A target repo with a hired team and a drafted story to judge. The skill calls `g
 
 5. **Aggregate the panel verdict.** After all five judges have written their files, call `aggregateJudgePanel({ targetRepoRoot, sessionUlid, draft, lensRoles })`. It uses the draft's persisted `riskTier` when present (single source of truth — Story 10.4) and otherwise classifies the tier from the draft's declared paths; then it reads the five per-lens files, assembles the `PanelVerdict { tier0, lenses }`, validates it, and emits one `panel.graded` telemetry event. It writes **no** readiness flag and **no** manifest.
 
-6. **Report the verdict to the operator.** Surface, per lens: the lens name, pass/fail, and the `missed` string. Lead with the headline (clean sweep vs. which lenses failed), then the per-lens detail. Make clear this is a **grade, not a blessing**: the draft is not `ready` and is not claimable until the Quality Lead adjudicates (Story 9.4) and you bless it via `/flow:ready`.
+6. **Report the verdict to the operator.** Surface, per lens: the lens name, pass/fail, and the `missed` string. Lead with the headline (clean sweep vs. which lenses failed), then the per-lens detail. Make clear this is a **grade, not an approval**: the draft is not `ready` and is not claimable until the Quality Lead adjudicates (Story 9.4) and you approve it via `/flow:ready`.
 
 # Guardrails
 
-- **Never write the readiness flag or a manifest from this skill.** The panel grades; it does not bless. The only writes are the per-lens verdict files (through `writeLensVerdict`) and the `panel.graded` telemetry event (through `aggregateJudgePanel`). Do not edit `.flow/state/**` by hand and do not run a git command.
+- **Never write the readiness flag or a manifest from this skill.** The panel grades; it does not approve. The only writes are the per-lens verdict files (through `writeLensVerdict`) and the `panel.graded` telemetry event (through `aggregateJudgePanel`). Do not edit `.flow/state/**` by hand and do not run a git command.
 - **Lens diversity is structural.** Never collapse two lenses onto one judge — `aggregateJudgePanel` refuses a shared-role roster (`DuplicateLensJudgeError`) and an unbound lens (`LensJudgeUnavailableError`). Fix the binding; do not work around it.
 - **The panel reads files, not transcripts.** If a judge narrates a verdict but does not call `writeLensVerdict`, its lens file is absent and aggregation fails loudly (`LensVerdictFileMalformedError`). That is the gate working — a missing lens is the rubber-stamp failure in disguise. Re-spawn the judge so it writes its file.
 

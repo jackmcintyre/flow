@@ -28,14 +28,14 @@ stories. Before you launch it, get the stories you want drained into that queue:
    writes one execution manifest per story into `.flow/state/to-do/`. Only
    stories that land in `to-do/` are claimable by the drain. `/flow:scan` is
    idempotent — re-running it is safe and only picks up new or changed stories.
-3. **Bless the stories with `/flow:ready`.** Scanned stories land in `to-do/` as
+3. **Approve the stories with `/flow:ready`.** Scanned stories land in `to-do/` as
    **not ready**. The readiness brake (Story 9.1) is fail-closed: the drain claims
-   **nothing** until you bless it. Mark each story you want drained as `ready` via
+   **nothing** until you approve it. Mark each story you want drained as `ready` via
    `/flow:ready` (the underlying `markStoryReady` is also a one-shot CLI seam, so
-   the same bless works mid-drain when the MCP server is down). A scan→launch with
-   no bless drains zero stories — that is the brake working, not a bug.
+   the same approval works mid-drain when the MCP server is down). A scan→launch with
+   no approval drains zero stories — that is the brake working, not a bug.
 
-After blessing, confirm the manifests are present (`.flow/state/to-do/`) and
+After approving, confirm the manifests are present (`.flow/state/to-do/`) and
 `ready` before launching. A story whose dependencies are not yet in
 `.flow/state/done/` will not be claimed until those deps complete.
 
