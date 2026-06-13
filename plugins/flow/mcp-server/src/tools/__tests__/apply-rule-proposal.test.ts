@@ -20,15 +20,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parse as yamlParse } from "yaml";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { acceptProposal } from "../accept-proposal.js";
 import { writeRetroProposal } from "../write-retro-proposal.js";
-import { makeRuleApplyHandler } from "../../lib/apply-rule-proposal.js";
+import { makeRuleApplyHandler, RULE_APPLY_WRITE_SET } from "../../lib/apply-rule-proposal.js";
 import {
   parseRuleRegistry,
   DisciplineRuleSchema,
 } from "../../schemas/discipline-rules.js";
 import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
+import { StandardsDivergenceError } from "../../errors.js";
 import type { gitCommit as gitCommitType, filterGitIgnoredPaths as filterGitIgnoredPathsType } from "../../lib/git.js";
 import type { RetroProposal } from "../../schemas/retro-proposal.js";
 
@@ -91,6 +92,7 @@ afterEach(async () => {
 });
 
 const REGISTRY_REL = "docs/discipline-rules.yaml";
+const STANDARDS_REL = "docs/standards.md";
 
 async function seedRegistry(contents: string): Promise<void> {
   const abs = path.join(tmpRoot, REGISTRY_REL);
@@ -98,8 +100,18 @@ async function seedRegistry(contents: string): Promise<void> {
   await fs.writeFile(abs, contents, "utf8");
 }
 
+async function seedStandardsDoc(contents: string): Promise<void> {
+  const abs = path.join(tmpRoot, STANDARDS_REL);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.writeFile(abs, contents, "utf8");
+}
+
 async function readRegistry(): Promise<string> {
   return fs.readFile(path.join(tmpRoot, REGISTRY_REL), "utf8");
+}
+
+async function readStandardsDoc(): Promise<string> {
+  return fs.readFile(path.join(tmpRoot, STANDARDS_REL), "utf8");
 }
 
 function makeFakeGitCommit(sha = "aabbccddeeff00112233445566778899aabbccdd") {
@@ -424,5 +436,256 @@ describe("acceptProposal production gate — idempotent re-run (AC5)", () => {
     // No second commit, no second telemetry event.
     expect(git.calls).toHaveLength(1);
     expect(await readTelemetryEvents()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Divergence guard (AC3 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)
+// ---------------------------------------------------------------------------
+
+// A standards doc that has a hand-authored criterion not in the registry.
+function standardsDocWithExtra(extraCriterionName: string): string {
+  return yamlStringify({
+    version: "1.0.0",
+    updated: "2026-01-01T00:00:00.000Z",
+    criteria: [
+      {
+        name: "handoff-grammar",
+        what: "Dev MUST emit the handoff phrase verbatim.",
+        check: "Inspect the diff for handoff-grammar; flag any hunk that exhibits it.",
+        anti_criterion: "The failure this rule guards against: handoff-grammar.",
+      },
+      {
+        name: extraCriterionName,
+        what: "A hand-authored criterion not in the registry.",
+        check: "Check for it.",
+        anti_criterion: "Against it.",
+      },
+    ],
+  }, { lineWidth: 0 });
+}
+
+describe("makeRuleApplyHandler — divergence guard (AC3 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)", () => {
+  it("refuses with StandardsDivergenceError when the standards doc contains a criterion not in the registry — registry and standards both unchanged", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    // The standards doc has 'handoff-grammar' (from registry) + 'orphan-criterion' (not in registry).
+    await seedStandardsDoc(standardsDocWithExtra("orphan-criterion"));
+    const registryBefore = await readRegistry();
+    const standardsBefore = await readStandardsDoc();
+    const handler = makeRuleApplyHandler({
+      now: () => FIXED_NOW,
+      mintUlid: () => MINTED_ULID,
+    });
+
+    // Apply should refuse — 'orphan-criterion' is not in the registry projection.
+    await expect(
+      handler.apply(ruleProposal(ULID_PROP), {
+        targetRepoRoot: tmpRoot,
+        role: "operator",
+      }),
+    ).rejects.toBeInstanceOf(StandardsDivergenceError);
+
+    // Both files are unchanged — the guard fires BEFORE any write.
+    expect(await readRegistry()).toBe(registryBefore);
+    expect(await readStandardsDoc()).toBe(standardsBefore);
+  });
+
+  it("StandardsDivergenceError names the unknown criterion", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    await seedStandardsDoc(standardsDocWithExtra("my-orphan-criterion"));
+    const handler = makeRuleApplyHandler({
+      now: () => FIXED_NOW,
+      mintUlid: () => MINTED_ULID,
+    });
+
+    await handler.apply(ruleProposal(ULID_PROP), {
+      targetRepoRoot: tmpRoot,
+      role: "operator",
+    }).catch((err: unknown) => {
+      expect(err).toBeInstanceOf(StandardsDivergenceError);
+      const e = err as StandardsDivergenceError;
+      expect(e.unknownCriterionName).toBe("my-orphan-criterion");
+    });
+  });
+
+  it("passes when the standards doc is absent (no criteria to check)", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    // No standards doc — guard should pass silently.
+    const handler = makeRuleApplyHandler({
+      now: () => FIXED_NOW,
+      mintUlid: () => MINTED_ULID,
+    });
+
+    // Should not throw.
+    await expect(
+      handler.apply(ruleProposal(ULID_PROP), {
+        targetRepoRoot: tmpRoot,
+        role: "operator",
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("passes when every standards doc criterion is in the registry", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    // Standards doc has only 'handoff-grammar' which IS in the registry.
+    await seedStandardsDoc(yamlStringify({
+      version: "1.0.0",
+      updated: "2026-01-01T00:00:00.000Z",
+      criteria: [
+        {
+          name: "handoff-grammar",
+          what: "Dev MUST emit the handoff phrase verbatim.",
+          check: "Inspect the diff for handoff-grammar; flag any hunk that exhibits it.",
+          anti_criterion: "The failure this rule guards against: handoff-grammar.",
+        },
+      ],
+    }, { lineWidth: 0 }));
+
+    const handler = makeRuleApplyHandler({
+      now: () => FIXED_NOW,
+      mintUlid: () => MINTED_ULID,
+    });
+
+    // Should not throw.
+    await expect(
+      handler.apply(ruleProposal(ULID_PROP), {
+        targetRepoRoot: tmpRoot,
+        role: "operator",
+      }),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Preview write set disclosure (AC2 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)
+// ---------------------------------------------------------------------------
+
+describe("makeRuleApplyHandler — preview discloses full write set (AC2 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)", () => {
+  it("previewDiff mentions the standards document as a file that will be modified", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    const handler = makeRuleApplyHandler();
+    const diff = await handler.previewDiff(ruleProposal(ULID_PROP), {
+      targetRepoRoot: tmpRoot,
+      role: "operator",
+    });
+    // The preview must list docs/standards.md in its file disclosure.
+    expect(diff).toContain("docs/standards.md");
+    expect(diff).toContain("docs/discipline-rules.yaml");
+  });
+
+  it("RULE_APPLY_WRITE_SET matches the changedPaths returned by apply", async () => {
+    await seedRegistry(SEEDED_REGISTRY);
+    const handler = makeRuleApplyHandler({
+      now: () => FIXED_NOW,
+      mintUlid: () => MINTED_ULID,
+    });
+
+    const result = await handler.apply(ruleProposal(ULID_PROP), {
+      targetRepoRoot: tmpRoot,
+      role: "operator",
+    });
+
+    // Every path in the write set must be in changedPaths, and vice-versa.
+    expect(new Set(result.changedPaths)).toEqual(new Set(RULE_APPLY_WRITE_SET));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R) — integration: accepting a
+// rule proposal against the seeded reviewer-criteria registry preserves all
+// four reviewer criteria in docs/standards.md.
+// ---------------------------------------------------------------------------
+
+// The four seeded reviewer criteria, serialised as a registry YAML string.
+// These mirror docs/discipline-rules.yaml in the repo root.
+const SEEDED_REVIEWER_CRITERIA_YAML = `# Discipline rules — do not hand-delete.
+rules:
+  - id: 01KTZDPZ5RXA5XENR9WS32797W
+    text: The PR's diff implements only what the story's acceptance criteria require.
+    target_failure_class: story-aligned
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: story-aligned
+    criterion_check: "Map each diff hunk to one or more ACs; flag any hunk that maps to none."
+    criterion_anti: "Scope creep: refactors or rewrites that the story did not request."
+  - id: 01KTZDPZ5TCJHM4PM6JH7WRHYP
+    text: Every AC has at least one assertion in the test suite that fails when the AC behaviour is removed.
+    target_failure_class: tests-cover-acs
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: tests-cover-acs
+    criterion_check: "Inspect the new/changed test files; trace each AC to a named test."
+    criterion_anti: "Tests that only exercise happy paths without asserting the AC's specific behaviour."
+  - id: 01KTZDPZ5TXX3HYAESH5523RA3
+    text: No code path writes to canonical-state paths (manifests, personas, registry, telemetry) except through MCP tools.
+    target_failure_class: no-canonical-fs-writes-outside-mcp
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: no-canonical-fs-writes-outside-mcp
+    criterion_check: "Grep the diff for raw fs.writeFile/fs.writeFileSync; any hit under a canonical path is a fail."
+    criterion_anti: "Direct fs.write to .flow/state, telemetry, or docs/standards.md."
+  - id: 01KTZDPZ5T3BC966K28E8J62MC
+    text: Every named failure mode in the diff throws a DomainError subclass; uncaught throws are bugs.
+    target_failure_class: errors-are-typed
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: errors-are-typed
+    criterion_check: "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message."
+    criterion_anti: "throw new Error('...') or returning {error: '...'} envelopes for known failures."
+`;
+
+describe("acceptProposal — preserves reviewer criteria (AC1 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)", () => {
+  it("accepting a rule proposal with the seeded reviewer-criteria registry keeps all four reviewer criteria intact in docs/standards.md", async () => {
+    // Seed the registry with the four hand-authored reviewer criteria.
+    await seedRegistry(SEEDED_REVIEWER_CRITERIA_YAML);
+    await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO,
+      proposals: [ruleProposalObj(ULID_PROP)],
+    });
+    const git = makeFakeGitCommit();
+
+    // Accept the proposal (confirm=true → full apply).
+    const result = await acceptProposal({
+      targetRepoRoot: tmpRoot,
+      proposalId: ULID_PROP,
+      confirm: true,
+      gitCommitImpl: git.impl,
+      filterGitIgnoredPathsImpl: allTrackedFilter,
+      now: () => FIXED_NOW,
+    });
+    expect(result.status).toBe("applied");
+
+    // Read the regenerated standards doc.
+    const standardsRaw = await readStandardsDoc();
+    const parsed = yamlParse(standardsRaw) as {
+      version: string;
+      criteria: Array<{ name: string; what: string; check: string; anti_criterion: string }>;
+    };
+
+    // All four hand-authored reviewer criteria must still be present.
+    const criteriaNames = parsed.criteria.map((c) => c.name);
+    expect(criteriaNames).toContain("story-aligned");
+    expect(criteriaNames).toContain("tests-cover-acs");
+    expect(criteriaNames).toContain("no-canonical-fs-writes-outside-mcp");
+    expect(criteriaNames).toContain("errors-are-typed");
+
+    // The new rule from the proposal is also present.
+    expect(criteriaNames).toContain("rubber-stamp");
+
+    // Five criteria total (4 seeded + 1 new).
+    expect(parsed.criteria).toHaveLength(5);
+
+    // The hand-authored wording is preserved byte-for-byte for one criterion.
+    const storyAligned = parsed.criteria.find((c) => c.name === "story-aligned")!;
+    expect(storyAligned.what).toBe(
+      "The PR's diff implements only what the story's acceptance criteria require.",
+    );
+    expect(storyAligned.check).toBe(
+      "Map each diff hunk to one or more ACs; flag any hunk that maps to none.",
+    );
+    expect(storyAligned.anti_criterion).toBe(
+      "Scope creep: refactors or rewrites that the story did not request.",
+    );
   });
 });

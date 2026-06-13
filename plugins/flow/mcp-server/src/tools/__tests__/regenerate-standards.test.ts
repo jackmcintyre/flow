@@ -121,7 +121,10 @@ async function readStandardsDoc(): Promise<string> {
   return fs.readFile(path.join(tmpRoot, STANDARDS_REL_PATH), "utf8");
 }
 
-async function seedStandardsDoc(version: string): Promise<void> {
+async function seedStandardsDoc(
+  version: string,
+  criterionName = "seed-criterion",
+): Promise<void> {
   const abs = path.join(tmpRoot, STANDARDS_REL_PATH);
   await fs.mkdir(path.dirname(abs), { recursive: true });
   const doc = {
@@ -129,10 +132,10 @@ async function seedStandardsDoc(version: string): Promise<void> {
     updated: "2026-01-01T00:00:00.000Z",
     criteria: [
       {
-        name: "seed-criterion",
+        name: criterionName,
         what: "Seed criterion description.",
-        check: "Check for seed criterion.",
-        anti_criterion: "Anti-criterion for seed.",
+        check: `Inspect the diff for ${criterionName}; flag any hunk that exhibits it.`,
+        anti_criterion: `The failure this rule guards against: ${criterionName}.`,
       },
     ],
   };
@@ -348,7 +351,9 @@ describe("regenerateStandards — version bump (AC2)", () => {
   });
 
   it("on the apply gate path, version bumps from the existing standards doc version", async () => {
-    await seedStandardsDoc("2.0.5");
+    // The standards doc must have criteria consistent with the registry that will
+    // exist when acceptProposal runs — the divergence guard fires otherwise.
+    await seedStandardsDoc("2.0.5", "existing-failure");
     const registryYaml = `rules:
   - id: ${ULID_RULE_1}
     text: Existing rule.
@@ -451,7 +456,9 @@ describe("regenerateStandards — cap enforcement (AC3)", () => {
 
     await seedRegistry(fullYaml);
     // Seed a standards doc so we can verify it is NOT changed.
-    await seedStandardsDoc("1.0.0");
+    // Use a criterion name that is projected by the 10-rule registry so the
+    // divergence guard passes (it guards against orphan criteria, not cap).
+    await seedStandardsDoc("1.0.0", "failure-class-1");
 
     const registryBefore = await readRegistry();
     const standardsBefore = await readStandardsDoc();
@@ -505,7 +512,7 @@ describe("regenerateStandards — cap enforcement (AC3)", () => {
       )
       .join("\n");
     await seedRegistry(`rules:\n${tenRulesYaml}\n`);
-    await seedStandardsDoc("1.0.0");
+    await seedStandardsDoc("1.0.0", "failure-class-1");
 
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
@@ -541,8 +548,18 @@ describe("regenerateStandards — cap enforcement (AC3)", () => {
 
 describe("regenerateStandards — production gate within-cap commit (AC4)", () => {
   it("accepts a rule, regenerates standards, commits both files + proposal in one commit", async () => {
-    // Seed a standards doc at a known version.
-    await seedStandardsDoc("0.9.0");
+    // Seed a registry with a prior rule so the existing standards doc is consistent
+    // with the registry (divergence guard requires this alignment).
+    const priorRuleYaml = `rules:
+  - id: 01HZRETR0000000000000000P1
+    text: Prior rule text.
+    target_failure_class: prior-rule
+    introduced_at: 2026-01-01T00:00:00.000Z
+    level: must
+`;
+    await seedRegistry(priorRuleYaml);
+    // Seed a standards doc at a known version, consistent with the prior registry.
+    await seedStandardsDoc("0.9.0", "prior-rule");
 
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
@@ -612,7 +629,16 @@ describe("regenerateStandards — production gate within-cap commit (AC4)", () =
 
   it("changedPaths contains both REGISTRY_REL and STANDARDS_REL_PATH", async () => {
     // We verify this indirectly: the commit carries both files.
-    await seedStandardsDoc("0.5.0");
+    // Seed a registry so the standards doc has a consistent criterion (divergence guard).
+    const priorRuleYaml = `rules:
+  - id: 01HZRETR0000000000000000Q2
+    text: Prior rule text.
+    target_failure_class: prior-rule
+    introduced_at: 2026-01-01T00:00:00.000Z
+    level: must
+`;
+    await seedRegistry(priorRuleYaml);
+    await seedStandardsDoc("0.5.0", "prior-rule");
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
       isoTimestamp: ISO,
@@ -724,5 +750,172 @@ describe("regenerateStandards — edge cases", () => {
     const doc = await lookupStandards(tmpRoot);
     expect(doc.version).toBe("1.0.0");
     expect(doc.criteria).toHaveLength(THREE_RULE_REGISTRY.rules.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC4 (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R) — retiring a rule drops
+// exactly its criterion; every other criterion survives intact.
+// ---------------------------------------------------------------------------
+
+// The four hand-authored reviewer criteria as seeded in docs/discipline-rules.yaml.
+const SEEDED_REVIEWER_CRITERIA_REGISTRY: DisciplineRulesFile = {
+  rules: [
+    {
+      id: "01KTZDPZ5RXA5XENR9WS32797W",
+      text: "The PR's diff implements only what the story's acceptance criteria require.",
+      target_failure_class: "story-aligned",
+      introduced_at: "2026-05-27T00:00:00.000Z",
+      level: "must",
+      criterion_name: "story-aligned",
+      criterion_check: "Map each diff hunk to one or more ACs; flag any hunk that maps to none.",
+      criterion_anti: "Scope creep: refactors or rewrites that the story did not request.",
+    },
+    {
+      id: "01KTZDPZ5TCJHM4PM6JH7WRHYP",
+      text: "Every AC has at least one assertion in the test suite that fails when the AC behaviour is removed.",
+      target_failure_class: "tests-cover-acs",
+      introduced_at: "2026-05-27T00:00:00.000Z",
+      level: "must",
+      criterion_name: "tests-cover-acs",
+      criterion_check: "Inspect the new/changed test files; trace each AC to a named test.",
+      criterion_anti: "Tests that only exercise happy paths without asserting the AC's specific behaviour.",
+    },
+    {
+      id: "01KTZDPZ5TXX3HYAESH5523RA3",
+      text: "No code path writes to canonical-state paths (manifests, personas, registry, telemetry) except through MCP tools.",
+      target_failure_class: "no-canonical-fs-writes-outside-mcp",
+      introduced_at: "2026-05-27T00:00:00.000Z",
+      level: "must",
+      criterion_name: "no-canonical-fs-writes-outside-mcp",
+      criterion_check: "Grep the diff for raw fs.writeFile/fs.writeFileSync; any hit under a canonical path is a fail.",
+      criterion_anti: "Direct fs.write to .flow/state, telemetry, or docs/standards.md.",
+    },
+    {
+      id: "01KTZDPZ5T3BC966K28E8J62MC",
+      text: "Every named failure mode in the diff throws a DomainError subclass; uncaught throws are bugs.",
+      target_failure_class: "errors-are-typed",
+      introduced_at: "2026-05-27T00:00:00.000Z",
+      level: "must",
+      criterion_name: "errors-are-typed",
+      criterion_check: "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message.",
+      criterion_anti: "throw new Error('...') or returning {error: '...'} envelopes for known failures.",
+    },
+  ],
+};
+
+describe("regenerateStandards — reviewer criteria seeding (AC4+AC5 of Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)", () => {
+  it("AC4: retiring one rule drops exactly its criterion; every other criterion name and text survives intact", async () => {
+    // Start with all four seeded reviewer criteria.
+    await regenerateStandards({
+      registry: SEEDED_REVIEWER_CRITERIA_REGISTRY,
+      targetVersion: "0.1.1",
+      updatedTimestamp: FIXED_NOW.toISOString(),
+      targetRepoRoot: tmpRoot,
+      mcpToolContext: { toolName: "acceptProposal", role: "operator" },
+    });
+
+    // Retire the second rule (tests-cover-acs).
+    const registryAfterRetire: DisciplineRulesFile = {
+      rules: SEEDED_REVIEWER_CRITERIA_REGISTRY.rules.filter(
+        (r) => r.id !== "01KTZDPZ5TCJHM4PM6JH7WRHYP",
+      ),
+    };
+
+    await regenerateStandards({
+      registry: registryAfterRetire,
+      targetVersion: "0.1.2",
+      updatedTimestamp: FIXED_NOW.toISOString(),
+      targetRepoRoot: tmpRoot,
+      mcpToolContext: { toolName: "acceptProposal", role: "operator" },
+    });
+
+    const { lookupStandards } = await import("../../state/lookup-standards.js");
+    const doc = await lookupStandards(tmpRoot);
+
+    // Exactly 3 criteria remain.
+    expect(doc.criteria).toHaveLength(3);
+
+    // The retired criterion is gone.
+    const criteriaNames = doc.criteria.map((c) => c.name);
+    expect(criteriaNames).not.toContain("tests-cover-acs");
+
+    // The other three survive with their hand-authored wording.
+    expect(criteriaNames).toContain("story-aligned");
+    expect(criteriaNames).toContain("no-canonical-fs-writes-outside-mcp");
+    expect(criteriaNames).toContain("errors-are-typed");
+
+    // The wording for one of the surviving criteria is preserved byte-for-byte.
+    const storyAligned = doc.criteria.find((c) => c.name === "story-aligned")!;
+    expect(storyAligned.what).toBe(
+      "The PR's diff implements only what the story's acceptance criteria require.",
+    );
+    expect(storyAligned.check).toBe(
+      "Map each diff hunk to one or more ACs; flag any hunk that maps to none.",
+    );
+    expect(storyAligned.anti_criterion).toBe(
+      "Scope creep: refactors or rewrites that the story did not request.",
+    );
+  });
+
+  it("AC5: seeding never duplicates an entry — if a criterion name already matches a registry rule, regeneration produces exactly one entry per name", async () => {
+    // Simulate a scenario where we regenerate with the full 4-rule seeded registry twice
+    // (e.g. an operator attempts to re-apply the same rule proposal a second time).
+    // The regeneration must produce exactly 4 criteria — no duplicates.
+    for (let i = 0; i < 2; i++) {
+      await regenerateStandards({
+        registry: SEEDED_REVIEWER_CRITERIA_REGISTRY,
+        targetVersion: `0.1.${i + 1}`,
+        updatedTimestamp: FIXED_NOW.toISOString(),
+        targetRepoRoot: tmpRoot,
+        mcpToolContext: { toolName: "acceptProposal", role: "operator" },
+      });
+    }
+
+    const { lookupStandards } = await import("../../state/lookup-standards.js");
+    const doc = await lookupStandards(tmpRoot);
+
+    // Must be exactly 4 criteria — pure projection of 4 rules, no duplicates.
+    expect(doc.criteria).toHaveLength(4);
+
+    // Each name appears exactly once.
+    const names = doc.criteria.map((c) => c.name);
+    const uniqueNames = new Set(names);
+    expect(uniqueNames.size).toBe(4);
+
+    // All four expected names are present.
+    expect(uniqueNames).toContain("story-aligned");
+    expect(uniqueNames).toContain("tests-cover-acs");
+    expect(uniqueNames).toContain("no-canonical-fs-writes-outside-mcp");
+    expect(uniqueNames).toContain("errors-are-typed");
+  });
+
+  it("AC4+AC5: seeded registry projects with the hand-authored criterion_name overrides (not slugified fallbacks)", async () => {
+    await regenerateStandards({
+      registry: SEEDED_REVIEWER_CRITERIA_REGISTRY,
+      targetVersion: "0.1.1",
+      updatedTimestamp: FIXED_NOW.toISOString(),
+      targetRepoRoot: tmpRoot,
+      mcpToolContext: { toolName: "acceptProposal", role: "operator" },
+    });
+
+    const { lookupStandards } = await import("../../state/lookup-standards.js");
+    const doc = await lookupStandards(tmpRoot);
+
+    // All four hand-authored criterion names are present (not the slugified defaults).
+    const names = doc.criteria.map((c) => c.name);
+    expect(names).toContain("story-aligned");
+    expect(names).toContain("tests-cover-acs");
+    expect(names).toContain("no-canonical-fs-writes-outside-mcp");
+    expect(names).toContain("errors-are-typed");
+
+    // The check and anti_criterion fields use the hand-authored overrides.
+    const errorsAreTyped = doc.criteria.find((c) => c.name === "errors-are-typed")!;
+    expect(errorsAreTyped.check).toBe(
+      "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message.",
+    );
+    expect(errorsAreTyped.anti_criterion).toBe(
+      "throw new Error('...') or returning {error: '...'} envelopes for known failures.",
+    );
   });
 });

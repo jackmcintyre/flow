@@ -27282,7 +27282,11 @@ var DisciplineRuleSchema = external_exports.object({
   text: external_exports.string().min(1),
   target_failure_class: external_exports.string().min(1),
   introduced_at: external_exports.string().min(1),
-  level: external_exports.enum(["must", "should", "advisory"]).optional()
+  level: external_exports.enum(["must", "should", "advisory"]).optional(),
+  // Optional projection-override fields (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)
+  criterion_name: external_exports.string().min(1).optional(),
+  criterion_check: external_exports.string().min(1).optional(),
+  criterion_anti: external_exports.string().min(1).optional()
 }).strict();
 var DisciplineRulesFileSchema = external_exports.object({
   rules: external_exports.array(DisciplineRuleSchema)

@@ -41,6 +41,7 @@ import {
   STANDARDS_REL_PATH,
   STANDARDS_SEED_VERSION,
 } from "./regenerate-standards.js";
+import { assertNoDivergence } from "./standards-divergence.js";
 import { lookupStandards } from "../state/lookup-standards.js";
 import {
   StandardsDocMissingError,
@@ -186,6 +187,15 @@ export function makeRuleRetirementApplyHandler(
       const preApplyRaw = await readRegistryRaw(ctx.targetRepoRoot);
 
       const { doc, data } = parseRuleRegistry(preApplyRaw, REGISTRY_REL_PATH);
+
+      // Step 1a: divergence guard — run against the PRE-WRITE registry so no
+      // mutation has happened if it throws. Checks that every criterion name in
+      // the CURRENT standards document is projected by the CURRENT registry.
+      // Any hand-authored criterion not in the current registry would be silently
+      // destroyed by the regeneration step — refuse with a typed error.
+      // Note: the retiring rule's criterion IS in the current registry, so it
+      // passes the guard correctly; the regeneration will remove it legitimately.
+      await assertNoDivergence({ rules: data.rules }, ctx.targetRepoRoot);
 
       // Step 2: match the target_rule_id BEFORE any write — fail closed.
       const ruleIdx = data.rules.findIndex((r) => r.id === proposal.target_rule_id);

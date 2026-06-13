@@ -40,9 +40,8 @@ const UlidSchema = z
   .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "must be a ULID");
 
 /**
- * A single discipline rule. The five fields the epic pins, nothing more
- * (criterion-projection fields are deliberately deferred to Story 6.5b so that
- * the rule schema stays minimal until the projection is designed):
+ * A single discipline rule. Core five fields plus optional projection-override
+ * fields added in Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R:
  *
  *  - `id`                   — freshly minted ULID (minted by the apply handler,
  *                             never by the proposal author).
@@ -54,6 +53,15 @@ const UlidSchema = z
  *  - `level`                — optional promotion level (`must | should | advisory`),
  *                             mapped from the proposal's `recommended_promotion_level`.
  *
+ * Optional projection-override fields (for hand-seeded entries):
+ *  - `criterion_name`       — override for the projected criterion's `name` field.
+ *                             When absent, the name is derived via
+ *                             `slugifyStandardsCriterion(target_failure_class)`.
+ *  - `criterion_check`      — override for the projected criterion's `check` field.
+ *                             When absent, the templated string is used.
+ *  - `criterion_anti`       — override for the projected criterion's `anti_criterion`
+ *                             field. When absent, the templated string is used.
+ *
  * `.strict()` — unknown keys are bugs, consistent with every other schema in
  * the codebase.
  */
@@ -64,6 +72,10 @@ export const DisciplineRuleSchema = z
     target_failure_class: z.string().min(1),
     introduced_at: z.string().min(1),
     level: z.enum(["must", "should", "advisory"]).optional(),
+    // Optional projection-override fields (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R)
+    criterion_name: z.string().min(1).optional(),
+    criterion_check: z.string().min(1).optional(),
+    criterion_anti: z.string().min(1).optional(),
   })
   .strict();
 

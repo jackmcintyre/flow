@@ -53,6 +53,7 @@ import {
   STANDARDS_REL_PATH,
   STANDARDS_SEED_VERSION,
 } from "./regenerate-standards.js";
+import { assertNoDivergence } from "./standards-divergence.js";
 import { lookupStandards } from "../state/lookup-standards.js";
 import { StandardsDocMissingError } from "../errors.js";
 import type {
@@ -72,6 +73,16 @@ import {
 
 /** The single repo-relative registry path this handler writes. */
 const REGISTRY_REL_PATH = "docs/discipline-rules.yaml";
+
+/**
+ * The complete set of repo-relative paths this handler will modify on an apply.
+ * Both the preview and the apply return/display this same set so they can never
+ * drift from each other (AC2 — preview enumerates every file the apply will modify).
+ */
+export const RULE_APPLY_WRITE_SET: readonly string[] = [
+  REGISTRY_REL_PATH,
+  STANDARDS_REL_PATH,
+] as const;
 
 /** Tool name threaded into the managed-fs role-trace for the registry write. */
 const TOOL_NAME = "acceptProposal";
@@ -147,6 +158,11 @@ function buildRuleFromProposal(
  * Render a human-readable before/after diff for the preview phase. Pure —
  * reads the registry but writes NOTHING (the gate's AC2 preview no-op depends
  * on this).
+ *
+ * The preview discloses ALL files this apply will modify (AC2): both the
+ * registry AND the regenerated standards document. The disclosed list is
+ * derived from `RULE_APPLY_WRITE_SET` — the same source the apply uses to
+ * return `changedPaths`, so the two can never drift.
  */
 async function renderRuleDiff(
   proposal: Extract<RetroProposal, { type: "rule" }>,
@@ -161,6 +177,13 @@ async function renderRuleDiff(
   const verb = existingIdx >= 0 ? "edit" : "append";
   const lines: string[] = [];
   lines.push(`# rule proposal ${proposal.id} → ${verb} in ${REGISTRY_REL_PATH}`);
+  lines.push("");
+  // Disclose ALL files this apply will modify — derived from the same RULE_APPLY_WRITE_SET
+  // the apply uses, so preview and apply can never diverge (AC2).
+  lines.push(`Files this apply will modify:`);
+  for (const p of RULE_APPLY_WRITE_SET) {
+    lines.push(`  - ${p}`);
+  }
   lines.push("");
   if (existingIdx >= 0) {
     const prior = data.rules[existingIdx]!;
@@ -215,8 +238,14 @@ export function makeRuleApplyHandler(
 
       // Step 1: snapshot the registry bytes for cap-rollback.
       const preAppendRaw = await readRegistryRaw(ctx.targetRepoRoot);
-
       const { doc, data } = parseRuleRegistry(preAppendRaw, REGISTRY_REL_PATH);
+
+      // Step 1a: divergence guard — run against the PRE-WRITE registry so no
+      // mutation has happened if it throws. Checks that every criterion name in
+      // the CURRENT standards document is projected by the CURRENT registry.
+      // A criterion the current registry doesn't know about would be silently
+      // destroyed by regeneration — refuse with a typed error.
+      await assertNoDivergence({ rules: data.rules }, ctx.targetRepoRoot);
 
       const existingIdx = data.rules.findIndex(
         (r) => r.target_failure_class === proposal.target_failure_class,
@@ -292,8 +321,10 @@ export function makeRuleApplyHandler(
         throw err;
       }
 
-      // Step 5: return both changed paths so the gate commits them together.
-      return { changedPaths: [REGISTRY_REL_PATH, STANDARDS_REL_PATH] };
+      // Step 5: return the full write set so the gate commits them together.
+      // Derived from RULE_APPLY_WRITE_SET — the same source the preview displays —
+      // so preview and apply can never diverge (AC2).
+      return { changedPaths: [...RULE_APPLY_WRITE_SET] };
     },
   };
 }

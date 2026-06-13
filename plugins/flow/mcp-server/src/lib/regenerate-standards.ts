@@ -103,16 +103,24 @@ export const STANDARDS_CRITERIA_CAP: number = readCapFromSchema();
 /**
  * Project one discipline rule into one standards criterion. Deterministic and
  * total (every well-formed rule produces a valid criterion).
+ *
+ * When a rule carries optional projection-override fields (`criterion_name`,
+ * `criterion_check`, `criterion_anti`), those values take precedence over the
+ * templated defaults. This allows hand-seeded entries (the four reviewer
+ * criteria) to project losslessly into the standards document.
  */
 function projectRuleToCriterion(rule: {
   text: string;
   target_failure_class: string;
+  criterion_name?: string;
+  criterion_check?: string;
+  criterion_anti?: string;
 }): Criterion {
   return {
-    name: slugifyStandardsCriterion(rule.target_failure_class),
+    name: rule.criterion_name ?? slugifyStandardsCriterion(rule.target_failure_class),
     what: rule.text,
-    check: `Inspect the diff for ${rule.target_failure_class}; flag any hunk that exhibits it.`,
-    anti_criterion: `The failure this rule guards against: ${rule.target_failure_class}.`,
+    check: rule.criterion_check ?? `Inspect the diff for ${rule.target_failure_class}; flag any hunk that exhibits it.`,
+    anti_criterion: rule.criterion_anti ?? `The failure this rule guards against: ${rule.target_failure_class}.`,
   };
 }
 
@@ -175,6 +183,16 @@ export interface RegenerateStandardsOptions {
    * be written from an MCP tool.
    */
   mcpToolContext: { toolName: string; role: string };
+}
+
+/**
+ * Compute the set of criterion names that the given registry projects.
+ * Used by the divergence guard to compare against the names in the current
+ * standards document — divergence guard keys on names only (never body text)
+ * so templated-vs-overridden wording can never false-positive the guard.
+ */
+export function projectRegistryCriterionNames(registry: DisciplineRulesFile): Set<string> {
+  return new Set(registry.rules.map((rule) => projectRuleToCriterion(rule).name));
 }
 
 /**

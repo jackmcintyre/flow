@@ -2293,6 +2293,47 @@ export class PrePrStagedArtifactLeakError extends DomainError {
 }
 
 /**
+ * The doc/registry divergence guard detected that `docs/standards.md` contains
+ * a criterion whose name the rule registry does not know about. Raised before any
+ * regeneration write — neither the registry nor the standards document is changed
+ * on this path.
+ *
+ * The guard compares criterion NAMES only (never body text), so a rule that uses
+ * projection-override fields and a rule that uses the templated defaults are both
+ * correct as long as their names match those in the document.
+ *
+ * The operator must reconcile the mismatch: either add a registry entry for the
+ * unknown criterion, remove the unknown criterion from the document, or seed the
+ * registry with the hand-authored entry.
+ *
+ * (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R — AC3)
+ */
+export class StandardsDivergenceError extends DomainError {
+  readonly unknownCriterionName: string;
+  readonly registryPath: string;
+  readonly standardsPath: string;
+
+  constructor(opts: {
+    unknownCriterionName: string;
+    registryPath: string;
+    standardsPath: string;
+  }) {
+    super(
+      `standards-divergence guard refused: docs/standards.md at '${opts.standardsPath}' ` +
+        `contains criterion '${opts.unknownCriterionName}' that does not exist in ` +
+        `the rule registry at '${opts.registryPath}'. ` +
+        `Regeneration was blocked — neither file was modified. ` +
+        `To resolve: add a rule for this criterion to the registry, or remove the ` +
+        `unknown criterion from docs/standards.md. ` +
+        `(Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R — AC3)`,
+    );
+    this.unknownCriterionName = opts.unknownCriterionName;
+    this.registryPath = opts.registryPath;
+    this.standardsPath = opts.standardsPath;
+  }
+}
+
+/**
  * The pre-PR test gate ran the project's full test suite and it exited
  * non-zero. No pull request was opened.
  * (Story native:01KT3ER5E9ACCERHAEJ5NM94TH)
