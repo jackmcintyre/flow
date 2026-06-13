@@ -96,8 +96,15 @@ async function maybeRun() {
     if (changed.length > 0) {
       console.log(`normalise-dist: rewrote ${changed.length} file(s) for deterministic enum key ordering.`);
     }
+    // Emit a machine-readable completion sentinel so the test can wait for
+    // this line instead of using a fixed wall-clock delay.  The marker is
+    // written to stdout (same stream the test already reads) and is deliberately
+    // terse so it doesn't pollute operator output meaningfully.
+    process.stdout.write("normalise-dist: done\n");
   } catch (err) {
     console.error("normalise-dist: error during normalisation:", err);
+    // Still emit done so waiters are not left hanging on error paths.
+    process.stdout.write("normalise-dist: done\n");
   } finally {
     running = false;
     if (pending) {

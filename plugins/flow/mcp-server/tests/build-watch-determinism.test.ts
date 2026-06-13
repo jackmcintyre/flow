@@ -139,6 +139,59 @@ function createSentinelWaiter(child: ChildProcessWithoutNullStreams) {
 }
 
 /**
+ * Wait until the normaliser-done counter reaches `targetCount`, up to `timeoutMs`.
+ *
+ * The watch-and-normalise.mjs wrapper emits "normalise-dist: done\n" to stdout
+ * after every normaliseDistTree() call (both success and error paths). This lets
+ * the test wait for a deterministic completion event instead of a fixed wall-clock
+ * delay — eliminating the source of false failures under machine load.
+ *
+ * Attach this listener immediately after spawning (same pattern as createSentinelWaiter)
+ * so no events are dropped between spawn and the first await.
+ */
+function createNormaliserWaiter(child: ChildProcessWithoutNullStreams) {
+  let count = 0;
+  const DONE_RE = /normalise-dist: done/g;
+  type Waiter = { target: number; resolve: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> };
+  const waiters: Waiter[] = [];
+
+  child.stdout.on("data", (buf: Buffer) => {
+    const s = buf.toString("utf8");
+    const matches = s.match(DONE_RE);
+    if (matches) {
+      count += matches.length;
+      for (let i = waiters.length - 1; i >= 0; i--) {
+        const w = waiters[i];
+        if (count >= w.target) {
+          clearTimeout(w.timer);
+          waiters.splice(i, 1);
+          w.resolve(true);
+        }
+      }
+    }
+  });
+
+  return {
+    waitFor(target: number, timeoutMs: number): Promise<boolean> {
+      if (count >= target) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        const w: Waiter = {
+          target,
+          resolve,
+          timer: setTimeout(() => {
+            const idx = waiters.indexOf(w);
+            if (idx >= 0) waiters.splice(idx, 1);
+            resolve(false);
+          }, timeoutMs),
+        };
+        waiters.push(w);
+      });
+    },
+    getCount() { return count; },
+  };
+}
+
+/**
  * Walk a directory recursively, returning a sorted list of relative file paths.
  */
 function listAllFiles(root: string): string[] {
@@ -375,7 +428,9 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
       }) as ChildProcessWithoutNullStreams;
       activeWatcher = watcher;
 
+      // Attach both waiters immediately (before any await) so no events are dropped.
       const sentinel = createSentinelWaiter(watcher);
+      const normaliser = createNormaliserWaiter(watcher);
 
       // Wait for first successful compile.
       // De-flake: the pre-PR gate runs this test inside the FULL vitest suite (all
@@ -387,13 +442,18 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
       const ready = await sentinel.waitFor(1, 60_000);
       expect(ready, "tsc --watch never reached steady-state within 60s").toBe(true);
 
+      // Wait for the normaliser to finish its first run before proceeding.
+      // This is a deterministic event-driven wait — no fixed wall-clock delay.
+      const normReady = await normaliser.waitFor(1, 30_000);
+      expect(normReady, "normaliser did not emit done signal after initial compile").toBe(true);
+
       // ── Phase 2: mutate the scratch source file to force a recompile ──
       const v2Content = initialContent.trimEnd() + "\n// touch\n";
       const t1 = new Date();
       writeFileSync(srcFile, v2Content);
       utimesSync(srcFile, t1, t1);
 
-      // ── Phase 3: wait for second sentinel (recompile done) ──
+      // ── Phase 3: wait for second sentinel (recompile done) then for normaliser ──
       const recompiled = await sentinel.waitFor(2, 60_000);
       // Restore original content immediately (before expect) so the reference build
       // sees the same source state.
@@ -403,8 +463,9 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
 
       expect(recompiled, "tsc --watch did not emit a second success sentinel within 60s after source touch").toBe(true);
 
-      // Give the normaliser a moment to finish (runs async after the sentinel).
-      await new Promise((r) => setTimeout(r, 800));
+      // Wait for the normaliser to complete its second run — event-driven, not a fixed delay.
+      const normDone = await normaliser.waitFor(2, 30_000);
+      expect(normDone, "normaliser did not emit done signal after recompile").toBe(true);
 
       // Kill the watcher BEFORE the reference build to prevent concurrent writes.
       await killProcess(watcher);
@@ -495,14 +556,18 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
       }) as ChildProcessWithoutNullStreams;
       activeWatcher = watcher;
 
+      // Attach both waiters immediately so no events are dropped.
       const sentinel = createSentinelWaiter(watcher);
+      const normaliser = createNormaliserWaiter(watcher);
 
       // Wait for initial compile to settle.
       // De-flake: generous ceiling — see the AC1 note. Starvation under the full
       // gate suite, not a real hang, is what blew the old 30s budget.
       const initial = await sentinel.waitFor(1, 60_000);
       expect(initial, "tsc --watch initial compile never settled within 60s").toBe(true);
-      await new Promise((r) => setTimeout(r, 400)); // let normaliser finish
+      // Wait for normaliser to finish initial run — event-driven, no fixed delay.
+      const normInitial = await normaliser.waitFor(1, 30_000);
+      expect(normInitial, "normaliser did not emit done signal after initial compile").toBe(true);
 
       const scratchDts = "scratch-enum.d.ts";
 
@@ -527,8 +592,13 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
           `cycle ${i + 1}: tsc --watch did not emit success sentinel within 45s`,
         ).toBe(true);
 
-        // Allow the normaliser to finish (it's async post-sentinel).
-        await new Promise((r) => setTimeout(r, 600));
+        // Wait for the normaliser to complete — event-driven, not a fixed delay.
+        // normaliser count = i + 2 because initial compile produced count 1.
+        const normSettled = await normaliser.waitFor(i + 2, 30_000);
+        expect(
+          normSettled,
+          `cycle ${i + 1}: normaliser did not emit done signal within 30s`,
+        ).toBe(true);
 
         const h = hashDtsTree(watchOutDir)[scratchDts];
         expect(h, `cycle ${i + 1}: scratch-enum.d.ts disappeared after recompile`).toBeDefined();
