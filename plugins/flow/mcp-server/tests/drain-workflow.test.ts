@@ -87,7 +87,8 @@ describe("Story 8.5 — drain workflow integrity", () => {
     // cheaper Haiku (a garble just re-invokes), while MUTATING seams stay on the
     // more-reliable Sonnet — Haiku garbled exactly such a verdict relay on the first
     // multi-story drain (story 8.13), and a garbled mutating relay pauses the story.
-    expect(SRC).toContain("model: retryable ? 'haiku' : 'sonnet'");
+    // A per-call `modelOverride` may force a specific model, bypassing the default tier.
+    expect(SRC).toContain("model: modelOverride || (retryable ? 'haiku' : 'sonnet')");
     // Story 8.20: the dev's EDITING SURFACE is its own worktree — the dev agent is
     // spawned with the runtime's per-agent `isolation: 'worktree'` primitive, so two
     // devs against the same repo can never cross-contaminate edits. This is what
@@ -109,6 +110,16 @@ describe("Story 8.5 — drain workflow integrity", () => {
     expect(SRC).toContain("'persona:dev', true");
     // Mutating seams (claim / verdict / gate) omit retryable → a garble surfaces as a
     // parse error and the loop pauses that story rather than risk a double-apply.
+  });
+
+  it("forces a reliable model for the LARGE persona relays (2026-06-13 startup fix)", () => {
+    // buildPersonaSpawnPrompt returns the full role system prompt — the only large
+    // verbatim payload in the drain, and it grows as the team accrues knowledge entries.
+    // Haiku could not reliably emit it through StructuredOutput (it printed the answer as
+    // plain text and threw, killing the run at startup), so both persona seams pass an
+    // explicit modelOverride past the swallow arg. Assert both opt out of the cheap tier.
+    expect(SRC).toContain("'persona:dev', true, false, 'opus'");
+    expect(SRC).toContain("'persona:reviewer', true, false, 'opus'");
   });
 });
 
