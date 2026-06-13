@@ -74,7 +74,7 @@ The retro works against **any adapter**. There is no branch on adapter name — 
    - Read `readCatalogue({ role: "author" })` and use its `Prompt` section verbatim as the `Task` system prompt.
    - Append an `<initial-context>` block containing: `targetRepoRoot`, a `feature_description` that faithfully translates the retro finding into a plain-language feature request (cite the proposal's `type`, `id`, and `rationale`), and the `backlog_inventory` from step 6a.
    - The author subagent calls `writeNativeStory` — it is the ONLY path that may call `writeNativeStory`. **The retro skill itself MUST NOT call `writeNativeStory` directly.** This boundary is load-bearing: the retro-analyst's permission surface excludes `writeNativeStory` and that constraint must not be bypassed.
-   - When the author subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, extract the `<ref>` and report it to the operator: "Draft **\<ref\>** queued as not-ready — judge and bless it via `/flow:judge` then `/flow:ready` when ready to build."
+   - When the author subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, extract the `<ref>` and report it to the operator: "Draft **\<ref\>** queued as not-ready — judge and approve it via `/flow:judge` then `/flow:ready` when ready to build."
 
    6c. **On a refuse-and-revise from the author:** If the author subagent surfaces a `DisciplineViolationError` (the drafted story violated a discipline rule), relay the violation codes and the revision offer to the operator verbatim. Nothing was written. Offer to retry with a revised framing; do NOT silently re-attempt without operator input.
 

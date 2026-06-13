@@ -110,10 +110,10 @@ into an execution manifest under `.flow/state/to-do/`. Scan is idempotent and
 fail-closed: a native story that cannot parse / clear Tier-0 is loudly warned and
 **not** projected (never silently dropped) — fix the source and re-scan.
 
-### 5. Bless the stories you want claimable
+### 5. Approve the stories you want claimable
 
 Scanning lands stories in `to-do/` as **not ready**. The readiness brake
-(Story 9.1) is fail-closed: the drain claims nothing until you bless it. Use
+(Story 9.1) is fail-closed: the drain claims nothing until you approve it. Use
 `/flow:ready` to mark each story you want the drain to pick up as `ready: true`.
 
 ### 6. Verify the board and the drain run on native
@@ -121,13 +121,13 @@ Scanning lands stories in `to-do/` as **not ready**. The readiness brake
 This is the proof that the live pipeline runs end-to-end on native:
 
 - **Board:** run `/flow:board`. It should render the backlog **grouped by epic
-  from native state**, with each blessed native story shown **claimable** and
-  each un-blessed one **not claimable**. (Native refs that carry an
+  from native state**, with each approved native story shown **claimable** and
+  each unapproved one **not claimable**. (Native refs that carry an
   `<epic>.<story>` source id group by epic exactly as BMad refs do; ULID-only
   refs fall into the `(no epic)` bucket.)
-- **Drain claim:** the claim path (`claimNextStory`) claims a **blessed native
+- **Drain claim:** the claim path (`claimNextStory`) claims an **approved native
   `ready`** story (readiness brake + dependencies honored) and **never** an
-  un-blessed one. The BMad authoring/scan path is no longer the live backlog.
+  unapproved one. The BMad authoring/scan path is no longer the live backlog.
 
 When the board renders from native state and the drain claims a native story, the
 cutover is complete: the live cockpit operates on native.

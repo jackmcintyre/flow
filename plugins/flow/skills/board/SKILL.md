@@ -14,12 +14,12 @@ version: 0.1.0
 This is the cockpit's **read surface**. It renders the outstanding backlog as **grouped-by-epic tables generated from live state** — never a hand-maintained list. It reads the backlog the same way the rest of the plugin does (the backlog-inventory enumeration over the `.flow/state/**` directories), groups items by epic, and shows each item's:
 
 - **state** — which state bucket the item sits in (`to-do`, `in-progress`, `blocked`, `done`, or `native-source-only`).
-- **readiness** — `ready` (blessed via `/flow:ready`) or `not ready` (behind the readiness brake).
-- **claimability** — `claimable` when the drain would claim it (a `to-do` item that is blessed AND dependency-satisfied AND not withdrawn); otherwise `not claimable`. A blessed item that is still blocked on an unmet dependency reads `ready` but `not claimable` — do not misread it as buildable.
+- **readiness** — `ready` (approved via `/flow:ready`) or `not ready` (behind the readiness brake).
+- **claimability** — `claimable` when the drain would claim it (a `to-do` item that is approved AND dependency-satisfied AND not withdrawn); otherwise `not claimable`. An approved item that is still blocked on an unmet dependency reads `ready` but `not claimable` — do not misread it as buildable.
 
 This is a **read-only** view: it mutates nothing, starts no build, and touches no git. The table is **generated output**, not a checked-in file — there is nothing here to hand-edit, which is the old failure mode the cockpit replaces. Everything flows through the `getBacklogDashboard` tool; this skill never reads or writes a manifest file directly and never runs a git command.
 
-To **bless or un-bless** an item (flip its readiness), use `/flow:ready`. To **author** or **discard** items, use `/flow:plan`. This skill only shows the board.
+To **approve or unapprove** an item (flip its readiness), use `/flow:ready`. To **author** or **discard** items, use `/flow:plan`. This skill only shows the board.
 
 # Prerequisites
 

@@ -12,7 +12,7 @@ allowed_tools: [Task, readCatalogue, readBacklogInventory, validatePlannerBacklo
 
 This is the **author seam** of the intake cockpit (Epic 9, gate 1) — the operator's half of "propose a feature." You describe a feature in plain language; the plugin spawns a lean author subagent that drafts **one** story spec, runs it through the deterministic discipline gate, and writes it to the backlog **parked not-ready**.
 
-Nothing you propose here can be built until it has been judged and blessed. A drafted story is never auto-ready: it sits in the backlog behind the readiness brake (Story 9.1) until it passes the judge panel (Story 9.3) and you bless it via `/flow:ready`. If you ask "why can't I build the thing I just authored?" — because it has not been judged yet. That is the gate working.
+Nothing you propose here can be built until it has been judged and approved. A drafted story is never auto-ready: it sits in the backlog behind the readiness brake (Story 9.1) until it passes the judge panel (Story 9.3) and you approve it via `/flow:ready`. If you ask "why can't I build the thing I just authored?" — because it has not been judged yet. That is the gate working.
 
 This seam reuses the existing native-authoring machinery rather than rebuilding it:
 - the draft is written by the same `writeNativeStory` path the planner uses,
@@ -45,8 +45,8 @@ A target repo with `.flow/config.yaml` resolved to a **`native`** adapter. (The 
 
 7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report to the operator:
    - the draft's **short handle** (first 8 characters of the ULID for native refs) alongside the full **ref** — e.g. `[01KT1NR9] native:01KT1NR9F6133VHY601SF3BD5N`. Display the short handle as the primary identifier; include the full ref for completeness.
-   - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and blessed),
-   - the next step: run `/flow:ready` to bless it once it has been judged. The draft is already in the backlog (materialisation is automatic — no `/flow:scan` is needed). `/flow:scan` remains available to re-sync if the story file is edited directly afterwards.
+   - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and approved),
+   - the next step: run `/flow:ready` to approve it once it has been judged. The draft is already in the backlog (materialisation is automatic — no `/flow:scan` is needed). `/flow:scan` remains available to re-sync if the story file is edited directly afterwards.
 
 8. **Inline approval prompt.** If a judge panel grade has been surfaced for the newly drafted story (i.e., `/flow:judge` was run in this same session and its verdict is visible in the conversation), immediately present the grade summary to the operator and ask a single yes/no question before the skill exits:
 
