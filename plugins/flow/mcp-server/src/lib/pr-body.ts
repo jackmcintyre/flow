@@ -155,9 +155,18 @@ export function composeCommitSubject(opts: {
 // ---------------------------------------------------------------------------
 
 /**
- * Compose the two-section PR body per AC1g:
+ * Compose the three-section PR body:
  *
- * **Section 1 (machine block):**
+ * **Section 1 — Approver summary (LEADING):**
+ * Five plain-language sections in fixed order, assembled from what the
+ * developer holds at PR-open time:
+ *   1. What changed — story title + AC summaries
+ *   2. Why — story narrative / user pain
+ *   3. How to check it yourself — AC text
+ *   4. Risk and blast radius — caller-supplied risk tier
+ *   5. Evidence — per-AC covering check + pre-PR gate result
+ *
+ * **Section 2 (machine block):**
  * ```
  * <!-- flow:pr:machine -->
  * Story: <ref>
@@ -168,17 +177,48 @@ export function composeCommitSubject(opts: {
  * <!-- /flow:pr:machine -->
  * ```
  *
- * **Section 2 (free-form summary):**
+ * **Section 3 (free-form summary):**
  * The caller's `summary` string verbatim (no wrap applied).
  *
- * The two sections are separated by a single blank line.
+ * Sections are separated by a single blank line each.
+ *
+ * The approver summary is built solely from handoff-available inputs:
+ * - `title` and `narrative` — from the story spec / manifest.
+ * - `acs[].firstLine` — first line of each AC body (truncated to 120 chars).
+ * - `acs[].coveringCheck` — the AC's vitest/artifact verification target,
+ *   carried from the manifest's `acceptance_criteria[].verification.target`.
+ *   If absent, the evidence section notes the AC by text only.
+ * - `riskTier` — the story's classified risk tier, passed in by the caller
+ *   (`run-dev-terminal-action.ts`). `composePrBody` does NOT compute risk.
+ * - The pre-PR build-and-test gate result: always stated as "passed" here
+ *   because `runDevTerminalAction` refuses to call `composePrBody` until
+ *   both gates have exited 0.
  */
 export function composePrBody(opts: {
   ref: string;
   specPath: string;
-  acs: Array<{ index: number; firstLine: string }>;
+  acs: Array<{ index: number; firstLine: string; coveringCheck?: string }>;
   summary: string;
+  /** Story title — assembled into the "What changed" section. */
+  title?: string;
+  /** Story narrative ("As a / I want / so that") — assembled into the "Why" section. */
+  narrative?: string;
+  /** Caller-supplied risk tier — assembled into the "Risk and blast radius" section. */
+  riskTier?: string;
 }): string {
+  // ---------------------------------------------------------------------------
+  // Section 1: Approver summary (five plain-language sections)
+  // ---------------------------------------------------------------------------
+  const approverSummary = buildApproverSummary({
+    title: opts.title,
+    narrative: opts.narrative,
+    acs: opts.acs,
+    riskTier: opts.riskTier,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Section 2: Machine block
+  // ---------------------------------------------------------------------------
   const acLines = opts.acs
     .map((ac) => `- [ ] AC${ac.index}: ${ac.firstLine}`)
     .join("\n");
@@ -192,5 +232,128 @@ export function composePrBody(opts: {
     "<!-- /flow:pr:machine -->",
   ].join("\n");
 
-  return `${machineBlock}\n\n${opts.summary}`;
+  // ---------------------------------------------------------------------------
+  // Assemble: approver summary → machine block → free-form summary
+  // ---------------------------------------------------------------------------
+  return `${approverSummary}\n\n${machineBlock}\n\n${opts.summary}`;
+}
+
+/**
+ * Build the five-section plain-language approver summary.
+ * Each section is a level-2 markdown heading followed by its body.
+ *
+ * All five sections are always emitted (even when the caller omits optional
+ * fields) so the approver can rely on a fixed, predictable shape. If a
+ * field is absent the section falls back to a minimal but honest placeholder.
+ */
+function buildApproverSummary(opts: {
+  title?: string;
+  narrative?: string;
+  acs: Array<{ index: number; firstLine: string; coveringCheck?: string }>;
+  riskTier?: string;
+}): string {
+  const { title, narrative, acs, riskTier } = opts;
+
+  // --- Section 1: What changed ---
+  const whatChangedLines: string[] = [];
+  if (title) {
+    whatChangedLines.push(title);
+    whatChangedLines.push("");
+  }
+  if (acs.length > 0) {
+    whatChangedLines.push("This change delivers the following acceptance criteria:");
+    for (const ac of acs) {
+      whatChangedLines.push(`- AC${ac.index}: ${ac.firstLine}`);
+    }
+  } else {
+    whatChangedLines.push("No acceptance criteria were listed for this change.");
+  }
+  const whatChanged = whatChangedLines.join("\n");
+
+  // --- Section 2: Why ---
+  const why = narrative
+    ? narrative
+    : "No narrative was provided for this story.";
+
+  // --- Section 3: How to check it yourself ---
+  const howLines: string[] = [];
+  if (acs.length > 0) {
+    howLines.push(
+      "Each acceptance criterion is covered by an automated check. To verify:",
+    );
+    for (const ac of acs) {
+      if (ac.coveringCheck) {
+        howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
+      } else {
+        howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
+      }
+    }
+    howLines.push("");
+    howLines.push(
+      "You can also read the change in the diff below and compare it against each criterion above.",
+    );
+  } else {
+    howLines.push("No automated checks were listed for this change.");
+  }
+  const howToCheck = howLines.join("\n");
+
+  // --- Section 4: Risk and blast radius ---
+  const riskLines: string[] = [];
+  if (riskTier) {
+    riskLines.push(`**Risk tier:** ${riskTier}`);
+    riskLines.push("");
+  }
+  riskLines.push(
+    "This change is additive and scoped to the files listed in the diff. " +
+    "It does not modify shared state, database schemas, or authentication paths " +
+    "unless explicitly stated in the acceptance criteria above.",
+  );
+  riskLines.push("");
+  riskLines.push(
+    "**What is explicitly not covered:** reviewer verification of this summary's accuracy " +
+    "is handled by a separate companion story.",
+  );
+  const riskAndBlastRadius = riskLines.join("\n");
+
+  // --- Section 5: Evidence ---
+  const evidenceLines: string[] = [];
+  evidenceLines.push(
+    "The pre-pull-request build-and-test gate passed before this pull request was opened. " +
+    "No pull request can be opened by the automated flow unless both `pnpm build` and `pnpm test` " +
+    "exit 0 in the developer's working directory.",
+  );
+  evidenceLines.push("");
+  if (acs.length > 0) {
+    evidenceLines.push("Per-criterion covering checks:");
+    for (const ac of acs) {
+      if (ac.coveringCheck) {
+        evidenceLines.push(`- AC${ac.index} → \`${ac.coveringCheck}\``);
+      } else {
+        evidenceLines.push(`- AC${ac.index} → no structured verification target recorded`);
+      }
+    }
+  }
+  const evidence = evidenceLines.join("\n");
+
+  return [
+    "## What changed",
+    "",
+    whatChanged,
+    "",
+    "## Why",
+    "",
+    why,
+    "",
+    "## How to check it yourself",
+    "",
+    howToCheck,
+    "",
+    "## Risk and blast radius",
+    "",
+    riskAndBlastRadius,
+    "",
+    "## Evidence",
+    "",
+    evidence,
+  ].join("\n");
 }

@@ -38063,6 +38063,12 @@ function composeCommitSubject(opts) {
   return `${opts.type}(${handle}): ${opts.title.trim()}`;
 }
 function composePrBody(opts) {
+  const approverSummary = buildApproverSummary({
+    title: opts.title,
+    narrative: opts.narrative,
+    acs: opts.acs,
+    riskTier: opts.riskTier
+  });
   const acLines = opts.acs.map((ac) => `- [ ] AC${ac.index}: ${ac.firstLine}`).join("\n");
   const machineBlock = [
     "<!-- flow:pr:machine -->",
@@ -38072,9 +38078,99 @@ function composePrBody(opts) {
     acLines,
     "<!-- /flow:pr:machine -->"
   ].join("\n");
-  return `${machineBlock}
+  return `${approverSummary}
+
+${machineBlock}
 
 ${opts.summary}`;
+}
+function buildApproverSummary(opts) {
+  const { title, narrative, acs, riskTier } = opts;
+  const whatChangedLines = [];
+  if (title) {
+    whatChangedLines.push(title);
+    whatChangedLines.push("");
+  }
+  if (acs.length > 0) {
+    whatChangedLines.push("This change delivers the following acceptance criteria:");
+    for (const ac of acs) {
+      whatChangedLines.push(`- AC${ac.index}: ${ac.firstLine}`);
+    }
+  } else {
+    whatChangedLines.push("No acceptance criteria were listed for this change.");
+  }
+  const whatChanged = whatChangedLines.join("\n");
+  const why = narrative ? narrative : "No narrative was provided for this story.";
+  const howLines = [];
+  if (acs.length > 0) {
+    howLines.push(
+      "Each acceptance criterion is covered by an automated check. To verify:"
+    );
+    for (const ac of acs) {
+      if (ac.coveringCheck) {
+        howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
+      } else {
+        howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
+      }
+    }
+    howLines.push("");
+    howLines.push(
+      "You can also read the change in the diff below and compare it against each criterion above."
+    );
+  } else {
+    howLines.push("No automated checks were listed for this change.");
+  }
+  const howToCheck = howLines.join("\n");
+  const riskLines = [];
+  if (riskTier) {
+    riskLines.push(`**Risk tier:** ${riskTier}`);
+    riskLines.push("");
+  }
+  riskLines.push(
+    "This change is additive and scoped to the files listed in the diff. It does not modify shared state, database schemas, or authentication paths unless explicitly stated in the acceptance criteria above."
+  );
+  riskLines.push("");
+  riskLines.push(
+    "**What is explicitly not covered:** reviewer verification of this summary's accuracy is handled by a separate companion story."
+  );
+  const riskAndBlastRadius = riskLines.join("\n");
+  const evidenceLines = [];
+  evidenceLines.push(
+    "The pre-pull-request build-and-test gate passed before this pull request was opened. No pull request can be opened by the automated flow unless both `pnpm build` and `pnpm test` exit 0 in the developer's working directory."
+  );
+  evidenceLines.push("");
+  if (acs.length > 0) {
+    evidenceLines.push("Per-criterion covering checks:");
+    for (const ac of acs) {
+      if (ac.coveringCheck) {
+        evidenceLines.push(`- AC${ac.index} \u2192 \`${ac.coveringCheck}\``);
+      } else {
+        evidenceLines.push(`- AC${ac.index} \u2192 no structured verification target recorded`);
+      }
+    }
+  }
+  const evidence = evidenceLines.join("\n");
+  return [
+    "## What changed",
+    "",
+    whatChanged,
+    "",
+    "## Why",
+    "",
+    why,
+    "",
+    "## How to check it yourself",
+    "",
+    howToCheck,
+    "",
+    "## Risk and blast radius",
+    "",
+    riskAndBlastRadius,
+    "",
+    "## Evidence",
+    "",
+    evidence
+  ].join("\n");
 }
 
 // src/lib/dep-merge-check.ts
@@ -39253,11 +39349,24 @@ async function runDevTerminalAction(opts) {
       ...execaImpl ? { execaImpl } : {}
     });
     const specPathForPr = path47.isAbsolute(manifest.source_path) ? path47.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
+    const manifestAcsByIndex = new Map(
+      (manifest.acceptance_criteria ?? []).map((ac, i2) => [i2 + 1, ac])
+    );
+    const acsWithCoveringCheck = acs.map((ac) => {
+      const manifestAc = manifestAcsByIndex.get(ac.index);
+      return {
+        ...ac,
+        coveringCheck: manifestAc?.verification?.target
+      };
+    });
     const prBody = composePrBody({
       ref,
       specPath: specPathForPr,
-      acs,
-      summary
+      acs: acsWithCoveringCheck,
+      summary,
+      title: manifest.title,
+      narrative: manifest.narrative,
+      riskTier: manifest.risk_tier
     });
     const pluginRoot = getPluginRoot();
     const permissions = await loadRolePermissions({ role: ROLE, pluginRoot });

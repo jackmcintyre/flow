@@ -205,7 +205,7 @@ describe("composePrBody", () => {
     expect(body).toContain("- [ ] AC3: Third AC");
   });
 
-  it("includes free-form summary after blank line separator", () => {
+  it("includes free-form summary after the machine block", () => {
     const summary = "This PR does something important.";
     const body = composePrBody({
       ref: "4-4",
@@ -213,10 +213,232 @@ describe("composePrBody", () => {
       acs: [{ index: 1, firstLine: "AC text" }],
       summary,
     });
-    // Summary appears after a blank line following the machine block
+    // Summary appears after the machine block
     const machineEndIdx = body.indexOf("<!-- /flow:pr:machine -->");
     const afterMachine = body.slice(machineEndIdx);
     expect(afterMachine).toContain("\n\n");
     expect(body).toContain(summary);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC1: Five-section approver summary leads the PR body
+  // -------------------------------------------------------------------------
+
+  it("AC1: PR body leads with the five-section approver summary before the machine block", () => {
+    const body = composePrBody({
+      ref: "native:01KV05C86B",
+      specPath: ".flow/native-stories/01KV05C86B.md",
+      acs: [
+        { index: 1, firstLine: "Given the team finishes a story", coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts" },
+        { index: 2, firstLine: "Given the PR description leads with the approver summary" },
+      ],
+      summary: "Extends composePrBody with a five-section approver summary.",
+      title: "Lead every pull request with a plain-language approver summary",
+      narrative: "As a technical but non-developer approver, I want every pull request to open with a fixed, plain-language summary.",
+      riskTier: "medium",
+    });
+
+    // The five section headings must appear in order before the machine block.
+    const machineIdx = body.indexOf("<!-- flow:pr:machine -->");
+    const whatChangedIdx = body.indexOf("## What changed");
+    const whyIdx = body.indexOf("## Why");
+    const howToCheckIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const evidenceIdx = body.indexOf("## Evidence");
+
+    // All five sections exist.
+    expect(whatChangedIdx).toBeGreaterThanOrEqual(0);
+    expect(whyIdx).toBeGreaterThanOrEqual(0);
+    expect(howToCheckIdx).toBeGreaterThanOrEqual(0);
+    expect(riskIdx).toBeGreaterThanOrEqual(0);
+    expect(evidenceIdx).toBeGreaterThanOrEqual(0);
+
+    // Sections appear before the machine block.
+    expect(whatChangedIdx).toBeLessThan(machineIdx);
+    expect(whyIdx).toBeLessThan(machineIdx);
+    expect(howToCheckIdx).toBeLessThan(machineIdx);
+    expect(riskIdx).toBeLessThan(machineIdx);
+    expect(evidenceIdx).toBeLessThan(machineIdx);
+
+    // Sections appear in the correct order.
+    expect(whatChangedIdx).toBeLessThan(whyIdx);
+    expect(whyIdx).toBeLessThan(howToCheckIdx);
+    expect(howToCheckIdx).toBeLessThan(riskIdx);
+    expect(riskIdx).toBeLessThan(evidenceIdx);
+    expect(evidenceIdx).toBeLessThan(machineIdx);
+  });
+
+  it("AC1: PR body leads with the body starting at the first approver summary section", () => {
+    const body = composePrBody({
+      ref: "native:01KV05C86B",
+      specPath: ".flow/native-stories/01KV05C86B.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+      title: "Story title",
+      narrative: "Story narrative",
+      riskTier: "low",
+    });
+
+    // Body must start with the approver summary (the first non-blank line
+    // is the "## What changed" heading).
+    expect(body.trimStart()).toMatch(/^## What changed/);
+  });
+
+  it("AC1: What changed section includes story title and AC summaries", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [
+        { index: 1, firstLine: "First acceptance criterion" },
+        { index: 2, firstLine: "Second acceptance criterion" },
+      ],
+      summary: "Summary",
+      title: "My story title",
+      narrative: "As a user I want this feature.",
+    });
+    expect(body).toContain("My story title");
+    expect(body).toContain("First acceptance criterion");
+    expect(body).toContain("Second acceptance criterion");
+  });
+
+  it("AC1: Why section includes the story narrative", () => {
+    const narrative = "As a technical but non-developer approver, I want every pull request to open with a fixed summary.";
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+      title: "Title",
+      narrative,
+    });
+    const whyIdx = body.indexOf("## Why");
+    const howIdx = body.indexOf("## How to check it yourself");
+    const whySection = body.slice(whyIdx, howIdx);
+    expect(whySection).toContain(narrative);
+  });
+
+  it("AC1: Risk and blast radius section includes the risk tier", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+      riskTier: "medium",
+    });
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const evidenceIdx = body.indexOf("## Evidence");
+    const riskSection = body.slice(riskIdx, evidenceIdx);
+    expect(riskSection).toContain("medium");
+  });
+
+  it("AC1: Evidence section maps each AC to its covering check", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [
+        { index: 1, firstLine: "First AC", coveringCheck: "src/lib/__tests__/foo.test.ts" },
+        { index: 2, firstLine: "Second AC", coveringCheck: "src/lib/__tests__/bar.test.ts" },
+      ],
+      summary: "Summary",
+    });
+    const evidenceIdx = body.indexOf("## Evidence");
+    const machineIdx = body.indexOf("<!-- flow:pr:machine -->");
+    const evidenceSection = body.slice(evidenceIdx, machineIdx);
+    expect(evidenceSection).toContain("src/lib/__tests__/foo.test.ts");
+    expect(evidenceSection).toContain("src/lib/__tests__/bar.test.ts");
+  });
+
+  it("AC1: Evidence section states the pre-PR build-and-test gate passed", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+    });
+    const evidenceIdx = body.indexOf("## Evidence");
+    const machineIdx = body.indexOf("<!-- flow:pr:machine -->");
+    const evidenceSection = body.slice(evidenceIdx, machineIdx);
+    expect(evidenceSection.toLowerCase()).toContain("build-and-test gate passed");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC2: Machine-readable detail block and free-form summary remain below
+  // -------------------------------------------------------------------------
+
+  it("AC2: machine-readable block travels below the approver summary", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+      title: "Title",
+      narrative: "Narrative",
+      riskTier: "low",
+    });
+
+    const evidenceIdx = body.indexOf("## Evidence");
+    const machineStartIdx = body.indexOf("<!-- flow:pr:machine -->");
+    const machineEndIdx = body.indexOf("<!-- /flow:pr:machine -->");
+
+    // Machine block exists and is below the last approver section.
+    expect(machineStartIdx).toBeGreaterThan(evidenceIdx);
+    expect(machineEndIdx).toBeGreaterThan(machineStartIdx);
+  });
+
+  it("AC2: free-form summary travels below the machine block", () => {
+    const summary = "Free-form developer summary text.";
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary,
+      title: "Title",
+      narrative: "Narrative",
+    });
+
+    const machineEndIdx = body.indexOf("<!-- /flow:pr:machine -->");
+    const summaryIdx = body.indexOf(summary);
+
+    // Free-form summary is after the machine block.
+    expect(summaryIdx).toBeGreaterThan(machineEndIdx);
+  });
+
+  it("AC2: approver summary does not remove the ACs checklist from the machine block", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [
+        { index: 1, firstLine: "First AC", coveringCheck: "test.ts" },
+        { index: 2, firstLine: "Second AC" },
+      ],
+      summary: "Summary",
+      title: "Title",
+      narrative: "Narrative",
+    });
+
+    // Machine block still has the unchecked AC boxes.
+    const machineStartIdx = body.indexOf("<!-- flow:pr:machine -->");
+    const machineEndIdx = body.indexOf("<!-- /flow:pr:machine -->");
+    const machineSection = body.slice(machineStartIdx, machineEndIdx + "<!-- /flow:pr:machine -->".length);
+    expect(machineSection).toContain("- [ ] AC1: First AC");
+    expect(machineSection).toContain("- [ ] AC2: Second AC");
+  });
+
+  // -------------------------------------------------------------------------
+  // Backward-compatibility: optional fields absent
+  // -------------------------------------------------------------------------
+
+  it("still renders all five section headings when optional fields are absent", () => {
+    const body = composePrBody({
+      ref: "4-4",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text" }],
+      summary: "Summary",
+    });
+    expect(body).toContain("## What changed");
+    expect(body).toContain("## Why");
+    expect(body).toContain("## How to check it yourself");
+    expect(body).toContain("## Risk and blast radius");
+    expect(body).toContain("## Evidence");
   });
 });

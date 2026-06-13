@@ -439,11 +439,29 @@ export async function runDevTerminalAction(opts: {
       ? path.relative(targetRepoRoot, manifest.source_path)
       : manifest.source_path;
 
+    // Merge per-AC covering checks from the manifest's acceptance_criteria
+    // (which carry the structured `verification.target` field) into the AcEntry
+    // array from extractAcsFromSpec. The manifest and spec are always in sync
+    // for in-progress stories, so the merge is by numeric index (AC1, AC2…).
+    const manifestAcsByIndex = new Map(
+      (manifest.acceptance_criteria ?? []).map((ac, i) => [i + 1, ac]),
+    );
+    const acsWithCoveringCheck = acs.map((ac) => {
+      const manifestAc = manifestAcsByIndex.get(ac.index);
+      return {
+        ...ac,
+        coveringCheck: manifestAc?.verification?.target,
+      };
+    });
+
     const prBody = composePrBody({
       ref,
       specPath: specPathForPr,
-      acs,
+      acs: acsWithCoveringCheck,
       summary,
+      title: manifest.title,
+      narrative: manifest.narrative,
+      riskTier: manifest.risk_tier,
     });
 
     // (xi) gh pr create — cwd pinned to gitRoot so `gh` resolves the intended
