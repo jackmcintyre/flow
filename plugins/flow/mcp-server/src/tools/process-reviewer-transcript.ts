@@ -89,7 +89,7 @@ export type ProcessReviewerTranscriptResult =
       chatLog: string[];
     }
   | {
-      /** Reviewer's `runReviewerSession` returned BLOCKED (empty ACs or manual-check-required). */
+      /** Reviewer's `runReviewerSession` returned BLOCKED (no ACs declared in source story). */
       next: "done-blocked-reviewer-blocked";
       chatLog: string[];
     };
@@ -198,7 +198,7 @@ export async function processReviewerTranscript(
 
   chatLog.push(
     `reviewer verdict: BLOCKED — story ${ref} blocked. ` +
-      `reviewer-result.json carries recommendedVerdict BLOCKED (empty ACs or manual-check-required). ` +
+      `reviewer-result.json carries recommendedVerdict BLOCKED (no ACs declared in source story). ` +
       `Human operator must review before this story can proceed.`,
   );
 

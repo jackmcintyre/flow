@@ -377,21 +377,36 @@ async function runVitestCheck(
  * Derive `recommendedVerdict` deterministically from `acResults` per spec §3f.
  *
  * Algorithm (closed set — the tool decides, the LLM does not):
- *  1. If any acResult has `status === "fail"` → "NEEDS CHANGES"
- *  2. Else if `acResults` is empty OR any acResult has `applicability === "manual-check-required"` → "BLOCKED"
+ *  1. If `acResults` is empty → "BLOCKED" (no ACs to verify — operational blocker)
+ *  2. If any acResult has `status === "fail"` OR has `applicability === "manual-check-required"`
+ *     → "NEEDS CHANGES" (unbacked criterion: the check failed or has no resolvable evidence
+ *     marker at all; an explicit non-approving verdict, not an operational blocker)
  *  3. Else → "READY FOR MERGE"
+ *
+ * Story native:01KV06ZGHHM1MZ2DS2HENXQG7N — unbacked-criterion gate:
+ *   A criterion the approver summary presents as covered but whose marker is missing
+ *   or fails to resolve is "unbacked." The reviewer names the unbacked criterion (via
+ *   the acResult's `reason` field) and the pull request cannot reach an approved verdict.
+ *   A criterion with NO resolvable evidence marker at all (manual-check-required) is
+ *   treated identically to a failing check — both yield "NEEDS CHANGES", not "BLOCKED",
+ *   so the reviewer explicitly refuses rather than signalling an operational stall.
  */
 function deriveRecommendedVerdict(acResults: Record<number, AcResult>): RecommendedVerdict {
   const values = Object.values(acResults);
 
-  // Rule 1: any fail → NEEDS CHANGES
-  if (values.some((r) => (r as { status?: string }).status === "fail")) {
-    return "NEEDS CHANGES";
+  // Rule 1: empty → BLOCKED (nothing to verify — operational issue, not a criterion failure)
+  if (values.length === 0) {
+    return "BLOCKED";
   }
 
-  // Rule 2: empty OR any manual-check-required → BLOCKED
-  if (values.length === 0 || values.some((r) => r.applicability === "manual-check-required")) {
-    return "BLOCKED";
+  // Rule 2: any fail OR any manual-check-required (unbacked) → NEEDS CHANGES
+  // A criterion with a failing check, or with no resolvable evidence marker at all,
+  // is unbacked: the reviewer explicitly refuses approval and names the criterion.
+  if (
+    values.some((r) => (r as { status?: string }).status === "fail") ||
+    values.some((r) => r.applicability === "manual-check-required")
+  ) {
+    return "NEEDS CHANGES";
   }
 
   // Rule 3: all runnable and all pass → READY FOR MERGE
