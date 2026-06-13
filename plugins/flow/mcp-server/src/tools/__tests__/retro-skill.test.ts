@@ -40,7 +40,12 @@ import { loadRolePermissions } from "../../state/load-role-permissions.js";
 import { gatherRetroInputs } from "../gather-retro-inputs.js";
 import { writeRetroProposal } from "../write-retro-proposal.js";
 import { summariseRetroProposal } from "../summarise-retro-proposal.js";
-import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
+import {
+  parseRetroProposalFile,
+  RetroProposalSchema,
+  RETRO_PROPOSAL_TYPES,
+} from "../../schemas/retro-proposal.js";
+import { warrantsAFix, warrantsAnyFix, FIX_WORTHY_TYPES } from "../warrants-a-fix.js";
 
 // ---------------------------------------------------------------------------
 // Resolve the real plugin root from this file's location.
@@ -421,6 +426,33 @@ describe("summariseRetroProposal — skill-path integration (AC1)", () => {
     }
   });
 
+  it("retro skill SKILL.md includes readBacklogInventory in allowed_tools (AC1 author-seam wiring)", async () => {
+    // The author-seam wiring (step 6) calls readBacklogInventory for de-dup
+    // awareness before spawning the author subagent. The skill must declare
+    // this tool in its allowed_tools frontmatter.
+    const skillPath = path.resolve(REAL_PLUGIN_ROOT, "skills", "retro", "SKILL.md");
+    const raw = await fs.readFile(skillPath, "utf8");
+    const lines = raw.split("\n");
+    const fmLines: string[] = [];
+    let inFm = false;
+    let closed = false;
+    for (const line of lines) {
+      if (!inFm && line === "---") {
+        inFm = true;
+        continue;
+      }
+      if (inFm && !closed) {
+        if (line === "---") {
+          closed = true;
+          break;
+        }
+        fmLines.push(line);
+      }
+    }
+    const fm = yamlParse(fmLines.join("\n")) as { allowed_tools?: string[] };
+    expect(fm.allowed_tools).toContain("readBacklogInventory");
+  });
+
   it("retro skill SKILL.md includes summariseRetroProposal in allowed_tools", async () => {
     // Load the production SKILL.md frontmatter and verify the tool is registered
     // as an allowed tool so the skill can call it after the subagent hands off.
@@ -448,3 +480,114 @@ describe("summariseRetroProposal — skill-path integration (AC1)", () => {
     expect(fm.allowed_tools).toContain("summariseRetroProposal");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Half 4: warrantsAFix / warrantsAnyFix classifier tests (AC2).
+//
+// Story native:01KTZGJ68HE6Z66A50BV7N6BJZ — a purely informational or empty
+// finding must NOT draft a story. The unit tests here anchor the pure
+// warrants-a-fix classifier so the skill's decision path is independently
+// testable without LLM invocation.
+// ---------------------------------------------------------------------------
+
+const ULID_C1 = "01HZC0AA00000000000000WF01";
+const ISO_C = "2026-06-13T12:00:00.000Z";
+
+describe("warrantsAFix / warrantsAnyFix — classifier (AC2)", () => {
+  // ---------------------------------------------------------------------------
+  // warrantsAnyFix: file-level predicate
+  // ---------------------------------------------------------------------------
+
+  it("returns false when the proposals array is empty (purely informational / no-op retro)", () => {
+    const emptyFile = parseRetroProposalFile({
+      iso_timestamp: ISO_C,
+      cycle_window: null,
+      proposals: [],
+    });
+    expect(warrantsAnyFix(emptyFile)).toBe(false);
+  });
+
+  it("returns true when the proposals array has at least one entry (fix-worthy retro)", () => {
+    const fileWithOne = parseRetroProposalFile({
+      iso_timestamp: ISO_C,
+      cycle_window: null,
+      proposals: [
+        {
+          type: "rule",
+          id: ULID_C1,
+          created_at: ISO_C,
+          rationale: "Dev skipped the handoff phrase twice.",
+          text: "Emit the handoff phrase verbatim as the final line.",
+          target_failure_class: "handoff-grammar",
+          recommended_promotion_level: "must",
+        },
+      ],
+    });
+    expect(warrantsAnyFix(fileWithOne)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // warrantsAFix: single-proposal predicate — all nine schema variants must
+  // return true (every validated proposal type carries a concrete change).
+  // ---------------------------------------------------------------------------
+
+  it("returns true for a `rule` proposal (concrete change)", () => {
+    const proposal = RetroProposalSchema.parse({
+      type: "rule",
+      id: ULID_C1,
+      created_at: ISO_C,
+      rationale: "Recurrent handoff phrase drift.",
+      text: "Emit the handoff phrase verbatim.",
+      target_failure_class: "handoff-grammar",
+      recommended_promotion_level: "must",
+    });
+    expect(warrantsAFix(proposal)).toBe(true);
+  });
+
+  it("returns true for a `skill-create` proposal (concrete change)", () => {
+    const proposal = RetroProposalSchema.parse({
+      type: "skill-create",
+      id: ULID_C1,
+      created_at: ISO_C,
+      rationale: "Reusable pre-flight checklist pattern observed.",
+      proposed_path: ".flow/skills/pre-flight.md",
+      frontmatter_description: "Run pre-flight checks before claiming.",
+      body: "# Pre-flight\n\nStep 1.\n",
+    });
+    expect(warrantsAFix(proposal)).toBe(true);
+  });
+
+  it("returns true for a `persona-append` proposal (concrete change)", () => {
+    const proposal = RetroProposalSchema.parse({
+      type: "persona-append",
+      id: ULID_C1,
+      created_at: ISO_C,
+      rationale: "Generalist-dev missed the sentinel in two stories.",
+      target_role: "generalist-dev",
+      lesson: "Always emit the handoff sentinel as the final line.",
+    });
+    expect(warrantsAFix(proposal)).toBe(true);
+  });
+
+  it("returns true for a `team-change` proposal (concrete change)", () => {
+    const proposal = RetroProposalSchema.parse({
+      type: "team-change",
+      id: ULID_C1,
+      created_at: ISO_C,
+      rationale: "Security audit failures recurred.",
+      action: "hire",
+      target_role: "security-reviewer",
+      justification: "Four fires in the last cycle.",
+      predicted_impact: { affected_failure_classes: ["security-audit"] },
+    });
+    expect(warrantsAFix(proposal)).toBe(true);
+  });
+
+  it("FIX_WORTHY_TYPES covers exactly the same set as RETRO_PROPOSAL_TYPES (completeness check)", () => {
+    // Assert FIX_WORTHY_TYPES and RETRO_PROPOSAL_TYPES are the same closed set.
+    const fixSet = new Set<string>(FIX_WORTHY_TYPES);
+    const schemaSet = new Set<string>(RETRO_PROPOSAL_TYPES);
+    expect(fixSet).toEqual(schemaSet);
+  });
+});
+
