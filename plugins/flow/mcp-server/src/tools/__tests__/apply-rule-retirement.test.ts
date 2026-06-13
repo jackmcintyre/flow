@@ -85,6 +85,7 @@ rules:
 
 // A minimal standards.md so lookupStandards doesn't throw StandardsDocMissingError.
 // Generated via yamlStringify to ensure correct YAML quoting of colons in values.
+// Used with SEEDED_TWO_RULES (which has handoff-grammar + rubber-stamp rules).
 const MINIMAL_STANDARDS = yamlStringify(
   {
     version: "1.0.0",
@@ -95,6 +96,24 @@ const MINIMAL_STANDARDS = yamlStringify(
         what: "Dev MUST emit the handoff phrase verbatim.",
         check: "Inspect the diff for handoff-grammar; flag any hunk that exhibits it.",
         anti_criterion: "The failure this rule guards against: handoff-grammar.",
+      },
+    ],
+  },
+  { lineWidth: 0 },
+);
+
+// A minimal standards.md for use with SEEDED_ONE_RULE (only-class).
+// The divergence guard requires the doc's criteria to match the registry projection.
+const MINIMAL_STANDARDS_ONE_RULE = yamlStringify(
+  {
+    version: "1.0.0",
+    updated: "2026-05-20T10:00:00.000Z",
+    criteria: [
+      {
+        name: "only-class",
+        what: "The only rule.",
+        check: "Inspect the diff for only-class; flag any hunk that exhibits it.",
+        anti_criterion: "The failure this rule guards against: only-class.",
       },
     ],
   },
@@ -373,7 +392,9 @@ describe("makeRuleRetirementApplyHandler — error cases (AC4)", () => {
 
   it("raises RetirementWouldEmptyRegistryError when retiring the last rule — no mutation (AC4)", async () => {
     await seedRegistry(SEEDED_ONE_RULE);
-    await seedStandards(MINIMAL_STANDARDS);
+    // Use the one-rule-aligned standards doc (only-class criterion) so the
+    // divergence guard does not fire before the retirement guard.
+    await seedStandards(MINIMAL_STANDARDS_ONE_RULE);
     const beforeRegistry = await readRegistry();
     const handler = makeRuleRetirementApplyHandler({ standardsNow: () => FIXED_NOW });
 
@@ -390,7 +411,9 @@ describe("makeRuleRetirementApplyHandler — error cases (AC4)", () => {
 
   it("relax on the last rule is allowed (only retire is blocked)", async () => {
     await seedRegistry(SEEDED_ONE_RULE);
-    await seedStandards(MINIMAL_STANDARDS);
+    // Use the one-rule-aligned standards doc (only-class criterion) so the
+    // divergence guard does not fire and the relax can proceed.
+    await seedStandards(MINIMAL_STANDARDS_ONE_RULE);
     const handler = makeRuleRetirementApplyHandler({ standardsNow: () => FIXED_NOW });
 
     // relax should succeed even for the last rule.

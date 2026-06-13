@@ -1,0 +1,41 @@
+# Discipline rules — do not hand-delete.
+# The four entries below are hand-seeded reviewer criteria (Story native:01KTZ7TAR2W5KDYY9Y4CX1P21R).
+# They carry criterion_name / criterion_check / criterion_anti overrides so that regenerating
+# docs/standards.md from this registry reproduces the hand-authored wording byte-for-byte.
+rules:
+  # The diff implements only what the story's ACs require — no scope creep.
+  - id: 01KTZDPZ5RXA5XENR9WS32797W
+    text: The PR's diff implements only what the story's acceptance criteria require.
+    target_failure_class: story-aligned
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: story-aligned
+    criterion_check: "Map each diff hunk to one or more ACs; flag any hunk that maps to none."
+    criterion_anti: "Scope creep: refactors or rewrites that the story did not request."
+  # Every AC has at least one assertion that fails when the behaviour is removed.
+  - id: 01KTZDPZ5TCJHM4PM6JH7WRHYP
+    text: Every AC has at least one assertion in the test suite that fails when the AC behaviour is removed.
+    target_failure_class: tests-cover-acs
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: tests-cover-acs
+    criterion_check: "Inspect the new/changed test files; trace each AC to a named test."
+    criterion_anti: "Tests that only exercise happy paths without asserting the AC's specific behaviour."
+  # Canonical-state paths may only be written through MCP tools.
+  - id: 01KTZDPZ5TXX3HYAESH5523RA3
+    text: No code path writes to canonical-state paths (manifests, personas, registry, telemetry) except through MCP tools.
+    target_failure_class: no-canonical-fs-writes-outside-mcp
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: no-canonical-fs-writes-outside-mcp
+    criterion_check: "Grep the diff for raw fs.writeFile/fs.writeFileSync; any hit under a canonical path is a fail."
+    criterion_anti: "Direct fs.write to .flow/state, telemetry, or docs/standards.md."
+  # Every named failure mode must throw a DomainError subclass.
+  - id: 01KTZDPZ5T3BC966K28E8J62MC
+    text: Every named failure mode in the diff throws a DomainError subclass; uncaught throws are bugs.
+    target_failure_class: errors-are-typed
+    introduced_at: "2026-05-27T00:00:00.000Z"
+    level: must
+    criterion_name: errors-are-typed
+    criterion_check: "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message."
+    criterion_anti: "throw new Error('...') or returning {error: '...'} envelopes for known failures."
