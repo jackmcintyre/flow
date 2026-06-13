@@ -26,6 +26,7 @@ import {
   validateBacklogAgainstDiscipline,
   validateStoryAgainstDiscipline,
 } from "../validators/planning-discipline.js";
+import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -39,6 +40,22 @@ const PendingStoryInputSchema = z.object({
       z.object({
         text: z.string().min(1),
         kind: z.enum(["integration", "unit"]),
+        /**
+         * OPTIONAL — mirrors the enriched `verification` field from
+         * `writeNativeStory`. When present, the pre-submit check engages the
+         * shared resolvability checker (T0-6) against this target.
+         * `vitest:` targets are shape-checked but NOT existence-checked (the
+         * build creates the test file). `artifact:` targets must resolve on disk.
+         *
+         * Absent on a legacy planning batch — keeping it optional ensures a
+         * batch with neither field validates exactly as it does today.
+         */
+        verification: z
+          .object({
+            type: z.enum(["vitest", "artifact"]),
+            target: z.string().min(1),
+          })
+          .optional(),
       }),
     )
     .min(1),
@@ -51,6 +68,16 @@ const PendingStoryInputSchema = z.object({
    * `false` — suppress heuristic (operator dismissed a false positive).
    */
   state_mutating: z.union([z.boolean(), z.literal("auto")]),
+  /**
+   * OPTIONAL — mirrors the enriched `cited_sources` field from
+   * `writeNativeStory`. When present and non-empty, the pre-submit check runs
+   * the shared resolvability checker (T0-5) to verify each path resolves on
+   * disk.
+   *
+   * Absent on a legacy planning batch — keeping it optional ensures a batch
+   * with neither field validates exactly as it does today.
+   */
+  cited_sources: z.array(z.string().min(1)).optional(),
 });
 
 type PendingStoryInput = z.infer<typeof PendingStoryInputSchema>;
@@ -75,21 +102,65 @@ export type ValidatePlannerBacklogOutput =
 // Synthesise SourceStory from PendingStoryInput
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a pending story carries enriched fields (cited_sources and/or any
+ * per-AC verification). When true, the pre-submit check engages the shared
+ * resolvability pass in addition to the existing pure discipline rules.
+ */
+function hasEnrichedFields(pending: PendingStoryInput): boolean {
+  if (pending.cited_sources && pending.cited_sources.length > 0) return true;
+  return pending.acceptance_criteria.some((ac) => ac.verification !== undefined);
+}
+
+/**
+ * Synthesise a `SourceStory` from a pending input for the PURE discipline
+ * validator (`validateStoryAgainstDiscipline`).
+ *
+ * Uses a `pending:<n>` ref — deliberately NOT `native:` — so the Tier-0 §3
+ * checks (T0-1/T0-2, gated to `isEnrichedStory`) do NOT fire here. The
+ * pending schema carries neither `tasks` (T0-1) nor the full enriched field
+ * set that T0-2 would require; those checks run at `writeNativeStory` time.
+ * Running §3 here would falsely block every pre-write batch.
+ */
 function pendingToSourceStory(pending: PendingStoryInput, index: number): SourceStory {
   return {
-    // A `pending:<n>` pseudo-ref — deliberately NOT `native:` so the Story 10.3
-    // Tier-0 §3 checks (T0-1/T0-2, gated to native/enriched stories via
-    // `isEnrichedStory`) do NOT fire here. This pre-write planning batch carries
-    // only the legacy discipline-rule fields (the PendingStoryInput schema has
-    // no `verification`/`tasks`/`cited_sources`); the §3 fields are present and
-    // enforced at `writeNativeStory` (which builds a real `native:` ref from the
-    // enriched input). Running §3 here would falsely block every pre-write batch.
     ref: `pending:${index}`,
     title: pending.title,
     narrative: pending.narrative,
     acceptance_criteria: pending.acceptance_criteria,
     depends_on: pending.depends_on,
     implementation_notes: pending.implementation_notes,
+    raw_path: "",
+    raw_frontmatter: { ship_gate: pending.ship_gate },
+    source_hash: "",
+  };
+}
+
+/**
+ * Synthesise a `SourceStory` from an enriched pending input for the DISK-SIDE
+ * resolvability validator (`resolveDisciplinePaths`).
+ *
+ * Uses a `native:pending:<n>` ref so `isEnrichedStory` returns `true` and
+ * `resolveDisciplinePaths` actually runs the T0-5/T0-6 checks. Without the
+ * `native:` prefix the resolvability pass silently returns `[]` — the key
+ * gotcha the story's implementation notes call out.
+ *
+ * This story is ONLY passed to `resolveDisciplinePaths`, never to
+ * `validateStoryAgainstDiscipline`: the pure validator would fire T0-1
+ * (missing tasks) and T0-2 for any AC lacking a verification block on a
+ * `native:`-prefixed story, producing false positives for fields that the
+ * pending schema intentionally omits (tasks are not present at plan time;
+ * ACs without verification are still valid at pre-submit time).
+ */
+function pendingToEnrichedSourceStory(pending: PendingStoryInput, index: number): SourceStory {
+  return {
+    ref: `native:pending:${index}`,
+    title: pending.title,
+    narrative: pending.narrative,
+    acceptance_criteria: pending.acceptance_criteria,
+    depends_on: pending.depends_on,
+    implementation_notes: pending.implementation_notes,
+    cited_sources: pending.cited_sources,
     raw_path: "",
     raw_frontmatter: { ship_gate: pending.ship_gate },
     source_hash: "",
@@ -144,6 +215,31 @@ export async function validatePlannerBacklog(
 
     if ("kind" in result && result.kind === "discipline-violation") {
       allViolations.push(result);
+    }
+
+    // Resolvability pass — only when the pending story carries enriched fields
+    // (cited_sources and/or per-AC verification). The shared `resolveDisciplinePaths`
+    // implementation is the SAME one the save gate (`writeNativeStory`) calls, so
+    // both gates enforce identically (AC3 parity guarantee).
+    //
+    // IMPORTANT: `resolveDisciplinePaths` gates on `isEnrichedStory`, which
+    // checks the `native:` ref prefix. We synthesise a SEPARATE enriched story
+    // under a `native:pending:<n>` ref for this call. We do NOT pass this
+    // enriched story to `validateStoryAgainstDiscipline` — the pure validator
+    // would fire T0-1 (no tasks) and T0-2 (ACs without verification) producing
+    // false positives for fields the pending schema intentionally omits.
+    if (hasEnrichedFields(pending)) {
+      const enrichedStory = pendingToEnrichedSourceStory(pending, i);
+      const resolvabilityReasons = await resolveDisciplinePaths(enrichedStory, targetRepoRoot);
+      if (resolvabilityReasons.length > 0) {
+        // Merge resolvability violations into a DisciplineViolation envelope for
+        // this story, matching the shape the pure validator produces.
+        allViolations.push({
+          kind: "discipline-violation",
+          ref: enrichedStory.ref,
+          violations: resolvabilityReasons,
+        });
+      }
     }
   }
 

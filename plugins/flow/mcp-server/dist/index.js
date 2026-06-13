@@ -50923,7 +50923,21 @@ var PendingStoryInputSchema = external_exports.object({
   acceptance_criteria: external_exports.array(
     external_exports.object({
       text: external_exports.string().min(1),
-      kind: external_exports.enum(["integration", "unit"])
+      kind: external_exports.enum(["integration", "unit"]),
+      /**
+       * OPTIONAL — mirrors the enriched `verification` field from
+       * `writeNativeStory`. When present, the pre-submit check engages the
+       * shared resolvability checker (T0-6) against this target.
+       * `vitest:` targets are shape-checked but NOT existence-checked (the
+       * build creates the test file). `artifact:` targets must resolve on disk.
+       *
+       * Absent on a legacy planning batch — keeping it optional ensures a
+       * batch with neither field validates exactly as it does today.
+       */
+      verification: external_exports.object({
+        type: external_exports.enum(["vitest", "artifact"]),
+        target: external_exports.string().min(1)
+      }).optional()
     })
   ).min(1),
   implementation_notes: external_exports.string().optional(),
@@ -50934,7 +50948,17 @@ var PendingStoryInputSchema = external_exports.object({
    * `true` — force state-mutating treatment (operator-declared exception).
    * `false` — suppress heuristic (operator dismissed a false positive).
    */
-  state_mutating: external_exports.union([external_exports.boolean(), external_exports.literal("auto")])
+  state_mutating: external_exports.union([external_exports.boolean(), external_exports.literal("auto")]),
+  /**
+   * OPTIONAL — mirrors the enriched `cited_sources` field from
+   * `writeNativeStory`. When present and non-empty, the pre-submit check runs
+   * the shared resolvability checker (T0-5) to verify each path resolves on
+   * disk.
+   *
+   * Absent on a legacy planning batch — keeping it optional ensures a batch
+   * with neither field validates exactly as it does today.
+   */
+  cited_sources: external_exports.array(external_exports.string().min(1)).optional()
 });
 var ValidatePlannerBacklogInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
@@ -50942,21 +50966,32 @@ var ValidatePlannerBacklogInputSchema = external_exports.object({
     message: "pendingStories must contain at least one story. Calling with an empty batch is a caller bug."
   })
 });
+function hasEnrichedFields(pending) {
+  if (pending.cited_sources && pending.cited_sources.length > 0) return true;
+  return pending.acceptance_criteria.some((ac) => ac.verification !== void 0);
+}
 function pendingToSourceStory(pending, index) {
   return {
-    // A `pending:<n>` pseudo-ref — deliberately NOT `native:` so the Story 10.3
-    // Tier-0 §3 checks (T0-1/T0-2, gated to native/enriched stories via
-    // `isEnrichedStory`) do NOT fire here. This pre-write planning batch carries
-    // only the legacy discipline-rule fields (the PendingStoryInput schema has
-    // no `verification`/`tasks`/`cited_sources`); the §3 fields are present and
-    // enforced at `writeNativeStory` (which builds a real `native:` ref from the
-    // enriched input). Running §3 here would falsely block every pre-write batch.
     ref: `pending:${index}`,
     title: pending.title,
     narrative: pending.narrative,
     acceptance_criteria: pending.acceptance_criteria,
     depends_on: pending.depends_on,
     implementation_notes: pending.implementation_notes,
+    raw_path: "",
+    raw_frontmatter: { ship_gate: pending.ship_gate },
+    source_hash: ""
+  };
+}
+function pendingToEnrichedSourceStory(pending, index) {
+  return {
+    ref: `native:pending:${index}`,
+    title: pending.title,
+    narrative: pending.narrative,
+    acceptance_criteria: pending.acceptance_criteria,
+    depends_on: pending.depends_on,
+    implementation_notes: pending.implementation_notes,
+    cited_sources: pending.cited_sources,
     raw_path: "",
     raw_frontmatter: { ship_gate: pending.ship_gate },
     source_hash: ""
@@ -50987,6 +51022,17 @@ async function validatePlannerBacklog(rawInput) {
     });
     if ("kind" in result && result.kind === "discipline-violation") {
       allViolations.push(result);
+    }
+    if (hasEnrichedFields(pending)) {
+      const enrichedStory = pendingToEnrichedSourceStory(pending, i2);
+      const resolvabilityReasons = await resolveDisciplinePaths(enrichedStory, targetRepoRoot);
+      if (resolvabilityReasons.length > 0) {
+        allViolations.push({
+          kind: "discipline-violation",
+          ref: enrichedStory.ref,
+          violations: resolvabilityReasons
+        });
+      }
     }
   }
   let existingStories = [];
