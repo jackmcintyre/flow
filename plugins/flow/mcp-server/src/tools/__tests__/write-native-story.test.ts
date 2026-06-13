@@ -583,3 +583,98 @@ describe("writeNativeStory AC4 (Story 10.3) — writable-time Tier-0 gate", () =
     expect(await listStoryFiles()).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KTZGJ68HE6Z66A50BV7N6BJZ AC3 — retro-finding author seam:
+// the fail-closed boundary holds for a story drafted from a retro finding.
+//
+// A confirmed finding whose drafted story would violate the discipline gate
+// is refused by writeNativeStory with DisciplineViolationError surfaced to
+// the operator — nothing malformed lands in the backlog — and the refusal
+// path is the gate working, not a tool failure. The retro-analyst permission
+// surface MUST NOT include writeNativeStory (asserted in retro-skill.test.ts).
+// ---------------------------------------------------------------------------
+
+describe("writeNativeStory AC3 (Story native:01KTZGJ68HE6Z66A50BV7N6BJZ) — retro-finding author seam: gate-violating draft refused, nothing written", () => {
+  it("refuses a retro-finding story that lacks an integration AC and names a state path — DisciplineViolationError and zero files written", async () => {
+    // Simulate the author subagent drafting a story from a confirmed retro
+    // finding that happens to violate a discipline rule: the story is
+    // state-mutating (references sprint-status.yaml in the narrative) but
+    // provides only a unit AC. The gate must refuse it.
+    let caught: unknown;
+    try {
+      await writeNativeStory({
+        targetRepoRoot: root,
+        title: "Queue a retro finding as a backlog story",
+        narrative: {
+          role: "operator reviewing the retrospective",
+          want: "a confirmed retro finding written to sprint-status.yaml as a story",
+          so_that: "recurring problems become gated work items",
+        },
+        acceptance_criteria: [
+          {
+            // Unit AC only — state-mutating story without an integration AC
+            // violates the `missing-integration-ac` discipline rule.
+            text: "**Given** a confirmed retro finding, **When** queued, **Then** a story entry is created in sprint-status.yaml.",
+            kind: "unit",
+            verification: {
+              type: "vitest",
+              target: "src/__tests__/retro-queue.test.ts",
+            },
+          },
+        ],
+        tasks: [
+          { text: "Create the story entry in sprint-status.yaml", ac_refs: ["AC1"] },
+        ],
+        cited_sources: ["src/state/ledger.ts"],
+        depends_on: [],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    // The gate must have fired — DisciplineViolationError, not undefined.
+    expect(caught).toBeInstanceOf(DisciplineViolationError);
+    const codes = (caught as DisciplineViolationError).violations.map((v) => v.code);
+    expect(codes).toContain("missing-integration-ac");
+
+    // Fail-closed: nothing malformed landed in the backlog.
+    expect(await listStoryFiles()).toHaveLength(0);
+  });
+
+  it("writes a retro-finding story that is properly formed (integration AC, no state mutation marker) — baseline positive", async () => {
+    // A well-formed story authored from a retro finding passes the gate.
+    // This is the positive path: the confirmed finding is specific enough
+    // that the author subagent drafted a compliant story.
+    const result = await writeNativeStory({
+      targetRepoRoot: root,
+      title: "Surface retro findings clearly to the operator",
+      narrative: {
+        role: "operator reviewing the retrospective",
+        want: "retro findings presented in plain language with actionable next steps",
+        so_that: "recurring problems become gated work items without hand-writing them",
+      },
+      acceptance_criteria: [
+        {
+          text: "**Given** a completed retro cycle with findings, **When** the operator reviews the summary, **Then** each finding is listed with its type, rationale, and a prompt to queue or skip it as a backlog story.",
+          kind: "integration",
+          verification: {
+            type: "vitest",
+            target: "src/__tests__/retro-author-seam.integration.test.ts",
+          },
+        },
+      ],
+      tasks: [
+        {
+          text: "Render each proposal entry with type, rationale, and a queue/skip prompt",
+          ac_refs: ["AC1"],
+        },
+      ],
+      cited_sources: ["src/state/ledger.ts"],
+      depends_on: [],
+    });
+
+    expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(await listStoryFiles()).toHaveLength(1);
+  });
+});
