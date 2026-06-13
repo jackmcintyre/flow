@@ -27,6 +27,7 @@ import {
   validateStoryAgainstDiscipline,
 } from "../validators/planning-discipline.js";
 import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
+import { DEFAULT_RISK_REASONING } from "./write-native-story.js";
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -78,6 +79,15 @@ const PendingStoryInputSchema = z.object({
    * with neither field validates exactly as it does today.
    */
   cited_sources: z.array(z.string().min(1)).optional(),
+  /**
+   * Story native:01KT7SSYVMJDVFKHK5VB7KBPFR — OPTIONAL at schema level but
+   * validated at runtime: when present, must be non-blank and must differ from
+   * DEFAULT_RISK_REASONING. Absent on a legacy planning batch (keeps backward
+   * compat). When provided and violating, returns a `placeholder-risk`
+   * violation code giving the author a chance to fix before calling
+   * `writeNativeStory`.
+   */
+  risk_reasoning: z.string().optional(),
 });
 
 type PendingStoryInput = z.infer<typeof PendingStoryInputSchema>;
@@ -238,6 +248,32 @@ export async function validatePlannerBacklog(
           kind: "discipline-violation",
           ref: enrichedStory.ref,
           violations: resolvabilityReasons,
+        });
+      }
+    }
+
+    // Story native:01KT7SSYVMJDVFKHK5VB7KBPFR — risk_reasoning pre-write check.
+    // When the author supplies risk_reasoning, validate it is not the default
+    // placeholder. This mirrors the save gate in `writeNativeStory` so the
+    // operator gets an early friendly refusal before calling the write tool.
+    // Only fires when `risk_reasoning` is explicitly supplied (non-undefined),
+    // so legacy batches that omit the field entirely pass unchanged.
+    if (pending.risk_reasoning !== undefined) {
+      const riskText = pending.risk_reasoning.trim();
+      if (riskText.length === 0 || riskText === DEFAULT_RISK_REASONING) {
+        allViolations.push({
+          kind: "discipline-violation",
+          ref: `pending:${i}`,
+          violations: [
+            {
+              code: "placeholder-risk",
+              field: "risk_reasoning",
+              detail:
+                "risk_reasoning is blank or still the default placeholder. " +
+                "Supply a real risk statement naming the highest-risk failure mode " +
+                "and how it is caught.",
+            },
+          ],
         });
       }
     }

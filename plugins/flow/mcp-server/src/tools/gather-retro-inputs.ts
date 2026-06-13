@@ -693,6 +693,11 @@ function buildHardeningStoryInput(
     ],
     depends_on: [],
     sessionUlid: sessionUlid ?? "retro-loop",
+    // Supply a real risk_reasoning so the write gate does not refuse with
+    // placeholder-risk. The highest risk for a hardening story is that the
+    // guard is too narrow and misses the real trigger — caught by the
+    // integration AC asserting the failure is detectable at build or test time.
+    risk_reasoning: `Highest risk: the guard is too narrow and misses the real "${failure_class}" trigger — caught by the integration AC asserting the failure is detectable at build or test time.`,
   };
 }
 

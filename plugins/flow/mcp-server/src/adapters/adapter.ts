@@ -116,7 +116,8 @@ export type DisciplineViolationReason = {
     | "missing-cited-sources"
     | "unresolvable-cited-source"
     | "invalid-verification-target"
-    | "unresolvable-verification-target";
+    | "unresolvable-verification-target"
+    | "placeholder-risk";
   field: string;
   detail: string;
 };

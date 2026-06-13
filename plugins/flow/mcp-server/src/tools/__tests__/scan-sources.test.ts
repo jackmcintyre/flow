@@ -162,6 +162,7 @@ describe("scan-sources Story native:01KT49G9B38NZ2QP16GY843KYK AC3 — idempoten
       tasks: [{ text: "Write the ledger persistence path", ac_refs: ["AC1"] }],
       cited_sources: ["src/state/ledger.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: ledger write silently succeeds but read-back finds stale data — caught by the integration AC round-trip assertion.",
       sessionUlid: SESSION_ULID,
     });
 

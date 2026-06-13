@@ -29002,6 +29002,16 @@ async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author
   const pureResult = validateStoryAgainstDiscipline(candidate);
   const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
   violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
+  if (agent !== "ingest") {
+    const riskText = (input.risk_reasoning ?? "").trim();
+    if (riskText.length === 0 || riskText === DEFAULT_RISK_REASONING) {
+      violations.push({
+        code: "placeholder-risk",
+        field: "risk_reasoning",
+        detail: `risk_reasoning is absent or still the default placeholder. Supply a real risk statement naming the highest-risk failure mode and how it is caught. Placeholder text: "${DEFAULT_RISK_REASONING}"`
+      });
+    }
+  }
   if (violations.length > 0) {
     await emitFriction({
       targetRepoRoot,
@@ -29433,7 +29443,12 @@ function buildHardeningStoryInput(failure_class, recurrence_count, targetRepoRoo
       "plugins/flow/mcp-server/src/tools/gather-retro-inputs.ts"
     ],
     depends_on: [],
-    sessionUlid: sessionUlid ?? "retro-loop"
+    sessionUlid: sessionUlid ?? "retro-loop",
+    // Supply a real risk_reasoning so the write gate does not refuse with
+    // placeholder-risk. The highest risk for a hardening story is that the
+    // guard is too narrow and misses the real trigger — caught by the
+    // integration AC asserting the failure is detectable at build or test time.
+    risk_reasoning: `Highest risk: the guard is too narrow and misses the real "${failure_class}" trigger \u2014 caught by the integration AC asserting the failure is detectable at build or test time.`
   };
 }
 function computeRecurringFriction(events) {

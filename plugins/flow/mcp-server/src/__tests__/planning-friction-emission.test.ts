@@ -131,6 +131,7 @@ function makeValidStoryInput(root: string, sessionUlid?: string): WriteNativeSto
     tasks: [{ text: "Render the greeting component", ac_refs: ["AC1"] }],
     cited_sources: ["src/ui/greeting.ts"],
     depends_on: [],
+    risk_reasoning: "Highest risk: greeting text is blank — caught by the unit AC assertion.",
     sessionUlid,
   };
 }

@@ -114,6 +114,7 @@ describe("AC4(a) — native add with existing backlog", () => {
       tasks: [{ text: "Build the new feature", ac_refs: ["AC1"] }],
       cited_sources: ["src/new-feature.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: the feature deploys but is inaccessible — caught by the integration AC user-access assertion.",
     });
 
     expect(result.ref).toMatch(/^native:[0-9A-Z]{26}$/);
@@ -161,6 +162,7 @@ describe("AC4(b) — native edit-pending rewrites a to-do story", () => {
       tasks: [{ text: "Build the edited feature", ac_refs: ["AC1"] }],
       cited_sources: ["src/edited-feature.ts"],
       depends_on: [oldRef],
+      risk_reasoning: "Highest risk: edit overwrites the original file — caught by asserting original bytes unchanged after write.",
     });
 
     // A NEW file is created (new ULID).
@@ -223,6 +225,7 @@ describe("AC4(c) — native discard: revert/deprecate story appears, originals u
       tasks: [{ text: "Remove the feature and its tests", ac_refs: ["AC1"] }],
       cited_sources: ["src/done-feature.ts"],
       depends_on: [originalRef],
+      risk_reasoning: "Highest risk: revert removes the wrong feature — caught by the integration AC asserting the target feature is absent post-deploy.",
     });
 
     // New revert story file has the revert/deprecate: title prefix.
