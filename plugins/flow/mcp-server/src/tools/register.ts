@@ -62,6 +62,7 @@ import { classifyStoryLane } from "./classify-story-lane.js";
 import { resolveJudgePlan } from "./resolve-judge-plan.js";
 import { resolveBuildPlan } from "./resolve-build-plan.js";
 import { summariseRetroProposal } from "./summarise-retro-proposal.js";
+import { discardDraft } from "./discard-draft.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2783,6 +2784,59 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
                 text: JSON.stringify({ error: err.name, message: err.message }),
               },
             ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — discardDraft: first-class discard
+  // of an un-built parked native draft (AC1–AC4). Removes BOTH the to-do/
+  // execution manifest AND the underlying .flow/native-stories/<ULID>.md source
+  // file in one guarded action so a later projection pass cannot re-materialise
+  // the item. Refuses anything that is not an un-claimed, un-withdrawn native
+  // to-do draft with the typed NotAnEligibleDraftError. Already-absent refs
+  // are a clean no-op (idempotent). Used by the /flow:ready skill's discard
+  // action (AC4) — the skill calls this tool and never touches files itself.
+  server.registerTool({
+    name: "discardDraft",
+    description:
+      "Discard an un-claimed native draft parked in the backlog " +
+      "(Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB). Removes BOTH the to-do/ execution " +
+      "manifest AND the underlying .flow/native-stories/<ULID>.md source draft in one " +
+      "guarded action, so a later scanSources pass cannot re-materialise the item. " +
+      "Refuses with NotAnEligibleDraftError when the ref is claimed/in-progress/done/" +
+      "blocked (not-in-to-do), already withdrawn, belongs to a non-native adapter " +
+      "(wrong-adapter), or does not exist AND is not just absent (not-found). " +
+      "When the ref is absent from every state directory the action is a clean no-op " +
+      "(returns { removed:false, noop:true }) — idempotent on double-call. " +
+      "Used by the /flow:ready skill; the skill never deletes files or runs git itself.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+      },
+      required: ["targetRepoRoot", "ref"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            ref: z.string().min(1),
+          })
+          .parse(args);
+        const result = await discardDraft(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
             isError: true,
           };
         }

@@ -627,7 +627,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("resolveBuildPlan");
       // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 53 → 54.
       expect(toolNames).toContain("summariseRetroProposal");
-      expect(toolNames.length).toBe(54);
+      // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 54 → 55.
+      expect(toolNames).toContain("discardDraft");
+      expect(toolNames.length).toBe(55);
     } finally {
       await client.close();
       await server.close();

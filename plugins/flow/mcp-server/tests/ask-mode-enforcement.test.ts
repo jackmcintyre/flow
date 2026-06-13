@@ -462,7 +462,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver) = 52 total.
       // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver) = 53 total.
       // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary) = 54 total.
-      expect(result.tools.length, "expected exactly 54 tools").toBe(54);
+      // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft) = 55 total.
+      expect(result.tools.length, "expected exactly 55 tools").toBe(55);
     } finally {
       await client.close();
       await server.close();
