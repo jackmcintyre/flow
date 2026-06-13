@@ -120,17 +120,10 @@ export async function markStoryReady(
   }
 
   // Step 4b: Re-verify the manifest is still in to-do/ immediately before the
-  // write — closing the TOCTOU window where claimNextStory can move the
-  // manifest to in-progress/ between our Step-1 scan (above) and the write
-  // below.  If the file has disappeared from foundAbsPath the claim beat us;
-  // abort without writing so the run's in-progress copy is the only copy.
-  //
-  // Note: there is a residual sub-millisecond race between this re-stat and
-  // atomicWriteFile below.  The re-stat shrinks the window dramatically; the
-  // full elimination would require routing the flip through the state-machine's
-  // rename-conditioned write, which is deferred because the current tool writes
-  // in-place (no directory move).  For the interim fix the re-stat is the
-  // minimum safe guard.
+  // write — cheaply rejecting the common case where claimNextStory has ALREADY
+  // moved the manifest to in-progress/ between our Step-1 scan (above) and here.
+  // If the file has disappeared from foundAbsPath the claim beat us; abort
+  // without writing so the run's in-progress copy is the only copy.
   try {
     await fs.stat(foundAbsPath);
   } catch {
@@ -144,6 +137,30 @@ export async function markStoryReady(
   const updated: ExecutionManifest = { ...manifest, ready };
   const yamlText = serialiseManifest(updated);
   await atomicWriteFile(foundAbsPath, yamlText);
+
+  // Step 5b: Compensating single-copy guard — closes the residual race the
+  // Step-4b re-stat cannot. A claim that renames to-do/ -> in-progress/ DURING
+  // atomicWriteFile's own tmp->dest rename leaves a transient DUPLICATE, because
+  // atomicWriteFile unconditionally (re)creates the to-do/ copy from the tmp
+  // file regardless of whether the original was renamed away mid-write. That
+  // interleaving is the ~20% flake in mark-story-ready.concurrency.test.ts. So
+  // AFTER the write, if the ref now ALSO exists in any non-to-do state dir, a
+  // concurrent claim won the race: delete the to-do/ copy we just (re)created so
+  // the claimed copy is the only one, and report the loss exactly as the Step-4b
+  // path does. This only ever removes OUR own just-written to-do/ file; it never
+  // touches the claimed copy's contents, and it never fires the telemetry event
+  // below (the flip did not durably take — the story was claimed, not approved).
+  for (const stateName of STATE_NAMES) {
+    if (stateName === "to-do") continue;
+    try {
+      await fs.stat(path.join(stateRoot, stateName, `${ref}.yaml`));
+    } catch {
+      continue; // ref not in this state dir — keep scanning
+    }
+    // A non-to-do copy exists: the claim won. Remove our recreated to-do/ copy.
+    await fs.rm(foundAbsPath, { force: true });
+    throw new NotAnEligibleBacklogItemError({ ref, foundState: stateName, reason: "not-in-to-do" });
+  }
 
   // Step 6: Emit exactly one readiness-change telemetry event (real toggle only).
   await logTelemetryEvent({
