@@ -94,17 +94,25 @@ async function killProcess(child: ChildProcessWithoutNullStreams): Promise<void>
 }
 
 /**
- * Wait until the sentinel counter reaches `targetCount`, up to `timeoutMs`.
- * Attach this listener right after spawning — no events are dropped.
+ * Generic event-driven line-counter: attaches a `data` listener to a process's
+ * stdout immediately after spawn (so no events are dropped), counts every
+ * occurrence of `pattern` across all received chunks, and resolves `waitFor(n)`
+ * as soon as the running count reaches `n` — or resolves `false` after
+ * `timeoutMs` if the count never reaches `n`.
+ *
+ * Used for both the tsc success-sentinel and the normaliser-done signal so the
+ * two waiters share identical retry / timeout mechanics with different patterns.
  */
-function createSentinelWaiter(child: ChildProcessWithoutNullStreams) {
+function createPatternWaiter(child: ChildProcessWithoutNullStreams, pattern: RegExp) {
+  // Ensure the regex has the global flag so match() returns all occurrences in a chunk.
+  const globalRe = pattern.flags.includes("g") ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
   let count = 0;
   type Waiter = { target: number; resolve: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> };
   const waiters: Waiter[] = [];
 
   child.stdout.on("data", (buf: Buffer) => {
     const s = buf.toString("utf8");
-    const matches = s.match(new RegExp(SENTINEL_RE.source, "g"));
+    const matches = s.match(globalRe);
     if (matches) {
       count += matches.length;
       for (let i = waiters.length - 1; i >= 0; i--) {
@@ -139,6 +147,14 @@ function createSentinelWaiter(child: ChildProcessWithoutNullStreams) {
 }
 
 /**
+ * Wait until the tsc success-sentinel counter reaches `targetCount`, up to `timeoutMs`.
+ * Attach this listener right after spawning — no events are dropped.
+ */
+function createSentinelWaiter(child: ChildProcessWithoutNullStreams) {
+  return createPatternWaiter(child, SENTINEL_RE);
+}
+
+/**
  * Wait until the normaliser-done counter reaches `targetCount`, up to `timeoutMs`.
  *
  * The watch-and-normalise.mjs wrapper emits "normalise-dist: done\n" to stdout
@@ -150,45 +166,7 @@ function createSentinelWaiter(child: ChildProcessWithoutNullStreams) {
  * so no events are dropped between spawn and the first await.
  */
 function createNormaliserWaiter(child: ChildProcessWithoutNullStreams) {
-  let count = 0;
-  const DONE_RE = /normalise-dist: done/g;
-  type Waiter = { target: number; resolve: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> };
-  const waiters: Waiter[] = [];
-
-  child.stdout.on("data", (buf: Buffer) => {
-    const s = buf.toString("utf8");
-    const matches = s.match(DONE_RE);
-    if (matches) {
-      count += matches.length;
-      for (let i = waiters.length - 1; i >= 0; i--) {
-        const w = waiters[i];
-        if (count >= w.target) {
-          clearTimeout(w.timer);
-          waiters.splice(i, 1);
-          w.resolve(true);
-        }
-      }
-    }
-  });
-
-  return {
-    waitFor(target: number, timeoutMs: number): Promise<boolean> {
-      if (count >= target) return Promise.resolve(true);
-      return new Promise<boolean>((resolve) => {
-        const w: Waiter = {
-          target,
-          resolve,
-          timer: setTimeout(() => {
-            const idx = waiters.indexOf(w);
-            if (idx >= 0) waiters.splice(idx, 1);
-            resolve(false);
-          }, timeoutMs),
-        };
-        waiters.push(w);
-      });
-    },
-    getCount() { return count; },
-  };
+  return createPatternWaiter(child, /normalise-dist: done/);
 }
 
 /**
