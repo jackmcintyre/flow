@@ -137,6 +137,16 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC1, AC2, AC3, AC5 — write-native-story.ts enforcement
+//
+// The outer describe name matches the reviewer's vitest testNameFilter so that
+// `pnpm vitest --run -t "plugins/flow/mcp-server/src/tools/write-native-story.ts"`
+// selects these tests.
+// ---------------------------------------------------------------------------
+
+describe("plugins/flow/mcp-server/src/tools/write-native-story.ts — risk_reasoning enforcement", () => {
+
+// ---------------------------------------------------------------------------
 // AC1 — write tool refuses absent or placeholder risk_reasoning
 // ---------------------------------------------------------------------------
 
@@ -287,6 +297,18 @@ describe("AC3 — two violations accumulate into one DisciplineViolationError", 
   });
 });
 
+}); // end: plugins/flow/mcp-server/src/tools/write-native-story.ts
+
+// ---------------------------------------------------------------------------
+// AC4 — validate-planner-backlog.ts enforcement
+//
+// The outer describe name matches the reviewer's vitest testNameFilter so that
+// `pnpm vitest --run -t "plugins/flow/mcp-server/src/tools/validate-planner-backlog.ts"`
+// selects these tests.
+// ---------------------------------------------------------------------------
+
+describe("plugins/flow/mcp-server/src/tools/validate-planner-backlog.ts — risk_reasoning enforcement", () => {
+
 // ---------------------------------------------------------------------------
 // AC4 — validatePlannerBacklog surfaces placeholder-risk before write
 // ---------------------------------------------------------------------------
@@ -382,6 +404,18 @@ describe("AC4 — validatePlannerBacklog surfaces placeholder-risk violation bef
   });
 });
 
+}); // end: plugins/flow/mcp-server/src/tools/validate-planner-backlog.ts
+
+// ---------------------------------------------------------------------------
+// AC5 — write-native-story.ts enforcement (BMad ingest seam exemption)
+//
+// The outer describe name matches the reviewer's vitest testNameFilter so that
+// `pnpm vitest --run -t "plugins/flow/mcp-server/src/tools/write-native-story.ts"`
+// selects this test.
+// ---------------------------------------------------------------------------
+
+describe("plugins/flow/mcp-server/src/tools/write-native-story.ts — BMad ingest seam exemption", () => {
+
 // ---------------------------------------------------------------------------
 // AC5 — BMad→native ingest seam is exempt from risk_reasoning enforcement
 // ---------------------------------------------------------------------------
@@ -461,3 +495,5 @@ describe("AC5 — BMad→native ingest seam is exempt from risk_reasoning enforc
     await expect(fs.stat(writtenPath)).resolves.toBeTruthy();
   });
 });
+
+}); // end: plugins/flow/mcp-server/src/tools/write-native-story.ts — BMad ingest seam exemption
