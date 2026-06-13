@@ -112,7 +112,21 @@ const J = (o) => JSON.stringify(o)
 // success). The guard lives HERE, gated on this flag, rather than around
 // processStory: wrapping processStory would also swallow load-bearing failures
 // and reintroduce silent-success, which is exactly what this story forbids.
-const seam = async (cmd, label, retryable = false, swallow = false) => {
+//
+// `modelOverride` (2026-06-13 drain-startup fix): forces a specific courier model,
+// bypassing the read-only/mutating Haiku/Sonnet default. The default tiering assumes
+// every relayed payload is a SMALL JSON line, so a garble just re-invokes cheaply.
+// That assumption breaks for the two persona seams: buildPersonaSpawnPrompt returns
+// the full role system prompt (~2KB+, and it GROWS as the team accrues knowledge/
+// pitfall entries). Haiku could not reliably emit a payload that large through the
+// StructuredOutput tool — it degraded to printing the answer as plain TEXT instead of
+// calling the tool, three times, so the agent() call threw and (this seam not being a
+// swallow seam) killed the whole drain at startup before any story was claimed.
+// Routing the persona seams to Opus — the most reliable at both tool-calling discipline
+// and verbatim reproduction of a large string — removes that failure mode. It is the
+// only large verbatim relay in the drain and runs exactly twice per run (at startup),
+// so the cost is immaterial. The small read-only seams stay on Haiku.
+const seam = async (cmd, label, retryable = false, swallow = false, modelOverride = null) => {
   const attempts = retryable ? 3 : 1
   let parsed = { _parseError: 'agent-null' }
   for (let a = 0; a < attempts; a++) {
@@ -122,7 +136,7 @@ const seam = async (cmd, label, retryable = false, swallow = false) => {
         `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
           `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
           `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-        { schema: RawSchema, label, phase: 'drain', model: retryable ? 'haiku' : 'sonnet' },
+        { schema: RawSchema, label, phase: 'drain', model: modelOverride || (retryable ? 'haiku' : 'sonnet') },
       )
     } catch (e) {
       // HARD rejection of the courier call. For an observability seam we degrade
@@ -225,8 +239,12 @@ log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded
 // The reviewer persona is fetched up-front too so a crash-resume that skips dev
 // can still drive the review (it is exactly the prompt processDevTranscript
 // would otherwise hand back — just the persona system prompt, no story context).
-const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true))?.systemPrompt || ''
-const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:reviewer', true))?.systemPrompt || ''
+// The persona payload is the only LARGE verbatim relay in the drain (the full role
+// system prompt, which grows as the team accrues knowledge entries). Haiku could not
+// reliably hand it back through StructuredOutput (it degraded to plain text and threw,
+// killing the run at startup), so these two seams force Opus — see the seam() doc.
+const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true, false, 'opus'))?.systemPrompt || ''
+const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:reviewer', true, false, 'opus'))?.systemPrompt || ''
 // FAIL LOUD on an empty persona (finding D5). A seam error or a missing
 // systemPrompt would otherwise let every story spawn dev/reviewer with NO
 // discipline rules — silently dropping the evidence-only contract these prompts
