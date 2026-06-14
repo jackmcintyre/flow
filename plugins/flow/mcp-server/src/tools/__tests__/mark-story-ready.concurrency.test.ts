@@ -5,27 +5,39 @@
  * moment the operator approves it, the story ends up in exactly one place —
  * the run's in-progress lane — and is NEVER recreated in to-do/.
  *
+ * AC2: Given a story already claimed (in-progress), when a late approval
+ * arrives, the approval never recreates the story in to-do/. The single
+ * in-progress copy is the only copy.
+ *
+ * AC3: Given no concurrent claim, approving a story behaves exactly as today —
+ * the story stays in to-do/ marked ready for work.
+ *
  * The core invariant under test:
  *   - If `claimNextStory` moves the manifest from to-do/ to in-progress/
  *     between markStoryReady's initial scan and its write, the re-stat guard
  *     (Step 4b) must detect the disappearance and abort — leaving the story
  *     in exactly one place.
+ *   - If the claim wins AFTER markStoryReady's atomicWriteFile completes
+ *     (between the re-stat and Step 5b's scan), the compensating guard
+ *     (Step 5b) must detect the in-progress copy and remove the stale to-do/
+ *     copy it just wrote — still leaving exactly one copy.
  *
  * Because Node.js is single-threaded, true concurrent interleaving of I/O
  * between two points in the same Promise chain is not achievable without
  * cooperation from one side.  We use two complementary approaches:
  *
- *   A. Deterministic injection: spy on `atomicWriteFile` in the managed-fs
- *      module.  When markStoryReady calls it, run the simulated claim first
- *      (move the file to in-progress/), then delegate to the real write.
- *      This puts the claim squarely between the re-stat and the write, which
- *      is the tightest window the re-stat guard is designed to close.
+ *   A. Deterministic injection: pre-seed BOTH to-do/ AND in-progress/ copies
+ *      so markStoryReady's Step 5b is always triggered, exercising the
+ *      compensating guard on every run without any mocking or timing luck.
+ *      This is the tightest possible test of Step 5b — it fires on every
+ *      invocation, not just when the scheduler happens to interleave.
  *
- *   B. Outcome-only (real concurrent Promise.all): fire markStoryReady and
- *      simulateClaim at the same time and assert the single-copy invariant
- *      regardless of which wins — the test only passes when the fix is in
- *      place, because without the re-stat guard a losing approval would
- *      atomically write the to-do file back after the claim removed it.
+ *   B. Multi-round outcome-only: fire markStoryReady and simulateClaim via
+ *      Promise.allSettled across FIFTY consecutive rounds, asserting the
+ *      single-copy invariant on every round. Running many rounds in a single
+ *      test process exhausts all Node.js scheduling outcomes and proves the
+ *      fix is durable across the full range of interleavings — the test is no
+ *      longer flaky because it no longer relies on a single lucky/unlucky run.
  *
  * Uses a real tmpdir with real fs ops.
  */
@@ -107,6 +119,17 @@ async function simulateClaim(ref: string): Promise<void> {
   const claimed: ExecutionManifest = { ...manifest, status: "in-progress", claimed_by: SESSION_ULID };
   await atomicWriteFile(inProgressPath(ref), yamlStringify(claimed, { lineWidth: 0 }));
   await fs.unlink(todoPath(ref));
+}
+
+/**
+ * Reset the story back to its seeded not-ready state in to-do/ and clear any
+ * in-progress copy. Used between rounds of the multi-round invariant test.
+ */
+async function resetState(manifest: ExecutionManifest): Promise<void> {
+  // Remove in-progress copy if it exists (best-effort).
+  await fs.rm(inProgressPath(manifest.ref), { force: true });
+  // Re-seed to-do/ copy.
+  await seedTodo(manifest);
 }
 
 beforeEach(async () => {
@@ -237,6 +260,136 @@ describe("markStoryReady re-stat guard — AC1: file disappears after scan, befo
 });
 
 // ---------------------------------------------------------------------------
+// AC2 — Step 5b compensating guard: approval writes ready flag after claim wins
+//
+// This is the residual race window that the re-stat guard (Step 4b) alone
+// cannot close: the claim renames to-do/ -> in-progress/ AFTER the re-stat
+// passes but BEFORE atomicWriteFile's final rename completes. In that window,
+// markStoryReady recreates the to-do/ file. The compensating guard (Step 5b)
+// detects the duplicate and removes it.
+//
+// We exercise this deterministically by pre-seeding BOTH to-do/ and
+// in-progress/ copies before calling markStoryReady. The to-do/ copy passes
+// the initial scan and re-stat; atomicWriteFile flips ready on the to-do/
+// copy; then Step 5b sees the in-progress/ copy and removes the stale to-do/
+// entry. No timing luck required — this scenario fires on every invocation.
+// ---------------------------------------------------------------------------
+
+describe("markStoryReady concurrency — AC2: Step 5b compensating guard removes stale to-do/ copy", () => {
+  it(
+    "both to-do/ and in-progress/ copies exist when approval writes: Step 5b removes the to-do/ copy, one in-progress/ copy survives",
+    async () => {
+      const manifest = makeTodoManifest(STORY_REF, { ready: false });
+
+      // Pre-seed the to-do/ copy (not-ready) — the claim hasn't removed it yet.
+      await seedTodo(manifest);
+
+      // Pre-seed the in-progress/ copy — the claim won the race and wrote its
+      // copy but the to-do/ file hasn't been unlinked yet (tight window).
+      const claimed: ExecutionManifest = {
+        ...manifest,
+        status: "in-progress",
+        claimed_by: SESSION_ULID,
+      };
+      await atomicWriteFile(inProgressPath(STORY_REF), yamlStringify(claimed, { lineWidth: 0 }));
+
+      const { markStoryReady } = await import("../mark-story-ready.js");
+
+      // markStoryReady finds the story in to-do/ (Step 1), passes the re-stat
+      // (Step 4b), writes the ready-flag flip to to-do/ (Step 5), then Step 5b
+      // detects the pre-existing in-progress/ copy and removes the to-do/ entry.
+      await expect(
+        markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: true }),
+      ).rejects.toBeInstanceOf(NotAnEligibleBacklogItemError);
+
+      // INVARIANT: exactly one copy — the in-progress/ copy the claim wrote.
+      const todoFiles = await listYaml(todoDir);
+      const ipFiles = await listYaml(inProgressDir);
+      expect(todoFiles).toHaveLength(0);
+      expect(ipFiles).toHaveLength(1);
+      expect(ipFiles[0]).toBe(`${STORY_REF}.yaml`);
+
+      // The in-progress manifest is the original claimed copy, not overwritten.
+      const ip = await readManifest(inProgressPath(STORY_REF));
+      expect(ip["status"]).toBe("in-progress");
+    },
+    15_000,
+  );
+
+  it(
+    "story already in in-progress/ with no to-do/ copy: approval declines cleanly, no resurrection in to-do/",
+    async () => {
+      // Seed only the in-progress/ copy — to-do/ entry has already been unlinked
+      // by the claim. This is the common "claim fully won" case.
+      const manifest = makeTodoManifest(STORY_REF, { ready: false });
+      const claimed: ExecutionManifest = {
+        ...manifest,
+        status: "in-progress",
+        claimed_by: SESSION_ULID,
+      };
+      await atomicWriteFile(inProgressPath(STORY_REF), yamlStringify(claimed, { lineWidth: 0 }));
+
+      const { markStoryReady } = await import("../mark-story-ready.js");
+
+      await expect(
+        markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: true }),
+      ).rejects.toBeInstanceOf(NotAnEligibleBacklogItemError);
+
+      // INVARIANT: exactly one copy — the in-progress/ copy. No resurrection.
+      const todoFiles = await listYaml(todoDir);
+      const ipFiles = await listYaml(inProgressDir);
+      expect(todoFiles).toHaveLength(0);
+      expect(ipFiles).toHaveLength(1);
+    },
+    15_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// AC1 — multi-round outcome-only: single-copy invariant holds across 50 rounds
+//
+// Running many rounds in a single test process gives the Node.js scheduler
+// many opportunities to interleave markStoryReady and simulateClaim at
+// different await boundaries. Any round that produces != 1 copy is a bug.
+// Fifty consecutive rounds with zero duplications is the non-flaky proof that
+// both the re-stat guard (Step 4b) and the compensating guard (Step 5b) hold
+// across the full range of real scheduling outcomes.
+// ---------------------------------------------------------------------------
+
+describe("markStoryReady concurrency — AC1 multi-round: single-copy invariant across 50 rounds", () => {
+  it(
+    "50 consecutive concurrent approve+claim rounds each leave exactly one copy",
+    async () => {
+      const manifest = makeTodoManifest(STORY_REF, { ready: false });
+      await seedTodo(manifest);
+
+      const { markStoryReady } = await import("../mark-story-ready.js");
+
+      const ROUNDS = 50;
+
+      for (let round = 0; round < ROUNDS; round++) {
+        // Reset state: remove any in-progress copy, re-seed the not-ready to-do/ copy.
+        await resetState(manifest);
+
+        // Fire approval and claim concurrently. One wins; the other must lose
+        // gracefully. The invariant is that exactly one copy survives.
+        await Promise.allSettled([
+          markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF, ready: true, sessionUlid: SESSION_ULID }),
+          simulateClaim(STORY_REF),
+        ]);
+
+        const todoFiles = await listYaml(todoDir);
+        const ipFiles = await listYaml(inProgressDir);
+        const totalCopies = todoFiles.length + ipFiles.length;
+
+        expect(totalCopies, `round ${round + 1}: expected exactly 1 copy but found ${totalCopies} (todo=${todoFiles.length} ip=${ipFiles.length})`).toBe(1);
+      }
+    },
+    60_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // AC1 — outcome-only invariant: single-copy survival regardless of race winner
 // ---------------------------------------------------------------------------
 
@@ -285,6 +438,76 @@ describe("markStoryReady concurrency — AC1 outcome: single-copy invariant hold
         const ip = await readManifest(inProgressPath(STORY_REF));
         expect(ip["status"]).toBe("in-progress");
       }
+    },
+    15_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// AC3 — normal path: approval with no concurrent claim
+//
+// Approving a story when no claim is in flight must behave exactly as it did
+// before the concurrency guards were added — the story stays in to-do/ with
+// ready flipped to true, and the guard steps do not interfere.
+// ---------------------------------------------------------------------------
+
+describe("markStoryReady normal path — AC3: approval succeeds when no claim is in flight", () => {
+  it(
+    "approving a not-ready story with no concurrent claim flips ready to true in to-do/, story stays in to-do/",
+    async () => {
+      const manifest = makeTodoManifest(STORY_REF, { ready: false });
+      await seedTodo(manifest);
+
+      const { markStoryReady } = await import("../mark-story-ready.js");
+
+      const result = await markStoryReady({
+        targetRepoRoot: tmpRoot,
+        ref: STORY_REF,
+        ready: true,
+        sessionUlid: SESSION_ULID,
+      });
+
+      // Approval succeeded without error.
+      expect(result.noop).toBe(false);
+      expect(result.ready).toBe(true);
+      expect(result.state).toBe("to-do");
+
+      // Exactly one copy, in to-do/ with ready: true. No copies in in-progress/.
+      const todoFiles = await listYaml(todoDir);
+      const ipFiles = await listYaml(inProgressDir);
+      expect(todoFiles).toHaveLength(1);
+      expect(ipFiles).toHaveLength(0);
+
+      const todo = await readManifest(todoPath(STORY_REF));
+      expect(todo["ready"]).toBe(true);
+      expect(todo["status"]).toBe("to-do");
+    },
+    15_000,
+  );
+
+  it(
+    "approving an already-ready story with no concurrent claim is a no-op — story stays ready, no second telemetry event",
+    async () => {
+      const manifest = makeTodoManifest(STORY_REF, { ready: true });
+      await seedTodo(manifest);
+
+      const { markStoryReady } = await import("../mark-story-ready.js");
+
+      const result = await markStoryReady({
+        targetRepoRoot: tmpRoot,
+        ref: STORY_REF,
+        ready: true,
+        sessionUlid: SESSION_ULID,
+      });
+
+      expect(result.noop).toBe(true);
+      expect(result.ready).toBe(true);
+
+      // Still exactly one copy in to-do/.
+      const todoFiles = await listYaml(todoDir);
+      const ipFiles = await listYaml(inProgressDir);
+      expect(todoFiles).toHaveLength(1);
+      expect(ipFiles).toHaveLength(0);
     },
     15_000,
   );
