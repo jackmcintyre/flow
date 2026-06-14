@@ -1,7 +1,7 @@
 ---
 name: flow:retro
 description: "Run the cycle-level retro-analyst over the cycle's done manifests, telemetry, prior proposals, and rule registry to produce one retro-proposal markdown file."
-allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory]
+allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory, openCycle]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/6-2-retro-skill-and-retro-analyst-subagent.md § AC1 -->
@@ -53,30 +53,39 @@ The retro works against **any adapter**. There is no branch on adapter name — 
    c. Render the summary inline to the operator:
       - If `noProposals` is true: "This cycle yielded no recommended changes."
       - Otherwise: list each proposal as "- **\<type\>** (\<id\>): \<rationale\>" and conclude with "Total: \<totalCount\> proposal(s). Proposal file: \<path\>."
-   d. Exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
 
    **Do NOT** relay the summary from the subagent's prose — always call `summariseRetroProposal` on the written file path so the inline summary is derived from the same frontmatter source of truth as the file itself.
 
-6. **Offer to queue fix-worthy proposals as backlog stories (operator-gated).** After rendering the summary (step 5), present the operator with the list of proposals. For each proposal in the summary:
-   - A proposal is **fix-worthy** when its `type` is any concrete change variant (every proposal type in the closed schema is fix-worthy — an empty `proposals` array means nothing warranted a fix, and step 5d already exited).
-   - An empty `proposals` array was already handled in step 5c ("This cycle yielded no recommended changes.") — skip step 6 entirely.
+6. **Advance the cycle (conditional on successful proposal write).** The locked handoff phrase from step 5 (`Handoff to operator — retro proposal ready for review at <path>`) confirms `writeRetroProposal` returned successfully. **Only when that phrase appeared** in the subagent output — call `openCycle({ targetRepoRoot, sessionUlid })` and surface the result to the operator in plain language:
+
+   > Cycle advanced to `<cycleUlid>`, new window opens at `<openedAt>`.
+
+   Where `<cycleUlid>` and `<openedAt>` are the fields returned by `openCycle`.
+
+   **Conditional constraint:** This call is gated strictly on the locked handoff phrase appearing in the subagent output. Do NOT call `openCycle` if the subagent terminated without the handoff phrase (proposal write failed or incomplete) — a failed write must not advance the cycle. Do NOT call `openCycle` inside the retro-analyst subagent itself or inside `writeRetroProposal` — the trigger belongs in this orchestrating skill, after the durable write is confirmed.
+
+   After surfacing the message, exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
+
+7. **Offer to queue fix-worthy proposals as backlog stories (operator-gated).** After rendering the summary (step 5) and advancing the cycle (step 6), present the operator with the list of proposals. For each proposal in the summary:
+   - A proposal is **fix-worthy** when its `type` is any concrete change variant (every proposal type in the closed schema is fix-worthy — an empty `proposals` array means nothing warranted a fix, and step 5c already rendered "no recommended changes").
+   - An empty `proposals` array was already handled in step 5c ("This cycle yielded no recommended changes.") — skip step 7 entirely.
 
    For each fix-worthy proposal, ask the operator a single yes/no question:
 
    > Finding: **\<type\>** (\<id\>): \<rationale\>. Queue this as a backlog story? (yes / no)
 
    - If the operator says **no** (or skips): move on. Do not draft a story.
-   - If the operator says **yes**: proceed to sub-step 6a.
+   - If the operator says **yes**: proceed to sub-step 7a.
 
-   6a. **Build de-dup context.** Call `readBacklogInventory({ targetRepoRoot })` once (you may reuse this result across all proposals in the same retro session). Surface a typed error verbatim and stop if it fires.
+   7a. **Build de-dup context.** Call `readBacklogInventory({ targetRepoRoot })` once (you may reuse this result across all proposals in the same retro session). Surface a typed error verbatim and stop if it fires.
 
-   6b. **Spawn the author subagent** via Claude Code's `Task` tool to draft a story for the confirmed proposal:
+   7b. **Spawn the author subagent** via Claude Code's `Task` tool to draft a story for the confirmed proposal:
    - Read `readCatalogue({ role: "author" })` and use its `Prompt` section verbatim as the `Task` system prompt.
-   - Append an `<initial-context>` block containing: `targetRepoRoot`, a `feature_description` that faithfully translates the retro finding into a plain-language feature request (cite the proposal's `type`, `id`, and `rationale`), and the `backlog_inventory` from step 6a.
+   - Append an `<initial-context>` block containing: `targetRepoRoot`, a `feature_description` that faithfully translates the retro finding into a plain-language feature request (cite the proposal's `type`, `id`, and `rationale`), and the `backlog_inventory` from step 7a.
    - The author subagent calls `writeNativeStory` — it is the ONLY path that may call `writeNativeStory`. **The retro skill itself MUST NOT call `writeNativeStory` directly.** This boundary is load-bearing: the retro-analyst's permission surface excludes `writeNativeStory` and that constraint must not be bypassed.
    - When the author subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, extract the `<ref>` and report it to the operator: "Draft **\<ref\>** queued as not-ready — judge and approve it via `/flow:judge` then `/flow:ready` when ready to build."
 
-   6c. **On a refuse-and-revise from the author:** If the author subagent surfaces a `DisciplineViolationError` (the drafted story violated a discipline rule), relay the violation codes and the revision offer to the operator verbatim. Nothing was written. Offer to retry with a revised framing; do NOT silently re-attempt without operator input.
+   7c. **On a refuse-and-revise from the author:** If the author subagent surfaces a `DisciplineViolationError` (the drafted story violated a discipline rule), relay the violation codes and the revision offer to the operator verbatim. Nothing was written. Offer to retry with a revised framing; do NOT silently re-attempt without operator input.
 
    **Operator-gated diff-then-confirm contract:** Never draft a story silently. The operator must confirm each proposal individually before anything is written to the backlog. One proposal = one confirm = one draft (or none). Do not batch-confirm or assume the operator's intent.
 
