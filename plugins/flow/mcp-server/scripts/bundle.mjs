@@ -26,6 +26,7 @@
  * stay external (they ship with node, so a clean install still resolves them).
  */
 import { build } from "esbuild";
+import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -38,20 +39,25 @@ const OUT_DIR = process.env["CREW_BUNDLE_OUT_DIR"]
   ? path.resolve(process.env["CREW_BUNDLE_OUT_DIR"])
   : path.join(ROOT, "dist");
 
-/** @type {{ entry: string; out: string }[]} */
+/** @type {{ entry: string; out: string; metaOut: string }[]} */
 const ENTRYPOINTS = [
-  { entry: "src/index.ts", out: "index.js" }, // MCP stdio server (plugin.json)
-  { entry: "src/cli.ts", out: "cli.js" }, //     stateless CLI seam (drain)
+  { entry: "src/index.ts", out: "index.js", metaOut: "bundle-meta-index.json" }, // MCP stdio server (plugin.json)
+  { entry: "src/cli.ts", out: "cli.js", metaOut: "bundle-meta-cli.json" }, //     stateless CLI seam (drain)
 ];
 
-for (const { entry, out } of ENTRYPOINTS) {
-  await build({
+for (const { entry, out, metaOut } of ENTRYPOINTS) {
+  const result = await build({
     entryPoints: [path.join(ROOT, entry)],
     outfile: path.join(OUT_DIR, out),
     bundle: true,
     platform: "node",
     format: "esm",
     target: "es2022",
+    // Emit esbuild's dependency graph so bundle-coverage.test.ts can diff it
+    // against the full src/ tree to surface dead modules. The metafile is
+    // written beside the bundle so the same CREW_BUNDLE_OUT_DIR override that
+    // lets the drift test do a temp-dir rebuild also redirects the metafiles.
+    metafile: true,
     // NOT minified — deliberately. Minification mangles class names, and the
     // drain classifies failures on `DomainError.name` (the class name, e.g.
     // `NotAnEligibleBacklogItemError`). A minified bundle returns `name: "un"`,
@@ -74,5 +80,9 @@ for (const { entry, out } of ENTRYPOINTS) {
     },
     logLevel: "warning",
   });
-  console.log(`bundle: ${entry} -> ${out}`);
+  // Write the metafile beside the bundle so bundle-coverage.test.ts can read it.
+  // The metafile records every input file esbuild pulled into the bundle, giving
+  // the coverage check a ground-truth reachable set to diff against src/**/*.ts.
+  await writeFile(path.join(OUT_DIR, metaOut), JSON.stringify(result.metafile));
+  console.log(`bundle: ${entry} -> ${out} (metafile: ${metaOut})`);
 }
