@@ -302,7 +302,11 @@ function makeDiscriminatingStub(opts: DiscriminatingStubOpts = {}) {
 
       if (cmd === "pnpm") {
         return {
-          stdout: opts.vitest?.stdout ?? "",
+          // Default to a realistic passing vitest summary so the zero-executed
+          // guard (fix 01KV43ET) sees ≥1 test actually RAN — exit 0 with empty
+          // output is no longer a pass. Tests that need a specific run shape
+          // (zero-match, failure) override opts.vitest.stdout/exitCode.
+          stdout: opts.vitest?.stdout ?? "\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n",
           stderr: opts.vitest?.stderr ?? "",
           exitCode: opts.vitest?.exitCode ?? 0,
           timedOut: opts.vitest?.timedOut ?? false,
