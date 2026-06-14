@@ -212,8 +212,12 @@ function makeOpts() {
 // (a) READY FOR MERGE — spec §4l
 // ---------------------------------------------------------------------------
 
-describe("(a) READY FOR MERGE → done-ready-for-merge with completeStory side-effect", () => {
-  it("moves manifest to done/, returns completed: true, chatLog has verbatim line", async () => {
+describe("(a) READY FOR MERGE → done-ready-for-merge, manifest STAYS in in-progress/", () => {
+  // fix/drain-isolation-coordination-honesty: processReviewerTranscript NO LONGER
+  // completes the story on READY. The manifest stays in in-progress/; the
+  // auto-merge GATE owns the done/ move and makes it only after confirming CI
+  // green, so "done == reviewer-approved AND CI-green" holds by construction.
+  it("returns done-ready-for-merge + completed:true, leaves the manifest in in-progress/, never moves it to done/", async () => {
     await seedResultFile(makeReviewerResultFile("READY FOR MERGE"));
 
     const result = await processReviewerTranscript(makeOpts());
@@ -223,24 +227,24 @@ describe("(a) READY FOR MERGE → done-ready-for-merge with completeStory side-e
     expect(result.completed).toBe(true);
 
     expect(result.chatLog).toContain(
-      `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for merge gate`,
+      `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for the merge gate`,
     );
 
-    // in-progress manifest no longer exists
-    await expect(
-      fs.stat(path.join(tmpRoot, ".flow", "state", "in-progress", `${STORY_REF}.yaml`)),
-    ).rejects.toThrow();
-
-    // done manifest exists with status: "done"
-    const doneRaw = await fs.readFile(
-      path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
+    // The manifest STAYS in in-progress/ (the gate completes it later).
+    const inProgressRaw = await fs.readFile(
+      path.join(tmpRoot, ".flow", "state", "in-progress", `${STORY_REF}.yaml`),
       "utf8",
     );
-    const doneManifest = parseExecutionManifest(yamlParse(doneRaw) as unknown, {
-      absPath: path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
+    const inProgressManifest = parseExecutionManifest(yamlParse(inProgressRaw) as unknown, {
+      absPath: path.join(tmpRoot, ".flow", "state", "in-progress", `${STORY_REF}.yaml`),
     });
-    expect(doneManifest.status).toBe("done");
-    expect(doneManifest.claimed_by).toBe(SESSION_ULID);
+    expect(inProgressManifest.status).toBe("in-progress");
+    expect(inProgressManifest.claimed_by).toBe(SESSION_ULID);
+
+    // done/ is empty — the verdict step never moves the manifest.
+    await expect(
+      fs.stat(path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`)),
+    ).rejects.toThrow();
   });
 
   it("no completed field on result variants other than done-ready-for-merge", async () => {

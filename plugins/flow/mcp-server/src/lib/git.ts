@@ -818,6 +818,101 @@ export async function stashWorkingTree(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// restoreRootHead (fix/drain-isolation-coordination-honesty — root-HEAD restore)
+// ---------------------------------------------------------------------------
+
+/**
+ * Restore the orchestrating root checkout's HEAD to the base branch after a story,
+ * undoing root-HEAD DRIFT.
+ *
+ * Companion to the clean-root guard. In a background job with
+ * `worktree.bgIsolation: "none"` the per-agent dev worktree is suppressed, so the
+ * dev's `git checkout -b <story-branch>` + commit run in the SHARED ROOT and move
+ * its HEAD — leaving the root on a story branch, or DETACHED at a story commit,
+ * after the run (observed: root left detached at a story commit). `listDirtyPaths`
+ * / `stashWorkingTree` only address dirty working-tree files; they never reposition
+ * HEAD. This does.
+ *
+ * It ONLY restores when HEAD is DETACHED or on a `story/`-prefixed branch (the
+ * drain's own dev branches) — never when the root sits on a deliberate operator
+ * branch. The move is a plain `git checkout <baseBranch>` (NEVER `reset --hard`,
+ * NEVER `-f`): all dev work is on the pushed story branch, so returning the root to
+ * base discards nothing. The caller runs the clean-root stash FIRST, so the working
+ * tree is clean and the checkout is safe.
+ *
+ * Best-effort: any git failure returns `{ headMoved: false }` with a note and never
+ * throws — a guard step can never break the drain.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ */
+export async function restoreRootHead(opts: {
+  cwd: string;
+  /** Base branch to return to. Defaults to `main` (flow's trunk). */
+  baseBranch?: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<{
+  headMoved: boolean;
+  restoredFrom?: string;
+  restoredTo?: string;
+  note?: string;
+}> {
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+  const baseBranch = opts.baseBranch ?? "main";
+
+  // Current branch name (exit 0), or empty stdout / non-zero when detached.
+  const branchResult = await execaImpl(
+    "git",
+    ["-C", opts.cwd, "symbolic-ref", "--quiet", "--short", "HEAD"],
+    { reject: false },
+  );
+  const onBranch =
+    (branchResult.exitCode ?? 1) === 0
+      ? String(branchResult.stdout ?? "").trim()
+      : "";
+  const detached = onBranch === "";
+
+  // Already on the base branch — nothing to do.
+  if (onBranch === baseBranch) return { headMoved: false };
+
+  // Only undo the drain's OWN drift: a detached HEAD (left at a story commit) or a
+  // story/* branch. Leave any deliberate operator branch untouched.
+  if (!detached && !onBranch.startsWith("story/")) {
+    return {
+      headMoved: false,
+      note: `root on non-story branch '${onBranch}' — left as-is`,
+    };
+  }
+
+  // Capture where we are (for the caller's warning) before moving.
+  const headShaResult = await execaImpl(
+    "git",
+    ["-C", opts.cwd, "rev-parse", "--short", "HEAD"],
+    { reject: false },
+  );
+  const restoredFrom = detached
+    ? `detached@${String(headShaResult.stdout ?? "").trim()}`
+    : onBranch;
+
+  // Plain checkout — never -f, never reset. The working tree is already clean
+  // (caller stashed first), so this cannot discard work.
+  const checkout = await execaImpl(
+    "git",
+    ["-C", opts.cwd, "checkout", baseBranch],
+    { reject: false },
+  );
+  if ((checkout.exitCode ?? 1) !== 0) {
+    const stderr =
+      typeof checkout.stderr === "string" ? checkout.stderr : "";
+    return {
+      headMoved: false,
+      note: `checkout ${baseBranch} failed: ${stderr.slice(0, 200)}`,
+    };
+  }
+  return { headMoved: true, restoredFrom, restoredTo: baseBranch };
+}
+
+// ---------------------------------------------------------------------------
 // checkSharedRootLeak (Story native:01KT47430Q4C73K5E3ZECBSE5R — pre-PR leak gate)
 // ---------------------------------------------------------------------------
 

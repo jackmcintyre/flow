@@ -265,6 +265,18 @@ export const ExecutionManifestSchema = z
         "reviewer-grammar",
         "deps-drift",
         "needs-human-decision",
+        // Drain give-up reasons (fix/drain-isolation-coordination-honesty): the
+        // drain abandons a story it cannot finish and MUST move the manifest out
+        // of in-progress/ so it stops counting as live work (the non-termination
+        // fix). Each names WHY the drain gave up.
+        "rework-exhausted",
+        "verdict-failed",
+        "worker-threw",
+        // Auto-merge gate honesty reasons: a story whose full CI build is not
+        // confirmed green never reaches done/ — the gate routes it to blocked/
+        // with one of these so done/ means "reviewer-approved AND CI-green".
+        "ci-not-green",
+        "ci-status-unreadable",
       ])
       .optional(),
 

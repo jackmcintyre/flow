@@ -52,10 +52,12 @@ function makeAgreementImpl(result: AgreementMetricResult | null) {
   return async (): Promise<AgreementMetricResult | null> => result;
 }
 
-function makeDoneManifestYaml(opts: { ref: string; risk_tier?: "low" | "medium" | "high" }): string {
+// The gate reads risk_tier from the IN-PROGRESS manifest (the manifest's location
+// at gate time now that completeStory runs after the gate confirms CI green).
+function makeInProgressManifestYaml(opts: { ref: string; risk_tier?: "low" | "medium" | "high" }): string {
   const manifest: Record<string, unknown> = {
     ref: opts.ref,
-    status: "done",
+    status: "in-progress",
     adapter: "native",
     source_path: `.flow/native-stories/${opts.ref.replace("native:", "")}.md`,
     source_hash: "a".repeat(64),
@@ -70,13 +72,13 @@ function makeDoneManifestYaml(opts: { ref: string; risk_tier?: "low" | "medium" 
   return yamlStringify(manifest, { lineWidth: 0 });
 }
 
-async function seedDoneManifest(
+async function seedInProgressManifest(
   repoRoot: string,
   opts: { ref: string; risk_tier?: "low" | "medium" | "high" },
 ): Promise<void> {
-  const doneDir = path.join(repoRoot, ".flow", "state", "done");
-  await fs.mkdir(doneDir, { recursive: true });
-  await atomicWriteFile(path.join(doneDir, `${opts.ref}.yaml`), makeDoneManifestYaml(opts));
+  const inProgressDir = path.join(repoRoot, ".flow", "state", "in-progress");
+  await fs.mkdir(inProgressDir, { recursive: true });
+  await atomicWriteFile(path.join(inProgressDir, `${opts.ref}.yaml`), makeInProgressManifestYaml(opts));
 }
 
 async function seedPluginPermissions(pluginRoot: string): Promise<void> {
@@ -108,7 +110,7 @@ beforeEach(async () => {
   __resetGhErrorMapCacheForTests();
   repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "flow-ci-unreadable-test-"));
   pluginRoot = path.join(repoRoot, "_plugin");
-  await seedDoneManifest(repoRoot, { ref: REF, risk_tier: "low" });
+  await seedInProgressManifest(repoRoot, { ref: REF, risk_tier: "low" });
   await seedPluginPermissions(pluginRoot);
 });
 
