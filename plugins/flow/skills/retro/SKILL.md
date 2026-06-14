@@ -1,7 +1,7 @@
 ---
 name: flow:retro
 description: "Run the cycle-level retro-analyst over the cycle's done manifests, telemetry, prior proposals, and rule registry to produce one retro-proposal markdown file."
-allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory]
+allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory, openCycle]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/6-2-retro-skill-and-retro-analyst-subagent.md § AC1 -->
@@ -53,9 +53,12 @@ The retro works against **any adapter**. There is no branch on adapter name — 
    c. Render the summary inline to the operator:
       - If `noProposals` is true: "This cycle yielded no recommended changes."
       - Otherwise: list each proposal as "- **\<type\>** (\<id\>): \<rationale\>" and conclude with "Total: \<totalCount\> proposal(s). Proposal file: \<path\>."
-   d. Exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
+   d. **Advance the cycle** — call `openCycle({ targetRepoRoot, sessionUlid })`. This is conditional on the locked handoff phrase having appeared: if the subagent did NOT emit the locked handoff phrase (i.e. it exited early with an error or yield), do NOT call `openCycle`. Surface the returned `cycleUlid` and `openedAt` to the operator in plain language: `Cycle advanced to <cycleUlid>, new window opens at <openedAt>`.
+   e. Exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
 
    **Do NOT** relay the summary from the subagent's prose — always call `summariseRetroProposal` on the written file path so the inline summary is derived from the same frontmatter source of truth as the file itself.
+
+   **Do NOT** call `openCycle` if the subagent did not emit the locked handoff phrase — the cycle must not advance unless `writeRetroProposal` returned successfully (which the handoff phrase confirms).
 
 6. **Offer to queue fix-worthy proposals as backlog stories (operator-gated).** After rendering the summary (step 5), present the operator with the list of proposals. For each proposal in the summary:
    - A proposal is **fix-worthy** when its `type` is any concrete change variant (every proposal type in the closed schema is fix-worthy — an empty `proposals` array means nothing warranted a fix, and step 5d already exited).
