@@ -1,12 +1,22 @@
 /**
- * Story 8.5 — drain workflow integrity.
+ * Story 8.5 — drain workflow structural integrity.
  *
  * The stateless drain runs under the Workflow primitive (`export const meta`,
- * top-level `await`/`return`), so it cannot be unit-executed here. This is a
- * structure/integrity anchor: the script parses, declares its meta, wires the
- * load-bearing seam tools via the one-shot CLI, switches on the verified
- * discriminants, and accounts for every ref in a structured return (the
- * no-silent-failures surface). End-to-end behaviour is exercised in M5.
+ * top-level `await`/`return`), so it cannot be unit-executed here. This file
+ * is a structure/integrity anchor: the script parses, declares its meta,
+ * accounts for every ref in a structured return (no-silent-failures surface),
+ * and preserves load-bearing architectural decisions that are cheap to verify
+ * at the source level.
+ *
+ * **End-to-end orchestration behaviour** is now exercised in
+ * `tests/drain-workflow-e2e.test.ts` — that test actually runs the workflow
+ * against a real scratch repo and proves a broken seam is detected. Any
+ * source-text assertion that merely checks a token exists in the workflow
+ * source ("shape assertion") should live here ONLY if it guards a regression
+ * that the e2e test cannot catch (e.g. an architectural decision expressed as
+ * a specific identifier, or a NOT-present guard on a previously-mislabelled
+ * token). Pure "tool name present in source" checks have been removed in favour
+ * of the e2e smoke that actually invokes those tools.
  */
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";
@@ -31,38 +41,24 @@ describe("Story 8.5 — drain workflow integrity", () => {
     expect(SRC).toContain("title: 'drain'");
   });
 
-  it("wires the load-bearing seam tools via the one-shot CLI", () => {
-    for (const tool of [
-      "mintSessionUlid",
-      "buildPersonaSpawnPrompt",
-      "claimNextStory",
-      "runDevTerminalAction",
-      "processDevTranscript",
-      "runReviewerSession",
-      "processReviewerTranscript",
-      "runAutoMergeGate",
-    ]) {
-      expect(SRC).toContain(tool);
-    }
-  });
-
-  it("switches on the verified seam discriminants", () => {
-    for (const arm of [
-      "spawn-dev",
-      "spawn-reviewer",
-      "done-ready-for-merge",
-      "done-blocked-reviewer-needs-changes",
-      "auto-merge",
-    ]) {
-      expect(SRC).toContain(arm);
-    }
-  });
-
   it("accounts for every ref in a structured return (no silent failures)", () => {
+    // The return object shape is the no-silent-failures contract: every story
+    // lands in exactly one bucket. Keep this check — it verifies the shape at
+    // the source level AND is not otherwise covered by the e2e smoke (the e2e
+    // proves the runtime enforces it; this proves the fields are defined in the
+    // return statement, which is a distinct regression surface).
     for (const field of ["completed", "merged", "pausedForHuman", "blocked", "drainedReason"]) {
       expect(SRC).toContain(field);
     }
   });
+
+  // NOTE: "wires the load-bearing seam tools via the one-shot CLI" and
+  // "switches on the verified seam discriminants" were pure shape assertions —
+  // they checked that token strings exist in the source but proved nothing about
+  // whether the tools are actually called or the discriminants are actually
+  // handled. Those checks have been removed in favour of drain-workflow-e2e.test.ts,
+  // which actually claims a story, drives it through the loop, and asserts a broken
+  // seam is detected — something a source-text string search cannot do.
 
   it("classifies drain exits with explicit reasons (no budget-exhausted mislabel)", () => {
     // The happy unattended path keys off the real claimNextStory empty-queue signal.
