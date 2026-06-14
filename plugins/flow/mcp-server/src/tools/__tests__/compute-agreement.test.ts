@@ -619,7 +619,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
     // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 52 → 53.
     // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 53 → 54.
-    expect(registeredTools.length).toBe(54);
+    // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 54 → 55.
+    expect(registeredTools.length).toBe(55);
   });
 });
 

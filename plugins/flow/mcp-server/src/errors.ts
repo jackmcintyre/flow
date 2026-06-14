@@ -2389,3 +2389,56 @@ export class PrePrTestFailedError extends DomainError {
     this.timeoutMs = timeoutMs;
   }
 }
+
+/**
+ * `discardDraft` refused because the referenced item is not an un-claimed
+ * native to-do draft that is eligible for discard.
+ *
+ * The discard action is only valid for un-claimed, un-withdrawn native-adapter
+ * backlog items still waiting in `to-do/`. Everything else is refused:
+ *   - `not-found`: the ref does not exist in any state directory.
+ *   - `not-in-to-do`: the ref exists but has already been claimed, is
+ *     in-progress, done, or blocked — work that is in flight or complete must
+ *     not be discarded.
+ *   - `withdrawn`: the ref is already in `to-do/` but has been marked
+ *     withdrawn — it is already logically retired; discard does nothing extra.
+ *   - `wrong-adapter`: the ref belongs to an external (non-native) adapter;
+ *     those adapters use `markWithdrawn` for their discard path.
+ *
+ * Nothing is removed on this error path — the eligibility guard fires BEFORE
+ * any filesystem mutation.
+ *
+ * Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — first-class discard of an
+ * un-built parked draft.
+ */
+export class NotAnEligibleDraftError extends DomainError {
+  readonly ref: string;
+  readonly foundState: string | null;
+  readonly reason: "not-found" | "not-in-to-do" | "withdrawn" | "wrong-adapter";
+
+  constructor(opts: {
+    ref: string;
+    foundState: string | null;
+    reason: "not-found" | "not-in-to-do" | "withdrawn" | "wrong-adapter";
+  }) {
+    const detail =
+      opts.reason === "not-found"
+        ? `no manifest for '${opts.ref}' exists in any state directory`
+        : opts.reason === "withdrawn"
+          ? `'${opts.ref}' has been withdrawn — it is already logically retired and ` +
+            `does not need to be discarded`
+          : opts.reason === "wrong-adapter"
+            ? `'${opts.ref}' belongs to a non-native adapter; use markWithdrawn for ` +
+              `external-adapter refs — discardDraft is native-only`
+            : `'${opts.ref}' is in state '${opts.foundState}', not 'to-do' — only ` +
+              `un-claimed backlog drafts waiting in to-do/ may be discarded`;
+    super(
+      `discardDraft refused: ${detail}. ` +
+        `Only un-claimed, un-withdrawn native-adapter to-do drafts are eligible. ` +
+        `(Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB)`,
+    );
+    this.ref = opts.ref;
+    this.foundState = opts.foundState;
+    this.reason = opts.reason;
+  }
+}

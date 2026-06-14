@@ -66,6 +66,7 @@ import { recallLesson } from "./tools/recall-lesson.js";
 import { classifyStoryLane } from "./tools/classify-story-lane.js";
 import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
 import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
+import { discardDraft } from "./tools/discard-draft.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -171,6 +172,12 @@ const TOOLS: Record<string, ToolFn> = {
   // Callable on the no-MCP drain path:
   //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
   resolveBuildPlan,
+  // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — discard an un-claimed native draft.
+  // Removes BOTH the to-do/ execution manifest AND the .flow/native-stories/<ULID>.md
+  // source draft so a later projection pass cannot re-materialise the item.
+  // Callable on the no-MCP seam:
+  //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
+  discardDraft,
 };
 
 function emit(obj: unknown): void {
