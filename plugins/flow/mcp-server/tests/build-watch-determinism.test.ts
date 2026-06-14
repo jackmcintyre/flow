@@ -291,6 +291,9 @@ describe("Story 5.28 — AC1: zero-new-deps static check", () => {
   const PRE_STORY_DEV_DEPENDENCIES: Record<string, string> = {
     "@types/node": "^22.10.0",
     "@types/picomatch": "^4.0.3",
+    // @vitest/coverage-v8 added by native:01KT7RPCNQJGYBR8V0XSFHVRKP (coverage gate story).
+    // Pinned to the same minor as vitest (2.1.x) to guarantee API compatibility.
+    "@vitest/coverage-v8": "2.1.9",
     "esbuild": "^0.28.0",
     "oxlint": "^1.68.0",
     "remark-parse": "11.0.0",

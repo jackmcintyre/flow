@@ -26,5 +26,26 @@ export default defineConfig({
         ...(isCI ? {} : { execArgv: ["--max-old-space-size=2048"] }),
       },
     },
+    coverage: {
+      // Use v8 built-in instrumentation — no source transforms needed.
+      provider: "v8",
+      // 'text' prints the summary to the console; 'json-summary' writes
+      // coverage/coverage-summary.json for downstream tooling.
+      reporter: ["text", "json-summary"],
+      // Do NOT set all:true — that would enumerate every source file and
+      // fail the run on files with zero coverage, violating AC3.
+      // Zero-coverage files appear in the report when a test imports them;
+      // they are a review lens, not an automatic gate.
+      all: false,
+      // Non-regression thresholds committed from the first baseline run
+      // (2026-06-14, native:01KT7RPCNQJGYBR8V0XSFHVRKP). Any PR that drops
+      // below these numbers will fail the coverage step in CI.
+      // To update: run `pnpm test:coverage`, read the console percentages,
+      // and commit the new numbers here.
+      thresholds: {
+        lines: 87,
+        branches: 85,
+      },
+    },
   },
 });

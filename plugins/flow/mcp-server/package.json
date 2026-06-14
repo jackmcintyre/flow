@@ -9,7 +9,8 @@
     "build:watch": "node scripts/watch-and-normalise.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint -A all -D no-unused-vars --disable-unicorn-plugin --disable-oxc-plugin --quiet src/",
-    "test": "NODE_OPTIONS=--max-old-space-size=8192 vitest run"
+    "test": "NODE_OPTIONS=--max-old-space-size=8192 vitest run",
+    "test:coverage": "NODE_OPTIONS=--max-old-space-size=8192 vitest run --coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/picomatch": "^4.0.3",
+    "@vitest/coverage-v8": "2.1.9",
     "esbuild": "^0.28.0",
     "oxlint": "^1.68.0",
     "remark-parse": "11.0.0",

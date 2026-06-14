@@ -58,3 +58,14 @@ jobs:
         if: github.event_name == 'push'
         run: git diff --exit-code mcp-server/dist
       - run: pnpm test
+      - name: Coverage — fail if overall coverage drops below committed baseline
+        run: |
+          cd mcp-server
+          pnpm test:coverage 2>&1 | tee /tmp/coverage-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "::error::Coverage dropped below the committed baseline thresholds."
+            echo "::error::Run 'pnpm test:coverage' locally to see the shortfall, then update the thresholds in vitest.config.ts if the drop is intentional."
+            grep -E "Coverage threshold|threshold" /tmp/coverage-output.txt || true
+            exit $EXIT_CODE
+          fi
