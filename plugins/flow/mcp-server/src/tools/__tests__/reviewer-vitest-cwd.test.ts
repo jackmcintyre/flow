@@ -741,3 +741,131 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
     expect(pnpmCalls[0]!.cwd).toBe(capturedInnerPkgDir);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP):
+// Workspace-root delegation — vitest target is a SOURCE file in a sub-directory
+// of a pnpm workspace root whose root package.json has no vitest; the walk must
+// delegate to the workspace member that does have vitest.
+//
+// Scenario: `plugins/flow/workflows/drain.workflow.js` as the vitest: target.
+//   - Walk finds `plugins/flow/package.json` (workspace root, no vitest).
+//   - pnpm-workspace.yaml lists "mcp-server".
+//   - `plugins/flow/mcp-server/` has vitest in node_modules/.bin/.
+//   → findPackageRoot must return `plugins/flow/mcp-server/`.
+// ---------------------------------------------------------------------------
+
+describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegates to workspace member when root lacks vitest", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "flow-inline-spec-ac5-"));
+    __resetGhErrorMapCacheForTests();
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /**
+   * Build a fixture that mirrors the real repo layout for the AC2 failing case:
+   *   <root>/plugins/flow/package.json           (workspace root, no vitest bin)
+   *   <root>/plugins/flow/pnpm-workspace.yaml    (lists "mcp-server")
+   *   <root>/plugins/flow/mcp-server/package.json
+   *   <root>/plugins/flow/mcp-server/node_modules/.bin/vitest   (present)
+   *   <root>/plugins/flow/workflows/drain.workflow.js            (the vitest: target)
+   */
+  function buildWorkspaceRootFixture(root: string): {
+    workspaceRoot: string;
+    memberPkgDir: string;
+    sourceFilePath: string;
+    sourceFileRel: string;
+  } {
+    const workspaceRoot = path.join(root, "plugins", "flow");
+
+    // Workspace root: has package.json but NO vitest
+    writeFile(
+      path.join(workspaceRoot, "package.json"),
+      JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+    );
+    // pnpm-workspace.yaml lists "mcp-server"
+    writeFile(
+      path.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "packages:\n  - \"mcp-server\"\n",
+    );
+
+    // Workspace member: mcp-server has vitest
+    const memberPkgDir = path.join(workspaceRoot, "mcp-server");
+    writeFile(
+      path.join(memberPkgDir, "package.json"),
+      JSON.stringify({ name: "@flow/mcp-server", version: "0.1.0", private: true }, null, 2),
+    );
+    // Simulate vitest binary present in the member's node_modules
+    writeFile(
+      path.join(memberPkgDir, "node_modules", ".bin", "vitest"),
+      "#!/usr/bin/env node\n// vitest stub\n",
+    );
+
+    // Source file (the vitest: target) — lives in the workflows/ subdirectory
+    const sourceFilePath = path.join(workspaceRoot, "workflows", "drain.workflow.js");
+    writeFile(sourceFilePath, "// drain workflow");
+
+    const sourceFileRel = path.relative(root, sourceFilePath);
+    return { workspaceRoot, memberPkgDir, sourceFilePath, sourceFileRel };
+  }
+
+  it("findPackageRoot returns the workspace member (mcp-server) when the workspace root lacks vitest", () => {
+    const root = path.join(tmp, "unit-workspace-root");
+    mkdir(root);
+    const { memberPkgDir, sourceFilePath } = buildWorkspaceRootFixture(root);
+
+    const result = findPackageRoot({
+      testFilePathAbs: sourceFilePath,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(memberPkgDir);
+  });
+
+  it("vitest runs from the mcp-server member (not the workspace root) when the target is a workflow source file", async () => {
+    // Build a runReviewerSession fixture where the vitest: marker points at
+    // `plugins/flow/workflows/drain.workflow.js` but the workspace root has
+    // no vitest — the delegate logic must route pnpm to the mcp-server member.
+    const TEST_FILE_REL = "plugins/flow/workflows/drain.workflow.js";
+    await buildRunnerFixture(tmp, TEST_FILE_REL);
+
+    let capturedMemberPkgDir: string | null = null;
+
+    const { stub, pnpmCalls } = makeRunnerStub({
+      vitestExitCode: 0,
+      populateWorktree: (worktreePath) => {
+        const { memberPkgDir } = buildWorkspaceRootFixture(worktreePath);
+        capturedMemberPkgDir = memberPkgDir;
+      },
+    });
+
+    const result = await runReviewerSession({
+      targetRepoRoot: tmp,
+      sessionUlid: FIXTURE_SESSION_ULID,
+      ref: FIXTURE_REF,
+      prNumber: FIXTURE_PR_NUMBER,
+      execaImpl: stub,
+    });
+
+    const ac1 = result.acResults[1];
+    expect(ac1).toBeDefined();
+    expect(ac1!.applicability).toBe("runnable-vitest");
+    if (ac1!.applicability !== "runnable-vitest") return;
+
+    // The check must pass (vitest ran successfully from the delegate member).
+    expect(ac1!.status).toBe("pass");
+
+    // pnpm was invoked with cwd === the mcp-server member directory, not the workspace root.
+    expect(pnpmCalls).toHaveLength(1);
+    const pnpmCall = pnpmCalls[0]!;
+    expect(pnpmCall.cwd).toBe(capturedMemberPkgDir);
+    expect(pnpmCall.args).toContain("vitest");
+  });
+});

@@ -310,7 +310,7 @@ const blockStoryGiveUp = async (ref, blockedBy) => {
 //                 Passed to the reviewer's prompt so a fast-lane story gets a
 //                 targeted review rather than the full deep pass. Defaults to
 //                 'full' (current behaviour) when absent.
-async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '', storyModel = null, reviewDepth = 'full' }) {
+async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '', storyModel = null, reviewDepth = 'full', inlineAcs = null }) {
   let verdict = null, prNumber = resumeAtReview ? resumePrNumber : null
   // Per-story model: use the resolveBuildPlan result when available, else the
   // run-level execModel (the FU6 devReviewerModel launch arg or 'sonnet').
@@ -345,6 +345,18 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       // NOT the orchestrating REPO — the tool maps the worktree back to the
       // orchestrating checkout for the session ledger via `git --git-common-dir`.
       // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
+      //
+      // INLINE ACs (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1/AC2): when the
+      // story is a native story, the orchestrator pre-extracted the ACs from
+      // .flow/native-stories/<ULID>.md (which is gitignored and present ONLY in the
+      // orchestrating checkout). The builder receives them inline via the
+      // `inlineAcs` field in runDevTerminalAction, so it never needs to read
+      // a .flow path from within its own worktree. Non-native stories (whose specs
+      // are tracked in git) pass no inlineAcs and use the existing file-read path.
+      const runDevArgs = { targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' }
+      if (inlineAcs && Array.isArray(inlineAcs) && inlineAcs.length > 0) {
+        runDevArgs.inlineAcs = inlineAcs
+      }
       // HEARTBEAT: enter the dev-build phase — the longest per-story span (the
       // single long dev agent() call). The start line flags it as the long one
       // so an operator reading the narrator knows a multi-minute gap is expected.
@@ -359,7 +371,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `Implement the story end-to-end in your working directory: write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
           `Do NOT gold-plate; do NOT touch the execution manifest or any \`.flow/state\` file (the tools own the ledger).\n\n` +
           `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
-          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
+          `  node ${CLI} runDevTerminalAction --json '${J(runDevArgs)}'\n` +
           `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
           `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the drain and orphans your story. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
@@ -581,7 +593,17 @@ for (const o of orphans) {
   const orphanPlan = await seam(`node ${CLI} resolveBuildPlan --json '${J({ storyId: ref, manifestPath })}'`, `build-plan:${ref}:resume`, true)
   const orphanModel = (orphanPlan && !orphanPlan._parseError && typeof orphanPlan.devReviewerModel === 'string') ? orphanPlan.devReviewerModel : null
   const orphanReviewDepth = (orphanPlan && !orphanPlan._parseError && (orphanPlan.reviewDepth === 'light' || orphanPlan.reviewDepth === 'full')) ? orphanPlan.reviewDepth : 'full'
-  await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume', storyModel: orphanModel, reviewDepth: orphanReviewDepth })
+  // INLINE ACs for native orphan resumes (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP):
+  // same extraction as the main drain loop — ensure the builder has its spec on
+  // resume, even though it is re-running from an orphaned state. Fail-soft.
+  let orphanInlineAcs = null
+  if (ref.startsWith('native:')) {
+    const orphanAcsResult = await seam(`node ${CLI} extractNativeStoryAcs --json '${J({ targetRepoRoot: REPO, ref })}'`, `native-acs:${ref}:resume`, true)
+    if (orphanAcsResult && !orphanAcsResult._parseError && Array.isArray(orphanAcsResult.acs) && orphanAcsResult.acs.length > 0) {
+      orphanInlineAcs = orphanAcsResult.acs
+    }
+  }
+  await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume', storyModel: orphanModel, reviewDepth: orphanReviewDepth, inlineAcs: orphanInlineAcs })
   await guardRoot(ref)
 }
 
@@ -709,6 +731,23 @@ async function drainWorker(workerId) {
     const storyModel = (buildPlan && !buildPlan._parseError && typeof buildPlan.devReviewerModel === 'string') ? buildPlan.devReviewerModel : null
     const storyReviewDepth = (buildPlan && !buildPlan._parseError && (buildPlan.reviewDepth === 'light' || buildPlan.reviewDepth === 'full')) ? buildPlan.reviewDepth : 'full'
     if (storyModel) log(`${ref} build-plan: model=${storyModel} reviewDepth=${storyReviewDepth}`)
+    // INLINE AC EXTRACTION for native stories (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC2):
+    // native story specs live in .flow/native-stories/ which is gitignored — present only
+    // in the orchestrating checkout (REPO), NOT in the builder's isolated worktree. The
+    // orchestrator reads them here (before spawning the builder) and passes them inline
+    // to runDevTerminalAction via the inlineAcs field so the builder never needs to
+    // reach outside its own work copy to read the spec. Fail-soft: if extraction fails
+    // or returns an empty array, processStory passes null and the builder uses its
+    // existing file-read path (which will surface a clear error if the spec is missing).
+    // Read-only / idempotent → retryable.
+    let storyInlineAcs = null
+    if (ref.startsWith('native:')) {
+      const acsResult = await seam(`node ${CLI} extractNativeStoryAcs --json '${J({ targetRepoRoot: REPO, ref })}'`, `native-acs:${ref}`, true)
+      if (acsResult && !acsResult._parseError && Array.isArray(acsResult.acs) && acsResult.acs.length > 0) {
+        storyInlineAcs = acsResult.acs
+        log(`${ref} extracted ${storyInlineAcs.length} AC(s) inline for builder worktree`)
+      }
+    }
     // PER-WORKER ISOLATION: a throw inside processStory (a seam hard-rejection, a
     // build crash, any unexpected error) must land THIS story in blocked with its
     // reason and never abort the run or poison a sibling. processStory already
@@ -719,7 +758,7 @@ async function drainWorker(workerId) {
     // with no live owner (exit). Balanced with the finally below.
     activeProcessing++
     try {
-      await processStory({ ref, title, manifestPath, storyModel, reviewDepth: storyReviewDepth })
+      await processStory({ ref, title, manifestPath, storyModel, reviewDepth: storyReviewDepth, inlineAcs: storyInlineAcs })
     } catch (e) {
       // Preserve the failure REASON (the error message — what an operator needs)
       // up front, with a short stack tail for context. Capturing .message first

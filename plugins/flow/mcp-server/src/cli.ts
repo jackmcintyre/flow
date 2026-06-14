@@ -68,6 +68,7 @@ import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
 import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
 import { discardDraft } from "./tools/discard-draft.js";
 import { blockStory } from "./tools/block-story.js";
+import { extractNativeStoryAcs } from "./tools/extract-native-story-acs.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -185,6 +186,12 @@ const TOOLS: Record<string, ToolFn> = {
   // counting as live work and the queue can drain (the non-termination fix).
   //   node dist/cli.js blockStory --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","blockedBy":"worker-threw"}'
   blockStory,
+  // Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline AC extraction for native stories.
+  // Called by the drain BEFORE spawning the builder worktree, so the builder receives
+  // its ACs inline and never needs to resolve a .flow/native-stories path from within
+  // its isolated work copy (.flow is gitignored — not present in builder worktrees).
+  //   node dist/cli.js extractNativeStoryAcs --json '{"targetRepoRoot":"...","ref":"native:01KT..."}'
+  extractNativeStoryAcs,
 };
 
 function emit(obj: unknown): void {
