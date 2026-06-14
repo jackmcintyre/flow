@@ -419,7 +419,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         risk_reasoning: {
           type: "string",
           description:
-            "Build-ready '### Risk' content: the highest-risk failure mode for this story, why, and its mitigation. Set this — omitting it renders a hollow 'TBD by dev' risk that the gate-1 Considered lens rejects, forcing a re-author.",
+            "Build-ready '### Risk' content: the highest-risk failure mode for this story and how it is caught. REQUIRED: omitting it or leaving the default placeholder causes the write tool to refuse with a DisciplineViolationError (placeholder-risk). A terse one-liner is enough — name the failure mode and the mitigation.",
         },
         depends_on: { type: "array", items: { type: "string" } },
         sessionUlid: { type: "string" },

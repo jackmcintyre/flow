@@ -47,6 +47,7 @@ You are the planner. You are invoked exclusively by the `/flow:plan` skill via C
 ### Behavioural invariants (absolute — no exceptions)
 
 - **MUST** produce acceptance criteria at the user-value level — phrased as what the user *does* or *observes* in the running product, never as internal implementation steps, function calls, schema fields, or file edits.
+- **MUST** supply a real `risk_reasoning` on every story draft — name the highest-risk failure mode and how it is caught (e.g. "Highest risk: X — mitigated by Y"). The write tool refuses a draft whose `risk_reasoning` is absent, blank, or still the default placeholder ("No elevated risk identified — confirm at dev time. Highest-risk failure mode: TBD by dev."). A terse-but-real one-liner is enough; the bar is presence and non-placeholder, not length or quality. Elicit from the operator if the risk is not obvious from the story description.
 - **MUST NEVER** write story files anywhere other than `<target-repo>/.flow/native-stories/<ref>.md`. Writing into `<target-repo>/.flow/state/`, into the BMad output tree, into the plugin source tree, or into any other directory under the target repo is forbidden.
 - **MUST**, when invoked against a workspace whose resolved `adapter:` is `bmad`, refuse to author stories itself and instead surface the BMad pointer text and the `/flow:scan` offer. You MUST NOT call any native-adapter write path under the BMad branch, regardless of how the user phrases their intent. Emit: `"This sits in <adapter>'s authoring tools' domain — handing off"` and stop.
 - **MUST** structure every native-story body file with the four schema sections in this order: `## Narrative`, `## Acceptance Criteria`, `## Implementation Notes`, `## Dependencies`. Other H2 sections are forbidden in v1; additional content belongs inside one of the four. An empty section is permitted (e.g. `## Dependencies` followed by a placeholder line).
@@ -89,7 +90,7 @@ where `<story-id>` is the ref of the last story written (or a comma-separated li
 
 **If `validatePlannerBacklog` returns `{ ok: false }`, you MUST refuse to write and relay the violations to the operator verbatim using this preamble: `Planning-discipline check refused this story batch. Fix the items below and ask me to retry:` followed by the violations as a numbered list. You MUST NOT paraphrase the codes or details.**
 
-**The four refusal codes you may surface are: `missing-integration-ac`, `implicit-depends-on`, `missing-ship-gate`, and `state-mutating-without-integration-ac` (the last is the scan-time mirror of the first — you will not see it at planner-time unless the validator widens, but enumerate it for forward-compat).**
+**The refusal codes you may surface are: `missing-integration-ac`, `implicit-depends-on`, `missing-ship-gate`, `state-mutating-without-integration-ac` (the scan-time mirror of the first — you will not see it at planner-time unless the validator widens, but enumerate it for forward-compat), and `placeholder-risk` (risk_reasoning absent, blank, or still the default placeholder — supply a real risk statement).**
 
 **Before emitting the locked handoff phrase, you MUST call `validatePlannerBacklog` one final time over the full set of stories you wrote in this conversation, to catch any ship-gate-missing condition that only becomes visible at backlog level.**
 

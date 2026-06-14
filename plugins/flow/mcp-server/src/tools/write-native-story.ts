@@ -137,8 +137,14 @@ const DEFAULT_DEFINITION_OF_DONE =
     "- [ ] PR opened against `main` with CI green.",
   ].join("\n");
 
-/** Default text for the risk-reasoning sub-section when the author omits it. */
-const DEFAULT_RISK_REASONING =
+/**
+ * Default text for the risk-reasoning sub-section when the author omits it.
+ *
+ * Exported so that `validatePlannerBacklog` can apply the same placeholder
+ * check at pre-write time (AC4: the early validate pass surfaces the violation
+ * before `writeNativeStory` is called).
+ */
+export const DEFAULT_RISK_REASONING =
   "No elevated risk identified — confirm at dev time. Highest-risk failure mode: TBD by dev.";
 
 // ---------------------------------------------------------------------------
@@ -363,6 +369,28 @@ export async function renderGateWriteNativeStory(
       ? [...pureResult.violations]
       : [];
   violations.push(...(await resolveDisciplinePaths(candidate, targetRepoRoot)));
+
+  // Story native:01KT7SSYVMJDVFKHK5VB7KBPFR — risk_reasoning enforcement.
+  // On the interactive author/planner write path, refuse a draft whose
+  // risk_reasoning is absent, blank, or still the build-time default placeholder.
+  // The BMad→native ingest seam is exempt (agent === "ingest"): it is a one-way
+  // migration, not interactive authoring, and the enriched draft may legitimately
+  // omit a risk statement on the first pass.
+  if (agent !== "ingest") {
+    const riskText = (input.risk_reasoning ?? "").trim();
+    if (riskText.length === 0 || riskText === DEFAULT_RISK_REASONING) {
+      violations.push({
+        code: "placeholder-risk",
+        field: "risk_reasoning",
+        detail:
+          "risk_reasoning is absent or still the default placeholder. " +
+          "Supply a real risk statement naming the highest-risk failure mode " +
+          "and how it is caught. " +
+          `Placeholder text: "${DEFAULT_RISK_REASONING}"`,
+      });
+    }
+  }
+
   if (violations.length > 0) {
     await emitFriction({
       targetRepoRoot,

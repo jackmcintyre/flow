@@ -160,6 +160,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
       tasks: [{ text: "Write the ledger path", ac_refs: ["AC1"] }],
       cited_sources: ["src/state/ledger.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: ledger write silently succeeds but read-back finds stale data — caught by the integration AC round-trip assertion.",
     });
 
     expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
@@ -188,6 +189,7 @@ describe("writeNativeStory AC1 — fail-closed discipline gate", () => {
       tasks: [{ text: "Render the greeting component", ac_refs: ["AC1"] }],
       cited_sources: ["src/ui/greeting.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: greeting renders but contains no user name — caught by the unit AC text assertion.",
     });
 
     expect(result.ref).toMatch(/^native:/);
@@ -221,6 +223,7 @@ describe("writeNativeStory AC1 — verification round-trip + fail-closed on abse
       tasks: [{ text: "Build the feature", ac_refs: ["AC1", "AC2"] }],
       cited_sources: ["src/feature/index.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: verification directive lost in round-trip — caught by re-parsing the written file.",
     });
 
     // Exactly one file landed; re-read and re-parse it.
@@ -307,6 +310,7 @@ function candidate10_2(overrides: Record<string, unknown> = {}) {
     ],
     cited_sources: ["src/parser.ts", "docs/design.md"],
     depends_on: [] as string[],
+    risk_reasoning: "Highest risk: parser silently misparses a field — caught by the unit AC round-trip assertion.",
     ...overrides,
   };
 }
@@ -414,7 +418,9 @@ function sparseCandidate() {
     tasks: [{ text: "Author a sparse story and assert the build-ready blocks are present", ac_refs: ["AC1"] }],
     cited_sources: ["src/parser.ts"],
     depends_on: [] as string[],
-    // Intentionally omit: implementation_notes, files_touched, definition_of_done, risk_reasoning
+    // Intentionally omit: implementation_notes, files_touched, definition_of_done
+    // risk_reasoning must now be supplied: the write gate refuses a placeholder.
+    risk_reasoning: "Highest risk: build-ready blocks render empty — caught by the AC assertion checking non-empty sub-section content.",
   };
 }
 
@@ -672,6 +678,7 @@ describe("writeNativeStory AC3 (Story native:01KTZGJ68HE6Z66A50BV7N6BJZ) — ret
       ],
       cited_sources: ["src/state/ledger.ts"],
       depends_on: [],
+      risk_reasoning: "Highest risk: findings are rendered but the queue/skip prompt is missing — caught by the integration AC UI assertion.",
     });
 
     expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);

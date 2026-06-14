@@ -109,6 +109,7 @@ it("AC5(a) — written story file parses via parseNativeStory", async () => {
     tasks: [{ text: "Add the dark-mode toggle", ac_refs: ["AC1"] }],
     cited_sources: ["src/settings/theme.ts"],
     depends_on: [],
+    risk_reasoning: "Highest risk: colour scheme does not persist across page reloads — caught by the unit AC toggle assertion.",
   });
 
   expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
@@ -140,6 +141,7 @@ it("AC5(b) — parsed SourceStory has all required keys (key-set equality with B
     tasks: [{ text: "Render the order-history list", ac_refs: ["AC1"] }],
     cited_sources: ["src/account/order-history.ts"],
     depends_on: [],
+    risk_reasoning: "Highest risk: order list renders empty for customers with many past orders — caught by the unit AC list assertion.",
   });
 
   const contents = await fs.readFile(result.path, "utf8");
@@ -176,6 +178,7 @@ it("AC5(c) — scanSources creates manifest under .flow/state/to-do/ with adapte
     tasks: [{ text: "Build the sign-up flow", ac_refs: ["AC1"] }],
     cited_sources: ["src/auth/sign-up.ts"],
     depends_on: [],
+    risk_reasoning: "Highest risk: sign-up accepts a duplicate email without error — caught by the unit AC submission assertion.",
   });
 
   // Write story B that depends on A.
@@ -197,6 +200,7 @@ it("AC5(c) — scanSources creates manifest under .flow/state/to-do/ with adapte
     tasks: [{ text: "Render the profile page", ac_refs: ["AC1"] }],
     cited_sources: ["src/profile/profile.ts"],
     depends_on: [storyA.ref],
+    risk_reasoning: "Highest risk: profile page shows another user's details — caught by the unit AC name and email assertion.",
   });
 
   // Run scanSources — both stories were auto-materialised by writeNativeStory
@@ -306,6 +310,7 @@ it("integration-tagged AC produces kind: 'integration' in the parsed SourceStory
     tasks: [{ text: "Wire the card-payment flow", ac_refs: ["AC1"] }],
     cited_sources: ["src/checkout/payment.ts"],
     depends_on: [],
+    risk_reasoning: "Highest risk: card payment succeeds but order confirmation is not displayed — caught by the integration AC confirmation-number assertion.",
   });
 
   const contents = await fs.readFile(result.path, "utf8");
