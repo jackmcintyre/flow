@@ -39212,7 +39212,8 @@ async function runDevTerminalAction(opts) {
     body,
     summary,
     manifestPath,
-    sessionUlid
+    sessionUlid,
+    inlineAcs
   } = opts;
   const base = opts.base ?? "main";
   const useWorktree = opts.worktree !== false;
@@ -39227,7 +39228,7 @@ async function runDevTerminalAction(opts) {
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
   const specPath = path47.isAbsolute(manifest.source_path) ? manifest.source_path : path47.join(targetRepoRoot, manifest.source_path);
-  const acs = await extractAcsFromSpec(specPath);
+  const acs = inlineAcs ? [...inlineAcs].sort((a2, b) => a2.index - b.index) : await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
   if (useWorktree) {
@@ -42635,6 +42636,26 @@ function isEnoent13(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
 
+// src/tools/read-manifest-acs.ts
+async function readManifestAcs(opts) {
+  const { manifestPath } = opts;
+  const manifest = await readManifest(manifestPath);
+  const acs = (manifest.acceptance_criteria ?? []).map(
+    (ac, i2) => {
+      const lines = ac.text.split("\n");
+      const firstLine = lines.find((l) => l.trim().length > 0)?.trim().slice(0, 120) ?? "";
+      const tag = ac.kind === "integration" ? "integration" : null;
+      return {
+        index: i2 + 1,
+        firstLine,
+        tag,
+        body: lines
+      };
+    }
+  );
+  return { acs };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -42740,7 +42761,15 @@ var TOOLS = {
   // source draft so a later projection pass cannot re-materialise the item.
   // Callable on the no-MCP seam:
   //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
-  discardDraft
+  discardDraft,
+  // Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline-spec-to-builder (AC extraction seam).
+  // Reads an execution manifest and returns its acceptance_criteria as AcEntry-compatible
+  // objects so the drain orchestrator can pass them inline to the builder subagent.
+  // Native stories carry their spec in .flow/native-stories/ which is gitignored and
+  // absent from an isolated worktree — passing ACs inline removes the file-read dependency.
+  // Callable on the no-MCP drain path:
+  //   node dist/cli.js readManifestAcs --json '{"manifestPath":"/abs/path/to/manifest.yaml"}'
+  readManifestAcs
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

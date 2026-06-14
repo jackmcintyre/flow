@@ -52398,7 +52398,8 @@ async function runDevTerminalAction(opts) {
     body,
     summary,
     manifestPath,
-    sessionUlid
+    sessionUlid,
+    inlineAcs
   } = opts;
   const base = opts.base ?? "main";
   const useWorktree = opts.worktree !== false;
@@ -52413,7 +52414,7 @@ async function runDevTerminalAction(opts) {
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
   const specPath = path64.isAbsolute(manifest.source_path) ? manifest.source_path : path64.join(targetRepoRoot, manifest.source_path);
-  const acs = await extractAcsFromSpec(specPath);
+  const acs = inlineAcs ? [...inlineAcs].sort((a2, b) => a2.index - b.index) : await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
   if (useWorktree) {

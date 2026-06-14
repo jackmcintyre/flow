@@ -278,6 +278,34 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // routing continues to use exactly the same model as before.
   const agentModel = storyModel || execModel
 
+  // INLINE-SPEC-TO-BUILDER (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP, AC2):
+  // For native stories, the spec file lives in `.flow/native-stories/<ulid>.md`
+  // which is gitignored and absent from an isolated worktree checkout. Extract
+  // the ACs here — in the orchestrator's full checkout where `.flow/` is present
+  // — and pass them inline to the builder so the builder never needs to reach
+  // outside its own worktree. The seam is read-only/idempotent (retryable).
+  //
+  // Non-native stories carry their spec in the repo history and do NOT need this;
+  // inlineAcs stays null for BMad-adapter stories so the existing file-read path
+  // in runDevTerminalAction applies unchanged (backward-compatible).
+  //
+  // Fail-soft: if the seam errors or returns a garbled relay, inlineAcs is null
+  // and the builder falls back to the file-read path (which will ENOENT for a
+  // native story in a worktree, surfacing as a build error the dev can diagnose).
+  // The seam failing silently is preferable to aborting the whole drain on a
+  // transient relay error — and the ENOENT is a clear, actionable signal.
+  const isNativeStory = String(ref).startsWith('native:')
+  let inlineAcs = null
+  if (isNativeStory) {
+    const acsResult = await seam(`node ${CLI} readManifestAcs --json '${J({ manifestPath })}'`, `read-acs:${ref}`, true)
+    if (acsResult && !acsResult._parseError && Array.isArray(acsResult.acs)) {
+      inlineAcs = acsResult.acs
+      log(`${ref} inline-spec: extracted ${inlineAcs.length} AC(s) from orchestrator manifest`)
+    } else {
+      log(`${ref} inline-spec: readManifestAcs did not return acs (${acsResult?._parseError || 'unknown'}) — builder will fall back to file-read`)
+    }
+  }
+
   for (let rw = 0; rw < MAX_REWORK; rw++) {
     const skipDev = resumeAtReview && rw === 0
     let reviewerPrompt
@@ -311,15 +339,28 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       const devStartedAt = await progressStart(ref, 'dev-build')
       const reworkNote = rw === 0 ? '' :
         `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .flow/state for the recorded verdict), push the fixes, and hand off again.`
+      // INLINE-ACS NOTE (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP, AC1):
+      // For native stories the acceptance criteria cannot be read from the spec
+      // file inside the worktree (`.flow/` is gitignored). They are passed inline
+      // via the `inlineAcs` field of `runDevTerminalAction`. The builder reads the
+      // execution manifest (at `manifestPath`) for context — the manifest IS at
+      // an absolute path in the orchestrating checkout, so `readManifest` works —
+      // but does NOT need to read the `.flow/native-stories/<ulid>.md` spec file.
+      const inlineAcsNote = inlineAcs
+        ? `\nThe acceptance criteria have been extracted by the orchestrator and are embedded in the \`inlineAcs\` field of the \`runDevTerminalAction\` call below — you do NOT need to read any spec file from \`.flow/\` to proceed.`
+        : ''
+      const runDevArgs = inlineAcs
+        ? { targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>', inlineAcs }
+        : { targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' }
       const devFinal = await agent(
         `${devPersona}\n\n## This run (story ${ref})\n` +
           `- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
           `You are working inside your OWN dedicated git worktree (your current working directory) — a clean checkout cut for this story alone. Edit and build HERE; never reach outside it.\n` +
           `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
           `Implement the story end-to-end in your working directory: write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
-          `Do NOT gold-plate; do NOT touch the execution manifest or any \`.flow/state\` file (the tools own the ledger).\n\n` +
+          `Do NOT gold-plate; do NOT touch the execution manifest or any \`.flow/state\` file (the tools own the ledger).${inlineAcsNote}\n\n` +
           `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
-          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
+          `  node ${CLI} runDevTerminalAction --json '${J(runDevArgs)}'\n` +
           `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
           `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the drain and orphans your story. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +

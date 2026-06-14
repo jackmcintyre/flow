@@ -1608,6 +1608,196 @@ describe("runDevTerminalAction — branch reuse on crash retry (Story native:01K
   });
 });
 
+// ---------------------------------------------------------------------------
+// Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline-spec-to-builder (AC1)
+//
+// AC1: When the drain passes inlineAcs, the builder uses those ACs directly
+//      and does NOT attempt to read the spec file (which may not exist in an
+//      isolated worktree for native stories).
+//
+// The integration test uses a manifest whose source_path points to a
+// NON-EXISTENT file to confirm that `extractAcsFromSpec` is never called
+// when inlineAcs is provided — the tool succeeds despite the missing file.
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — inline-spec-to-builder (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1)", () => {
+  const INLINE_ACS = [
+    {
+      index: 1,
+      firstLine: "Given a native story whose spec lives in .flow, When the drain builds it, Then the builder has the ACs.",
+      tag: "integration",
+      body: [
+        "Given a native story whose spec lives in .flow,",
+        "When the drain builds it in an isolated worktree,",
+        "Then the builder has the full acceptance criteria from the start.",
+      ],
+    },
+    {
+      index: 2,
+      firstLine: "Given a drain run, When the orchestrator prepares the build context, Then ACs are passed inline.",
+      tag: null,
+      body: [
+        "Given a drain run that spawns a builder,",
+        "When the orchestrator prepares the build context,",
+        "Then the story ACs are extracted and passed inline to the builder.",
+      ],
+    },
+  ];
+
+  it("AC1: succeeds and includes all inline ACs in the PR body when inlineAcs is provided, even if spec file does not exist", async () => {
+    // Use a manifest whose source_path resolves to a non-existent file.
+    // If extractAcsFromSpec were called, it would throw ENOENT. The test
+    // confirms that when inlineAcs is provided, no file-read occurs and the
+    // PR body contains all the provided ACs.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    // Rewrite the manifest to point to a non-existent spec path.
+    const nonExistentSpecRelPath = ".flow/native-stories/01KTESTFAKE000000000000.md";
+    const { stringify: yamlStringify2 } = await import("yaml");
+    await atomicWriteFile(
+      ctx.manifestPath,
+      yamlStringify2({
+        ref: "native:" + REF,
+        status: "in-progress",
+        adapter: "native",
+        source_path: nonExistentSpecRelPath,
+        source_hash: SOURCE_HASH,
+        depends_on: [],
+        acceptance_criteria: [
+          { text: "AC1 text for native story", kind: "integration" },
+          { text: "AC2 text for native story", kind: "unit" },
+        ],
+        title: TITLE,
+        narrative: "As a operator, I want inline ACs.",
+        withdrawn: false,
+        claimed_by: SESSION_ULID,
+      }),
+    );
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: "native:" + REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      inlineAcs: INLINE_ACS,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    // The call succeeded — no ENOENT despite the non-existent spec file.
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+
+    // The PR body must include checklist entries for both inline ACs.
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(
+      ([cmd]) => cmd === "gh",
+    );
+    expect(ghCall).toBeDefined();
+    const ghArgs = ghCall![1];
+    const bodyIdx = ghArgs.indexOf("--body");
+    const bodyArg = ghArgs[bodyIdx + 1]!;
+
+    expect(bodyArg).toContain("- [ ] AC1:");
+    expect(bodyArg).toContain("- [ ] AC2:");
+    // The first AC's firstLine must appear in the checklist.
+    expect(bodyArg).toContain("Given a native story");
+  });
+
+  it("AC1: falls back to file-read when inlineAcs is not provided (backward-compat for BMad stories)", async () => {
+    // Without inlineAcs, the existing file-read path must apply. The fixture
+    // spec (FIXTURE_SPEC) is already at ctx.specPath (set up in setupRepo).
+    // The default manifest points to it — so extractAcsFromSpec succeeds.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      // No inlineAcs → file-read path applies.
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+
+    // ACs from the spec file must appear in the PR body.
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(
+      ([cmd]) => cmd === "gh",
+    );
+    const ghArgs = ghCall![1];
+    const bodyIdx = ghArgs.indexOf("--body");
+    const bodyArg = ghArgs[bodyIdx + 1]!;
+    expect(bodyArg).toContain("- [ ] AC1:");
+    expect(bodyArg).toContain("- [ ] AC2:");
+    expect(bodyArg).toContain("- [ ] AC3:");
+  });
+
+  it("AC1: inline ACs appear in the PR body in numeric index order", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    // Write native manifest.
+    const { stringify: yamlStringify3 } = await import("yaml");
+    await atomicWriteFile(
+      ctx.manifestPath,
+      yamlStringify3({
+        ref: "native:" + REF,
+        status: "in-progress",
+        adapter: "native",
+        source_path: ".flow/native-stories/01KTDOESNOTEXIST.md",
+        source_hash: SOURCE_HASH,
+        depends_on: [],
+        acceptance_criteria: [
+          { text: "AC1 text", kind: "unit" },
+          { text: "AC2 text", kind: "integration" },
+        ],
+        title: TITLE,
+        narrative: "As a dev, I want inline ACs in order.",
+        withdrawn: false,
+        claimed_by: SESSION_ULID,
+      }),
+    );
+
+    const orderedInlineAcs = [
+      { index: 2, firstLine: "AC two body.", tag: null, body: ["AC two body."] },
+      { index: 1, firstLine: "AC one body.", tag: "integration", body: ["AC one body."] },
+    ];
+
+    await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: "native:" + REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      inlineAcs: orderedInlineAcs,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(([cmd]) => cmd === "gh");
+    const ghArgs = ghCall![1];
+    const bodyIdx = ghArgs.indexOf("--body");
+    const bodyArg = ghArgs[bodyIdx + 1]!;
+
+    const ac1Idx = bodyArg.indexOf("- [ ] AC1:");
+    const ac2Idx = bodyArg.indexOf("- [ ] AC2:");
+    expect(ac1Idx).toBeGreaterThanOrEqual(0);
+    expect(ac2Idx).toBeGreaterThan(ac1Idx);
+  });
+});
+
 describe("runDevTerminalAction — time budget (Story native:01KTN5E6T75XKDX8A0SGBVPRYS AC3)", () => {
   it("AC3a: applies the default budget when no override is supplied — a timed-out build is reported as a build failure", async () => {
     // A timed-out build must surface PrePrBuildFailedError with timedOut:true,

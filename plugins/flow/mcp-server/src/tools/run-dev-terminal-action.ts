@@ -125,6 +125,18 @@ const ROLE = "generalist-dev";
  *                             `false` to commit in `targetRepoRoot` with
  *                             `git add .` (legacy Story 4.4 path; used by that
  *                             story's integration tests).
+ * @param opts.inlineAcs       Pre-extracted AC entries from the orchestrator
+ *                             (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP). When
+ *                             present the builder uses these directly and SKIPS
+ *                             the `extractAcsFromSpec` file-read — this is the
+ *                             fix for native stories whose spec lives in the
+ *                             local-only `.flow/native-stories/` folder and is
+ *                             therefore absent from an isolated worktree checkout.
+ *                             The drain orchestrator reads the spec from its own
+ *                             full checkout (where `.flow/` is present) and passes
+ *                             the ACs inline so the builder never reaches outside
+ *                             its worktree. Non-native stories (BMad adapter) do
+ *                             not pass this; the existing file-read path applies.
  * @param opts.buildTestTimeoutMs
  *                             Per-run time budget (milliseconds) for the
  *                             build/test gates. Defaults to
@@ -146,6 +158,13 @@ export async function runDevTerminalAction(opts: {
   sessionUlid: string;
   base?: string;
   worktree?: boolean;
+  /**
+   * Pre-extracted AC entries supplied inline by the drain orchestrator
+   * (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP). When present the builder uses
+   * these and SKIPS the extractAcsFromSpec file-read (the spec may not exist
+   * inside an isolated worktree for native stories). Shape mirrors AcEntry.
+   */
+  inlineAcs?: Array<{ index: number; firstLine: string; tag: string | null; body: string[] }>;
   /** Per-run time budget for build/test gates. Defaults to `DEFAULT_BUILD_TEST_TIMEOUT_MS`. */
   buildTestTimeoutMs?: number;
   execaImpl?: typeof defaultExeca;
@@ -159,6 +178,7 @@ export async function runDevTerminalAction(opts: {
     summary,
     manifestPath,
     sessionUlid,
+    inlineAcs,
   } = opts;
   const base = opts.base ?? "main";
   const useWorktree = opts.worktree !== false;
@@ -184,8 +204,25 @@ export async function runDevTerminalAction(opts: {
     ? manifest.source_path
     : path.join(targetRepoRoot, manifest.source_path);
 
-  // (iii) Extract ACs from the spec file.
-  const acs = await extractAcsFromSpec(specPath);
+  // (iii) Extract ACs — inline when the orchestrator pre-supplied them, else read
+  // from the spec file (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP).
+  //
+  // Native stories carry their spec in `.flow/native-stories/<ulid>.md` which is
+  // gitignored and therefore absent from an isolated worktree checkout.  The drain
+  // orchestrator reads that file from its own full checkout (where `.flow/` is
+  // present) and passes the extracted ACs as `inlineAcs` so the builder never
+  // reaches outside its worktree boundary.
+  //
+  // Non-native stories (BMad adapter) commit their spec to the repo history, so
+  // the file is present in the worktree and the existing file-read path applies.
+  // The fallback also covers any call-site that does not yet pass `inlineAcs`.
+  //
+  // Sort inline ACs by numeric index (mirrors extractAcsFromSpec's sort) so the
+  // PR body checklist is always in AC1, AC2, … order regardless of the order in
+  // which the orchestrator assembled the array.
+  const acs = inlineAcs
+    ? [...inlineAcs].sort((a, b) => a.index - b.index)
+    : await extractAcsFromSpec(specPath);
 
   // (iv) Resolve the dev's git surface and the stage set (Story 8.16 / 8.20).
   // In worktree mode `targetRepoRoot` IS the dev's own worktree — the runtime

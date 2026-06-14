@@ -67,6 +67,7 @@ import { classifyStoryLane } from "./tools/classify-story-lane.js";
 import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
 import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
 import { discardDraft } from "./tools/discard-draft.js";
+import { readManifestAcs } from "./tools/read-manifest-acs.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -178,6 +179,14 @@ const TOOLS: Record<string, ToolFn> = {
   // Callable on the no-MCP seam:
   //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
   discardDraft,
+  // Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline-spec-to-builder (AC extraction seam).
+  // Reads an execution manifest and returns its acceptance_criteria as AcEntry-compatible
+  // objects so the drain orchestrator can pass them inline to the builder subagent.
+  // Native stories carry their spec in .flow/native-stories/ which is gitignored and
+  // absent from an isolated worktree — passing ACs inline removes the file-read dependency.
+  // Callable on the no-MCP drain path:
+  //   node dist/cli.js readManifestAcs --json '{"manifestPath":"/abs/path/to/manifest.yaml"}'
+  readManifestAcs,
 };
 
 function emit(obj: unknown): void {
