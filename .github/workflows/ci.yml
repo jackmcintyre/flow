@@ -58,3 +58,13 @@ jobs:
         if: github.event_name == 'push'
         run: git diff --exit-code mcp-server/dist
       - run: pnpm test
+      - name: Coverage — fail if overall line or branch coverage drops below committed baseline
+        working-directory: plugins/flow/mcp-server
+        run: |
+          pnpm test:coverage 2>&1 | tee /tmp/coverage-output.txt; EXIT=${PIPESTATUS[0]}
+          if [ $EXIT -ne 0 ]; then
+            echo "::error::Coverage check failed — overall coverage dropped below the committed baseline."
+            echo "Shortfall detail:"
+            grep -E "ERROR|threshold|thresholds|lines|branches|Coverage" /tmp/coverage-output.txt || true
+            exit $EXIT
+          fi

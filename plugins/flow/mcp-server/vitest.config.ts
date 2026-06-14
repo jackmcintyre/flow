@@ -26,5 +26,25 @@ export default defineConfig({
         ...(isCI ? {} : { execArgv: ["--max-old-space-size=2048"] }),
       },
     },
+    // Coverage configuration: collects line and branch coverage using V8.
+    // `all: false` means only files imported by tests appear in the report —
+    // avoids artificially inflating zero-coverage noise from untested operator
+    // surfaces. Thresholds gate on non-regression: a drop below the committed
+    // baseline fails CI; zero-coverage on an individual file is a review lens,
+    // not an automatic fail (no perFile thresholds).
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      reportsDirectory: "./coverage",
+      all: false,
+      thresholds: {
+        // Baseline captured 2026-06-14: lines 87.04 %, branches 85.60 %.
+        // Set 1 pp below the measured floor so a genuine regression fails CI
+        // but a rounding fluctuation does not. Raise these whenever coverage
+        // improves; never lower them without a conscious reviewer decision.
+        lines: 87,
+        branches: 85,
+      },
+    },
   },
 });
