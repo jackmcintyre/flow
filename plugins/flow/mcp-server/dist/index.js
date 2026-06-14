@@ -52425,7 +52425,7 @@ async function runDevTerminalAction(opts) {
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
   const specPath = path64.isAbsolute(manifest.source_path) ? manifest.source_path : path64.join(targetRepoRoot, manifest.source_path);
-  const acs = await extractAcsFromSpec(specPath);
+  const acs = opts.inlineAcs ? opts.inlineAcs : await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
   if (useWorktree) {

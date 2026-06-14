@@ -148,6 +148,27 @@ export async function runDevTerminalAction(opts: {
   worktree?: boolean;
   /** Per-run time budget for build/test gates. Defaults to `DEFAULT_BUILD_TEST_TIMEOUT_MS`. */
   buildTestTimeoutMs?: number;
+  /**
+   * Inline acceptance criteria text, extracted by the drain orchestrator from
+   * the native story spec in the orchestrating checkout's `.flow/native-stories/`
+   * folder. When provided, the builder uses these ACs directly and DOES NOT
+   * attempt to read a spec file from its own worktree.
+   *
+   * This is the fix for Story native:01KT6QGBWP7KJDVMHQK3MEKDXP (AC1): a native
+   * story's spec lives in `.flow/native-stories/`, which is gitignored and only
+   * present in the orchestrating checkout — NOT in the builder's isolated worktree.
+   * Passing ACs inline ensures the builder always has its spec from the start,
+   * without reaching outside its own work copy.
+   *
+   * Each entry mirrors `AcEntry` from `extract-acs-from-spec.ts`. The `index` is
+   * the 1-based AC number; `firstLine` is the first non-blank body line (truncated
+   * to 120 chars); `tag` is the parenthetical tag from the AC heading (or null);
+   * `body` is all body lines (verbatim).
+   *
+   * When absent (non-native stories whose spec is already tracked in git and
+   * therefore present in the worktree), the existing file-read path applies.
+   */
+  inlineAcs?: Array<{ index: number; firstLine: string; tag: string | null; body: string[] }>;
   execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult> {
   const {
@@ -184,8 +205,17 @@ export async function runDevTerminalAction(opts: {
     ? manifest.source_path
     : path.join(targetRepoRoot, manifest.source_path);
 
-  // (iii) Extract ACs from the spec file.
-  const acs = await extractAcsFromSpec(specPath);
+  // (iii) Extract ACs from the spec file, OR use inline ACs when supplied by the
+  // orchestrator (native stories: Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1).
+  // Native story specs live in `.flow/native-stories/` which is gitignored and only
+  // present in the orchestrating checkout — NOT in the builder's isolated worktree.
+  // When the drain passes `inlineAcs`, the builder uses them directly and skips the
+  // file read entirely, so no file-not-found error can arise on the spec path.
+  // For non-native stories (specs tracked in git and present in the worktree), the
+  // existing `extractAcsFromSpec` call applies unchanged.
+  const acs = opts.inlineAcs
+    ? opts.inlineAcs
+    : await extractAcsFromSpec(specPath);
 
   // (iv) Resolve the dev's git surface and the stage set (Story 8.16 / 8.20).
   // In worktree mode `targetRepoRoot` IS the dev's own worktree — the runtime
