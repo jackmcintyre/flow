@@ -28,12 +28,14 @@
 
 import * as path from "node:path";
 import { z } from "zod";
-import { listDirtyPaths, stashWorkingTree } from "../lib/git.js";
+import { listDirtyPaths, stashWorkingTree, restoreRootHead } from "../lib/git.js";
 
 const GuardCleanRootInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
   /** Optional story ref for a more legible stash message / log line. */
   ref: z.string().min(1).optional(),
+  /** Base branch the root should sit on. Defaults to `main` (flow's trunk). */
+  baseBranch: z.string().min(1).optional(),
 });
 
 export interface GuardCleanRootResult {
@@ -45,6 +47,18 @@ export interface GuardCleanRootResult {
   paths: string[];
   /** The stash message used (present only when a stash was attempted). */
   stashMessage?: string;
+  /**
+   * True when the root checkout's HEAD had drifted off the base branch (detached
+   * at a story commit or on a `story/*` branch — the bgIsolation leak) and was
+   * restored. fix/drain-isolation-coordination-honesty.
+   */
+  headMoved: boolean;
+  /** Where HEAD was before the restore (e.g. `detached@abc1234` or a branch name). */
+  restoredFrom?: string;
+  /** The base branch HEAD was returned to (present only when headMoved). */
+  restoredTo?: string;
+  /** A note when HEAD drift was detected but deliberately left as-is, or a failure. */
+  headNote?: string;
 }
 
 export async function guardCleanRoot(
@@ -53,12 +67,32 @@ export async function guardCleanRoot(
   const input = GuardCleanRootInputSchema.parse(rawInput);
   const cwd = path.resolve(input.targetRepoRoot);
 
+  // Step 1: stash any leaked working-tree changes (the original guard behaviour).
   const paths = await listDirtyPaths({ cwd });
-  if (paths.length === 0) {
-    return { dirty: false, stashed: false, paths: [] };
+  let stashed = false;
+  let stashMessage: string | undefined;
+  if (paths.length > 0) {
+    stashMessage = `flow-drain clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
+    ({ stashed } = await stashWorkingTree({ cwd, paths, message: stashMessage }));
   }
 
-  const stashMessage = `flow-drain clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
-  const { stashed } = await stashWorkingTree({ cwd, paths, message: stashMessage });
-  return { dirty: true, stashed, paths, stashMessage };
+  // Step 2: restore root HEAD if it drifted (detached / story-branch). Runs even
+  // when the tree was clean — HEAD can move without dirtying the tree, which is
+  // exactly the observed leak (root left DETACHED at a story commit, tree clean).
+  // Ordered AFTER the stash so the working tree is clean and the checkout is safe.
+  const head = await restoreRootHead({
+    cwd,
+    ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+  });
+
+  return {
+    dirty: paths.length > 0,
+    stashed,
+    paths,
+    ...(stashMessage ? { stashMessage } : {}),
+    headMoved: head.headMoved,
+    ...(head.restoredFrom ? { restoredFrom: head.restoredFrom } : {}),
+    ...(head.restoredTo ? { restoredTo: head.restoredTo } : {}),
+    ...(head.note ? { headNote: head.note } : {}),
+  };
 }

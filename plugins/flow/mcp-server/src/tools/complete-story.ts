@@ -134,8 +134,15 @@ export async function completeStory(opts: {
 
   // Step 5: Field rewrite.
   // Set status to "done". Preserve claimed_by verbatim for retros.
+  // STRIP any stale `blocked_by` (fix/drain-isolation-coordination-honesty): a
+  // story can reach completion after one or more NEEDS-CHANGES rounds stamped
+  // `blocked_by: reviewer-verdict-needs-changes` on the in-progress manifest. A
+  // DONE manifest must never carry a block reason — leaving it produced the
+  // contradictory "status: done + blocked_by: …" record behind PR #355. Drop it
+  // here (mirrors blockOrphanNoTranscript's deliberate claimed_by strip).
+  const { blocked_by: _dropBlockedBy, ...manifestWithoutBlock } = manifest;
   const updatedManifest = {
-    ...manifest,
+    ...manifestWithoutBlock,
     status: "done" as const,
     // claimed_by is already present and preserved by the spread above.
   };

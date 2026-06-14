@@ -100,6 +100,17 @@ interface DrainOpts {
   throwSeam?: { ref?: string; prefix: string };
   /** Refs that should drive the needs-human-decision path, → their verbatim question. */
   needsHuman?: Record<string, string>;
+  /**
+   * What the `claim:` seam returns once the queue is exhausted. Default
+   * `"queue-drained"` (the happy terminal). Set `"waiting-on-in-progress"` to
+   * simulate a manifest WEDGED in in-progress/ with no live owner — the
+   * non-termination scenario the re-poll guard must escape (Bug 1).
+   */
+  claimAfterQueue?: "queue-drained" | "waiting-on-in-progress";
+  /** Re-poll delay (ms) for waiting-on-in-progress. Tests pass 0 to avoid sleeping. */
+  repollDelayMs?: number;
+  /** Consecutive no-active-worker re-poll cap before the run exits stalled-in-progress. */
+  maxRepoll?: number;
 }
 
 /**
@@ -145,7 +156,7 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
   // queue length the claim seam reports the genuine full-drain outcome.
   const storyForClaimIdx = (idx: number): unknown => {
     const s = queue[idx];
-    if (!s) return { next: "queue-drained" };
+    if (!s) return { next: opts.claimAfterQueue ?? "queue-drained" };
     return {
       next: "spawn-dev",
       ref: s.ref,
@@ -191,6 +202,17 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
     if (label.startsWith("verdict:")) return { next: "done-ready-for-merge" };
     if (label.startsWith("gate:")) {
       return { decision: "pause-needs-human", reason: "no-agreement-history" };
+    }
+    // fix/drain-isolation-coordination-honesty: completeStory now runs as a drain
+    // seam AFTER a confirmed-green gate (the done/ move), and blockStory is the
+    // give-up move that pulls an abandoned/red story out of in-progress/.
+    if (label.startsWith("complete:")) {
+      const ref = refOfLabel(label);
+      return { ref, absPath: `/tmp/done/${String(ref).replace(/[^a-z0-9]/gi, "_")}.yaml` };
+    }
+    if (label.startsWith("block-story:")) {
+      const ref = refOfLabel(label);
+      return { ref, absPath: `/tmp/blocked/${String(ref).replace(/[^a-z0-9]/gi, "_")}.yaml` };
     }
     // Progress seams — exercise the REAL tools so the asserted lines are the
     // production lines. (The throw branch is handled in `agent`, below.)
@@ -272,6 +294,8 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
     cli: "/tmp/cli.js",
     sessionUlid: "01TESTULID0000000000000000",
     ...(opts.maxConcurrency ? { maxConcurrency: opts.maxConcurrency } : {}),
+    ...(opts.repollDelayMs !== undefined ? { repollDelayMs: opts.repollDelayMs } : {}),
+    ...(opts.maxRepoll !== undefined ? { maxRepoll: opts.maxRepoll } : {}),
   });
 
   // GENERALISED runner: inject the fifth global `notify` alongside the existing
@@ -439,7 +463,13 @@ describe("drain fault-injection — honest reporting under misbehaving seams (na
     assertHonestyInvariant(result, thrown, [REF_A, REF_B]);
   });
 
-  it("AC2: a garbled GATE relay (after a green verdict) buckets that story in pausedForHuman with the gate-step reason, run keeps going", async () => {
+  it("AC2: a garbled GATE relay (after a green verdict) buckets that story in BLOCKED — a story whose merge gate cannot be confirmed never reaches done/, run keeps going", async () => {
+    // fix/drain-isolation-coordination-honesty: a garbled gate relay means the
+    // gate decision (incl. the CI-green check) could NOT be confirmed. Under the
+    // honesty rebuild a story reaches done/ ONLY on a CONFIRMED-green gate, so an
+    // unconfirmable gate must NOT complete or pause-as-merge-ready — it is bucketed
+    // BLOCKED (with the gate parse-error reason) and the manifest is moved out of
+    // in-progress/. This is the #355 guarantee: nothing unconfirmed looks shippable.
     const queue = [
       { ref: REF_A, title: "Story A (garbled gate)" },
       { ref: REF_B, title: "Story B (clean)" },
@@ -451,18 +481,17 @@ describe("drain fault-injection — honest reporting under misbehaving seams (na
     });
 
     expect(thrown).toBeUndefined();
-    // A earned a green verdict (so it is in completed), then its gate relay
-    // garbled → processStory buckets A in pausedForHuman with the gate step's own
-    // reason (gate?._parseError), NOT aborting (drain.workflow.js gate branch).
-    expect(result.completed).toContain(REF_A);
-    const a = result.pausedForHuman.find((p: any) => p.ref === REF_A);
-    expect(a, "story A should be paused at the gate").toBeDefined();
-    expect(typeof a.reason).toBe("string");
-    expect(a.reason.length).toBeGreaterThan(0);
-    // The gate reason is the seam's own parse-error sentinel, not a green merge.
+    // A earned a green verdict but its gate relay garbled → NOT confirmed green →
+    // blocked, never completed (done/) and never merged.
+    const a = result.blocked.find((b: any) => b.ref === REF_A);
+    expect(a, "story A should be blocked (unconfirmable gate)").toBeDefined();
+    expect(typeof a.blocked_by).toBe("string");
+    expect(a.blocked_by.length).toBeGreaterThan(0);
+    expect(result.completed).not.toContain(REF_A);
     expect(result.merged.some((m: any) => m.ref === REF_A)).toBe(false);
+    expect(result.pausedForHuman.some((p: any) => p.ref === REF_A)).toBe(false);
 
-    // The other story still finishes normally.
+    // The other story still finishes normally (green → confirmed → paused at gate).
     expect(result.completed).toContain(REF_B);
 
     expect(result.drainedReason).toBe("queue-drained");
@@ -578,4 +607,37 @@ describe("drain fault-injection — honest reporting under misbehaving seams (na
 
     assertHonestyInvariant(degraded.result, degraded.thrown, [REF_A, REF_B]);
   });
+
+  it("TERMINATION: a manifest wedged in in-progress/ with no live worker makes the run EXIT (stalled-in-progress), never spin forever", async () => {
+    // fix/drain-isolation-coordination-honesty — the non-termination fix.
+    //
+    // Reproduces the observed hang: a story is given up (here: its verdict relay is
+    // garbled → blocked), and thereafter the claim seam reports
+    // `waiting-on-in-progress` PERMANENTLY (a manifest stuck in in-progress/ with no
+    // live owner). Before the fix the worker re-polled on that signal forever
+    // ("lots of claim", ~197 agents, no exit). The re-poll termination guard counts
+    // consecutive no-active-worker polls and, past maxRepoll, exits HONESTLY with
+    // drainedReason 'stalled-in-progress' instead of spinning.
+    //
+    // repollDelayMs:0 + a SMALL maxRepoll keep the test fast; the 5s vitest timeout
+    // is the safety net — pre-fix this test would TIME OUT (the failing signal).
+    const queue = [{ ref: REF_A, title: "Story A (given up, then queue wedges)" }];
+    const { result, thrown } = await runDrain({
+      queue,
+      maxConcurrency: 1,
+      // Drive REF_A to a given-up bucket so no worker is processing afterwards.
+      garble: { ref: REF_A, prefix: "verdict:" },
+      // After REF_A is claimed, every further claim reports a wedged in-progress slot.
+      claimAfterQueue: "waiting-on-in-progress",
+      repollDelayMs: 0,
+      maxRepoll: 5,
+    });
+
+    // The run RETURNED (did not throw, did not hang) with the honest stall reason.
+    expect(thrown).toBeUndefined();
+    expect(result.drainedReason).toBe("stalled-in-progress");
+    expect(result.drained).toBe(false);
+    // REF_A still landed in exactly one bucket (blocked, from the garbled verdict).
+    expect(result.blocked.some((b: any) => b.ref === REF_A)).toBe(true);
+  }, 5_000);
 });

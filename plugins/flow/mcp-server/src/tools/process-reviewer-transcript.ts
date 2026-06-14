@@ -61,7 +61,6 @@
  */
 
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
-import { completeStory } from "./complete-story.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { ReviewerFirstCallSkippedError } from "../errors.js";
 import type { RecommendedVerdict } from "./run-reviewer-session.js";
@@ -163,12 +162,17 @@ export async function processReviewerTranscript(
   const verdict: RecommendedVerdict = resultFile.recommendedVerdict;
 
   if (verdict === "READY FOR MERGE") {
-    chatLog.push(`reviewer verdict: READY FOR MERGE — story ${ref} ready for merge gate`);
-    // Atomically move the manifest to done/ via internal function import.
-    // Errors propagate verbatim — no try/catch (behavioural contract §
-    // _bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md
-    // § Behavioural contract).
-    await completeStory({ targetRepoRoot, ref, sessionUlid });
+    // fix/drain-isolation-coordination-honesty: do NOT complete here. The manifest
+    // STAYS in in-progress/; the auto-merge GATE owns the done/ move and makes it
+    // only after confirming the PR's CI is green. That makes "done == reviewer-
+    // approved AND CI-green" hold by construction — a red / CI-rejected story can
+    // never land in done/ wearing a merge-ready label (the #355 honesty bug).
+    // completeStory now runs in the drain AFTER the gate's green confirmation; any
+    // stale blocked_by from a prior NEEDS-CHANGES round is stripped there.
+    // `completed: true` is retained as the "reviewer says ready-for-merge" signal
+    // (the drain switches on `next`, not this field); it no longer implies the
+    // manifest has moved to done/.
+    chatLog.push(`reviewer verdict: READY FOR MERGE — story ${ref} ready for the merge gate`);
     return { next: "done-ready-for-merge", completed: true as const, chatLog };
   }
 

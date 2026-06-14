@@ -67,6 +67,7 @@ import { classifyStoryLane } from "./tools/classify-story-lane.js";
 import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
 import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
 import { discardDraft } from "./tools/discard-draft.js";
+import { blockStory } from "./tools/block-story.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -178,6 +179,12 @@ const TOOLS: Record<string, ToolFn> = {
   // Callable on the no-MCP seam:
   //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
   discardDraft,
+  // fix/drain-isolation-coordination-honesty — blockStory: the live drain's
+  // "give up on this story" seam. Moves a story THIS session owns from
+  // in-progress/ to blocked/ with a give-up reason, so an abandoned story stops
+  // counting as live work and the queue can drain (the non-termination fix).
+  //   node dist/cli.js blockStory --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","blockedBy":"worker-threw"}'
+  blockStory,
 };
 
 function emit(obj: unknown): void {

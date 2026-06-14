@@ -148,15 +148,20 @@ async function seedRatioVerdicts(
   await writeJSONL(telemetryDir, "ratio-verdicts.jsonl", events);
 }
 
-/** Build the done manifest YAML */
-function makeDoneManifestYaml(opts: {
+/**
+ * Build the in-progress manifest YAML. The auto-merge gate reads risk_tier from
+ * the IN-PROGRESS manifest (fix/drain-isolation-coordination-honesty): completeStory
+ * now runs AFTER the gate confirms CI green, so the manifest sits in in-progress/
+ * at gate time, not done/.
+ */
+function makeInProgressManifestYaml(opts: {
   ref: string;
   sessionUlid: string;
   risk_tier?: "low" | "medium" | "high";
 }): string {
   const manifest: Record<string, unknown> = {
     ref: opts.ref,
-    status: "done",
+    status: "in-progress",
     adapter: "native",
     source_path: `.flow/native-stories/${opts.ref.replace("native:", "")}.md`,
     source_hash: "a".repeat(64),
@@ -175,8 +180,8 @@ function makeDoneManifestYaml(opts: {
   return yamlStringify(manifest, { lineWidth: 0 });
 }
 
-/** Seed the done/<ref>.yaml manifest */
-async function seedDoneManifest(
+/** Seed the in-progress/<ref>.yaml manifest (the gate's risk_tier read location). */
+async function seedInProgressManifest(
   targetRepoRoot: string,
   opts: {
     ref: string;
@@ -184,11 +189,11 @@ async function seedDoneManifest(
     risk_tier?: "low" | "medium" | "high";
   },
 ): Promise<void> {
-  const doneDir = path.join(targetRepoRoot, ".flow", "state", "done");
-  await fs.mkdir(doneDir, { recursive: true });
+  const inProgressDir = path.join(targetRepoRoot, ".flow", "state", "in-progress");
+  await fs.mkdir(inProgressDir, { recursive: true });
   await atomicWriteFile(
-    path.join(doneDir, `${opts.ref}.yaml`),
-    makeDoneManifestYaml(opts),
+    path.join(inProgressDir, `${opts.ref}.yaml`),
+    makeInProgressManifestYaml(opts),
   );
 }
 
@@ -362,7 +367,7 @@ function makeReviewerResultWithTier(
 describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => {
   it("manifest lacks risk_tier + reviewer-result says low + provisional_trust → auto-merges", async () => {
     // No risk_tier on the manifest — the gate must fall back to reviewer-result.
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
     const { impl: fakeExeca, calls } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -382,7 +387,7 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
   });
 
   it("low tier (via fallback) + null history + provisional_trust OFF → pauses (insufficient-data)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -400,7 +405,7 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
   });
 
   it("reviewer-result says medium + provisional_trust ON → STILL pauses (flag never relaxes medium)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -418,7 +423,7 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
   });
 
   it("fallback IGNORES tier when reviewer-result verdict is not green → pauses (no-tier-no-signal)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -439,7 +444,7 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
   });
 
   it("fallback IGNORES tier when reviewer-result ref does not match the gated ref → pauses", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -460,7 +465,7 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
   });
 
   it("manifest risk_tier wins over reviewer-result (manifest low, fallback not consulted)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
     let fallbackConsulted = false;
 
@@ -552,7 +557,7 @@ describe("classifyCiRollup", () => {
 
 describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
   it("risk says auto-merge but CI failed → pause-needs-human (ci-not-green), label applied, NOT merged", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca, calls } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -572,7 +577,7 @@ describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
   });
 
   it("CI still pending at timeout → pause-needs-human (ci-not-green), NOT merged", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -588,7 +593,7 @@ describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
   });
 
   it("CI green → merge proceeds (gate fires only on green)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -603,7 +608,7 @@ describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
   });
 
   it("CI gate does NOT run when the risk gate already pauses (medium)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
     const { impl: fakeExeca } = makePauseExeca();
     let ciConsulted = false;
 
@@ -626,7 +631,7 @@ describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
 
 describe("AC5(a) — auto-merge fires (low risk, met threshold)", () => {
   it("ratio === default threshold (0.8) → decision auto-merge, merged: true, pr merge called", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca, calls } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -649,7 +654,7 @@ describe("AC5(a) — auto-merge fires (low risk, met threshold)", () => {
   });
 
   it("ratio 0.81 (strictly above) → auto-merge", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -663,7 +668,7 @@ describe("AC5(a) — auto-merge fires (low risk, met threshold)", () => {
   });
 
   it("thresholdOverride: 0.85 with agreement 0.8 → pause (cross-check threshold-override path)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -685,7 +690,7 @@ describe("AC5(a) — auto-merge fires (low risk, met threshold)", () => {
 
 describe("AC5(b) — medium pauses", () => {
   it("medium risk with perfect agreement → pause with medium-risk, no merge call", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
     const { impl: fakeExeca, calls } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -721,7 +726,7 @@ describe("AC5(b) — medium pauses", () => {
 
 describe("AC5(c) — high pauses", () => {
   it("high risk with perfect agreement → pause with high-risk, no merge call", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "high" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "high" });
     const { impl: fakeExeca, calls } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -746,7 +751,7 @@ describe("AC5(c) — high pauses", () => {
 
 describe("AC5(d) — low + sub-threshold pauses", () => {
   it("low risk, ratio 0.7 (below default 0.8) → low-risk-sub-threshold pause", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -762,7 +767,7 @@ describe("AC5(d) — low + sub-threshold pauses", () => {
   });
 
   it("thresholdOverride: 0.6 with agreement 0.7 → auto-merge fires (cross-check)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -784,7 +789,7 @@ describe("AC5(d) — low + sub-threshold pauses", () => {
 
 describe("AC5(e) — low + insufficient-data pauses", () => {
   it("null agreement_metric → low-risk-insufficient-data pause", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -801,7 +806,7 @@ describe("AC5(e) — low + insufficient-data pauses", () => {
   });
 
   it("lastNVerdictsOverride: 30 with 30 seeds → agreement computed, decision based on ratio", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const telemetryDir = path.join(targetRepoRoot, ".flow", "telemetry");
     // Seed 30 READY FOR MERGE + merged pairs (ratio 1.0)
     await seedRatioVerdicts(telemetryDir, 30, 30);
@@ -834,7 +839,7 @@ describe("AC5(e) — low + insufficient-data pauses", () => {
 describe("AC5(g) — no-tier pause (legacy manifest)", () => {
   it("manifest without risk_tier → no-tier-no-signal pause, agreement still computed", async () => {
     // Seed manifest WITHOUT risk_tier
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID }); // no risk_tier
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID }); // no risk_tier
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -857,7 +862,7 @@ describe("AC5(g) — no-tier pause (legacy manifest)", () => {
 
 describe("AC5(h) — boundary: ratio exactly equals threshold (>= semantics)", () => {
   it("ratio 0.8 with threshold 0.8 → auto-merge fires (pinned against regression to >)", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -911,7 +916,7 @@ describe("AC5(j) — MCP tool registration smoke", () => {
 
 describe("AC5(k) — dryRun: true skips gh shell-out", () => {
   it("dryRun: true → decision computed, merged: false, dryRun: true, no execa calls for merge", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca, calls } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -942,7 +947,7 @@ describe("AC5(k) — dryRun: true skips gh shell-out", () => {
 
 describe("AC5(l) — recoverable gh error on pr merge folds to pause-needs-human", () => {
   it("non-zero exit on pr merge with mapped stderr → pause-needs-human/merge-failed (no throw), label still applied", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
     // pr merge fails with a mapped (recoverable) stderr → gh() raises
     // GhRecoverableError; repo-view + api-labels succeed so the fallback
@@ -992,7 +997,7 @@ describe("AC5(l) — recoverable gh error on pr merge folds to pause-needs-human
 
 describe("AC5(m) — pr-merge denied without permission folds to pause-needs-human", () => {
   it("pr-merge absent from gh_allow → pause-needs-human/merge-failed (no throw), denial in chatLog", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
     // Create a plugin root WITHOUT pr-merge (and without repo-view/api) in gh_allow
     const restrictedPluginRoot = path.join(tmpRoot, "restricted-plugin");
@@ -1054,7 +1059,7 @@ describe("AC5(m) — pr-merge denied without permission folds to pause-needs-hum
 
 describe("PR #277 regression — label failure on the pause path stays JSON-only", () => {
   it("medium-risk pause + gh label call throws (with a stray BLOCKED token) → clean pause-needs-human/medium-risk, label skipped, cause in chatLog", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
 
     // repo-view succeeds; the label POST throws an ExecaError-shaped error whose
     // text carries a bare `BLOCKED` token — exactly the #277 shape that used to
@@ -1099,7 +1104,7 @@ describe("PR #277 regression — label failure on the pause path stays JSON-only
 
 describe("AC5(n) — AutoMergeGateResultSchema round-trip", () => {
   it("result parses through schema without error and unknown keys fail", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makeMergeExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -1131,7 +1136,7 @@ describe("AC5(n) — AutoMergeGateResultSchema round-trip", () => {
 
 describe("AutoMergeGateThresholdInvalidError — threshold validation", () => {
   it("thresholdOverride: NaN → throws AutoMergeGateThresholdInvalidError", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
     await expect(
       runAutoMergeGate(baseOpts({ thresholdOverride: NaN })),
@@ -1139,7 +1144,7 @@ describe("AutoMergeGateThresholdInvalidError — threshold validation", () => {
   });
 
   it("thresholdOverride: 1.5 → throws AutoMergeGateThresholdInvalidError", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
     await expect(
       runAutoMergeGate(baseOpts({ thresholdOverride: 1.5 })),
@@ -1147,7 +1152,7 @@ describe("AutoMergeGateThresholdInvalidError — threshold validation", () => {
   });
 
   it("thresholdOverride: -0.1 → throws AutoMergeGateThresholdInvalidError", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
 
     await expect(
       runAutoMergeGate(baseOpts({ thresholdOverride: -0.1 })),
@@ -1161,7 +1166,7 @@ describe("AutoMergeGateThresholdInvalidError — threshold validation", () => {
 
 describe("threshold_used is stamped in result", () => {
   it("thresholdOverride: 0.75 → result.threshold_used is 0.75", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -1175,7 +1180,7 @@ describe("threshold_used is stamped in result", () => {
   });
 
   it("no thresholdOverride + loadWorkspaceConfigImpl returning 0.9 → threshold_used is 0.9", async () => {
-    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    await seedInProgressManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
     const { impl: fakeExeca } = makePauseExeca();
 
     const result = await runAutoMergeGate(baseOpts({
@@ -1211,7 +1216,7 @@ const REAL_PLUGIN_ROOT = path.resolve(HERE, "..", "..", "..", "..");
 
 describe("Story 5.34 — AC2: real generalist-dev permissions, both gate branches", () => {
   it("pause-needs-human branch — repo-view and api are allowed (no GhSubcommandDeniedError)", async () => {
-    await seedDoneManifest(targetRepoRoot, {
+    await seedInProgressManifest(targetRepoRoot, {
       ref: REF,
       sessionUlid: SESSION_ULID,
       risk_tier: "medium", // medium → always pause-needs-human
@@ -1236,7 +1241,7 @@ describe("Story 5.34 — AC2: real generalist-dev permissions, both gate branche
   });
 
   it("auto-merge branch — pr-merge is allowed (no GhSubcommandDeniedError)", async () => {
-    await seedDoneManifest(targetRepoRoot, {
+    await seedInProgressManifest(targetRepoRoot, {
       ref: REF,
       sessionUlid: SESSION_ULID,
       risk_tier: "low", // low + met threshold → auto-merge

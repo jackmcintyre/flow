@@ -335,21 +335,20 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
     );
     // READY FOR MERGE line.
     expect(allChatLog).toContain(
-      `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for merge gate`,
+      `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for the merge gate`,
     );
 
-    // Story 4.3c: manifest moved to done/; in-progress/ no longer has the ref.
-    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
-    const doneManifestRaw = await fs.readFile(
-      path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
-      "utf8",
-    );
-    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
-      absPath: path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
+    // fix/drain-isolation-coordination-honesty: the verdict step NO LONGER moves
+    // the manifest. It STAYS in in-progress/ (the merge gate completes it later,
+    // only after confirming CI green). done/ is empty at this point.
+    const ipRaw = await fs.readFile(manifestPath, "utf8");
+    const ipManifest = parseExecutionManifest(yamlParse(ipRaw) as unknown, {
+      absPath: manifestPath,
     });
-    expect(doneManifest.status).toBe("done");
-    expect(doneManifest.rework_count).toBeUndefined();
-    expect(doneManifest.blocked_by).toBeUndefined();
+    expect(ipManifest.status).toBe("in-progress");
+    await expect(
+      fs.stat(path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`)),
+    ).rejects.toThrow(); // ENOENT — not completed by the verdict step
   });
 });
 
@@ -399,21 +398,18 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     );
     expect(hasNeedsChangesLog).toBe(true);
 
-    // Story 4.3c: manifest moved to done/ after READY FOR MERGE on second attempt.
-    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
-    const doneManifestRaw = await fs.readFile(
-      path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
-      "utf8",
-    );
-    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
-      absPath: path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
+    // fix/drain-isolation-coordination-honesty: the READY verdict no longer moves
+    // the manifest — it STAYS in in-progress/ (the gate completes it later). The
+    // blocked_by stamped on the prior NEEDS CHANGES round remains on the manifest;
+    // it is stripped by completeStory when the gate later moves it to done/.
+    const ipRaw = await fs.readFile(manifestPath, "utf8");
+    const ipManifest = parseExecutionManifest(yamlParse(ipRaw) as unknown, {
+      absPath: manifestPath,
     });
-    // Note: In revision 2, NEEDS CHANGES stamps blocked_by on the manifest.
-    // The operator would normally clear it before re-running; in this test we
-    // just assert the done manifest got the READY FOR MERGE transition (status: "done").
-    // The blocked_by from the NEEDS CHANGES round is preserved in the done manifest
-    // since completeStory moves it as-is — this is expected behavior.
-    expect(doneManifest.status).toBe("done");
+    expect(ipManifest.status).toBe("in-progress");
+    await expect(
+      fs.stat(path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`)),
+    ).rejects.toThrow(); // ENOENT — not completed by the verdict step
   });
 });
 
@@ -486,18 +482,17 @@ describe("AC4(d): two-iteration NEEDS CHANGES × 2 → READY FOR MERGE (revision
     ).length;
     expect(needsChangesCount).toBe(2);
 
-    // Story 4.3c: manifest moved to done/.
-    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
-    const doneManifestRaw = await fs.readFile(
-      path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
-      "utf8",
-    );
-    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
-      absPath: path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`),
+    // fix/drain-isolation-coordination-honesty: the READY verdict no longer moves
+    // the manifest — it STAYS in in-progress/ after the final READY (the gate
+    // completes it later, only on confirmed-green CI). done/ is empty here.
+    const ipRaw = await fs.readFile(manifestPath, "utf8");
+    const ipManifest = parseExecutionManifest(yamlParse(ipRaw) as unknown, {
+      absPath: manifestPath,
     });
-    // The manifest may carry blocked_by from the NEEDS CHANGES iterations;
-    // what matters is the story reached done/ with status === "done".
-    expect(doneManifest.status).toBe("done");
+    expect(ipManifest.status).toBe("in-progress");
+    await expect(
+      fs.stat(path.join(tmpRoot, ".flow", "state", "done", `${STORY_REF}.yaml`)),
+    ).rejects.toThrow(); // ENOENT — not completed by the verdict step
   });
 });
 
@@ -817,25 +812,28 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     expect(reviewerA.completed).toBe(true);
     syntheticChatLog.push(...reviewerA.chatLog);
 
-    // AC4(c) disk assertion: in-progress/ no longer has refA; done/ does
-    await expect(
-      fs.stat(path.join(root, ".flow", "state", "in-progress", `${refA}.yaml`)),
-    ).rejects.toThrow(); // ENOENT — moved by processReviewerTranscript internally
-    const doneManifestARaw = await fs.readFile(
-      path.join(root, ".flow", "state", "done", `${refA}.yaml`),
+    // fix/drain-isolation-coordination-honesty: the verdict step no longer moves
+    // refA — it STAYS in in-progress/ (the gate, not exercised here, completes it
+    // later). It is NOT in done/. A non-overlapping sibling (refB) is still
+    // claimable while refA sits in-progress.
+    const ipManifestARaw = await fs.readFile(
+      path.join(root, ".flow", "state", "in-progress", `${refA}.yaml`),
       "utf8",
     );
-    const doneManifestA = parseExecutionManifest(yamlParse(doneManifestARaw) as unknown, {
-      absPath: path.join(root, ".flow", "state", "done", `${refA}.yaml`),
+    const ipManifestA = parseExecutionManifest(yamlParse(ipManifestARaw) as unknown, {
+      absPath: path.join(root, ".flow", "state", "in-progress", `${refA}.yaml`),
     });
-    expect(doneManifestA.status).toBe("done");
-    expect(doneManifestA.claimed_by).toBe(sessionUlid);
+    expect(ipManifestA.status).toBe("in-progress");
+    expect(ipManifestA.claimed_by).toBe(sessionUlid);
+    await expect(
+      fs.stat(path.join(root, ".flow", "state", "done", `${refA}.yaml`)),
+    ).rejects.toThrow(); // ENOENT — not completed by the verdict step
 
     // AC4(d): synthetic chat log — prose observes completed: true and appends the line
     const completionLineA = `story ${refA} moved to done — claiming next`;
     syntheticChatLog.push(completionLineA); // simulates prose emitting line after observing completed: true
 
-    const readyForMergeLineA = `reviewer verdict: READY FOR MERGE — story ${refA} ready for merge gate`;
+    const readyForMergeLineA = `reviewer verdict: READY FOR MERGE — story ${refA} ready for the merge gate`;
     const readyIdx = syntheticChatLog.indexOf(readyForMergeLineA);
     const doneIdx = syntheticChatLog.indexOf(completionLineA);
     expect(readyIdx).toBeGreaterThanOrEqual(0);
@@ -880,47 +878,54 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     expect(reviewerB.completed).toBe(true);
     syntheticChatLog.push(...reviewerB.chatLog);
 
-    await expect(
-      fs.stat(path.join(root, ".flow", "state", "in-progress", `${refB}.yaml`)),
-    ).rejects.toThrow();
-    const doneManifestBRaw = await fs.readFile(
-      path.join(root, ".flow", "state", "done", `${refB}.yaml`),
+    // refB also STAYS in in-progress/ after its READY verdict (the gate completes
+    // it later); it is NOT in done/.
+    const ipManifestBRaw = await fs.readFile(
+      path.join(root, ".flow", "state", "in-progress", `${refB}.yaml`),
       "utf8",
     );
-    const doneManifestB = parseExecutionManifest(yamlParse(doneManifestBRaw) as unknown, {
-      absPath: path.join(root, ".flow", "state", "done", `${refB}.yaml`),
+    const ipManifestB = parseExecutionManifest(yamlParse(ipManifestBRaw) as unknown, {
+      absPath: path.join(root, ".flow", "state", "in-progress", `${refB}.yaml`),
     });
-    expect(doneManifestB.status).toBe("done");
-    expect(doneManifestB.claimed_by).toBe(sessionUlid);
+    expect(ipManifestB.status).toBe("in-progress");
+    expect(ipManifestB.claimed_by).toBe(sessionUlid);
+    await expect(
+      fs.stat(path.join(root, ".flow", "state", "done", `${refB}.yaml`)),
+    ).rejects.toThrow(); // ENOENT — not completed by the verdict step
 
     const completionLineB = `story ${refB} moved to done — claiming next`;
     syntheticChatLog.push(completionLineB); // simulates prose observing completed: true
 
-    const readyForMergeLineB = `reviewer verdict: READY FOR MERGE — story ${refB} ready for merge gate`;
+    const readyForMergeLineB = `reviewer verdict: READY FOR MERGE — story ${refB} ready for the merge gate`;
     const readyIdxB = syntheticChatLog.lastIndexOf(readyForMergeLineB);
     const doneIdxB = syntheticChatLog.lastIndexOf(completionLineB);
     expect(readyIdxB).toBeGreaterThanOrEqual(0);
     expect(doneIdxB).toBeGreaterThan(readyIdxB);
 
-    // AC4(e): third claimNextStory → queue-drained
+    // AC4(e): fix/drain-isolation-coordination-honesty — with both stories driven
+    // to a READY verdict but NOT yet completed (the gate, not exercised here, owns
+    // the done/ move), they STAY in in-progress/. The to-do queue is empty but
+    // in-progress/ is not, so a third claim reports waiting-on-in-progress (not
+    // queue-drained — that would falsely imply nothing is outstanding).
     const claimThird = await claimNextStory({ targetRepoRoot: root, sessionUlid });
-    expect(claimThird.next).toBe("queue-drained");
-    expect(claimThird.chatLog[0]).toBe(
-      "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.",
-    );
+    expect(claimThird.next).toBe("waiting-on-in-progress");
 
-    // AC4(f): final on-disk state
+    // AC4(f): final on-disk state — to-do drained; BOTH stories sit in in-progress/
+    // awaiting the gate; done/ is empty (nothing was completed by the inner cycle).
     const todoFiles = await fs.readdir(path.join(root, ".flow", "state", "to-do"));
     expect(todoFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
 
     const inProgressFiles = await fs.readdir(path.join(root, ".flow", "state", "in-progress"));
-    expect(inProgressFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
+    // Exclude the per-claim `<ref>.snapshot.yaml` sidecars — count manifests only.
+    const inProgressYaml = inProgressFiles.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml"),
+    );
+    expect(inProgressYaml).toHaveLength(2);
+    expect(inProgressYaml).toContain(`${refA}.yaml`);
+    expect(inProgressYaml).toContain(`${refB}.yaml`);
 
     const doneFiles = await fs.readdir(path.join(root, ".flow", "state", "done"));
-    const doneYaml = doneFiles.filter((f) => f.endsWith(".yaml"));
-    expect(doneYaml).toHaveLength(2);
-    expect(doneYaml).toContain(`${refA}.yaml`);
-    expect(doneYaml).toContain(`${refB}.yaml`);
+    expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
   });
 });
 

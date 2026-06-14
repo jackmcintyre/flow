@@ -37118,7 +37118,19 @@ var ExecutionManifestSchema = external_exports.object({
     "orphan-no-transcript",
     "reviewer-grammar",
     "deps-drift",
-    "needs-human-decision"
+    "needs-human-decision",
+    // Drain give-up reasons (fix/drain-isolation-coordination-honesty): the
+    // drain abandons a story it cannot finish and MUST move the manifest out
+    // of in-progress/ so it stops counting as live work (the non-termination
+    // fix). Each names WHY the drain gave up.
+    "rework-exhausted",
+    "verdict-failed",
+    "worker-threw",
+    // Auto-merge gate honesty reasons: a story whose full CI build is not
+    // confirmed green never reaches done/ — the gate routes it to blocked/
+    // with one of these so done/ means "reviewer-approved AND CI-green".
+    "ci-not-green",
+    "ci-status-unreadable"
   ]).optional(),
   /**
    * Structured violation list for manifests blocked by `planning-discipline`.
@@ -37639,8 +37651,9 @@ async function completeStory(opts) {
     from: "in-progress",
     to: "done"
   });
+  const { blocked_by: _dropBlockedBy, ...manifestWithoutBlock } = manifest;
   const updatedManifest = {
-    ...manifest,
+    ...manifestWithoutBlock,
     status: "done"
     // claimed_by is already present and preserved by the spread above.
   };
@@ -52084,8 +52097,7 @@ async function processReviewerTranscript(opts) {
   }
   const verdict = resultFile.recommendedVerdict;
   if (verdict === "READY FOR MERGE") {
-    chatLog.push(`reviewer verdict: READY FOR MERGE \u2014 story ${ref} ready for merge gate`);
-    await completeStory({ targetRepoRoot, ref, sessionUlid });
+    chatLog.push(`reviewer verdict: READY FOR MERGE \u2014 story ${ref} ready for the merge gate`);
     return { next: "done-ready-for-merge", completed: true, chatLog };
   }
   if (verdict === "NEEDS CHANGES") {
@@ -54026,11 +54038,16 @@ async function runAutoMergeGate(opts) {
     opts.targetRepoRoot,
     ".flow",
     "state",
-    "done",
+    "in-progress",
     `${opts.ref}.yaml`
   );
-  const manifest = await readManifestFn(manifestPath);
-  let risk_tier = manifest.risk_tier;
+  let risk_tier;
+  try {
+    const manifest = await readManifestFn(manifestPath);
+    risk_tier = manifest.risk_tier;
+  } catch {
+    risk_tier = void 0;
+  }
   if (risk_tier === void 0) {
     const reviewerResult = await readReviewerResultFn(
       opts.targetRepoRoot,

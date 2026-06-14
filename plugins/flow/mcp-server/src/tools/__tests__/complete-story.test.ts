@@ -215,6 +215,38 @@ describe("completeStory (a) — happy complete: matching claimed_by", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Honesty fix: strip a stale blocked_by on completion
+// ---------------------------------------------------------------------------
+
+describe("completeStory — strips a stale blocked_by on the done/ write (fix/drain-isolation-coordination-honesty)", () => {
+  it("a manifest carrying blocked_by from a prior NEEDS-CHANGES round completes with NO blocked_by", async () => {
+    // A story can reach completion after one or more NEEDS-CHANGES rounds that
+    // stamped `blocked_by: reviewer-verdict-needs-changes` on the in-progress
+    // manifest. Leaving it produced the contradictory "status: done + blocked_by"
+    // record behind PR #355. completeStory must strip it on the done/ write.
+    const absInProgress = await seedInProgressManifest(stateRoot, REF, SESSION_A);
+    // Inject a stale blocked_by onto the in-progress manifest (after the sidecar
+    // baseline was captured) — exactly the prior-round residue.
+    const ipRaw = await fs.readFile(absInProgress, "utf8");
+    const ipManifest = yamlParse(ipRaw) as Record<string, unknown>;
+    ipManifest["blocked_by"] = "reviewer-verdict-needs-changes";
+    await atomicWriteFile(absInProgress, yamlStringify(ipManifest, { lineWidth: 0 }));
+
+    const result = await completeStory({
+      targetRepoRoot: root,
+      ref: REF,
+      sessionUlid: SESSION_A,
+    });
+
+    const raw = await fs.readFile(result.absPath, "utf8");
+    const done = yamlParse(raw) as Record<string, unknown>;
+    expect(done["status"]).toBe("done");
+    expect(done["blocked_by"]).toBeUndefined(); // stale block reason stripped
+    expect(done["claimed_by"]).toBe(SESSION_A); // claimed_by still preserved for retros
+  });
+});
+
+// ---------------------------------------------------------------------------
 // (b) Wrong claimant
 // ---------------------------------------------------------------------------
 

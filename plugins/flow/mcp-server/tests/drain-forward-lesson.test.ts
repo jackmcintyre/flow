@@ -291,20 +291,24 @@ describe("learning-loop — drain workflow wires the capture+forward seams in or
     expect(src).toMatch(/recordReviewerLesson.*owns the lesson write/s);
   });
 
-  it("forwards the captured lesson via recordStoryRetro inside the green-verdict block, before the gate", async () => {
+  it("forwards the captured lesson via recordStoryRetro AFTER a confirmed-green gate completes the story", async () => {
     const src = await fs.readFile(DRAIN, "utf8");
     // Anchor on the actual SEAM COMMANDS (`node ... <tool> --json`), not the bare
     // identifiers — the identifiers also appear in the surrounding comments.
-    const greenIdx = src.indexOf("verdict?.next === 'done-ready-for-merge'");
+    const gateSeamIdx = src.indexOf("runAutoMergeGate --json");
+    const completeSeamIdx = src.indexOf("completeStory --json");
     const readSeamIdx = src.indexOf("readReviewerLesson --json");
     const forwardSeamIdx = src.indexOf("recordStoryRetro --json");
-    const gateSeamIdx = src.indexOf("runAutoMergeGate --json");
-    expect(greenIdx).toBeGreaterThan(-1);
-    // FORWARD lives inside the green-verdict block: read then forward, both after
-    // the block opens and both BEFORE the gate seam runs.
-    expect(readSeamIdx).toBeGreaterThan(greenIdx);
+    expect(gateSeamIdx).toBeGreaterThan(-1);
+    expect(completeSeamIdx).toBeGreaterThan(-1);
+    // fix/drain-isolation-coordination-honesty: the honesty rebuild reorders the
+    // tail. The GATE runs FIRST; completeStory moves the story to done/ ONLY on a
+    // confirmed-green gate; and ONLY THEN is the lesson forwarded — recordStoryRetro
+    // requires the manifest already in done/. So the order is strictly:
+    //   gate  <  completeStory  <  readReviewerLesson  <  recordStoryRetro.
+    expect(completeSeamIdx).toBeGreaterThan(gateSeamIdx);
+    expect(readSeamIdx).toBeGreaterThan(completeSeamIdx);
     expect(forwardSeamIdx).toBeGreaterThan(readSeamIdx);
-    expect(forwardSeamIdx).toBeLessThan(gateSeamIdx);
   });
 
   it("forwards with the swallow/non-fatal variant so a forward error never blocks the merge", async () => {

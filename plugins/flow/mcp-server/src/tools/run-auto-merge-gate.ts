@@ -435,21 +435,34 @@ export async function runAutoMergeGate(
   }
 
   // ------------------------------------------------------------------
-  // Step 3: Resolve risk_tier. Prefer the done/<ref>.yaml manifest field;
-  // fall back to the tier the reviewer computed from the actual PR diff and
-  // recorded in reviewer-result.json (the authoritative source — the manifest
-  // is not always stamped). Without this fallback the gate sees `undefined`
-  // and always pauses (`no-tier-no-signal`).
+  // Step 3: Resolve risk_tier. Prefer the manifest field; fall back to the tier
+  // the reviewer computed from the actual PR diff and recorded in
+  // reviewer-result.json (the authoritative source — the manifest is not always
+  // stamped). Without this fallback the gate sees `undefined` and always pauses
+  // (`no-tier-no-signal`).
+  //
+  // fix/drain-isolation-coordination-honesty: the manifest is in IN-PROGRESS/ when
+  // the gate runs. completeStory no longer runs at verdict time — the gate's caller
+  // moves the story to done/ only AFTER this gate confirms CI is green, so done/
+  // means "reviewer-approved AND CI-green" by construction. Read risk_tier from
+  // in-progress/ and tolerate a miss (fall back to the reviewer-computed tier).
   // ------------------------------------------------------------------
   const manifestPath = path.join(
     opts.targetRepoRoot,
     ".flow",
     "state",
-    "done",
+    "in-progress",
     `${opts.ref}.yaml`,
   );
-  const manifest = await readManifestFn(manifestPath);
-  let risk_tier = (manifest as { risk_tier?: "low" | "medium" | "high" }).risk_tier;
+  let risk_tier: "low" | "medium" | "high" | undefined;
+  try {
+    const manifest = await readManifestFn(manifestPath);
+    risk_tier = (manifest as { risk_tier?: "low" | "medium" | "high" }).risk_tier;
+  } catch {
+    // Manifest absent from in-progress/ (an unusual resume path) — leave risk_tier
+    // undefined and fall back to the reviewer-computed tier below.
+    risk_tier = undefined;
+  }
   if (risk_tier === undefined) {
     const reviewerResult = await readReviewerResultFn(
       opts.targetRepoRoot,

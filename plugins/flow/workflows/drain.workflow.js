@@ -50,6 +50,16 @@ const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency >
 // while a sibling story is still building. Default: 2000 ms for production runs.
 // Tests pass 0 (or a very small value) so the harness does not slow down.
 const REPOLL_DELAY_MS = Number.isInteger(A.repollDelayMs) && A.repollDelayMs >= 0 ? A.repollDelayMs : 2000
+// Re-poll termination guard (fix/drain-isolation-coordination-honesty): the
+// belt-and-braces cap on consecutive `waiting-on-in-progress` re-polls during
+// which NO worker is actually processing a story. The non-termination fix moves
+// every given-up story OUT of in-progress/ so the common stall cause is gone;
+// this cap guarantees the drain can NEVER hang even if some OTHER cause leaves a
+// manifest wedged in in-progress/ (a hand-broken manifest, a future bug). After
+// this many consecutive no-progress polls with zero active workers, the run
+// exits honestly with drainedReason 'stalled-in-progress'. Default 50; tests
+// pass a small value alongside repollDelayMs:0.
+const MAX_REPOLL = Number.isInteger(A.maxRepoll) && A.maxRepoll > 0 ? A.maxRepoll : 50
 // Execution model for the dev and reviewer subagents (FU6). Default: 'sonnet' so
 // overnight drains use the cheaper model without hand-editing the workflow.
 // Override per-run by passing devReviewerModel: 'opus' (or any model string) in
@@ -223,6 +233,14 @@ const guardRoot = async (ref) => {
       `${g.stashed ? 'Auto-stashed (recover via `git stash list` / `git stash pop`).' : 'STASH DID NOT LAND — root still dirty; inspect manually.'} ` +
       `Likely a worktree-isolation leak (bgIsolation:'none').`)
   }
+  // ROOT-HEAD RESTORE (fix/drain-isolation-coordination-honesty): the same
+  // bgIsolation leak can leave the root checkout DETACHED at a story commit (HEAD
+  // moved without dirtying the tree). The guard now also returns the root to base.
+  if (g && !g._parseError && g.headMoved) {
+    log(`⚠ CLEAN-ROOT GUARD: root checkout HEAD had drifted after ${ref} (was ${g.restoredFrom || 'unknown'}) — restored to ${g.restoredTo || 'base'}. Likely a worktree-isolation leak (bgIsolation:'none'); the story's work is safe on its pushed branch.`)
+  } else if (g && !g._parseError && g.headNote) {
+    log(`CLEAN-ROOT GUARD (HEAD): ${g.headNote}`)
+  }
 }
 
 phase('drain')
@@ -256,6 +274,28 @@ if (!reviewerPersona.trim()) throw new Error('drain: empty generalist-reviewer p
 const completed = [], merged = [], pausedForHuman = [], blocked = [], resumed = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
 let drainedReason = 'incomplete'
+
+// GIVE-UP MOVE (fix/drain-isolation-coordination-honesty — the non-termination
+// fix). Whenever the drain abandons a story it cannot finish, the manifest MUST
+// leave in-progress/ so it stops counting as live work — otherwise
+// claimNextStory keeps returning waiting-on-in-progress forever and the loop
+// re-polls without end (the observed "lots of claim" spin). This moves the
+// manifest in-progress/ → blocked/ via the blockStory CLI seam, stamping the
+// give-up reason (a closed blocked_by enum value). It is BEST-EFFORT: a failed
+// or garbled block is logged and swallowed (never re-thrown), because the result
+// bucket already records the give-up honestly and a thrown block must not abort
+// the run. INVARIANT this preserves: in-progress/ holds ONLY actively-processing
+// stories; every terminal story is in done/ (CI-green) or blocked/ (everything
+// else needing a human). retryable=false (one-shot) so a garble cannot double-
+// move (the second move would ManifestNotFound after the first succeeded).
+const blockStoryGiveUp = async (ref, blockedBy) => {
+  try {
+    const r = await seam(`node ${CLI} blockStory --json '${J({ targetRepoRoot: REPO, ref, sessionUlid: SU, blockedBy })}'`, `block-story:${ref}`)
+    if (!r || r._parseError) log(`⚠ block-story unconfirmed for ${ref} (${r?._parseError || 'no result'}) — manifest may linger in in-progress/`)
+  } catch (e) {
+    log(`⚠ block-story threw for ${ref}: ${String((e && e.message) || e)} — manifest may linger in in-progress/`)
+  }
+}
 
 // processStory: run ONE story end-to-end — rework loop (dev → review → verdict)
 // then the auto-merge gate — and file the outcome into exactly one result bucket.
@@ -346,6 +386,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           const question = ph0.question || '(no question text captured)'
           pausedForHuman.push({ ref, reason: 'needs-human-decision', question })
           notifyHumanNeeded(ref, question)
+          await blockStoryGiveUp(ref, 'needs-human-decision')
           return
         }
         // Marker present but the tool did not confirm it (garbled relay / parse
@@ -358,6 +399,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       // phrase, the dev did not finish cleanly; block rather than fake success.
       if (!devText.includes(HANDOFF(ref))) {
         blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: devText.slice(-300) })
+        await blockStoryGiveUp(ref, 'handoff-grammar')
         return
       }
 
@@ -365,7 +407,13 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
       // same blocked_by) — safe to retry the relay on a garble.
       const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}${tag}`, true)
-      if (!pd || pd.next !== 'spawn-reviewer') { blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' }); return }
+      if (!pd || pd.next !== 'spawn-reviewer') {
+        blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' })
+        // Move out of in-progress/. pd.next may be a recoverable gh-* enum reason
+        // (a real blocked_by value); otherwise fall back to handoff-grammar.
+        await blockStoryGiveUp(ref, ['gh-defer', 'gh-retry', 'gh-needs-human'].includes(pd?.next) ? pd.next : 'handoff-grammar')
+        return
+      }
       prNumber = pd.prNumber
       reviewerPrompt = pd.reviewerPrompt
       log(`${ref} -> PR #${prNumber}`)
@@ -401,61 +449,95 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     )
     await progressDone(ref, 'review', reviewStartedAt)
 
-    // VERDICT — derived from the reviewer-result FILE; on green, completeStory
-    // runs inside processReviewerTranscript (atomic in-progress -> done).
+    // VERDICT — derived from the reviewer-result FILE. On green it returns
+    // done-ready-for-merge but NO LONGER moves the manifest to done/; the gate
+    // owns the done/ move after confirming CI green (the honesty fix below).
     verdict = await seam(`node ${CLI} processReviewerTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, manifestPath })}'`, `verdict:${ref}:${rw}${tag}`)
     const v = verdict?.next
     log(`${ref} verdict -> ${v}`)
     if (v === 'done-ready-for-merge') break
-    if (v === 'done-blocked-reviewer-needs-changes') continue // rework
-    blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' }); return
+    if (v === 'done-blocked-reviewer-needs-changes') continue // rework (manifest legitimately stays in in-progress/ between rounds)
+    blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' })
+    await blockStoryGiveUp(ref, v === 'done-blocked-reviewer-blocked' ? 'reviewer-verdict-blocked' : 'verdict-failed')
+    return
   }
 
   // REWORK EXHAUSTED (B2): the loop fell through without a green verdict —
   // MAX_REWORK NEEDS-CHANGES rounds in a row (each `continue`d above). Without
   // this guard the story lands in NO result bucket and silently vanishes from
   // the run summary, which promises every story lands in exactly one bucket.
-  // Record it as blocked so the stories that most need a human actually surface.
+  // Record it as blocked AND move the manifest out of in-progress/ (give-up move)
+  // so an abandoned story stops counting as live work and the queue can drain.
   if (verdict?.next !== 'done-ready-for-merge') {
-    blocked.push({ ref, blocked_by: 'rework-exhausted', rounds: MAX_REWORK }); return
+    blocked.push({ ref, blocked_by: 'rework-exhausted', rounds: MAX_REWORK })
+    await blockStoryGiveUp(ref, 'rework-exhausted')
+    return
   }
 
-  // GATE — only on a green verdict. risk-tier x agreement x threshold; the tool
-  // performs the merge or applies the needs-human label. Stage-1 expects
-  // pause-needs-human (no agreement history yet) -> a human merges.
-  if (verdict?.next === 'done-ready-for-merge') {
-    completed.push(ref)
+  // GREEN VERDICT. The manifest is STILL in in-progress/ — processReviewerTranscript
+  // no longer completes it (fix/drain-isolation-coordination-honesty). The
+  // auto-merge GATE now owns the done/ move: a story reaches done/ ONLY after the
+  // gate confirms its CI is green. That makes "done == reviewer-approved AND
+  // CI-green" true by construction, so a red / CI-rejected story can never sit in
+  // done/ wearing a merge-ready label (the #355 honesty bug).
+  //
+  // GATE — risk-tier x agreement x threshold, AND the Stage-2 CI poll. It merges
+  // the PR on auto-merge and applies the needs-human label on a pause, but it does
+  // NOT move the manifest; the workflow owns completion below. Stage-1 expects
+  // pause-needs-human (no agreement history yet) on a GREEN CI -> a human merges.
+  const gateStartedAt = await progressStart(ref, 'gate')
+  const gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)
+  await progressDone(ref, 'gate', gateStartedAt)
 
-    // FORWARD THE LESSON (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop
-    // producer, the keystone). The reviewer may have captured ONE reusable lesson
-    // onto the per-ref reviewer-result.json (via recordReviewerLesson). The manifest
-    // is already in done/ at this point (completeStory ran inside
-    // processReviewerTranscript), which is exactly what recordStoryRetro requires.
-    // Read the captured lesson, and if one is present, forward it onto the done
-    // manifest via recordStoryRetro so the retro analyst finally has a real,
-    // grounded, role-attributable signal to reason over.
-    //
-    // FAIL-SOFT by contract: BOTH seams use the retryable+swallow variant (as the
-    // friction + heartbeat seams do). A garbled relay, a missing/empty lesson, OR
-    // any thrown error is logged, swallowed, and the merge gate still runs — a
-    // forwarding failure must NEVER block the merge or leave a spurious lesson.
-    // recordStoryRetro is a deterministic idempotent shallow-overwrite, so a
-    // crash-resume re-forward of the same lesson writes a byte-identical manifest.
-    const lessonRead = await seam(`node ${CLI} readReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `lesson-read:${ref}`, true, true)
-    const lesson = lessonRead && !lessonRead._parseError ? lessonRead.lesson : null
-    if (lesson) {
-      const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: 'generalist-reviewer' })}'`, `lesson-forward:${ref}`, true, true)
-      if (fwd && !fwd._parseError) log(`${ref} forwarded reviewer lesson onto done manifest`)
-      else log(`${ref} lesson-forward did not confirm (swallowed) — merge proceeds`)
-    }
+  const decision = gate?.decision
+  const gateReason = gate?.reason || decision || gate?._parseError || 'gate-failed'
+  // CONFIRMED GREEN iff the gate auto-merged (green CI + agreement, PR merged) OR
+  // it paused for a reason OTHER than a CI problem (green CI, held only for a human
+  // to merge — the Stage-1 happy path). A red CI, an unreadable CI status, a
+  // garbled relay, or a missing decision is NOT confirmed green -> never done/.
+  const ciUnconfirmed = gateReason === 'ci-not-green' || gateReason === 'ci-status-unreadable' || !!gate?._parseError || !decision
+  const confirmedGreen = decision === 'auto-merge' || (decision === 'pause-needs-human' && !ciUnconfirmed)
 
-    // HEARTBEAT: bracket the gate phase (start → done with elapsed time).
-    const gateStartedAt = await progressStart(ref, 'gate')
-    const gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)
-    await progressDone(ref, 'gate', gateStartedAt)
-    if (gate?.decision === 'auto-merge') merged.push({ ref, prNumber })
-    else pausedForHuman.push({ ref, prNumber, reason: gate?.reason || gate?.decision || gate?._parseError || 'gate-failed' })
+  if (!confirmedGreen) {
+    // NOT confirmed green -> the story must NOT enter done/. Move it to blocked/
+    // with an honest reason and bucket it. This is the #355 fix: a red-CI story
+    // lands in blocked/, never done/+needs-human.
+    blocked.push({ ref, prNumber, blocked_by: gateReason })
+    const enumReason = gateReason === 'ci-status-unreadable' ? 'ci-status-unreadable'
+      : gate?._parseError ? 'verdict-failed'
+      : 'ci-not-green'
+    await blockStoryGiveUp(ref, enumReason)
+    return
   }
+
+  // CONFIRMED GREEN -> safe to record done/. completeStory moves in-progress/ ->
+  // done/ (claimant-guarded) and strips any stale blocked_by on the way. Only now
+  // is the story "done". A failed/garbled completion does NOT fake success: bucket
+  // it for a human rather than guess.
+  const done = await seam(`node ${CLI} completeStory --json '${J({ targetRepoRoot: REPO, ref, sessionUlid: SU })}'`, `complete:${ref}`)
+  if (!done || done._parseError) {
+    blocked.push({ ref, prNumber, blocked_by: done?._parseError || 'complete-failed' })
+    await blockStoryGiveUp(ref, 'verdict-failed')
+    return
+  }
+  completed.push(ref)
+
+  // FORWARD THE LESSON (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop
+  // producer). The reviewer may have captured ONE reusable lesson onto the per-ref
+  // reviewer-result.json. The manifest is in done/ NOW (completeStory just ran),
+  // which is exactly what recordStoryRetro requires, so this runs after completion.
+  // FAIL-SOFT: both seams use the retryable+swallow variant; a garble, a
+  // missing/empty lesson, or any throw is logged and swallowed — never blocks.
+  const lessonRead = await seam(`node ${CLI} readReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `lesson-read:${ref}`, true, true)
+  const lesson = lessonRead && !lessonRead._parseError ? lessonRead.lesson : null
+  if (lesson) {
+    const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: 'generalist-reviewer' })}'`, `lesson-forward:${ref}`, true, true)
+    if (fwd && !fwd._parseError) log(`${ref} forwarded reviewer lesson onto done manifest`)
+    else log(`${ref} lesson-forward did not confirm (swallowed) — merge proceeds`)
+  }
+
+  if (decision === 'auto-merge') merged.push({ ref, prNumber })
+  else pausedForHuman.push({ ref, prNumber, reason: gateReason })
 }
 
 // ── ORPHAN RECOVERY (crash resume) ─────────────────────────────────────────
@@ -537,6 +619,14 @@ let stop = false // set the moment any worker observes a terminal claim outcome
 // outcomes are ignored so the reason is derived once, not last-writer-wins.
 let reasonRecorded = false
 const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; drainedReason = r; stop = true } }
+// Termination-guard state (fix/drain-isolation-coordination-honesty):
+//   activeProcessing — workers currently inside processStory (live work in flight).
+//   stuckPolls — consecutive waiting-on-in-progress re-polls observed while NO
+//                worker is processing; a non-zero run of these means a manifest is
+//                wedged in in-progress/ with no live owner, so the run must exit
+//                rather than spin. Reset whenever real work is in flight.
+let activeProcessing = 0
+let stuckPolls = 0
 
 async function drainWorker(workerId) {
   for (;;) {
@@ -567,6 +657,23 @@ async function drainWorker(workerId) {
       // queue-drained and the worker stops. Do NOT call recordReason here — this is
       // a transient re-poll signal, not a terminal drain outcome.
       if (claim?.next === 'waiting-on-in-progress') {
+        // TERMINATION GUARD (fix/drain-isolation-coordination-honesty): re-polling
+        // here is only legitimate while a sibling is ACTUALLY processing a story
+        // (activeProcessing > 0) and will eventually free the slot. If NO worker is
+        // processing yet the claim still reports waiting-on-in-progress, a manifest
+        // is wedged in in-progress/ with no live owner — re-polling would spin
+        // forever (the observed "lots of claim" hang). Count consecutive
+        // no-active-worker polls; after MAX_REPOLL, exit honestly with
+        // 'stalled-in-progress'. The give-up move (blockStory) keeps abandoned
+        // stories OUT of in-progress/, so this backstop should rarely trip.
+        if (activeProcessing === 0) {
+          if (++stuckPolls >= MAX_REPOLL) {
+            log(`STALLED — worker ${workerId} saw waiting-on-in-progress ${stuckPolls}x with no worker processing; a manifest is wedged in in-progress/. Exiting honestly.`)
+            recordReason('stalled-in-progress'); return
+          }
+        } else {
+          stuckPolls = 0 // a sibling is genuinely working — reset the stall counter
+        }
         log(`WAITING — worker ${workerId} found no claimable story (a sibling is still in progress); re-polling in ${REPOLL_DELAY_MS}ms`)
         if (REPOLL_DELAY_MS > 0) await new Promise(resolve => setTimeout(resolve, REPOLL_DELAY_MS))
         claimsStarted-- // un-reserve the slot: this loop iteration did not claim a story
@@ -590,6 +697,7 @@ async function drainWorker(workerId) {
     }
     const { ref, title, manifestPath } = claim
     log(`claimed ${ref} — ${title} (worker ${workerId})`)
+    stuckPolls = 0 // a claim succeeded — real progress; reset the stall counter
     // FAST-LANE ROUTING (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): resolve the
     // build plan (dev/reviewer model + review depth) from the story's persisted
     // lane. The seam reads the lane from the in-progress manifest and returns
@@ -606,6 +714,10 @@ async function drainWorker(workerId) {
     // reason and never abort the run or poison a sibling. processStory already
     // buckets every *expected* outcome itself; this catch is the backstop for an
     // UNEXPECTED throw so the no-silent-failures surface holds even then.
+    // activeProcessing brackets the live work so the re-poll termination guard can
+    // tell a genuine in-flight sibling (keep re-polling) from a wedged manifest
+    // with no live owner (exit). Balanced with the finally below.
+    activeProcessing++
     try {
       await processStory({ ref, title, manifestPath, storyModel, reviewDepth: storyReviewDepth })
     } catch (e) {
@@ -617,6 +729,12 @@ async function drainWorker(workerId) {
       const stackTail = String((e && e.stack) || '').slice(-200)
       blocked.push({ ref, blocked_by: 'worker-threw', tail: msg, stackTail })
       log(`worker ${workerId} story ${ref} threw — bucketed blocked (${msg.slice(0, 120)}), run continues`)
+      // GIVE-UP MOVE: an unexpected throw left the manifest in in-progress/. Move
+      // it to blocked/ so it stops counting as live work and cannot wedge the
+      // re-poll loop (the non-termination fix). Best-effort (self-guarded).
+      await blockStoryGiveUp(ref, 'worker-threw')
+    } finally {
+      activeProcessing--
     }
     // CLEAN-ROOT GUARD (Fix 2b): runs whether the story settled or threw, so a
     // leaked-then-crashed story still can't leave the root dirty for the next claim.
