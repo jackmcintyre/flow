@@ -379,7 +379,37 @@ export function findPackageRoot(opts: {
   return { ok: false };
 }
 
-async function runVitestCheck(
+/** Strip ANSI escape codes so vitest's summary line can be parsed as plain text. */
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\[[0-9;]*m/g, "");
+}
+
+/**
+ * How many tests ACTUALLY EXECUTED (passed + failed, excluding skipped/todo),
+ * parsed from vitest's run summary. Returns 0 when the run matched no test — i.e.
+ * the "Tests" summary line reports only skipped, there is no such line, or vitest
+ * printed "No test files found".
+ *
+ * fix(01KV43ET): this is the heart of the zero-executed guard. vitest exits 0 even
+ * when the `-t` name filter matches nothing (every test is skipped), which made a
+ * source-file marker — which can never match a test NAME — "pass" while running
+ * zero tests. Counting executed tests lets the caller refuse that vacuous green.
+ */
+export function countExecutedTests(output: string): number {
+  const text = stripAnsi(output);
+  if (/No test files? found/i.test(text)) return 0;
+  // The per-test summary line is "Tests  N passed | M failed | K skipped (T)".
+  // It is distinct from the "Test Files" line ("Test" + space, never "Tests").
+  const line = /^\s*Tests\s+(.+)$/m.exec(text);
+  if (!line) return 0; // no Tests summary at all → nothing ran
+  const seg = line[1] ?? "";
+  const passed = /(\d+)\s+passed/.exec(seg);
+  const failed = /(\d+)\s+failed/.exec(seg);
+  return (passed ? Number(passed[1]) : 0) + (failed ? Number(failed[1]) : 0);
+}
+
+export async function runVitestCheck(
   index: number,
   tag: string | null,
   testNameFilter: string,
@@ -428,6 +458,26 @@ async function runVitestCheck(
       testNameFilter,
       status: "fail",
       reason: `vitest filter '${testNameFilter}' timed out after 90s`,
+      stdout: capString(rawStdout),
+      stderr: capString(rawStderr),
+      exitCode,
+    };
+  }
+
+  // ZERO-EXECUTED GUARD (fix 01KV43ET): vitest exits 0 even when the `-t` filter
+  // matched NO test (every test skipped). A criterion "verified" by running zero
+  // tests must NOT pass — that is a vacuous green that signs off a class of ACs
+  // without running anything (the source-file-marker flaw). Fail loudly, naming
+  // the marker mismatch so the dev/operator fixes the marker to target a real test.
+  const executedTests = countExecutedTests(`${rawStdout}\n${rawStderr}`);
+  if (exitCode === 0 && executedTests === 0) {
+    return {
+      index,
+      tag,
+      applicability: "runnable-vitest",
+      testNameFilter,
+      status: "fail",
+      reason: `vitest marker '${testNameFilter}' matched no test (0 ran) — cannot verify this criterion; the marker must target a runnable test (a test name or test file), not a source file`,
       stdout: capString(rawStdout),
       stderr: capString(rawStderr),
       exitCode,

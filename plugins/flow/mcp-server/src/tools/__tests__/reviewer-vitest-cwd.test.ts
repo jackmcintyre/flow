@@ -259,7 +259,13 @@ function makeRunnerStub(opts: RunnerStubOpts) {
           exitCode,
         });
         return {
-          stdout: exitCode === 0 ? "All tests passed." : "1 test failed.",
+          // Emit a realistic vitest summary so the zero-executed guard
+          // (fix 01KV43ET) sees a test actually RAN — exit 0 alone is no longer
+          // a pass; the run must report ≥1 executed test.
+          stdout:
+            exitCode === 0
+              ? "\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n"
+              : "\n Test Files  1 failed (1)\n      Tests  1 failed (1)\n",
           stderr: "",
           exitCode,
           timedOut: false,

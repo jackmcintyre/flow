@@ -52950,6 +52950,19 @@ function findPackageRoot(opts) {
   }
   return { ok: false };
 }
+function stripAnsi(s) {
+  return s.replace(/\[[0-9;]*m/g, "");
+}
+function countExecutedTests(output) {
+  const text = stripAnsi(output);
+  if (/No test files? found/i.test(text)) return 0;
+  const line = /^\s*Tests\s+(.+)$/m.exec(text);
+  if (!line) return 0;
+  const seg = line[1] ?? "";
+  const passed = /(\d+)\s+passed/.exec(seg);
+  const failed = /(\d+)\s+failed/.exec(seg);
+  return (passed ? Number(passed[1]) : 0) + (failed ? Number(failed[1]) : 0);
+}
 async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoot, execaImpl) {
   const testFilePathAbs = path66.resolve(checkRoot, testFilePath);
   const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
@@ -52982,6 +52995,21 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
       testNameFilter,
       status: "fail",
       reason: `vitest filter '${testNameFilter}' timed out after 90s`,
+      stdout: capString(rawStdout),
+      stderr: capString(rawStderr),
+      exitCode
+    };
+  }
+  const executedTests = countExecutedTests(`${rawStdout}
+${rawStderr}`);
+  if (exitCode === 0 && executedTests === 0) {
+    return {
+      index,
+      tag,
+      applicability: "runnable-vitest",
+      testNameFilter,
+      status: "fail",
+      reason: `vitest marker '${testNameFilter}' matched no test (0 ran) \u2014 cannot verify this criterion; the marker must target a runnable test (a test name or test file), not a source file`,
       stdout: capString(rawStdout),
       stderr: capString(rawStderr),
       exitCode
