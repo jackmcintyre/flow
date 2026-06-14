@@ -39692,7 +39692,7 @@ function capString(s) {
 }
 function findPackageRoot(opts) {
   const checkRootAbs = path49.resolve(opts.checkRoot);
-  let dir = path49.dirname(opts.testFilePathAbs);
+  let dir = opts.testFilePathAbs;
   const isWithinCheckRoot = (d) => d === checkRootAbs || d.startsWith(checkRootAbs + path49.sep);
   while (isWithinCheckRoot(dir)) {
     try {

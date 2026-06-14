@@ -374,6 +374,30 @@ describe("findPackageRoot — unit tests", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it("directory-as-target: finds package.json when testFilePathAbs is a directory (e.g. vitest: plugins/flow/mcp-server/)", () => {
+    // Reproduces the failure seen in PR #353 where the AC spec contained
+    //   `vitest: plugins/flow/mcp-server/`
+    // The marker is a directory path, not a file path.  path.dirname() of a
+    // normalised directory path returns the parent, so the old code walked up
+    // to plugins/flow/ (which also has a package.json) and ran pnpm vitest
+    // from the wrong root — failing with "Command vitest not found".
+    // The fix: start the walk at testFilePathAbs itself.
+    writePackageJson(tmp, "outer-pkg");
+    const innerPkgDir = path.join(tmp, "plugins", "flow", "mcp-server");
+    writePackageJson(innerPkgDir, "@flow/mcp-server");
+
+    // testFilePathAbs IS the mcp-server directory (no file name at the end)
+    const result = findPackageRoot({
+      testFilePathAbs: innerPkgDir,
+      checkRoot: tmp,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Must resolve to the inner package, not the outer one
+    expect(result.packageRoot).toBe(innerPkgDir);
+  });
 });
 
 // ---------------------------------------------------------------------------

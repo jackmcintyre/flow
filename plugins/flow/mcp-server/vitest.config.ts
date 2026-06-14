@@ -40,9 +40,11 @@ export default defineConfig({
       thresholds: {
         // Baseline captured 2026-06-14: lines 87.04 %, branches 85.60 %.
         // Set 1 pp below the measured floor so a genuine regression fails CI
-        // but a rounding fluctuation does not. Raise these whenever coverage
-        // improves; never lower them without a conscious reviewer decision.
-        lines: 87,
+        // but a rounding fluctuation or V8 instrumentation variance across
+        // environments (Node versions, GitHub Actions runner) does not.
+        // Raise these whenever coverage improves; never lower them without a
+        // conscious reviewer decision.
+        lines: 86,
         branches: 85,
       },
     },

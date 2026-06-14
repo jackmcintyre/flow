@@ -266,7 +266,13 @@ export function findPackageRoot(opts: {
   checkRoot: string;
 }): { ok: true; packageRoot: string } | { ok: false } {
   const checkRootAbs = path.resolve(opts.checkRoot);
-  let dir = path.dirname(opts.testFilePathAbs);
+  // Start at `testFilePathAbs` itself so that a directory-as-target vitest:
+  // marker (e.g. `vitest: plugins/flow/mcp-server/`) resolves to the package
+  // root at that directory rather than overshooting to its parent.  When the
+  // path is a file, `path.join(dir, "package.json")` will miss (ENOENT) and
+  // the loop walks up to `dirname` on the next iteration — same behaviour as
+  // before for file-path markers.
+  let dir = opts.testFilePathAbs;
 
   const isWithinCheckRoot = (d: string): boolean =>
     d === checkRootAbs || d.startsWith(checkRootAbs + path.sep);
