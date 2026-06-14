@@ -52660,7 +52660,8 @@ async function runDevTerminalAction(opts) {
 // src/tools/run-reviewer-session.ts
 import * as path66 from "node:path";
 import * as fs51 from "node:fs/promises";
-import { accessSync } from "node:fs";
+import { accessSync, readFileSync as readFileSync4, readdirSync as readdirSync2 } from "node:fs";
+var import_yaml31 = __toESM(require_dist2(), 1);
 
 // src/lib/materialise-pr-branch-worktree.ts
 import * as path65 from "node:path";
@@ -52883,6 +52884,52 @@ function capString(s) {
   if (s.length <= STDOUT_STDERR_CAP) return s;
   return s.slice(0, STDOUT_STDERR_CAP) + TRUNCATION_MARKER;
 }
+function hasLocalVitest(dir) {
+  try {
+    accessSync(path66.join(dir, "node_modules", ".bin", "vitest"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function findVitestInWorkspaceMembers(workspaceRoot) {
+  try {
+    const yaml = readFileSync4(
+      path66.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "utf8"
+    );
+    const parsed = (0, import_yaml31.parse)(yaml);
+    const packages = parsed?.packages;
+    if (!Array.isArray(packages)) return { ok: false };
+    for (const pattern of packages) {
+      if (typeof pattern !== "string") continue;
+      const segments = pattern.split("/");
+      const hasGlob = segments.some((s) => s === "*" || s === "**");
+      if (!hasGlob) {
+        const memberDir = path66.join(workspaceRoot, pattern);
+        if (hasLocalVitest(memberDir)) {
+          return { ok: true, packageRoot: memberDir };
+        }
+      } else {
+        const parentSegments = segments.slice(0, segments.indexOf("*"));
+        const parentDir = path66.join(workspaceRoot, ...parentSegments);
+        try {
+          const entries = readdirSync2(parentDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const memberDir = path66.join(parentDir, entry.name);
+            if (hasLocalVitest(memberDir)) {
+              return { ok: true, packageRoot: memberDir };
+            }
+          }
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
+  return { ok: false };
+}
 function findPackageRoot(opts) {
   const checkRootAbs = path66.resolve(opts.checkRoot);
   let dir = path66.dirname(opts.testFilePathAbs);
@@ -52890,6 +52937,10 @@ function findPackageRoot(opts) {
   while (isWithinCheckRoot(dir)) {
     try {
       accessSync(path66.join(dir, "package.json"));
+      const memberResult = findVitestInWorkspaceMembers(dir);
+      if (memberResult.ok) {
+        return memberResult;
+      }
       return { ok: true, packageRoot: dir };
     } catch {
     }
@@ -53856,7 +53907,7 @@ async function recordSkillInvoke(opts) {
 // src/tools/run-auto-merge-gate.ts
 import * as path69 from "node:path";
 import { promises as fs53 } from "node:fs";
-var import_yaml31 = __toESM(require_dist2(), 1);
+var import_yaml32 = __toESM(require_dist2(), 1);
 
 // src/lib/auto-merge-gate.ts
 function decideAutoMerge(input) {
@@ -53919,7 +53970,7 @@ async function loadWorkspaceConfig(targetRepoRoot) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml31.parse)(raw);
+  const parsed = (0, import_yaml32.parse)(raw);
   if (parsed === null || parsed === void 0 || typeof parsed !== "object" || !("plugin" in parsed)) {
     return PluginSettingsSchema.parse({});
   }
@@ -54244,7 +54295,7 @@ async function createSmokeScratchRepo(opts) {
 }
 
 // src/tools/scan-orphaned-in-progress.ts
-var import_yaml32 = __toESM(require_dist2(), 1);
+var import_yaml33 = __toESM(require_dist2(), 1);
 import { promises as fs55 } from "node:fs";
 import * as path71 from "node:path";
 async function scanOrphanedInProgress(opts) {
@@ -54275,7 +54326,7 @@ async function scanOrphanedInProgress(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml32.parse)(raw);
+    const parsed = (0, import_yaml33.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!manifest.claimed_by) {
       continue;
@@ -54853,7 +54904,7 @@ function isEnoent16(err) {
 // src/tools/recall-lesson.ts
 import * as path77 from "node:path";
 import { promises as fs59 } from "node:fs";
-var import_yaml33 = __toESM(require_dist2(), 1);
+var import_yaml34 = __toESM(require_dist2(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
 var TOOL_NAME7 = "recallLesson";
@@ -55005,7 +55056,7 @@ function reconstructPersonaFile2(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml33.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml34.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -55100,7 +55151,7 @@ function resolveJudgePlan(opts) {
 }
 
 // src/tools/resolve-build-plan.ts
-var import_yaml34 = __toESM(require_dist2(), 1);
+var import_yaml35 = __toESM(require_dist2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
 var FAST_LANE_MODEL = "haiku";
 var FULL_LANE_MODEL = "sonnet";
@@ -55123,7 +55174,7 @@ var BuildPlanSchema = external_exports.object({
 async function readLaneFromManifest(manifestPath) {
   try {
     const raw = await readFile2(manifestPath, "utf8");
-    const parsed = (0, import_yaml34.parse)(raw);
+    const parsed = (0, import_yaml35.parse)(raw);
     const lane = parsed?.lane;
     if (lane === "fast" || lane === "full") return lane;
     return void 0;
@@ -55152,13 +55203,13 @@ async function resolveBuildPlan(opts) {
 }
 
 // src/tools/summarise-retro-proposal.ts
-var import_yaml35 = __toESM(require_dist2(), 1);
+var import_yaml36 = __toESM(require_dist2(), 1);
 import { promises as fs60 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
   const raw = await fs60.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml35.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
@@ -55176,7 +55227,7 @@ async function summariseRetroProposal(opts) {
 // src/tools/discard-draft.ts
 import { promises as fs61 } from "node:fs";
 import * as path78 from "node:path";
-var import_yaml36 = __toESM(require_dist2(), 1);
+var import_yaml37 = __toESM(require_dist2(), 1);
 var DiscardDraftInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -55209,7 +55260,7 @@ async function discardDraft(rawInput) {
     });
   }
   const rawText = await fs61.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml36.parse)(rawText);
+  const parsed = (0, import_yaml37.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "withdrawn" });

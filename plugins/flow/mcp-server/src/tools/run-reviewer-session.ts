@@ -33,8 +33,9 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { accessSync } from "node:fs";
+import { accessSync, readFileSync, readdirSync } from "node:fs";
 import { execa as defaultExeca } from "execa";
+import { parse as parseYaml } from "yaml";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { lookupStandards } from "../state/lookup-standards.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
@@ -248,11 +249,93 @@ function capString(s: string): string {
 }
 
 /**
+ * Check whether a directory has the vitest binary available locally.
+ *
+ * Returns true when `<dir>/node_modules/.bin/vitest` is accessible.
+ * Used by `findPackageRoot` to skip workspace roots that don't install vitest
+ * directly (e.g. `plugins/flow/` which delegates to its `mcp-server` sub-package).
+ */
+function hasLocalVitest(dir: string): boolean {
+  try {
+    accessSync(path.join(dir, "node_modules", ".bin", "vitest"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Given a pnpm workspace root (`dir`), parse `pnpm-workspace.yaml` and return
+ * the first workspace-member directory that has vitest installed locally.
+ *
+ * Returns `{ ok: true, packageRoot }` on success or `{ ok: false }` when no
+ * workspace member with vitest is found.  Only single-level glob patterns
+ * (e.g. `"mcp-server"` or `"packages/*"`) are supported — deep globs are
+ * skipped.  Fail-soft: any parse / access error returns `{ ok: false }`.
+ */
+function findVitestInWorkspaceMembers(
+  workspaceRoot: string,
+): { ok: true; packageRoot: string } | { ok: false } {
+  try {
+    const yaml = readFileSync(
+      path.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const parsed = parseYaml(yaml) as { packages?: unknown };
+    const packages = parsed?.packages;
+    if (!Array.isArray(packages)) return { ok: false };
+
+    for (const pattern of packages) {
+      if (typeof pattern !== "string") continue;
+      // Only handle simple (non-glob) patterns like "mcp-server" and single-level
+      // globs like "packages/*".
+      const segments = pattern.split("/");
+      const hasGlob = segments.some((s) => s === "*" || s === "**");
+      if (!hasGlob) {
+        // Direct member: `<workspaceRoot>/<pattern>`
+        const memberDir = path.join(workspaceRoot, pattern);
+        if (hasLocalVitest(memberDir)) {
+          return { ok: true, packageRoot: memberDir };
+        }
+      } else {
+        // Single-level glob like "packages/*": scan the parent directory.
+        const parentSegments = segments.slice(0, segments.indexOf("*"));
+        const parentDir = path.join(workspaceRoot, ...parentSegments);
+        try {
+          const entries = readdirSync(parentDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const memberDir = path.join(parentDir, entry.name);
+            if (hasLocalVitest(memberDir)) {
+              return { ok: true, packageRoot: memberDir };
+            }
+          }
+        } catch {
+          // parent directory not readable — skip this pattern.
+        }
+      }
+    }
+  } catch {
+    // pnpm-workspace.yaml not present or not parseable — not a workspace root.
+  }
+  return { ok: false };
+}
+
+/**
  * Walk up from `testFilePathAbs` to find the nearest enclosing `package.json`.
  *
  * Starts at `path.dirname(testFilePathAbs)` and walks toward the filesystem
  * root, stopping (inclusively) at `checkRoot`. Returns `{ ok: true, packageRoot }`
  * if found, `{ ok: false }` if the walk exhausts `checkRoot` without finding one.
+ *
+ * Workspace-root handling: when the walk finds a `package.json` that has a
+ * sibling `pnpm-workspace.yaml`, the directory is treated as a workspace root.
+ * In that case the function searches the workspace members (listed in the YAML)
+ * for one that has vitest installed locally (`node_modules/.bin/vitest`) and
+ * returns that member instead. This covers the case where a `vitest:` AC marker
+ * targets a source file in a sub-directory of a pnpm workspace root whose root
+ * package delegates vitest to a member package (e.g. `plugins/flow/workflows/
+ * drain.workflow.js` → `plugins/flow/` workspace root → member `mcp-server`).
  *
  * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
  * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
@@ -260,6 +343,7 @@ function capString(s: string): string {
  * import), NOT `require(...)`.
  *
  * Story 5.27 — AC1, AC2.
+ * Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — workspace-root vitest delegation.
  */
 export function findPackageRoot(opts: {
   testFilePathAbs: string;
@@ -274,6 +358,16 @@ export function findPackageRoot(opts: {
   while (isWithinCheckRoot(dir)) {
     try {
       accessSync(path.join(dir, "package.json"));
+      // Found a package.json. Check whether this is a pnpm workspace root
+      // (has a sibling pnpm-workspace.yaml). If so, look for a workspace member
+      // that has vitest installed — that member is the correct vitest root.
+      const memberResult = findVitestInWorkspaceMembers(dir);
+      if (memberResult.ok) {
+        return memberResult;
+      }
+      // Not a workspace root, or no member has vitest installed — use this
+      // package root directly (the vitest binary may not be installed in fixture
+      // environments; the caller handles the missing-vitest failure).
       return { ok: true, packageRoot: dir };
     } catch {
       // package.json not present here — walk up.
