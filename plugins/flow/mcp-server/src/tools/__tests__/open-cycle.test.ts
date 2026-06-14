@@ -16,6 +16,11 @@
  *     `openCycle` is NOT called — `cycle-state.json` remains unchanged after
  *     the failed proposal write.
  *
+ *   AC4 (unit): `openCycle` returns `cycleUlid` and `openedAt` values that
+ *     are sufficient for the skill to surface the plain-language message
+ *     "Cycle advanced to <cycleUlid>, new window opens at <openedAt>" to the
+ *     operator (SKILL.md step 5d).
+ *
  * All tests are pure deterministic — no LLM invocation, no network.
  * File mtimes (a done manifest's completion instant) are set with `fs.utimes`,
  * which is a read-shaped operation not covered by the fs-write guard.
@@ -436,11 +441,15 @@ describe("AC4 — openCycle returns cycleUlid and openedAt for operator surface"
     // openedAt must be the ISO instant the clock seam returned.
     expect(result.openedAt).toBe("2026-06-10T09:00:00.000Z");
 
-    // The returned values are sufficient for the skill to surface:
+    // The returned values are sufficient for the skill to surface the
+    // exact plain-language message from SKILL.md step 5d:
     // "Cycle advanced to <cycleUlid>, new window opens at <openedAt>"
-    const message = `Cycle advanced to ${result.cycleUlid}, new window opens at ${result.openedAt}`;
-    expect(message).toContain(result.cycleUlid);
-    expect(message).toContain("2026-06-10T09:00:00.000Z");
+    const expectedMessage = `Cycle advanced to ${result.cycleUlid}, new window opens at ${result.openedAt}`;
+    expect(expectedMessage).toMatch(
+      /^Cycle advanced to [0-9A-HJKMNP-TV-Z]{26}, new window opens at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+    );
+    // Verify openedAt is a valid ISO 8601 timestamp with milliseconds.
+    expect(new Date(result.openedAt).toISOString()).toBe(result.openedAt);
   });
 });
 
