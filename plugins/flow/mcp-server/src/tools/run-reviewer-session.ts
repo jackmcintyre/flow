@@ -33,7 +33,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { accessSync } from "node:fs";
+import { accessSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { execa as defaultExeca } from "execa";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { lookupStandards } from "../state/lookup-standards.js";
@@ -285,6 +285,61 @@ export function findPackageRoot(opts: {
   return { ok: false };
 }
 
+/**
+ * Check whether a directory's `package.json` declares `vitest` in its
+ * `dependencies` or `devDependencies`.  Returns `false` on any read/parse error.
+ */
+function packageJsonHasVitest(pkgDir: string): boolean {
+  try {
+    const raw = readFileSync(path.join(pkgDir, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    return (
+      "vitest" in (parsed.dependencies ?? {}) ||
+      "vitest" in (parsed.devDependencies ?? {})
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search `searchRoot` recursively (skipping `node_modules`) for the first
+ * `package.json` that declares `vitest` in its dependencies.  Returns the
+ * directory that contains it, or `undefined` if none is found.
+ *
+ * Used as a fallback in `runVitestCheck` when the package located by
+ * `findPackageRoot` does not have vitest installed — e.g. when a `vitest:`
+ * marker points to a source file whose directory tree contains an intermediate
+ * package that lacks vitest (such as `plugins/flow/`), while the actual tests
+ * live in a sibling sub-package (`plugins/flow/mcp-server/`) that does.
+ */
+function findVitestPackageUnder(searchRoot: string): string | undefined {
+  const queue: string[] = [searchRoot];
+  while (queue.length > 0) {
+    const dir = queue.shift()!;
+    if (packageJsonHasVitest(dir)) return dir;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry.startsWith(".")) continue;
+      const full = path.join(dir, entry);
+      try {
+        if (statSync(full).isDirectory()) queue.push(full);
+      } catch {
+        // ignore unreadable entries
+      }
+    }
+  }
+  return undefined;
+}
+
 async function runVitestCheck(
   index: number,
   tag: string | null,
@@ -311,11 +366,78 @@ async function runVitestCheck(
     };
   }
 
+  let runCwd = pkgRoot.packageRoot;
   const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-    cwd: pkgRoot.packageRoot,
+    cwd: runCwd,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,
   });
+
+  // When the nearest enclosing package lacks vitest (e.g. a `vitest:` marker that
+  // points to a source file in an intermediate package such as `plugins/flow/` while
+  // the tests live in a sibling sub-package such as `plugins/flow/mcp-server/`),
+  // `pnpm vitest` will exit non-zero with "Command vitest not found" in stdout.
+  // Fall back to searching the checkRoot tree for the first sub-package that does
+  // have vitest installed and retry from there.
+  const firstStdout = typeof result.stdout === "string" ? result.stdout : "";
+  const firstStderr = typeof result.stderr === "string" ? result.stderr : "";
+  if (
+    !result.timedOut &&
+    result.exitCode !== 0 &&
+    (firstStdout.includes("Command") && firstStdout.includes("vitest") && firstStdout.includes("not found") ||
+     firstStderr.includes("Command") && firstStderr.includes("vitest") && firstStderr.includes("not found"))
+  ) {
+    const fallbackPkgRoot = findVitestPackageUnder(checkRoot);
+    if (fallbackPkgRoot && fallbackPkgRoot !== runCwd) {
+      runCwd = fallbackPkgRoot;
+      const retryResult = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
+        cwd: runCwd,
+        reject: false,
+        timeout: VITEST_TIMEOUT_MS,
+      });
+
+      const rawStdout = typeof retryResult.stdout === "string" ? retryResult.stdout : "";
+      const rawStderr = typeof retryResult.stderr === "string" ? retryResult.stderr : "";
+      const exitCode =
+        typeof retryResult.exitCode === "number"
+          ? retryResult.exitCode
+          : retryResult.timedOut
+            ? -1
+            : 1;
+
+      if (retryResult.timedOut) {
+        return {
+          index,
+          tag,
+          applicability: "runnable-vitest",
+          testNameFilter,
+          status: "fail",
+          reason: `vitest filter '${testNameFilter}' timed out after 90s`,
+          stdout: capString(rawStdout),
+          stderr: capString(rawStderr),
+          exitCode,
+        };
+      }
+
+      const status = exitCode === 0 ? "pass" : "fail";
+      const reason =
+        exitCode === 0
+          ? `vitest filter '${testNameFilter}' passed`
+          : `vitest filter '${testNameFilter}' failed (exit ${exitCode})`;
+
+      return {
+        index,
+        tag,
+        applicability: "runnable-vitest",
+        testNameFilter,
+        status,
+        reason,
+        stdout: capString(rawStdout),
+        stderr: capString(rawStderr),
+        exitCode,
+      };
+    }
+  }
 
   const rawStdout = typeof result.stdout === "string" ? result.stdout : "";
   const rawStderr = typeof result.stderr === "string" ? result.stderr : "";

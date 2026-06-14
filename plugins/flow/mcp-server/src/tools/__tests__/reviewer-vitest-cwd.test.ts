@@ -741,3 +741,150 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
     expect(pnpmCalls[0]!.cwd).toBe(capturedInnerPkgDir);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fixture D: vitest-not-found fallback
+//
+// When a `vitest:` marker points to a source file whose nearest enclosing
+// package does NOT have vitest installed (e.g. `plugins/flow/` in a monorepo
+// where only `plugins/flow/mcp-server/` has vitest), `pnpm vitest` fails with
+// "Command vitest not found".  `runVitestCheck` must detect this, search the
+// checkRoot tree for the first sub-package that has vitest, retry from there,
+// and return the retry's result — not the original failure.
+// ---------------------------------------------------------------------------
+
+describe("Fixture D (vitest-not-found fallback — source file vitest: marker in intermediate package)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "flow-5-27-fixd-"));
+    __resetGhErrorMapCacheForTests();
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /**
+   * vitest: marker points to a source file inside `plugins/flow/workflows/`
+   * whose nearest enclosing package.json is `plugins/flow/package.json` which
+   * does NOT have vitest.  The sub-package `plugins/flow/mcp-server/` DOES.
+   */
+  const VITEST_MARKER_PATH = "plugins/flow/workflows/drain.workflow.js";
+
+  it("falls back to the vitest-capable sub-package and returns status:pass on retry success", async () => {
+    await buildRunnerFixture(tmp, VITEST_MARKER_PATH);
+
+    let capturedMcpServerPkgDir: string | null = null;
+    let capturedFlowPkgDir: string | null = null;
+
+    // Make the first pnpm call (from the intermediate package lacking vitest) return
+    // the "Command vitest not found" error, and the retry (from mcp-server) succeed.
+    let pnpmCallCount = 0;
+    const pnpmCalls: PnpmCallRecord[] = [];
+
+    const stub = vi.fn().mockImplementation(
+      async (cmd: string, args: string[], cmdOpts?: { cwd?: string; [k: string]: unknown }) => {
+        if (cmd === "gh") {
+          const argsArr = args as string[];
+          if (argsArr.includes("diff")) {
+            return { stdout: FAKE_PR_DIFF, stderr: "", exitCode: 0, timedOut: false };
+          }
+          if (argsArr.some((a) => a.includes("headRefOid") || a === "headRefName,headRefOid")) {
+            return {
+              stdout: JSON.stringify({ headRefName: FAKE_HEAD_REF_NAME, headRefOid: FAKE_HEAD_REF_OID }),
+              stderr: "",
+              exitCode: 0,
+              timedOut: false,
+            };
+          }
+          return { stdout: '["chore: fixture commit"]', stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        if (cmd === "git") {
+          const argsArr = args as string[];
+          if (argsArr[0] === "worktree" && argsArr[1] === "add") {
+            const worktreePath = argsArr[2];
+            if (worktreePath) {
+              await fsP.mkdir(worktreePath, { recursive: true });
+              // Seed: intermediate package WITHOUT vitest
+              const flowPkgDir = path.join(worktreePath, "plugins", "flow");
+              capturedFlowPkgDir = flowPkgDir;
+              writeFile(
+                path.join(flowPkgDir, "package.json"),
+                JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+              );
+              // Seed: sub-package WITH vitest
+              const mcpServerPkgDir = path.join(flowPkgDir, "mcp-server");
+              capturedMcpServerPkgDir = mcpServerPkgDir;
+              writeFile(
+                path.join(mcpServerPkgDir, "package.json"),
+                JSON.stringify(
+                  { name: "@flow/mcp-server", version: "0.1.0", devDependencies: { vitest: "^2.0.0" } },
+                  null,
+                  2,
+                ),
+              );
+              // Seed: source file the marker points to (need not be a real test)
+              writeFile(
+                path.join(flowPkgDir, "workflows", "drain.workflow.js"),
+                "// drain workflow source file\n",
+              );
+            }
+            return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+          }
+          if (argsArr[0] === "worktree" && argsArr[1] === "remove") {
+            const removePath = argsArr[2];
+            if (removePath) {
+              await fsP.rm(removePath, { recursive: true, force: true }).catch(() => { /* best-effort */ });
+            }
+            return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        if (cmd === "pnpm") {
+          pnpmCallCount++;
+          if (pnpmCallCount === 1) {
+            // First call: intermediate package (no vitest) → fail with vitest not found
+            pnpmCalls.push({ args: args as string[], cwd: cmdOpts?.cwd, exitCode: 1 });
+            return {
+              stdout: '[90mundefined[39m\n[41m[31m[[39m[49m[41m[30mERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL[39m[49m[41m[31m][39m[49m [31mCommand "vitest" not found[39m\n\nDid you mean "pnpm test"?',
+              stderr: "",
+              exitCode: 1,
+              timedOut: false,
+            };
+          }
+          // Second call: mcp-server (has vitest) → succeed
+          pnpmCalls.push({ args: args as string[], cwd: cmdOpts?.cwd, exitCode: 0 });
+          return { stdout: "All tests passed.", stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        return { stdout: "", stderr: `unexpected command: ${cmd}`, exitCode: 1, timedOut: false };
+      },
+    ) as unknown as typeof import("execa").execa;
+
+    const result = await runReviewerSession({
+      targetRepoRoot: tmp,
+      sessionUlid: FIXTURE_SESSION_ULID,
+      ref: FIXTURE_REF,
+      prNumber: FIXTURE_PR_NUMBER,
+      execaImpl: stub,
+    });
+
+    // Assert the final AC result is pass (from the retry)
+    const ac1 = result.acResults[1];
+    expect(ac1).toBeDefined();
+    expect(ac1!.applicability).toBe("runnable-vitest");
+    if (ac1!.applicability !== "runnable-vitest") return;
+    expect(ac1!.status).toBe("pass");
+
+    // Two pnpm calls were made: first (intermediate pkg, fails) + retry (mcp-server, passes)
+    expect(pnpmCalls).toHaveLength(2);
+
+    // First call cwd: intermediate package (no vitest)
+    expect(pnpmCalls[0]!.cwd).toBe(capturedFlowPkgDir);
+    // Second call cwd: mcp-server sub-package (has vitest)
+    expect(pnpmCalls[1]!.cwd).toBe(capturedMcpServerPkgDir);
+  });
+});

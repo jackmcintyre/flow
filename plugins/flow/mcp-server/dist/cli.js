@@ -39463,7 +39463,7 @@ async function runDevTerminalAction(opts) {
 // src/tools/run-reviewer-session.ts
 import * as path49 from "node:path";
 import * as fs35 from "node:fs/promises";
-import { accessSync } from "node:fs";
+import { accessSync, readFileSync as readFileSync4, readdirSync as readdirSync2, statSync as statSync3 } from "node:fs";
 
 // src/lib/slugify-standards-criterion.ts
 function slugifyStandardsCriterion(name) {
@@ -39707,6 +39707,37 @@ function findPackageRoot(opts) {
   }
   return { ok: false };
 }
+function packageJsonHasVitest(pkgDir) {
+  try {
+    const raw = readFileSync4(path49.join(pkgDir, "package.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return "vitest" in (parsed.dependencies ?? {}) || "vitest" in (parsed.devDependencies ?? {});
+  } catch {
+    return false;
+  }
+}
+function findVitestPackageUnder(searchRoot) {
+  const queue = [searchRoot];
+  while (queue.length > 0) {
+    const dir = queue.shift();
+    if (packageJsonHasVitest(dir)) return dir;
+    let entries;
+    try {
+      entries = readdirSync2(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry.startsWith(".")) continue;
+      const full = path49.join(dir, entry);
+      try {
+        if (statSync3(full).isDirectory()) queue.push(full);
+      } catch {
+      }
+    }
+  }
+  return void 0;
+}
 async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoot, execaImpl) {
   const testFilePathAbs = path49.resolve(checkRoot, testFilePath);
   const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
@@ -39723,11 +39754,54 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
       exitCode: -1
     };
   }
+  let runCwd = pkgRoot.packageRoot;
   const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-    cwd: pkgRoot.packageRoot,
+    cwd: runCwd,
     reject: false,
     timeout: VITEST_TIMEOUT_MS
   });
+  const firstStdout = typeof result.stdout === "string" ? result.stdout : "";
+  const firstStderr = typeof result.stderr === "string" ? result.stderr : "";
+  if (!result.timedOut && result.exitCode !== 0 && (firstStdout.includes("Command") && firstStdout.includes("vitest") && firstStdout.includes("not found") || firstStderr.includes("Command") && firstStderr.includes("vitest") && firstStderr.includes("not found"))) {
+    const fallbackPkgRoot = findVitestPackageUnder(checkRoot);
+    if (fallbackPkgRoot && fallbackPkgRoot !== runCwd) {
+      runCwd = fallbackPkgRoot;
+      const retryResult = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
+        cwd: runCwd,
+        reject: false,
+        timeout: VITEST_TIMEOUT_MS
+      });
+      const rawStdout2 = typeof retryResult.stdout === "string" ? retryResult.stdout : "";
+      const rawStderr2 = typeof retryResult.stderr === "string" ? retryResult.stderr : "";
+      const exitCode2 = typeof retryResult.exitCode === "number" ? retryResult.exitCode : retryResult.timedOut ? -1 : 1;
+      if (retryResult.timedOut) {
+        return {
+          index,
+          tag,
+          applicability: "runnable-vitest",
+          testNameFilter,
+          status: "fail",
+          reason: `vitest filter '${testNameFilter}' timed out after 90s`,
+          stdout: capString(rawStdout2),
+          stderr: capString(rawStderr2),
+          exitCode: exitCode2
+        };
+      }
+      const status2 = exitCode2 === 0 ? "pass" : "fail";
+      const reason2 = exitCode2 === 0 ? `vitest filter '${testNameFilter}' passed` : `vitest filter '${testNameFilter}' failed (exit ${exitCode2})`;
+      return {
+        index,
+        tag,
+        applicability: "runnable-vitest",
+        testNameFilter,
+        status: status2,
+        reason: reason2,
+        stdout: capString(rawStdout2),
+        stderr: capString(rawStderr2),
+        exitCode: exitCode2
+      };
+    }
+  }
   const rawStdout = typeof result.stdout === "string" ? result.stdout : "";
   const rawStderr = typeof result.stderr === "string" ? result.stderr : "";
   const exitCode = typeof result.exitCode === "number" ? result.exitCode : result.timedOut ? -1 : 1;
