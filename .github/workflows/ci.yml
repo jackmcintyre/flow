@@ -59,6 +59,10 @@ jobs:
         run: git diff --exit-code mcp-server/dist
       - run: pnpm test
       - name: Coverage — fail if overall coverage drops below committed baseline
+        # `shell: bash` is explicit because PIPESTATUS is a bash-ism;
+        # the default shell on ubuntu runners is bash, but making it explicit
+        # ensures correctness if the default ever changes.
+        shell: bash
         run: |
           cd mcp-server
           pnpm test:coverage 2>&1 | tee /tmp/coverage-output.txt
