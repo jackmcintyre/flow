@@ -62,6 +62,8 @@ import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
 import { recordStoryRetro } from "./tools/record-story-retro.js";
+import { recordDevLesson } from "./tools/record-dev-lesson.js";
+import { readDevLesson } from "./tools/read-dev-lesson.js";
 import { recallLesson } from "./tools/recall-lesson.js";
 import { classifyStoryLane } from "./tools/classify-story-lane.js";
 import { resolveJudgePlan } from "./tools/resolve-judge-plan.js";
@@ -150,6 +152,16 @@ const TOOLS: Record<string, ToolFn> = {
   recordReviewerLesson,
   readReviewerLesson,
   recordStoryRetro,
+  // Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder lesson capture seam.
+  // recordDevLesson is the CAPTURE seam: the dev (a no-MCP drain-path agent)
+  // calls it via `node dist/cli.js recordDevLesson --json` to write one reusable
+  // lesson onto the per-ref dev-result.json BEFORE emitting the handoff phrase.
+  // readDevLesson is the read side of FORWARD — a thin read-only seam returning
+  // { lesson } off the dev-result.json so the drain knows whether (and what)
+  // to forward to the done manifest alongside the reviewer lesson.
+  // Both must be on the CLI seam because the drain runs MCP-free.
+  recordDevLesson,
+  readDevLesson,
   // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
   // buildPersonaSpawnPrompt now emits a one-line index; agents call this
   // to retrieve the full detail body of a specific lesson by id.

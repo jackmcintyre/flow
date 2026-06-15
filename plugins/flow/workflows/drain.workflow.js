@@ -312,6 +312,11 @@ const blockStoryGiveUp = async (ref, blockedBy) => {
 //                 'full' (current behaviour) when absent.
 async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '', storyModel = null, reviewDepth = 'full', inlineAcs = null }) {
   let verdict = null, prNumber = resumeAtReview ? resumePrNumber : null
+  // Builder lesson (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD): captured by the dev
+  // via `recordDevLesson` (BEFORE the handoff phrase) and read by the drain via
+  // `readDevLesson` seam (after the pd: parse, before the reviewer spawn). Stored
+  // here so the green-verdict builder-forward block can access it after completeStory.
+  let capturedDevLesson = null
   // Per-story model: use the resolveBuildPlan result when available, else the
   // run-level execModel (the FU6 devReviewerModel launch arg or 'sonnet').
   // This preserves full backwards compatibility: a run with no per-story lane
@@ -375,6 +380,10 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
           `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the drain and orphans your story. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
+          `## Optional: record ONE reusable lesson (learning loop)\n` +
+          `If — and ONLY if — this build surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runDevTerminalAction call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
+          `  node ${CLI} recordDevLesson --json '${J({ targetRepoRoot: '<your-working-directory>', sessionUlid: SU, ref, lesson: { kind: '<kind>', text: '<one-line lesson text>' } })}'\n` +
+          `This is OPTIONAL and fail-soft: most builds teach nothing reusable — in that case call nothing. Recording no lesson, or any failure of this command, must NEVER block or change the handoff, the build, or the merge. Do not invent a lesson just to fill the slot; one real lesson or none.\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
         { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree', model: agentModel },
       )
@@ -429,6 +438,15 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       prNumber = pd.prNumber
       reviewerPrompt = pd.reviewerPrompt
       log(`${ref} -> PR #${prNumber}`)
+      // READ THE BUILDER LESSON (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder
+      // lesson capture, read side). After the pd: parse the dev has already run
+      // (and may have recorded a lesson via recordDevLesson). Read it now — BEFORE
+      // spawning the reviewer — so the FORWARD step in the green-verdict block has
+      // the captured lesson ready without an extra seam after completeStory.
+      // FAIL-SOFT: retryable+swallow; a garble, a missing file, or any throw is
+      // treated as "no lesson captured" — the merge is never blocked.
+      const devLessonRead = await seam(`node ${CLI} readDevLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `dev-lesson-read:${ref}`, true, true)
+      capturedDevLesson = devLessonRead && !devLessonRead._parseError ? (devLessonRead.lesson ?? null) : null
       // HEARTBEAT: leave the dev-build phase with elapsed wall-clock time.
       await progressDone(ref, 'dev-build', devStartedAt)
     }
@@ -546,6 +564,24 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: 'generalist-reviewer' })}'`, `lesson-forward:${ref}`, true, true)
     if (fwd && !fwd._parseError) log(`${ref} forwarded reviewer lesson onto done manifest`)
     else log(`${ref} lesson-forward did not confirm (swallowed) — merge proceeds`)
+  }
+
+  // FORWARD THE BUILDER LESSON (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder
+  // lesson capture). The dev captured a lesson (via recordDevLesson, before the
+  // handoff phrase) and the drain read it (readDevLesson seam, earlier in this
+  // iteration after the pd: parse, stored in `capturedDevLesson`). Forward it
+  // alongside the reviewer lesson by writing the UNION array — reviewer lesson
+  // (already applied) + builder lesson — so neither clobbers the other. FAIL-SOFT:
+  // both seams use the retryable+swallow variant; any failure is logged and
+  // swallowed — never blocks the merge gate.
+  if (capturedDevLesson) {
+    // Build the union: reviewer lesson (may be null) followed by builder lesson.
+    // recordStoryRetro shallow-overwrites lessons[] — passing the full union here
+    // ensures the builder lesson APPENDS rather than replaces the reviewer lesson.
+    const unionLessons = [...(lesson ? [lesson] : []), capturedDevLesson]
+    const devFwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: unionLessons }, role: 'generalist-dev' })}'`, `lesson-forward:${ref}`, true, true)
+    if (devFwd && !devFwd._parseError) log(`${ref} forwarded builder lesson onto done manifest`)
+    else log(`${ref} builder lesson-forward did not confirm (swallowed) — merge proceeds`)
   }
 
   if (decision === 'auto-merge') merged.push({ ref, prNumber })
