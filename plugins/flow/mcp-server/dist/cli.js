@@ -43045,6 +43045,18 @@ async function recordSkillInvoke(opts) {
 }
 
 // src/tools/capture-skill-invoke.ts
+async function resolvePluginVersion(pluginRoot, readFileImpl) {
+  try {
+    const manifestPath = path73.join(pluginRoot, ".claude-plugin", "plugin.json");
+    const raw = await readFileImpl(manifestPath);
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.version === "string" && parsed.version.length > 0) {
+      return parsed.version;
+    }
+  } catch {
+  }
+  return "unknown";
+}
 async function resolveSkillMeta(skillName, pluginRoot, readFileImpl) {
   const command = skillName.includes(":") ? skillName.slice(skillName.indexOf(":") + 1) : skillName;
   if (pluginRoot && command) {
@@ -43052,9 +43064,14 @@ async function resolveSkillMeta(skillName, pluginRoot, readFileImpl) {
     try {
       const raw = await readFileImpl(skillPath);
       const match = raw.match(/^version:\s*(.+?)\s*$/m);
-      const skillVersion = match && match[1] ? match[1].trim() : "unknown";
+      if (match && match[1]) {
+        return { skillPath, skillVersion: match[1].trim(), skillScope: "plugin" };
+      }
+      const skillVersion = await resolvePluginVersion(pluginRoot, readFileImpl);
       return { skillPath, skillVersion, skillScope: "plugin" };
     } catch {
+      const skillVersion = await resolvePluginVersion(pluginRoot, readFileImpl);
+      return { skillPath, skillVersion, skillScope: "plugin" };
     }
   }
   return { skillPath: skillName, skillVersion: "unknown", skillScope: "plugin" };

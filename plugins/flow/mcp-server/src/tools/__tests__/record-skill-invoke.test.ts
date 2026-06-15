@@ -182,17 +182,21 @@ describe("recordSkillInvoke — AC1 write path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4 — capture seam exercised end-to-end for the /flow:board skill
+// recordSkillInvoke write-path — the canonical skill.invoke writer.
+//
+// HISTORY: Story 6.8 originally wired this via a prose-call in /flow:board's
+// SKILL.md (a fragile, single-skill, under-counting seam). The deterministic
+// PreToolUse hook (native:01KV4610) superseded it for all skills, and
+// native:01KV4YGR removed the board prose-call entirely to stop double-counting.
+// These tests now pin the write-path contract itself, independent of any skill.
 // ---------------------------------------------------------------------------
 
-describe("recordSkillInvoke — AC4 capture seam (/flow:board, fallback prose-call path)", () => {
-  it("reproduces the instrumented SKILL.md first-step and lands a valid skill.invoke event", async () => {
-    // Mechanism (verified for this harness): the plugin manifest exposes no
-    // skill-invocation hook, so the seam is a prose-call in the SKILL.md first
-    // step (the shipped recordYield / recordStoryRetro precedent). This test
-    // reproduces exactly what that first step does.
+describe("recordSkillInvoke — skill.invoke write-path", () => {
+  it("records a valid skill.invoke event with all five data fields", async () => {
+    // Drives the canonical writer directly — the path the deterministic hook
+    // funnels every captured invocation through.
 
-    // 1. The skill mints a session id (mintSessionUlid).
+    // 1. Mint a session id (mintSessionUlid).
     const { sessionUlid } = mintSessionUlid();
     expect(sessionUlid).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 
@@ -224,22 +228,21 @@ describe("recordSkillInvoke — AC4 capture seam (/flow:board, fallback prose-ca
     expect(event.session_id).toBe(sessionUlid);
   });
 
-  it("the shipped /flow:board SKILL.md declares the seam tools and a skill_version", async () => {
-    // Asserts the wiring is actually present in the shipped skill file — the
-    // seam is only real if the SKILL.md lists the tools and carries the
-    // version the event reports. (The frontmatter is the source of truth for
-    // skill_version on the fallback path.)
+  it("the shipped /flow:board SKILL.md no longer carries the prose-call seam (double-count removed)", async () => {
+    // native:01KV4YGR removed the Story 6.8 prose-call from /flow:board so the
+    // deterministic PreToolUse hook is the SOLE recorder for the board view —
+    // no second event per use. The SKILL.md must no longer name the seam tools
+    // or call recordSkillInvoke. Its own `version:` line is retained — the hook
+    // reads it as the board view's declared version (the AC3 passthrough source).
     const skillPath = path.resolve(
       __dirname,
       "../../../../skills/board/SKILL.md",
     );
     const raw = await fs.readFile(skillPath, "utf8");
-    expect(raw).toMatch(/allowed_tools:.*recordSkillInvoke/);
-    expect(raw).toMatch(/allowed_tools:.*mintSessionUlid/);
+    expect(raw).not.toContain("recordSkillInvoke");
+    expect(raw).not.toMatch(/allowed_tools:.*mintSessionUlid/);
+    expect(raw).not.toContain('invocation_source: "user-slash-command"');
+    // The board view still declares its own version line (AC3 passthrough source).
     expect(raw).toMatch(/^version:\s*0\.1\.0\s*$/m);
-    // The first-step prose actually names the tool + the closed-enum values.
-    expect(raw).toContain("recordSkillInvoke");
-    expect(raw).toContain('skill_scope: "plugin"');
-    expect(raw).toContain('invocation_source: "user-slash-command"');
   });
 });
