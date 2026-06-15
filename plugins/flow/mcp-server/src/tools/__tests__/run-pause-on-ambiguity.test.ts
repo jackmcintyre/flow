@@ -1,21 +1,21 @@
 /**
- * Drain pause-on-ambiguity integration test — Story 8.19 AC2 + AC3.
+ * Run pause-on-ambiguity integration test — Story 8.19 AC2 + AC3.
  *
  * AC2: a story paused for a human decision lands in the human-needed result
  *      bucket (pausedForHuman) carrying its question text and ref; the dev does
- *      NOT open a PR or guess an implementation for it; and the drain continues
- *      to the next claimable story rather than halting the whole run. This drain
+ *      NOT open a PR or guess an implementation for it; and the run continues
+ *      to the next claimable story rather than halting the whole run. This run
  *      integration test (seams stubbed) drives one ambiguous story and one
  *      normal story and asserts the ambiguous one appears in the human-needed
  *      bucket with its question and the normal one still completes.
  *
- * AC3: when a story pauses for a human decision, the drain emits an operator
+ * AC3: when a story pauses for a human decision, the run emits an operator
  *      notification naming the ref and the question through the notification
  *      seam the run supports. The test injects a notifier seam and asserts a
  *      notification carrying the ref and question is emitted when a story pauses,
  *      and that NO notification is emitted for a story that completes normally.
  *
- * Harness shape (mirrors drain-progress-heartbeat.test.ts): `drain.workflow.js`
+ * Harness shape (mirrors run-progress-heartbeat.test.ts): `run.workflow.js`
  * is a plain script body that reaches every decision through injected globals.
  * We read the real workflow source and wrap it in an `AsyncFunction` whose
  * parameters ARE those globals, so the body runs verbatim against our stubs.
@@ -31,7 +31,7 @@ import { describe, expect, it } from "vitest";
 
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -63,7 +63,7 @@ const QUESTION =
  * normal story (clean handoff → review → green verdict). Returns the workflow's
  * structured result plus captured narrator lines, agent calls, and notifications.
  */
-async function runDrain(): Promise<{
+async function runRun(): Promise<{
   result: any;
   logs: string[];
   calls: AgentCall[];
@@ -73,7 +73,7 @@ async function runDrain(): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
   const calls: AgentCall[] = [];
@@ -86,12 +86,12 @@ async function runDrain(): Promise<{
     if (label === "orphan-scan") return { orphans: [] };
     if (label.startsWith("claim:")) {
       const idx = Number(label.split(":")[1]);
-      // First claim → the ambiguous story; second → the normal story; third drains.
+      // First claim → the ambiguous story; second → the normal story; third empties.
       if (idx === 0) {
         return {
           next: "spawn-dev",
           ref: AMBIGUOUS_REF,
-          title: "Drain pauses and pings the operator on genuine ambiguity",
+          title: "Run pauses and pings the operator on genuine ambiguity",
           manifestPath: "/tmp/ambiguous.yaml",
         };
       }
@@ -103,7 +103,7 @@ async function runDrain(): Promise<{
           manifestPath: "/tmp/normal.yaml",
         };
       }
-      return { next: "queue-drained" };
+      return { next: "queue-emptied" };
     }
     if (label.startsWith("baseline:")) return { dirtyPaths: [] };
     // The ambiguity routing seam (only fired for the ambiguous story): the real
@@ -167,13 +167,13 @@ async function runDrain(): Promise<{
   return { result, logs, calls, notifications };
 }
 
-describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
+describe("run pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
   it("files the ambiguous story into the human-needed bucket with its question, and the normal story still completes", async () => {
-    const { result } = await runDrain();
+    const { result } = await runRun();
 
-    // The whole run did not halt — it drained the queue to empty.
-    expect(result.drainedReason).toBe("queue-drained");
-    expect(result.drained).toBe(true);
+    // The whole run did not halt — it emptied the queue to empty.
+    expect(result.runReason).toBe("queue-emptied");
+    expect(result.queueEmptied).toBe(true);
 
     // AC2: the ambiguous story is in pausedForHuman carrying ref + verbatim question.
     const paused = result.pausedForHuman.find((p: any) => p.ref === AMBIGUOUS_REF);
@@ -195,7 +195,7 @@ describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
   });
 
   it("does NOT open a PR or run review/gate for the paused story", async () => {
-    const { calls } = await runDrain();
+    const { calls } = await runRun();
 
     // No reviewer spawn for the ambiguous story (review is skipped — it paused).
     const ambiguousReviewer = calls.find(
@@ -227,7 +227,7 @@ describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
   });
 
   it("emits an operator notification naming the ref and question when a story pauses — and none for a story that completes normally", async () => {
-    const { notifications, logs } = await runDrain();
+    const { notifications, logs } = await runRun();
 
     // AC3: exactly one notification, for the paused story, carrying ref + question.
     expect(notifications).toHaveLength(1);
@@ -256,7 +256,7 @@ describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
       /^export\s+const\s+meta\b/m,
       "const meta",
     );
-    const body = `${source}\n//# sourceURL=drain.workflow.js`;
+    const body = `${source}\n//# sourceURL=run.workflow.js`;
 
     const logs: string[] = [];
     const seamResult = (label: string): unknown => {
@@ -274,7 +274,7 @@ describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
             manifestPath: "/tmp/ambiguous.yaml",
           };
         }
-        return { next: "queue-drained" };
+        return { next: "queue-emptied" };
       }
       if (label.startsWith("baseline:")) return { dirtyPaths: [] };
       if (label.startsWith("pd-needs-human:")) {
@@ -304,7 +304,7 @@ describe("drain pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
     const fn = new AsyncFunction("args", "agent", "log", "phase", body);
     const result: any = await fn(args, agent, log, phase);
 
-    expect(result.drainedReason).toBe("queue-drained");
+    expect(result.runReason).toBe("queue-emptied");
     const paused = result.pausedForHuman.find((p: any) => p.ref === AMBIGUOUS_REF);
     expect(paused).toBeDefined();
     expect(paused.question).toBe(QUESTION);

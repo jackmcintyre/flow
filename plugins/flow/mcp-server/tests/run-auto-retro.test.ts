@@ -1,11 +1,11 @@
 /**
- * Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended drain auto-retro.
+ * Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended run auto-retro.
  *
- * The drain closes the learning loop automatically when the queue fully drains:
+ * The run closes the learning loop automatically when the queue fully empties:
  * it runs the retro-analyst, writes proposals, absorbs note-tier lessons, and
  * advances the cycle — all without operator involvement.
  *
- * This file exercises the auto-retro block added to drain.workflow.js. The
+ * This file exercises the auto-retro block added to run.workflow.js. The
  * workflow is a plain JS script body driven by injected globals (args, agent,
  * log, phase), so we use the AsyncFunction runner pattern from the e2e tests.
  *
@@ -31,7 +31,7 @@ import { execa } from "execa";
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "run.workflow.js");
 const CLI = resolve(HERE, "..", "dist", "cli.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
@@ -39,9 +39,9 @@ const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
 ) => (...args: unknown[]) => Promise<unknown>;
 
 // NOTE: The outer describe name MUST match the vitest: marker used in the story's ACs
-// ("plugins/flow/mcp-server/tests/drain-auto-retro.test.ts") so that
+// ("plugins/flow/mcp-server/tests/run-auto-retro.test.ts") so that
 // `pnpm vitest --run -t "<that-path>"` finds and executes these tests.
-describe("plugins/flow/mcp-server/tests/drain-auto-retro.test.ts", () => {
+describe("plugins/flow/mcp-server/tests/run-auto-retro.test.ts", () => {
 
 // ---------------------------------------------------------------------------
 // Minimal scratch repo setup (lighter than createSmokeScratchRepo — no git)
@@ -50,7 +50,7 @@ describe("plugins/flow/mcp-server/tests/drain-auto-retro.test.ts", () => {
 let scratchRoot: string;
 
 beforeEach(async () => {
-  scratchRoot = await fs.mkdtemp(path.join(os.tmpdir(), "drain-auto-retro-"));
+  scratchRoot = await fs.mkdtemp(path.join(os.tmpdir(), "run-auto-retro-"));
   // Create the minimal .flow directory structure.
   await fs.mkdir(path.join(scratchRoot, ".flow", "state", "to-do"), { recursive: true });
   await fs.mkdir(path.join(scratchRoot, ".flow", "state", "in-progress"), { recursive: true });
@@ -91,12 +91,12 @@ async function seedDoneManifest(repo: string, ref: string): Promise<void> {
       {
         text: "**Given** a done story, **When** the retro runs, **Then** it learns from it.",
         kind: "integration",
-        verification: { type: "vitest", target: "tests/drain-auto-retro.test.ts" },
+        verification: { type: "vitest", target: "tests/run-auto-retro.test.ts" },
       },
     ],
     title: "Auto-retro seed story",
-    narrative: "As the drain, I want a done story.",
-    narrative_struct: { role: "drain", want: "a done story", so_that: "the retro has input" },
+    narrative: "As the run, I want a done story.",
+    narrative_struct: { role: "run", want: "a done story", so_that: "the retro has input" },
     tasks: [{ text: "Implement seed story.", ac_refs: ["AC1"] }],
     cited_sources: [] as string[],
     implementation_notes: "Retro seed fixture.",
@@ -116,11 +116,11 @@ async function seedDoneManifest(repo: string, ref: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Core drain runner for the auto-retro tests.
+// Core run runner for the auto-retro tests.
 //
-// This runner exercises ONLY the post-drain terminal section (the auto-retro
-// block). The main drain loop is bypassed by using queue-already-drained:
-// mintSessionUlid is real; claimNextStory returns queue-drained immediately
+// This runner exercises ONLY the post-run terminal section (the auto-retro
+// block). The main run loop is bypassed by using queue-already-emptied:
+// mintSessionUlid is real; claimNextStory returns queue-emptied immediately
 // (no to-do manifests); the retro block then fires based on the `completed`
 // array we inject.
 //
@@ -160,13 +160,13 @@ interface RunAutoRetroOpts {
    */
   absorbResult?: unknown;
   /**
-   * When true, the second call to the runDrain function will re-use the same
-   * retroFiredThisRun state (simulates a concurrent second drain invocation
+   * When true, the second call to the runRun function will re-use the same
+   * retroFiredThisRun state (simulates a concurrent second run invocation
    * within the same run context). Used for AC4.
    *
    * This is not directly testable at the workflow level because retroFiredThisRun
    * is a local variable in the workflow body. AC4 is therefore tested structurally:
-   * the drain source must declare retroFiredThisRun and set it before the try block.
+   * the run source must declare retroFiredThisRun and set it before the try block.
    */
   checkAtMostOnce?: boolean;
 }
@@ -184,7 +184,7 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
 
@@ -215,7 +215,7 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
       if (label.startsWith("persona:reviewer")) return { stdout: JSON.stringify({ systemPrompt: "STUB-REV-PERSONA" }) };
 
       // claimNextStory — queue is empty immediately (no to-do manifests)
-      if (label.startsWith("claim:")) return { stdout: JSON.stringify({ next: "queue-drained" }) };
+      if (label.startsWith("claim:")) return { stdout: JSON.stringify({ next: "queue-emptied" }) };
 
       // AUTO-RETRO SEAMS:
       if (label === "auto-retro:gather") {
@@ -264,11 +264,11 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
   const phase = (_name: string) => { /* no-op */ };
 
   // The args include the pre-seeded completed refs through a custom arg that we
-  // DON'T use — instead, we inject them by patching the drain source so the
+  // DON'T use — instead, we inject them by patching the run source so the
   // `completed` array starts pre-seeded. We accomplish this by prepending a
-  // line that sets `completed` before the main drain loop. But since the drain
+  // line that sets `completed` before the main run loop. But since the run
   // initialises `completed` inside itself, we instead rely on the seams:
-  // - claimNextStory immediately returns queue-drained (no to-do manifest)
+  // - claimNextStory immediately returns queue-emptied (no to-do manifest)
   // - we need `completed` to be non-empty for AC1 / AC3
   //
   // The cleanest approach: patch the workflow source to replace the empty
@@ -282,7 +282,7 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
         .replace(/^export\s+const\s+meta\b/m, "const meta")
     : source.replace(/^export\s+const\s+meta\b/m, "const meta");
 
-  const patchedBody = `${patchedSource}\n//# sourceURL=drain.workflow.js`;
+  const patchedBody = `${patchedSource}\n//# sourceURL=run.workflow.js`;
 
   const args = JSON.stringify({
     targetRepoRoot: scratchRoot,
@@ -311,7 +311,7 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
 
 describe("AC1 — completed work triggers auto-retro, absorbs note-tier lessons, advances cycle, summary correct", () => {
   it(
-    "given a drained run with completed stories, the auto-retro fires, writes a proposal, absorbs lessons, and advances the cycle",
+    "given an emptied run with completed stories, the auto-retro fires, writes a proposal, absorbs lessons, and advances the cycle",
     async () => {
       const REF = "native:01KV2ZF0RETRO0000000001";
       // Seed a done manifest so gatherRetroInputs finds real data.
@@ -321,11 +321,11 @@ describe("AC1 — completed work triggers auto-retro, absorbs note-tier lessons,
         completedRefs: [REF],
       });
 
-      expect(thrown, `drain threw: ${thrown}`).toBeUndefined();
+      expect(thrown, `run threw: ${thrown}`).toBeUndefined();
       expect(result).toBeDefined();
 
-      // The run drained cleanly.
-      expect(result.drainedReason).toBe("queue-drained");
+      // The run emptied cleanly.
+      expect(result.runReason).toBe("queue-emptied");
 
       // The auto-retro fired and produced a 'ran' outcome.
       expect(result.autoRetroOutcome).toBeDefined();
@@ -377,7 +377,7 @@ describe("AC1 — completed work triggers auto-retro, absorbs note-tier lessons,
 
 describe("AC2 — nothing-completed run skips retro, does not advance cycle, reports skip reason", () => {
   it(
-    "given a drained run with zero completed stories, the auto-retro is skipped and the summary says why",
+    "given an emptied run with zero completed stories, the auto-retro is skipped and the summary says why",
     async () => {
       const { result, thrown, logs } = await runAutoRetro({
         completedRefs: [], // empty — nothing completed
@@ -386,8 +386,8 @@ describe("AC2 — nothing-completed run skips retro, does not advance cycle, rep
       expect(thrown).toBeUndefined();
       expect(result).toBeDefined();
 
-      // The run drained cleanly (queue was empty, no stories were claimed).
-      expect(result.drainedReason).toBe("queue-drained");
+      // The run emptied cleanly (queue was empty, no stories were claimed).
+      expect(result.runReason).toBe("queue-emptied");
 
       // The auto-retro outcome reports 'skipped'.
       expect(result.autoRetroOutcome).toBeDefined();
@@ -408,17 +408,17 @@ describe("AC2 — nothing-completed run skips retro, does not advance cycle, rep
   );
 
   it(
-    "when the run exits with a non-queue-drained reason (e.g. max-stories-reached), the auto-retro does not fire",
+    "when the run exits with a non-queue-emptied reason (e.g. max-stories-reached), the auto-retro does not fire",
     async () => {
-      // A non-queue-drained run is simulated by having completed=[] AND
-      // drainedReason != 'queue-drained'. We can't easily force a different
-      // drainedReason here without more plumbing, but we can verify that with
+      // A non-queue-emptied run is simulated by having completed=[] AND
+      // runReason != 'queue-emptied'. We can't easily force a different
+      // runReason here without more plumbing, but we can verify that with
       // no completed refs the outcome is still 'skipped' (the completed.length===0
-      // guard fires first, before the drainedReason check matters).
+      // guard fires first, before the runReason check matters).
       // The key invariant: autoRetroOutcome.status === 'skipped' when no work completed.
       const { result, thrown } = await runAutoRetro({ completedRefs: [] });
       expect(thrown).toBeUndefined();
-      // Either null (non-drained) or skipped (drained but empty).
+      // Either null (non-emptied) or skipped (emptied but empty).
       const outcome = result.autoRetroOutcome;
       if (outcome !== null) {
         expect(outcome.status).toBe("skipped");
@@ -434,7 +434,7 @@ describe("AC2 — nothing-completed run skips retro, does not advance cycle, rep
 
 describe("AC3 — retro failure leaves cycle un-advanced, no corruption, failure reason in summary", () => {
   it(
-    "given a retro-analyst that throws, the cycle is NOT advanced and the drain does not crash",
+    "given a retro-analyst that throws, the cycle is NOT advanced and the run does not crash",
     async () => {
       const REF = "native:01KV2ZF0RETRO0000000003";
       await seedDoneManifest(scratchRoot, REF);
@@ -444,8 +444,8 @@ describe("AC3 — retro failure leaves cycle un-advanced, no corruption, failure
         retroAnalystResult: new Error("retro-analyst-threw: simulated failure"),
       });
 
-      // The drain must NOT throw at the top level.
-      expect(thrown, `drain should not throw; threw: ${thrown}`).toBeUndefined();
+      // The run must NOT throw at the top level.
+      expect(thrown, `run should not throw; threw: ${thrown}`).toBeUndefined();
       expect(result).toBeDefined();
 
       // The auto-retro outcome is 'failed'.
@@ -525,7 +525,7 @@ describe("AC3 — retro failure leaves cycle un-advanced, no corruption, failure
 
 describe("AC4 — at-most-once guard: retroFiredThisRun prevents a second auto-retro in the same run", () => {
   it(
-    "the drain workflow source declares retroFiredThisRun and sets it to true before the try block",
+    "the run workflow source declares retroFiredThisRun and sets it to true before the try block",
     () => {
       // This is a structural (source-text) assertion. The at-most-once guarantee
       // is implemented as a run-scoped boolean in the workflow JS. We verify:
@@ -543,16 +543,16 @@ describe("AC4 — at-most-once guard: retroFiredThisRun prevents a second auto-r
       // Guard condition on entry.
       expect(src).toContain("!retroFiredThisRun");
 
-      // The guard is combined with the drainedReason check (only fires on full drain).
-      expect(src).toMatch(/drainedReason === 'queue-drained' && !retroFiredThisRun/);
+      // The guard is combined with the runReason check (only fires on full empty).
+      expect(src).toMatch(/runReason === 'queue-emptied' && !retroFiredThisRun/);
     },
   );
 
   it(
-    "the second drain call with retroFiredThisRun already set to true does not call the retro-analyst",
+    "the second run call with retroFiredThisRun already set to true does not call the retro-analyst",
     async () => {
       // We simulate this by checking that the completed-refs path is only entered once
-      // across a drain run. The at-most-once guard is set before the try block; a second
+      // across a run. The at-most-once guard is set before the try block; a second
       // concurrent call would find retroFiredThisRun === true and exit early.
       //
       // Since the Workflow runtime is single-threaded cooperative async, a true
@@ -580,4 +580,4 @@ describe("AC4 — at-most-once guard: retroFiredThisRun prevents a second auto-r
   );
 }); // end describe: AC4
 
-}); // end outer describe: plugins/flow/mcp-server/tests/drain-auto-retro.test.ts
+}); // end outer describe: plugins/flow/mcp-server/tests/run-auto-retro.test.ts

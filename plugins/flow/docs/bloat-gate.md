@@ -27,7 +27,7 @@ graph. The blind spot that matters here:
 
 This is exactly how `recordAgentInvoke` and `recordPrCloseAction` survived as dead
 code for months: registered, type-checked, tested in isolation, but never invoked
-by any drain/skill/gate path (the stories that were going to call them were mooted
+by any run/skill/gate path (the stories that were going to call them were mooted
 by the stateless-workflow pivot). They were removed in the 2026-05-30 de-cruft pass.
 
 **Reviewer checklist for any new tool / dynamically-dispatched code:**

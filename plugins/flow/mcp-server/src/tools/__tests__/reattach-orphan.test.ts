@@ -120,7 +120,7 @@ describe("reattachOrphan — successful rewrite", () => {
     );
   });
 
-  it("bumps drain_resume_attempts and returns the post-increment count (crash-recovery cap)", async () => {
+  it("bumps run_resume_attempts and returns the post-increment count (crash-recovery cap)", async () => {
     const ref = "native:01JVWX2REATTACH0000000003";
     const absPath = await seedInProgressManifest(stateRoot, ref, STALE_ULID);
 
@@ -132,7 +132,7 @@ describe("reattachOrphan — successful rewrite", () => {
     });
     expect(first.resumeAttempts).toBe(1);
     let written = yamlParse(await fs.readFile(absPath, "utf8")) as Record<string, unknown>;
-    expect(written["drain_resume_attempts"]).toBe(1);
+    expect(written["run_resume_attempts"]).toBe(1);
 
     // Second reattach (a later session re-resuming the same orphan): 1 -> 2.
     const second = await reattachOrphan({
@@ -142,7 +142,7 @@ describe("reattachOrphan — successful rewrite", () => {
     });
     expect(second.resumeAttempts).toBe(2);
     written = yamlParse(await fs.readFile(absPath, "utf8")) as Record<string, unknown>;
-    expect(written["drain_resume_attempts"]).toBe(2);
+    expect(written["run_resume_attempts"]).toBe(2);
   });
 });
 

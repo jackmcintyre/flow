@@ -939,12 +939,12 @@ export class GitPushFailedError extends DomainError {
  * — the same whole-project type-check command CI runs — and it exited non-zero.
  * Thrown AFTER the commit but BEFORE `gh pr create`, so NO pull request is
  * opened on a red build. Carries the build's `exitCode` and captured
- * `stdout`/`stderr` so the caller (the drain seam-agent) can surface exactly
+ * `stdout`/`stderr` so the caller (the run seam-agent) can surface exactly
  * what failed, instead of relying on the dev agent to have remembered to run
  * the build.
  *
  * This is the deterministic-seam fix for the #211 failure class (first real
- * end-to-end drain, 2026-05-30): a story broke an untouched sibling file, the
+ * end-to-end run, 2026-05-30): a story broke an untouched sibling file, the
  * story-scoped vitest passed in isolation, and a red PR was opened because the
  * "run the build green first" mandate lived only in agent prose. The gate now
  * lives in the tool layer where the agent cannot skip it.
@@ -1014,12 +1014,12 @@ export class PrePrBuildFailedError extends DomainError {
  * branch never reaches origin and no doomed PR is opened.
  *
  * Carries a readable `reason` (the conflicting paths / abbreviated rebase
- * stderr) so the caller (the drain seam-agent) surfaces it to the operator as a
+ * stderr) so the caller (the run seam-agent) surfaces it to the operator as a
  * plain-language parked reason naming the clash, mirroring how
  * `PrePrBuildFailedError` / `PrePrTestFailedError` are reported.
  *
  * This is the deterministic-seam fix for the PR #264 registry-collision scar:
- * under a concurrent drain two stories cut their branches from the same base; if
+ * under a concurrent run two stories cut their branches from the same base; if
  * one merges first and both touched a shared file, the second story's PR opened
  * with a merge conflict that could not merge cleanly. The gate now rebases each
  * story onto the latest trunk BEFORE opening its PR, so a clean story opens an
@@ -1272,7 +1272,7 @@ export class ReviewerResultFileMalformedError extends DomainError {
  * native:01KT6GSV8KTTKKHPRGEJWJAGZV). The file is written by `runReviewerSession`;
  * its absence means the reviewer called `recordReviewerLesson` BEFORE (or without)
  * its mandatory `runReviewerSession` call — a caller-order bug. The lesson capture
- * is optional and fail-soft at the orchestration layer (the drain contains any
+ * is optional and fail-soft at the orchestration layer (the run contains any
  * failure so the merge still runs), but the tool itself fails loud so the bug is
  * visible rather than silently dropping the lesson.
  */
@@ -1845,7 +1845,7 @@ export class RetroProposalAlreadyExistsError extends DomainError {
 
 /**
  * `materialiseDevStoryWorktree` failed to stand up the dev's isolated worktree
- * on the drain path. Raised on a non-zero `git status` (snapshotting the dev's
+ * on the run path. Raised on a non-zero `git status` (snapshotting the dev's
  * changed paths) or a failed `git worktree add` — both are structural failures
  * that must halt the dev step rather than silently fall back to committing in
  * the orchestrating checkout.
@@ -2235,7 +2235,7 @@ export class RetirementWouldEmptyRegistryError extends DomainError {
  *
  * Structurally identical to `PrePrBuildFailedError` / `PrePrTestFailedError`:
  * thrown BEFORE any push or PR is created, carrying a human-readable reason so
- * the drain can surface the block cleanly.
+ * the run can surface the block cleanly.
  *
  * (Story native:01KT47430Q4C73K5E3ZECBSE5R)
  */

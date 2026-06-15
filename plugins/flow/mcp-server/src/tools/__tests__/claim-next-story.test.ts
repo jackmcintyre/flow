@@ -6,7 +6,7 @@
  *
  * Covers the three return branches:
  *   (a) `spawn-dev`               — at least one eligible (depsReady: true) story in to-do/.
- *   (b) `queue-drained`           — no in-progress stories AND no eligible to-do stories.
+ *   (b) `queue-emptied`           — no in-progress stories AND no eligible to-do stories.
  *   (c) `waiting-on-in-progress`  — in-progress non-empty, no eligible to-do stories.
  *
  * File map reference: spec line ~355
@@ -24,7 +24,7 @@ import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import {
   claimNextStory,
-  QUEUE_DRAINED_LINE,
+  QUEUE_EMPTIED_LINE,
   WAITING_ON_IN_PROGRESS_LINE,
   WAITING_ON_UNMERGED_OVERLAP_LINE,
   WAITING_ON_UNMERGED_DEPENDENCY_LINE,
@@ -251,7 +251,7 @@ describe("(a) spawn-dev — eligible (depsReady: true) story in to-do/", () => {
     });
 
     // B4 fix: the dependent is held SOLELY by an approved-but-UNMERGED declared
-    // dependency. This is NOT a clean drain — surfacing queue-drained here would
+    // dependency. This is NOT a clean run — surfacing queue-emptied here would
     // lie to the operator that the queue is empty when work is actually waiting
     // on them to merge the dependency's PR. Expect the WAITING outcome naming the
     // held ref, mirroring the cited-source overlap hold (#325).
@@ -272,26 +272,26 @@ describe("(a) spawn-dev — eligible (depsReady: true) story in to-do/", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (b) queue-drained — no in-progress, no eligible to-do stories
+// (b) queue-emptied — no in-progress, no eligible to-do stories
 // ---------------------------------------------------------------------------
 
-describe("(b) queue-drained — no in-progress and no eligible to-do stories", () => {
-  it("returns next: 'queue-drained' when to-do/ is empty and in-progress/ is empty", async () => {
+describe("(b) queue-emptied — no in-progress and no eligible to-do stories", () => {
+  it("returns next: 'queue-emptied' when to-do/ is empty and in-progress/ is empty", async () => {
     // Both dirs are empty (seeded in beforeEach but no stories added).
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
 
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 
-  it("returns next: 'queue-drained' when all to-do stories have unmet deps and in-progress/ is empty", async () => {
+  it("returns next: 'queue-emptied' when all to-do stories have unmet deps and in-progress/ is empty", async () => {
     // Only a deps-blocked story — no eligible candidate, no in-progress.
     await seedTodoStory(makeTodoManifest(STORY_REF_A, { depends_on: [DEP_REF] }));
 
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
 
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 });
 
@@ -355,14 +355,14 @@ describe("Story 9.1 — readiness brake gates the claim entry point", () => {
     expect(result.ref).toBe(STORY_REF_B);
   });
 
-  it("queue-drains when the only deps-satisfied item is not ready (fail-closed)", async () => {
+  it("queue-empties when the only deps-satisfied item is not ready (fail-closed)", async () => {
     // A single deps-satisfied but not-ready item, and nothing in-progress.
     await seedTodoStory(makeTodoManifest(STORY_REF_A, { ready: false }));
 
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    // No eligible candidate (not ready) and no in-progress → queue-drained.
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    // No eligible candidate (not ready) and no in-progress → queue-emptied.
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 
   it("once the not-ready item is marked ready, the claim entry point selects it", async () => {
@@ -371,7 +371,7 @@ describe("Story 9.1 — readiness brake gates the claim entry point", () => {
 
     // Pre-condition: it is never claimed while not ready.
     const before = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    expect(before.next).toBe("queue-drained");
+    expect(before.next).toBe("queue-emptied");
 
     // Operator blesses it via the real tool.
     const toggle = await markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF_A, ready: true });
@@ -390,7 +390,7 @@ describe("Story 9.1 — readiness brake gates the claim entry point", () => {
 // Story 10.6 AC1 — after cutover (config flipped to `adapter: native`), the
 // board renders from native state grouped by epic with the blessed story shown
 // claimable, AND the claim path claims that blessed native `ready` story and
-// never an un-blessed one. This is the live cockpit spine (board + drain claim)
+// never an un-blessed one. This is the live cockpit spine (board + run claim)
 // operating on native state after the flip.
 //
 // This block builds its OWN config-bearing scratch repo (the file-level
@@ -510,15 +510,15 @@ describe("Story 10.6 AC1 — board + claim operate on native state after the fli
     expect(unblessedStillTodo).toBe(true);
   });
 
-  it("(c) with only an un-blessed native story present, the claim path drains (fail-closed)", async () => {
+  it("(c) with only an un-blessed native story present, the claim path empties (fail-closed)", async () => {
     await seedCutoverTodo(makeNativeTodo(NATIVE_EPIC_UNBLESSED, { ready: false }));
 
     const result = await claimNextStory({
       targetRepoRoot: cutoverRoot,
       sessionUlid: SESSION_ULID,
     });
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 });
 
@@ -538,8 +538,8 @@ describe("cited-source overlap gate", () => {
     // ref) cites the same file with no declared dependency. B must NOT be
     // claimed — it would build from a main lacking A's change and collide.
     // Story native:01KTNH6N1E64W0EM3FS5A4B4TP: this case now returns
-    // waiting-on-unmerged-overlap (NOT queue-drained) so the operator sees the
-    // correct WAITING/parked signal rather than a false clean-drain all-clear.
+    // waiting-on-unmerged-overlap (NOT queue-emptied) so the operator sees the
+    // correct WAITING/parked signal rather than a false clean-run all-clear.
     await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
 
@@ -549,7 +549,7 @@ describe("cited-source overlap gate", () => {
       isOverlapBlockerInFlight: async () => true, // A's PR still open (in flight)
     });
 
-    // B is held by the overlap gate — returns WAITING, NOT queue-drained.
+    // B is held by the overlap gate — returns WAITING, NOT queue-emptied.
     expect(result.next).toBe("waiting-on-unmerged-overlap");
     if (result.next !== "waiting-on-unmerged-overlap") return;
     expect(result.heldRefs).toContain(STORY_REF_B);
@@ -731,8 +731,8 @@ describe("AC3 — single-worker behaviour unchanged", () => {
     expect(r2.ref).toBe(STORY_REF_B);
 
     // Third call — both are in-progress, to-do is empty → waiting-on-in-progress
-    // (not queue-drained because the two in-progress manifests were written by
-    // claimStory and are on disk; the test is that we do NOT get queue-drained
+    // (not queue-emptied because the two in-progress manifests were written by
+    // claimStory and are on disk; the test is that we do NOT get queue-emptied
     // when stories are still in-flight).
     const r3 = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
     // Both stories are now in in-progress/, to-do/ is empty, so we get
@@ -740,7 +740,7 @@ describe("AC3 — single-worker behaviour unchanged", () => {
     expect(r3.next).toBe("waiting-on-in-progress");
   });
 
-  it("a single worker on a one-story queue returns spawn-dev and then queue-drained when both dirs are empty", async () => {
+  it("a single worker on a one-story queue returns spawn-dev and then queue-emptied when both dirs are empty", async () => {
     await seedTodoStory(makeTodoManifest(STORY_REF_A));
 
     const r1 = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
@@ -756,9 +756,9 @@ describe("AC3 — single-worker behaviour unchanged", () => {
 // is held solely by an unmerged overlapping PR in done/.
 //
 // Three AC boundaries:
-//   AC1 — held-on-unmerged-overlap: returns waiting-on-unmerged-overlap (drained:false)
-//          naming the held story ref, NOT a clean full-drain all-clear.
-//   AC2 — genuinely-empty: genuinely empty queue still returns queue-drained (drained:true),
+//   AC1 — held-on-unmerged-overlap: returns waiting-on-unmerged-overlap (queueEmptied:false)
+//          naming the held story ref, NOT a clean full-run all-clear.
+//   AC2 — genuinely-empty: genuinely empty queue still returns queue-emptied (queueEmptied:true),
 //          unchanged.
 //   AC3 — hold-still-fires: the overlap hold decision itself is preserved.
 // ---------------------------------------------------------------------------
@@ -767,10 +767,10 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
   const SHARED_FILE = "plugins/flow/mcp-server/src/tools/claim-next-story.ts";
 
   // AC1: the only ready story is held because it overlaps an unmerged done/ sibling.
-  it("AC1 — returns waiting-on-unmerged-overlap (not queue-drained) and names the held ref", async () => {
+  it("AC1 — returns waiting-on-unmerged-overlap (not queue-emptied) and names the held ref", async () => {
     // STORY_REF_A (earlier) is approved into done/ but its PR is NOT merged.
     // STORY_REF_B (later, ready) cites the same file — it must be held, not
-    // claimed, and the result must NOT be queue-drained.
+    // claimed, and the result must NOT be queue-emptied.
     await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
 
@@ -780,7 +780,7 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
       isOverlapBlockerInFlight: async () => true, // A's PR still open (in flight)
     });
 
-    // Must NOT be queue-drained.
+    // Must NOT be queue-emptied.
     expect(result.next).toBe("waiting-on-unmerged-overlap");
     if (result.next !== "waiting-on-unmerged-overlap") return;
 
@@ -798,21 +798,21 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
     expect(stillTodo).toBe(true);
   });
 
-  // AC2: genuinely empty queue still returns queue-drained — the clean drain is unchanged.
-  it("AC2 — genuinely empty queue still returns queue-drained (drained path unchanged)", async () => {
+  // AC2: genuinely empty queue still returns queue-emptied — the clean run is unchanged.
+  it("AC2 — genuinely empty queue still returns queue-emptied (run path unchanged)", async () => {
     // No stories at all — the queue is truly empty.
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
     });
 
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 
-  it("AC2 — returns queue-drained (not waiting) when all ready stories have unmet declared deps (no overlap hold)", async () => {
+  it("AC2 — returns queue-emptied (not waiting) when all ready stories have unmet declared deps (no overlap hold)", async () => {
     // A story blocked by an unmet declared dep — not an overlap hold.
-    // This must still be queue-drained, not waiting-on-unmerged-overlap.
+    // This must still be queue-emptied, not waiting-on-unmerged-overlap.
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { depends_on: [DEP_REF] }));
 
     const result = await claimNextStory({
@@ -821,8 +821,8 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
       isDependencyMerged: async () => false,
     });
 
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 
   // AC3: the overlap hold decision itself is unchanged — the held story is NOT claimed.
@@ -907,7 +907,7 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
 // ---------------------------------------------------------------------------
 
 describe("AC4 — genuine claim errors still halt the run loudly (not swallowed as a lost race)", () => {
-  it("a corrupted to-do manifest throws rather than returning queue-drained", async () => {
+  it("a corrupted to-do manifest throws rather than returning queue-emptied", async () => {
     // A YAML file that is syntactically valid but schema-invalid.
     // parseExecutionManifest throws MalformedExecutionManifestError — NOT a
     // ManifestNotFoundError, so it must propagate, not be swallowed.

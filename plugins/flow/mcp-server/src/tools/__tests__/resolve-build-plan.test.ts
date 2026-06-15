@@ -88,7 +88,7 @@ describe("AC1: full lane — Sonnet default + full review (no-regression pin)", 
 
   it("full lane model is 'sonnet' — unchanged from today's default (no-regression pin)", async () => {
     const plan = await resolveBuildPlan({ storyId: "native:test-full-sonnet-pin", lane: "full" });
-    // This is the EXACT model the drain has used since FU6 — must not change.
+    // This is the EXACT model the run has used since FU6 — must not change.
     expect(plan.devReviewerModel).toBe("sonnet");
   });
 

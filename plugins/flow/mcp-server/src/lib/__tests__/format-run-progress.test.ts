@@ -1,7 +1,7 @@
 /**
- * Unit tests for `formatDrainProgress` / `formatElapsed` — Story 8.18.
+ * Unit tests for `formatRunProgress` / `formatElapsed` — Story 8.18.
  *
- * AC1: a pure helper formats the drain's per-phase progress lines. For a
+ * AC1: a pure helper formats the run's per-phase progress lines. For a
  *      representative phase it produces a `start` line and a `done`-with-elapsed
  *      line, and the duration is rendered in a human-readable form. Pure and
  *      deterministic (no mutation, never throws, single line).
@@ -12,52 +12,52 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  formatDrainProgress,
+  formatRunProgress,
   formatElapsed,
   LONG_PHASE_MARKER,
-} from "../format-drain-progress.js";
+} from "../format-run-progress.js";
 
-describe("formatDrainProgress", () => {
+describe("formatRunProgress", () => {
   // ── AC1 — start line + done-with-elapsed line for a representative phase ──
   it("produces a start line for a representative phase (bmad ref → local part as handle)", () => {
     // For bmad:8.18 the short handle is "8.18" (local part after the colon).
-    expect(formatDrainProgress("bmad:8.18", "review", "start")).toBe(
+    expect(formatRunProgress("bmad:8.18", "review", "start")).toBe(
       "8.18 review: start",
     );
   });
 
   it("produces a done line that includes the elapsed time", () => {
-    const line = formatDrainProgress("bmad:8.18", "review", "done", 4200);
+    const line = formatRunProgress("bmad:8.18", "review", "done", 4200);
     expect(line).toBe("8.18 review: done in 4.2s");
     expect(line).toContain("done");
     expect(line).toContain("4.2s");
   });
 
   it("renders the elapsed duration in a human-readable form (start vs done differ)", () => {
-    const start = formatDrainProgress("bmad:8.18", "gate", "start");
-    const done = formatDrainProgress("bmad:8.18", "gate", "done", 12000);
+    const start = formatRunProgress("bmad:8.18", "gate", "start");
+    const done = formatRunProgress("bmad:8.18", "gate", "done", 12000);
     expect(start).not.toContain("12");
     expect(done).toContain("12.0s");
     expect(done).not.toBe(start);
   });
 
   it("ignores elapsedMs for a start transition (only the done line carries it)", () => {
-    expect(formatDrainProgress("bmad:8.18", "review", "start", 99999)).toBe(
+    expect(formatRunProgress("bmad:8.18", "review", "start", 99999)).toBe(
       "8.18 review: start",
     );
   });
 
   it("includes the short handle (not the full ref) in both the start and done lines", () => {
     // bmad ref: handle is the local part "8.18"
-    expect(formatDrainProgress("bmad:8.18", "review", "start")).toContain("8.18");
-    expect(formatDrainProgress("bmad:8.18", "review", "done", 1000)).toContain("8.18");
+    expect(formatRunProgress("bmad:8.18", "review", "start")).toContain("8.18");
+    expect(formatRunProgress("bmad:8.18", "review", "done", 1000)).toContain("8.18");
     // The full ref should NOT appear (short handle only)
-    expect(formatDrainProgress("bmad:8.18", "review", "start")).not.toContain("bmad:8.18");
+    expect(formatRunProgress("bmad:8.18", "review", "start")).not.toContain("bmad:8.18");
   });
 
   it("uses first-8-char ULID handle for a native ref", () => {
     const nativeRef = "native:01KT1NR9F6133VHY601SF3BD5N";
-    const line = formatDrainProgress(nativeRef, "review", "start");
+    const line = formatRunProgress(nativeRef, "review", "start");
     // Short handle = first 8 chars of ULID = "01KT1NR9"
     expect(line).toContain("01KT1NR9");
     // The full 26-char ULID should NOT appear
@@ -68,13 +68,13 @@ describe("formatDrainProgress", () => {
 
   it("native ref done line uses short handle", () => {
     const nativeRef = "native:01KT1NR9F6133VHY601SF3BD5N";
-    const line = formatDrainProgress(nativeRef, "gate", "done", 5000);
+    const line = formatRunProgress(nativeRef, "gate", "done", 5000);
     expect(line).toBe("01KT1NR9 gate: done in 5.0s");
   });
 
   it("is a single line (contains no newline) for either transition", () => {
-    expect(formatDrainProgress("bmad:8.18", "dev-build", "start")).not.toContain("\n");
-    expect(formatDrainProgress("bmad:8.18", "dev-build", "done", 600000)).not.toContain("\n");
+    expect(formatRunProgress("bmad:8.18", "dev-build", "start")).not.toContain("\n");
+    expect(formatRunProgress("bmad:8.18", "dev-build", "done", 600000)).not.toContain("\n");
   });
 
   it("never throws for any declared phase/transition combination", () => {
@@ -82,27 +82,27 @@ describe("formatDrainProgress", () => {
     const transitions = ["start", "done"] as const;
     for (const p of phases) {
       for (const t of transitions) {
-        expect(() => formatDrainProgress("bmad:8.18", p, t, 1234)).not.toThrow();
+        expect(() => formatRunProgress("bmad:8.18", p, t, 1234)).not.toThrow();
       }
     }
   });
 
   // ── AC2 — dev-build is explicitly marked the longest phase ───────────────
   it("marks the dev-build start line as the longest phase", () => {
-    const line = formatDrainProgress("bmad:8.18", "dev-build", "start");
+    const line = formatRunProgress("bmad:8.18", "dev-build", "start");
     expect(line).toContain(LONG_PHASE_MARKER);
     expect(line).toBe(`8.18 dev-build: start ${LONG_PHASE_MARKER}`);
   });
 
   it("does NOT mark the short phases (review, gate) as the longest phase", () => {
-    expect(formatDrainProgress("bmad:8.18", "review", "start")).not.toContain(LONG_PHASE_MARKER);
-    expect(formatDrainProgress("bmad:8.18", "gate", "start")).not.toContain(LONG_PHASE_MARKER);
+    expect(formatRunProgress("bmad:8.18", "review", "start")).not.toContain(LONG_PHASE_MARKER);
+    expect(formatRunProgress("bmad:8.18", "gate", "start")).not.toContain(LONG_PHASE_MARKER);
   });
 
   it("does not carry the longest-phase marker on the dev-build DONE line", () => {
     // The marker is a "this will take a while" signal on entry; on the done
     // line the elapsed time speaks for itself, so the marker is not repeated.
-    expect(formatDrainProgress("bmad:8.18", "dev-build", "done", 600000)).not.toContain(
+    expect(formatRunProgress("bmad:8.18", "dev-build", "done", 600000)).not.toContain(
       LONG_PHASE_MARKER,
     );
   });

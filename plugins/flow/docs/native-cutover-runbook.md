@@ -2,7 +2,7 @@
 
 > **Goal:** flip the repo's live planning substrate from BMad to **native**
 > (the owned, strict, Tier-0-enforced format), reconcile the live backlog onto
-> native state, and confirm the board and the drain run on native — **without
+> native state, and confirm the board and the run run on native — **without
 > stranding any un-migrated work**.
 
 This runbook is the deliberate operator procedure for Story 10.6. The mechanism
@@ -29,7 +29,7 @@ the code change and its tests can merge ahead of the live flip.
   native. It is just no longer the *live* backlog.
 - **Reversibility window.** The flip is fully reversible (flip the config back)
   **until native-only work accumulates** — i.e. until new stories are authored
-  directly as native and/or drained on the native pipeline. Past that point a
+  directly as native and/or run on the native pipeline. Past that point a
   revert to BMad would strand the native-authored work the same way a premature
   flip would strand un-migrated BMad work. **Treat the flip as a one-way door
   once the first native-authored story is claimed or merged.**
@@ -54,7 +54,7 @@ and re-running it skips already-ingested stories (dedupe by the recorded source
 
 This is the step that prevents stranding work. The pre-mortem failure mode is:
 *the flip happens with an incompletely-ingested backlog, and in-flight or
-un-migrated BMad stories become invisible to the now-native drain.*
+un-migrated BMad stories become invisible to the now-native run.*
 
 Reconcile against the ingest's fix-up report **before** flipping:
 
@@ -69,7 +69,7 @@ Reconcile against the ingest's fix-up report **before** flipping:
      intentionally not migrated.
    - **Defer** — the story stays in the BMad backlog for now; record that it will
      be migrated later, and accept that it will **not** be visible to the native
-     drain until it is.
+     run until it is.
 3. **Verify the reconciliation count.** Confirm the native-stories directory is a
    complete superset of the work the team still needs to be *live*: every BMad
    story that is not explicitly retired or deferred has a corresponding native
@@ -94,7 +94,7 @@ adapter_config: {}
 ```
 
 This is the cutover. From here, `resolveWorkspace` binds the native adapter, and
-the board and drain operate on native state.
+the board and run operate on native state.
 
 > **Detection ambiguity — why the flip is an explicit config field, not
 > detection.** With both `.flow/native-stories/` and a BMad stories tree present,
@@ -113,10 +113,10 @@ fail-closed: a native story that cannot parse / clear Tier-0 is loudly warned an
 ### 5. Approve the stories you want claimable
 
 Scanning lands stories in `to-do/` as **not ready**. The readiness brake
-(Story 9.1) is fail-closed: the drain claims nothing until you approve it. Use
-`/flow:ready` to mark each story you want the drain to pick up as `ready: true`.
+(Story 9.1) is fail-closed: the run claims nothing until you approve it. Use
+`/flow:ready` to mark each story you want the run to pick up as `ready: true`.
 
-### 6. Verify the board and the drain run on native
+### 6. Verify the board and the run run on native
 
 This is the proof that the live pipeline runs end-to-end on native:
 
@@ -125,11 +125,11 @@ This is the proof that the live pipeline runs end-to-end on native:
   each unapproved one **not claimable**. (Native refs that carry an
   `<epic>.<story>` source id group by epic exactly as BMad refs do; ULID-only
   refs fall into the `(no epic)` bucket.)
-- **Drain claim:** the claim path (`claimNextStory`) claims an **approved native
+- **Run claim:** the claim path (`claimNextStory`) claims an **approved native
   `ready`** story (readiness brake + dependencies honored) and **never** an
   unapproved one. The BMad authoring/scan path is no longer the live backlog.
 
-When the board renders from native state and the drain claims a native story, the
+When the board renders from native state and the run claims a native story, the
 cutover is complete: the live cockpit operates on native.
 
 ## Reversibility note
@@ -137,7 +137,7 @@ cutover is complete: the live cockpit operates on native.
 Until native-only work accumulates (step 6 onward), the flip is reversible: set
 `adapter: bmad` back in `.flow/config.yaml` and BMad is the live adapter again,
 with the BMad backlog live. Both adapters remain registered, so nothing is lost
-by reverting. **Once the first native-authored or native-drained story is in
+by reverting. **Once the first native-authored or native-run story is in
 flight or merged, treat the cutover as a one-way door** — reverting would strand
 the native work, mirroring the un-migrated-BMad strand this runbook's
 reconciliation step exists to prevent.

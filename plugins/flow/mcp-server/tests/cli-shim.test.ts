@@ -1,9 +1,9 @@
 /**
  * Story 8.4 — stateless CLI shim dispatch smoke test.
  *
- * The `drain` workflow's seam-agents shell out to
+ * The `run` workflow's seam-agents shell out to
  *   `node dist/cli.js <tool> --json <args>`
- * with NO persistent MCP server on the drain path. This verifies the dispatch
+ * with NO persistent MCP server on the run path. This verifies the dispatch
  * contract the seam-agents depend on: a known tool round-trips a single JSON
  * line; an unknown tool exits 64 with a typed error; the two newly-wired seam
  * tools (processReviewerYield, scanOrphanedInProgress) are registered; malformed
@@ -66,10 +66,10 @@ describe("Story 8.4 — stateless CLI shim dispatch", () => {
 });
 
 // ---------------------------------------------------------------------------
-// markStoryReady on the CLI (Epic 10 drain fix-plan, Fix 1).
+// markStoryReady on the CLI (Epic 10 run fix-plan, Fix 1).
 //
-// The drain runs MCP-free, so the "bless" mutation had no one-shot seam: every
-// drain blessed the next story via a hand-written `node` helper. Wiring
+// The run runs MCP-free, so the "bless" mutation had no one-shot seam: every
+// run blessed the next story via a hand-written `node` helper. Wiring
 // markStoryReady into the CLI TOOLS map makes bless a first-class seam — the
 // cutover scan→bless step and `/flow:ready` now round-trip through this transport.
 // This proves the tool LOGIC actually runs end-to-end over the CLI, not merely

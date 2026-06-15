@@ -146,7 +146,7 @@ export interface ReviewerResultFileShape {
    * Clean additive optional field. `runReviewerSession` NEVER writes it — it is
    * merged in afterwards, only by `recordReviewerLesson`, which the reviewer
    * calls at most once when (and only when) the review taught a reusable lesson.
-   * The drain then forwards this lesson onto the done manifest via
+   * The run then forwards this lesson onto the done manifest via
    * `recordStoryRetro` before the merge gate runs. Typed from `LessonSchema`'s
    * inferred type (the existing shape — no new lesson type is defined here).
    */
@@ -335,7 +335,7 @@ function findVitestInWorkspaceMembers(
  * returns that member instead. This covers the case where a `vitest:` AC marker
  * targets a source file in a sub-directory of a pnpm workspace root whose root
  * package delegates vitest to a member package (e.g. `plugins/flow/workflows/
- * drain.workflow.js` → `plugins/flow/` workspace root → member `mcp-server`).
+ * run.workflow.js` → `plugins/flow/` workspace root → member `mcp-server`).
  *
  * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
  * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
@@ -868,7 +868,7 @@ export async function runReviewerSession(
   //
   // Story 8.15: the result is namespaced per story ref within the session dir
   // (`<sessionUlid>/<sanitised-ref>/reviewer-result.json`) so a multi-story
-  // drain — which shares one session ULID across stories — cannot have a later
+  // run — which shares one session ULID across stories — cannot have a later
   // story overwrite an earlier story's verdict. The path is derived via the
   // shared `reviewerResultFilePath` helper, the same derivation every reader
   // uses, so writer and readers always agree.

@@ -1,10 +1,10 @@
 export const meta = {
-  name: 'flow-drain',
+  name: 'flow-run',
   description:
-    'Stage-1 stateless drain: a per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the drain path, so the cascade-SIGTERM disconnect cannot occur by construction. The main loop dispatches up to maxConcurrency stories at once (Story 8.22); per-dev worktree isolation (8.20) makes that safe. Recovers crash-orphaned stories first (auto-resume, serial). Story 8.5 + crash-recovery + concurrency.',
+    'Stage-1 stateless run: a per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the run path, so the cascade-SIGTERM disconnect cannot occur by construction. The main loop dispatches up to maxConcurrency stories at once (Story 8.22); per-dev worktree isolation (8.20) makes that safe. Recovers crash-orphaned stories first (auto-resume, serial). Story 8.5 + crash-recovery + concurrency.',
   phases: [
     { title: 'recover', detail: 'scan in-progress/ for crash-orphaned stories from a prior run; auto-resume each (resume at review if a PR exists, else re-run), serial, capped' },
-    { title: 'drain', detail: 'bounded-concurrent per story (up to maxConcurrency at once): claim -> dev (worktree) -> processDevTranscript -> review -> processReviewerTranscript -> (rework) -> auto-merge gate' },
+    { title: 'run', detail: 'bounded-concurrent per story (up to maxConcurrency at once): claim -> dev (worktree) -> processDevTranscript -> review -> processReviewerTranscript -> (rework) -> auto-merge gate' },
   ],
 }
 
@@ -16,11 +16,11 @@ export const meta = {
 //   sessionUlid    : (optional) launcher-minted id — pass it for journal-stable resume;
 //                    omitted → minted in-script for a standalone run
 //   maxStories     : OPTIONAL safety cap on stories claimed this run. Omitted →
-//                    drain until the queue is empty (the headline). Provided → stop after N.
+//                    run until the queue is empty (the headline). Provided → stop after N.
 //   maxRework      : per-story NEEDS-CHANGES rework cap. Default 2.
 //   maxResume      : per-story crash-resume cap. Past this many auto-resumes a
 //                    still-orphaned story is blocked for a human. Default 2.
-//   maxConcurrency     : OPTIONAL cap on how many stories the MAIN drain loop runs at
+//   maxConcurrency     : OPTIONAL cap on how many stories the MAIN run loop runs at
 //                    once (Story 8.22). Default 2. 1 → the historical strictly-serial
 //                    loop. Non-positive/garbage → the default. The orphan-resume
 //                    prelude stays serial regardless. Per-dev worktree isolation
@@ -35,33 +35,33 @@ export const meta = {
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
 const CLI = A.cli
-// Optional safety cap. Omitted (or non-positive/garbage) → unbounded drain: the
+// Optional safety cap. Omitted (or non-positive/garbage) → unbounded run: the
 // queue strictly shrinks (claimNextStory atomically moves to-do→in-progress), so
-// the loop always terminates on queue-drained. A positive integer caps the run.
+// the loop always terminates on queue-emptied. A positive integer caps the run.
 const MAX = Number.isInteger(A.maxStories) && A.maxStories > 0 ? A.maxStories : Infinity
 const MAX_REWORK = A.maxRework || 2
 const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResume : 2
-// Concurrency cap for the main drain loop (Story 8.22). Mirrors the maxStories /
+// Concurrency cap for the main run loop (Story 8.22). Mirrors the maxStories /
 // maxRework / maxResume knobs. Default 2; clamp a non-positive/garbage value to 1
-// so the loop is never spawned with zero workers (which would never drain).
+// so the loop is never spawned with zero workers (which would never run).
 const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency > 0 ? A.maxConcurrency : 2
 // Re-poll delay (ms) when a worker sees waiting-on-in-progress (Story native:01KTSQXBVE4WEJ2PQKVNHVFPS6).
 // A worker waits this long before re-checking the queue, so it does not spin hot
 // while a sibling story is still building. Default: 2000 ms for production runs.
 // Tests pass 0 (or a very small value) so the harness does not slow down.
 const REPOLL_DELAY_MS = Number.isInteger(A.repollDelayMs) && A.repollDelayMs >= 0 ? A.repollDelayMs : 2000
-// Re-poll termination guard (fix/drain-isolation-coordination-honesty): the
+// Re-poll termination guard (fix/run-isolation-coordination-honesty): the
 // belt-and-braces cap on consecutive `waiting-on-in-progress` re-polls during
 // which NO worker is actually processing a story. The non-termination fix moves
 // every given-up story OUT of in-progress/ so the common stall cause is gone;
-// this cap guarantees the drain can NEVER hang even if some OTHER cause leaves a
+// this cap guarantees the run can NEVER hang even if some OTHER cause leaves a
 // manifest wedged in in-progress/ (a hand-broken manifest, a future bug). After
 // this many consecutive no-progress polls with zero active workers, the run
-// exits honestly with drainedReason 'stalled-in-progress'. Default 50; tests
+// exits honestly with runReason 'stalled-in-progress'. Default 50; tests
 // pass a small value alongside repollDelayMs:0.
 const MAX_REPOLL = Number.isInteger(A.maxRepoll) && A.maxRepoll > 0 ? A.maxRepoll : 50
 // Execution model for the dev and reviewer subagents (FU6). Default: 'sonnet' so
-// overnight drains use the cheaper model without hand-editing the workflow.
+// overnight runs use the cheaper model without hand-editing the workflow.
 // Override per-run by passing devReviewerModel: 'opus' (or any model string) in
 // the launch args. Does NOT affect the seam-relay courier (Haiku for read-only
 // seams, Sonnet for mutating ones — see seam()), the judge panel, or persona/QL calls.
@@ -73,16 +73,16 @@ const MAX_REPOLL = Number.isInteger(A.maxRepoll) && A.maxRepoll > 0 ? A.maxRepol
 // when no per-story override is resolved; it continues to work as before so
 // existing launch scripts are unaffected.
 const execModel = (A && A.devReviewerModel) || 'sonnet'
-// PLUGIN ROOT: derived from the CLI path so the drain can call readCatalogue
+// PLUGIN ROOT: derived from the CLI path so the run can call readCatalogue
 // without knowing the plugin install location up front. The CLI always lives at
 // <pluginRoot>/mcp-server/dist/cli.js — strip the three trailing path segments.
-// This is the only path derivation in the drain; it is pure string manipulation.
+// This is the only path derivation in the run; it is pure string manipulation.
 const PLUGIN_ROOT = CLI ? CLI.replace(/\/mcp-server\/dist\/cli\.js$/, '') : ''
 // AUTO-ABSORB RETRO PROPOSALS (Story native:01KV2Z67850XWWQV0AY2N05JSX — note-tier
 // auto-absorption). When the retro-analyst has written its proposals for this cycle
-// (via writeRetroProposal), the drain can auto-absorb note-tier persona-append
+// (via writeRetroProposal), the run can auto-absorb note-tier persona-append
 // proposals unattended. The caller passes the proposal file's ISO timestamp so the
-// drain knows which file to absorb from. Omitted → no auto-absorb step this run
+// run knows which file to absorb from. Omitted → no auto-absorb step this run
 // (the safe default — the operator calls this manually or via /flow:retro).
 // This optional arg is the seam: setting it wires the autonomous absorption path;
 // omitting it leaves every proposal for the operator's explicit accept-proposal gate.
@@ -93,7 +93,7 @@ const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.
 // NEEDS-HUMAN-DECISION signal (Story 8.19): the dev emits this locked marker as
 // its last line — INSTEAD of the handoff phrase — when it hits a genuine
 // decision a human must make to proceed correctly (distinct from a normal
-// handoff, a domain-yield, and a hard block). The drain detects the marker on
+// handoff, a domain-yield, and a hard block). The run detects the marker on
 // the REAL dev transcript, asks processDevTranscript to extract the verbatim
 // question (the tool owns the parse), routes the story to the human-needed
 // surface (pausedForHuman) carrying the question, NOTIFIES the operator, and
@@ -120,7 +120,7 @@ const J = (o) => JSON.stringify(o)
 //     These leave retryable=false so a garble safely pauses that one story
 //     (no-silent-failure) rather than risk re-applying a mutation the first call
 //     may already have landed — and Haiku garbled exactly such a verdict relay on
-//     the first multi-story drain (Story 8.13), so the reliable model is worth its
+//     the first multi-story run (Story 8.13), so the reliable model is worth its
 //     cost on the handful of state-mutating seams per story.
 //
 // `swallow` (Story 8.21) extends the existing "no line, keep going" degrade
@@ -137,7 +137,7 @@ const J = (o) => JSON.stringify(o)
 // processStory: wrapping processStory would also swallow load-bearing failures
 // and reintroduce silent-success, which is exactly what this story forbids.
 //
-// `modelOverride` (2026-06-13 drain-startup fix): forces a specific courier model,
+// `modelOverride` (2026-06-13 run-startup fix): forces a specific courier model,
 // bypassing the read-only/mutating Haiku/Sonnet default. The default tiering assumes
 // every relayed payload is a SMALL JSON line, so a garble just re-invokes cheaply.
 // That assumption breaks for the two persona seams: buildPersonaSpawnPrompt returns
@@ -145,10 +145,10 @@ const J = (o) => JSON.stringify(o)
 // pitfall entries). Haiku could not reliably emit a payload that large through the
 // StructuredOutput tool — it degraded to printing the answer as plain TEXT instead of
 // calling the tool, three times, so the agent() call threw and (this seam not being a
-// swallow seam) killed the whole drain at startup before any story was claimed.
+// swallow seam) killed the whole run at startup before any story was claimed.
 // Routing the persona seams to Opus — the most reliable at both tool-calling discipline
 // and verbatim reproduction of a large string — removes that failure mode. It is the
-// only large verbatim relay in the drain and runs exactly twice per run (at startup),
+// only large verbatim relay in the run and runs exactly twice per run (at startup),
 // so the cost is immaterial. The small read-only seams stay on Haiku.
 const seam = async (cmd, label, retryable = false, swallow = false, modelOverride = null) => {
   const attempts = retryable ? 3 : 1
@@ -160,7 +160,7 @@ const seam = async (cmd, label, retryable = false, swallow = false, modelOverrid
         `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
           `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
           `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-        { schema: RawSchema, label, phase: 'drain', model: modelOverride || (retryable ? 'haiku' : 'sonnet') },
+        { schema: RawSchema, label, phase: 'run', model: modelOverride || (retryable ? 'haiku' : 'sonnet') },
       )
     } catch (e) {
       // HARD rejection of the courier call. For an observability seam we degrade
@@ -184,11 +184,11 @@ const seam = async (cmd, label, retryable = false, swallow = false, modelOverrid
 // indistinguishable from a hang. These lines are emitted through the SAME
 // narrator (`log()`) and change NO control flow — purely additive observability.
 //
-// The wall clock is read through the CLI seam (drainPhaseStart/drainPhaseDone),
+// The wall clock is read through the CLI seam (runPhaseStart/runPhaseDone),
 // never in-script: the Workflow runtime forbids the script from calling
 // Date.now()/new Date() (resume-determinism), but a seam result is recorded and
 // replayed, so reading the clock through a seam stays deterministic. The pure,
-// unit-tested formatDrainProgress helper does the formatting inside those tools.
+// unit-tested formatRunProgress helper does the formatting inside those tools.
 //
 // progressStart(ref, ph) -> the epoch-ms start time (handed back to progressDone)
 // progressDone(ref, ph, startedAtMs) -> emits the elapsed line.
@@ -196,45 +196,45 @@ const seam = async (cmd, label, retryable = false, swallow = false, modelOverrid
 // relay OR a hard rejection of the underlying courier never breaks the run —
 // progressStart falls back to a null start time and progressDone then renders
 // 0ms. The heartbeat is pure observability, so it degrades to no line on ANY
-// failure (garble or throw) rather than ever failing the story or the drain.
+// failure (garble or throw) rather than ever failing the story or the run.
 const progressStart = async (ref, ph) => {
-  const r = await seam(`node ${CLI} drainPhaseStart --json '${J({ ref, phase: ph })}'`, `progress-start:${ref}:${ph}`, true, true)
+  const r = await seam(`node ${CLI} runPhaseStart --json '${J({ ref, phase: ph })}'`, `progress-start:${ref}:${ph}`, true, true)
   if (r && !r._parseError && typeof r.line === 'string') log(r.line)
   return r && typeof r.atMs === 'number' ? r.atMs : null
 }
 const progressDone = async (ref, ph, startedAtMs) => {
-  const r = await seam(`node ${CLI} drainPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true, true)
+  const r = await seam(`node ${CLI} runPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true, true)
   if (r && !r._parseError && typeof r.line === 'string') log(r.line)
 }
 
 // OPERATOR NOTIFICATION (Story 8.19): when a story pauses for a human decision,
-// the drain pushes a notification naming the ref and the question. The binding
+// the run pushes a notification naming the ref and the question. The binding
 // contract is "the question reaches the operator with the ref" — we do NOT
-// hard-wire a specific notifier the runtime may not expose. The drain narrator
+// hard-wire a specific notifier the runtime may not expose. The run narrator
 // (`log()`) is the channel the runtime always provides, so we surface the pause
 // there; if the runtime additionally injects a dedicated `notify` seam (e.g. a
-// push channel), we route through that too. This path is exercised by the drain
+// push channel), we route through that too. This path is exercised by the run
 // integration test via an injected notifier so a future change cannot silently
 // drop it. `typeof` guards keep the workflow safe when no `notify` is injected.
 const notifyHumanNeeded = (ref, question) => {
   const line = `NEEDS HUMAN — story ${ref} paused for a decision. question: ${question}`
   log(line)
   if (typeof notify === 'function') {
-    try { notify({ kind: 'needs-human-decision', ref, question, line }) } catch (_e) { /* notification is best-effort; never break the drain */ }
+    try { notify({ kind: 'needs-human-decision', ref, question, line }) } catch (_e) { /* notification is best-effort; never break the run */ }
   }
 }
 
-// CLEAN-ROOT GUARD (Epic 10 drain fix-plan, Fix 2b): the dev edits inside its OWN
+// CLEAN-ROOT GUARD (Epic 10 run fix-plan, Fix 2b): the dev edits inside its OWN
 // per-story worktree (Story 8.20), so the orchestrating root checkout should stay
 // clean. But in a BACKGROUND job the repo's `worktree.bgIsolation: "none"` setting
 // can suppress that isolation, pinning the dev's edits to the shared root instead
-// (Epic 10 drain retro, Issue B — observed mid-10.2, recurred 0/5 across the
+// (Epic 10 run retro, Issue B — observed mid-10.2, recurred 0/5 across the
 // batch). After each story settles we ask the guard tool whether the root carries
 // any leaked tracked changes (operational `.flow/**` is gitignored, so only a real
 // source leak shows); if so it stashes exactly those paths non-destructively
 // (recoverable via `git stash`) so the NEXT story's worktree is still cut from a
 // clean base, and we log a LOUD warning here. This converts a silent leak into a
-// visible, safe one — it does not pretend to make concurrent drains under a broken
+// visible, safe one — it does not pretend to make concurrent runs under a broken
 // isolation flag correct. Read-mostly + idempotent (a second call after a stash
 // finds the root clean), so retryable; a garbled relay never breaks the run.
 const guardRoot = async (ref) => {
@@ -247,7 +247,7 @@ const guardRoot = async (ref) => {
       `${g.stashed ? 'Auto-stashed (recover via `git stash list` / `git stash pop`).' : 'STASH DID NOT LAND — root still dirty; inspect manually.'} ` +
       `Likely a worktree-isolation leak (bgIsolation:'none').`)
   }
-  // ROOT-HEAD RESTORE (fix/drain-isolation-coordination-honesty): the same
+  // ROOT-HEAD RESTORE (fix/run-isolation-coordination-honesty): the same
   // bgIsolation leak can leave the root checkout DETACHED at a story commit (HEAD
   // moved without dirtying the tree). The guard now also returns the root to base.
   if (g && !g._parseError && g.headMoved) {
@@ -257,21 +257,21 @@ const guardRoot = async (ref) => {
   }
 }
 
-phase('drain')
+phase('run')
 if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli'], got: Object.keys(A) }
 
 // Session id: prefer the launcher-minted id (Layer-1 journal stability across
 // resume); fall back to minting one via the CLI for a standalone run.
 const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
-log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME} maxConcurrency=${MAX_CONCURRENCY}`)
+log(`run session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME} maxConcurrency=${MAX_CONCURRENCY}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
 // The reviewer persona is fetched up-front too so a crash-resume that skips dev
 // can still drive the review (it is exactly the prompt processDevTranscript
 // would otherwise hand back — just the persona system prompt, no story context).
-// The persona payload is the only LARGE verbatim relay in the drain (the full role
+// The persona payload is the only LARGE verbatim relay in the run (the full role
 // system prompt, which grows as the team accrues knowledge entries). Haiku could not
 // reliably hand it back through StructuredOutput (it degraded to plain text and threw,
 // killing the run at startup), so these two seams force Opus — see the seam() doc.
@@ -282,15 +282,15 @@ const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json 
 // discipline rules — silently dropping the evidence-only contract these prompts
 // carry. The persona is a structural prerequisite for the whole run, so stop now
 // with a clear message rather than build/review unguarded.
-if (!devPersona.trim()) throw new Error('drain: empty generalist-dev persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn dev without its discipline rules')
-if (!reviewerPersona.trim()) throw new Error('drain: empty generalist-reviewer persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn reviewer without its discipline rules')
+if (!devPersona.trim()) throw new Error('run: empty generalist-dev persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn dev without its discipline rules')
+if (!reviewerPersona.trim()) throw new Error('run: empty generalist-reviewer persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn reviewer without its discipline rules')
 
 const completed = [], merged = [], pausedForHuman = [], blocked = [], resumed = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
-let drainedReason = 'incomplete'
+let runReason = 'incomplete'
 
-// GIVE-UP MOVE (fix/drain-isolation-coordination-honesty — the non-termination
-// fix). Whenever the drain abandons a story it cannot finish, the manifest MUST
+// GIVE-UP MOVE (fix/run-isolation-coordination-honesty — the non-termination
+// fix). Whenever the run abandons a story it cannot finish, the manifest MUST
 // leave in-progress/ so it stops counting as live work — otherwise
 // claimNextStory keeps returning waiting-on-in-progress forever and the loop
 // re-polls without end (the observed "lots of claim" spin). This moves the
@@ -324,10 +324,10 @@ const blockStoryGiveUp = async (ref, blockedBy) => {
 //                 Passed to the reviewer's prompt so a fast-lane story gets a
 //                 targeted review rather than the full deep pass. Defaults to
 //                 'full' (current behaviour) when absent.
-async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '', storyModel = null, reviewDepth = 'full', inlineAcs = null }) {
+async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'run', tag = '', storyModel = null, reviewDepth = 'full', inlineAcs = null }) {
   let verdict = null, prNumber = resumeAtReview ? resumePrNumber : null
   // Builder lesson (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD): captured by the dev
-  // via `recordDevLesson` (BEFORE the handoff phrase) and read by the drain via
+  // via `recordDevLesson` (BEFORE the handoff phrase) and read by the run via
   // `readDevLesson` seam (after the pd: parse, before the reviewer spawn). Stored
   // here so the green-verdict builder-forward block can access it after completeStory.
   let capturedDevLesson = null
@@ -392,7 +392,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
           `  node ${CLI} runDevTerminalAction --json '${J(runDevArgs)}'\n` +
           `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
-          `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the drain and orphans your story. ` +
+          `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the run and orphans your story. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `## Optional: record ONE reusable lesson (learning loop)\n` +
           `If — and ONLY if — this build surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runDevTerminalAction call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
@@ -412,7 +412,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       // REAL dev transcript here (not the synthesised handoff phrase) so the tool
       // can read the question. On a clean parse we file the story into the
       // human-needed surface (pausedForHuman) carrying its question, NOTIFY the
-      // operator, and RETURN — no PR is opened and the drain continues to the
+      // operator, and RETURN — no PR is opened and the run continues to the
       // next claimable story. retryable=true: the tool is idempotent (re-stamps
       // the same blocked_by, re-extracts the same question).
       if (NEEDS_HUMAN_MARKER.test(devText)) {
@@ -511,7 +511,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // this guard the story lands in NO result bucket and silently vanishes from
   // the run summary, which promises every story lands in exactly one bucket.
   // Record it as blocked AND move the manifest out of in-progress/ (give-up move)
-  // so an abandoned story stops counting as live work and the queue can drain.
+  // so an abandoned story stops counting as live work and the queue can run.
   if (verdict?.next !== 'done-ready-for-merge') {
     blocked.push({ ref, blocked_by: 'rework-exhausted', rounds: MAX_REWORK })
     await blockStoryGiveUp(ref, 'rework-exhausted')
@@ -519,7 +519,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   }
 
   // GREEN VERDICT. The manifest is STILL in in-progress/ — processReviewerTranscript
-  // no longer completes it (fix/drain-isolation-coordination-honesty). The
+  // no longer completes it (fix/run-isolation-coordination-honesty). The
   // auto-merge GATE now owns the done/ move: a story reaches done/ ONLY after the
   // gate confirms its CI is green. That makes "done == reviewer-approved AND
   // CI-green" true by construction, so a red / CI-rejected story can never sit in
@@ -582,7 +582,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
 
   // FORWARD THE BUILDER LESSON (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder
   // lesson capture). The dev captured a lesson (via recordDevLesson, before the
-  // handoff phrase) and the drain read it (readDevLesson seam, earlier in this
+  // handoff phrase) and the run read it (readDevLesson seam, earlier in this
   // iteration after the pd: parse, stored in `capturedDevLesson`). Forward it
   // alongside the reviewer lesson by writing the UNION array — reviewer lesson
   // (already applied) + builder lesson — so neither clobbers the other. FAIL-SOFT:
@@ -604,7 +604,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
 
 // ── ORPHAN RECOVERY (crash resume) ─────────────────────────────────────────
 // A prior run that died mid-story leaves the manifest in in-progress/ claimed by
-// a now-stale session. Recover BEFORE draining new work: for each orphan, either
+// a now-stale session. Recover BEFORE emptying new work: for each orphan, either
 // resume at review (a PR already exists — skip dev) or re-run the story (no PR),
 // capped by maxResume so a story that keeps crashing the loop is blocked for a
 // human instead of looping forever. scanOrphanedInProgress is read-only/idempotent
@@ -632,19 +632,19 @@ for (const o of orphans) {
     continue
   }
   // Take ownership (reattachOrphan rewrites claimed_by → this session AND bumps
-  // drain_resume_attempts, so the cap advances every resume).
+  // run_resume_attempts, so the cap advances every resume).
   const re = await seam(`node ${CLI} reattachOrphan --json '${J({ targetRepoRoot: REPO, ref, currentSessionUlid: SU })}'`, `orphan-reattach:${ref}`)
   if (!re || re._parseError) { blocked.push({ ref, blocked_by: re?._parseError || 'reattach-failed' }); continue }
   const mode = prNumber ? 'resume-at-review' : 're-run'
   resumed.push({ ref, mode, attempt: re.resumeAttempts })
   log(`resuming orphan ${ref} (${mode}, attempt ${re.resumeAttempts})`)
-  // Resolve the build plan for the orphan's lane (same seam as the main drain loop).
+  // Resolve the build plan for the orphan's lane (same seam as the main run loop).
   // Fail-soft: a garbled relay falls back to full-lane defaults.
   const orphanPlan = await seam(`node ${CLI} resolveBuildPlan --json '${J({ storyId: ref, manifestPath })}'`, `build-plan:${ref}:resume`, true)
   const orphanModel = (orphanPlan && !orphanPlan._parseError && typeof orphanPlan.devReviewerModel === 'string') ? orphanPlan.devReviewerModel : null
   const orphanReviewDepth = (orphanPlan && !orphanPlan._parseError && (orphanPlan.reviewDepth === 'light' || orphanPlan.reviewDepth === 'full')) ? orphanPlan.reviewDepth : 'full'
   // INLINE ACs for native orphan resumes (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP):
-  // same extraction as the main drain loop — ensure the builder has its spec on
+  // same extraction as the main run loop — ensure the builder has its spec on
   // resume, even though it is re-running from an orphaned state. Fail-soft.
   let orphanInlineAcs = null
   if (ref.startsWith('native:')) {
@@ -657,9 +657,9 @@ for (const o of orphans) {
   await guardRoot(ref)
 }
 
-// ── MAIN DRAIN (concurrent — Story 8.22) ────────────────────────────────────
+// ── MAIN RUN (concurrent — Story 8.22) ────────────────────────────────────
 // The loop is no longer strictly serial: up to MAX_CONCURRENCY workers each run
-// the SAME claim→processStory cycle at once, so a backlog drains in parallel
+// the SAME claim→processStory cycle at once, so a backlog empties in parallel
 // wall-clock time. Concurrency changes THROUGHPUT only, never correctness — the
 // guarantees that hold are exactly the serial loop's:
 //
@@ -676,22 +676,22 @@ for (const o of orphans) {
 //    that one story in `blocked` (its reason preserved) and never aborts the run
 //    or disturbs a concurrently-running sibling — exactly the per-item isolation
 //    a substrate `parallel`/`pipeline` would give; hand-rolled here because the
-//    drain script reaches its seams through injected globals, not a pool import.
-//  • The drain reason is derived ONCE from the first terminal claim outcome
-//    (queue-drained / cap / claim error), under a guard, not from whichever
+//    run script reaches its seams through injected globals, not a pool import.
+//  • The run reason is derived ONCE from the first terminal claim outcome
+//    (queue-emptied / cap / claim error), under a guard, not from whichever
 //    worker finishes last — so the honest-exit surface (Story 8.14) is unchanged.
 //
 // Result buckets stay the in-place append-only `.push()`es processStory already
 // does: append is atomic under the single-threaded runtime (no torn writes), so
 // no worker's outcome can be lost or double-counted.
-phase('drain')
+phase('run')
 let claimsStarted = 0 // claims reserved this run (caps the run at MAX claims)
 let stop = false // set the moment any worker observes a terminal claim outcome
-// Record the first terminal claim outcome as the drain reason; later workers'
+// Record the first terminal claim outcome as the run reason; later workers'
 // outcomes are ignored so the reason is derived once, not last-writer-wins.
 let reasonRecorded = false
-const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; drainedReason = r; stop = true } }
-// Termination-guard state (fix/drain-isolation-coordination-honesty):
+const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; runReason = r; stop = true } }
+// Termination-guard state (fix/run-isolation-coordination-honesty):
 //   activeProcessing — workers currently inside processStory (live work in flight).
 //   stuckPolls — consecutive waiting-on-in-progress re-polls observed while NO
 //                worker is processing; a non-zero run of these means a manifest is
@@ -700,17 +700,17 @@ const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; drai
 let activeProcessing = 0
 let stuckPolls = 0
 
-async function drainWorker(workerId) {
+async function runWorker(workerId) {
   for (;;) {
     // Reserve a claim slot SYNCHRONOUSLY (no await between the read and the bump)
     // so concurrent workers can never both take the final slot. A terminal flag
-    // or the cap stops this worker; it then drains its already-claimed work and
+    // or the cap stops this worker; it then empties its already-claimed work and
     // returns — siblings still in flight keep going.
     if (stop) return
     if (claimsStarted >= MAX) { recordReason('max-stories-reached'); return }
     const claimIdx = claimsStarted++
     // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
-    // 'queue-drained' is the happy unattended path; any other non-spawn-dev
+    // 'queue-emptied' is the happy unattended path; any other non-spawn-dev
     // outcome (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
     const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${claimIdx}`)
     if (!claim || claim.next !== 'spawn-dev') {
@@ -719,17 +719,17 @@ async function drainWorker(workerId) {
       // right now is that its dependent work is blocked waiting for it to finish.
       // This is NOT a terminal outcome — wait a bounded interval and loop back to
       // re-attempt the claim. Once the sibling settles, claimNextStory will return
-      // either spawn-dev (the dependent is now claimable) or queue-drained (no work
+      // either spawn-dev (the dependent is now claimable) or queue-emptied (no work
       // remains), both of which terminate the worker normally.
       //
       // Loop-safety: REPOLL_DELAY_MS bounds the busy-wait so the worker cannot spin
       // hot. The natural terminator is the sibling settling; if it crashes instead
-      // of finishing cleanly, drainWorker's per-story catch buckets it as `blocked`,
+      // of finishing cleanly, runWorker's per-story catch buckets it as `blocked`,
       // which frees the in-progress slot, so the next re-poll resolves to
-      // queue-drained and the worker stops. Do NOT call recordReason here — this is
-      // a transient re-poll signal, not a terminal drain outcome.
+      // queue-emptied and the worker stops. Do NOT call recordReason here — this is
+      // a transient re-poll signal, not a terminal run outcome.
       if (claim?.next === 'waiting-on-in-progress') {
-        // TERMINATION GUARD (fix/drain-isolation-coordination-honesty): re-polling
+        // TERMINATION GUARD (fix/run-isolation-coordination-honesty): re-polling
         // here is only legitimate while a sibling is ACTUALLY processing a story
         // (activeProcessing > 0) and will eventually free the slot. If NO worker is
         // processing yet the claim still reports waiting-on-in-progress, a manifest
@@ -752,7 +752,7 @@ async function drainWorker(workerId) {
         continue
       }
       // waiting-on-unmerged-overlap: a ready story is parked solely because it
-      // overlaps an approved-but-unmerged PR in done/. This is NOT a clean drain —
+      // overlaps an approved-but-unmerged PR in done/. This is NOT a clean run —
       // surface it as WAITING so the operator is not misled into thinking the queue is empty.
       if (claim?.next === 'waiting-on-unmerged-overlap') {
         const held = Array.isArray(claim.heldRefs) ? claim.heldRefs.join(', ') : '(unknown)'
@@ -760,7 +760,7 @@ async function drainWorker(workerId) {
       }
       // waiting-on-unmerged-dependency: twin of the overlap hold (finding B4) — a
       // ready story is parked solely because a declared dependency's PR is not yet
-      // merged. Also NOT a clean drain — surface it as WAITING, not queue-drained.
+      // merged. Also NOT a clean run — surface it as WAITING, not queue-emptied.
       if (claim?.next === 'waiting-on-unmerged-dependency') {
         const held = Array.isArray(claim.heldRefs) ? claim.heldRefs.join(', ') : '(unknown)'
         log(`WAITING — ready story held for an unmerged declared dependency. Held: ${held}`)
@@ -836,15 +836,15 @@ async function drainWorker(workerId) {
 // cannot reject the pool and abort the run.
 const workerCount = Math.max(1, Math.min(MAX_CONCURRENCY, MAX === Infinity ? MAX_CONCURRENCY : MAX))
 // AT-MOST-ONCE guard (Story native:01KV2ZF0B74KKKHS1JQ4075N9T AC4): a
-// run-scoped boolean prevents a second retro firing in the same drain run
-// (e.g. if a concurrent worker finishing triggers another drained-check).
+// run-scoped boolean prevents a second retro firing in the same run run
+// (e.g. if a concurrent worker finishing triggers another emptied-check).
 // Set to true immediately before the retro step begins; checked at the top
 // of the auto-retro block.
 let retroFiredThisRun = false
-await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => drainWorker(w)))
+await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => runWorker(w)))
 
 // ── UNATTENDED AUTO-RETRO (Story native:01KV2ZF0B74KKKHS1JQ4075N9T) ─────────
-// When the queue fully drains (drainedReason === 'queue-drained'), the drain
+// When the queue fully empties (runReason === 'queue-emptied'), the run
 // automatically closes the learning loop:
 //   1. If no stories were completed this run → skip (nothing to reflect on).
 //   2. Set retroFiredThisRun = true (at-most-once guard; AC4).
@@ -856,14 +856,14 @@ await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => drainWork
 // The at-most-once guard (retroFiredThisRun) prevents a second fire even if
 // this section is somehow re-entered (e.g. by a future concurrent finaliser).
 // Fail-soft contract: any throw inside the try block is caught here; the entire
-// retro block is wrapped in try/catch; the drain never crashes from a retro error.
+// retro block is wrapped in try/catch; the run never crashes from a retro error.
 //
 // Relationship to the RETRO_PROPOSAL_TIMESTAMP path below: that path absorbs
 // proposals written by a PRIOR (operator-triggered) retro. This path triggers
 // the retro itself. They are orthogonal; the at-most-once guard is per-run
-// scoped (not persisted), so only one unattended retro fires per drain run.
+// scoped (not persisted), so only one unattended retro fires per run run.
 let autoRetroOutcome = null
-if (drainedReason === 'queue-drained' && !retroFiredThisRun) {
+if (runReason === 'queue-emptied' && !retroFiredThisRun) {
   if (completed.length === 0) {
     // AC2: no stories completed → skip; do not call the retro-analyst; do not
     // advance the cycle; surface the skip reason in the run summary.
@@ -916,7 +916,7 @@ if (drainedReason === 'queue-drained' && !retroFiredThisRun) {
       const retroFinal = await agent(
         (retroAnalystPrompt ? retroAnalystPrompt + '\n\n' : '') +
         `<initial-context>\n${retroContext}\n</initial-context>`,
-        { label: 'auto-retro:analyst', phase: 'drain', model: 'sonnet' },
+        { label: 'auto-retro:analyst', phase: 'run', model: 'sonnet' },
       )
       const retroText = String(retroFinal || '')
 
@@ -990,7 +990,7 @@ if (drainedReason === 'queue-drained' && !retroFiredThisRun) {
     } catch (e) {
       // AC3 fail-soft contract: a retro failure is a clean, reported no-op.
       // Do NOT call openCycle. Do NOT mutate any state. Record the failure
-      // outcome. Exit normally. The drain does not crash; no completed work is
+      // outcome. Exit normally. The run does not crash; no completed work is
       // lost from the next cycle's window (cycle boundary not moved).
       const msg = String(e && e.message ? e.message : e)
       autoRetroOutcome = { status: 'failed', error: msg }
@@ -1001,9 +1001,9 @@ if (drainedReason === 'queue-drained' && !retroFiredThisRun) {
 
 // AUTO-ABSORB POST-RETRO (Story native:01KV2Z67850XWWQV0AY2N05JSX): if the
 // caller provided a retroProposalTimestamp, run the note-tier auto-absorb step
-// now — after all stories have settled and the drain loop is done. This is the
+// now — after all stories have settled and the run loop is done. This is the
 // post-retro path: the retro-analyst has already written its proposals for this
-// cycle, and the drain absorbs the safe subset (note-tier persona-append only)
+// cycle, and the run absorbs the safe subset (note-tier persona-append only)
 // unattended. Higher-stakes proposals (skill, code, or any other type) are left
 // pending for the operator's explicit accept-proposal gate.
 //
@@ -1019,7 +1019,7 @@ if (RETRO_PROPOSAL_TIMESTAMP) {
     `node ${CLI} autoAbsorbProposalFile --json '${J({ targetRepoRoot: REPO, proposalFileTimestamp: RETRO_PROPOSAL_TIMESTAMP })}'`,
     'auto-absorb',
     true, // retryable — reading a proposal file is idempotent
-    true, // swallow — absorption is best-effort, never blocks the drain
+    true, // swallow — absorption is best-effort, never blocks the run
   )
   if (absorb && !absorb._parseError) {
     autoAbsorbResult = absorb
@@ -1038,14 +1038,14 @@ if (RETRO_PROPOSAL_TIMESTAMP) {
 }
 
 // The return object IS the no-silent-failures surface: every ref lands in exactly
-// one of completed / merged / pausedForHuman / blocked, with a drain reason.
+// one of completed / merged / pausedForHuman / blocked, with a run reason.
 // `resumed` additionally records which stories were crash-recovered this run.
 return {
   sessionUlid: SU,
-  drainedReason,
-  // True ONLY on a genuine full drain (queue emptied). Hitting the cap,
-  // waiting-on-in-progress, waiting-on-unmerged-overlap, or any claim error is NOT a drain.
-  drained: drainedReason === 'queue-drained',
+  runReason,
+  // True ONLY on a genuine full run (queue emptied). Hitting the cap,
+  // waiting-on-in-progress, waiting-on-unmerged-overlap, or any claim error is NOT a run.
+  queueEmptied: runReason === 'queue-emptied',
   resumed,
   completed,
   merged,
@@ -1054,7 +1054,7 @@ return {
   // Auto-absorb summary (null when no retroProposalTimestamp was provided).
   autoAbsorbResult,
   // Unattended auto-retro summary (Story native:01KV2ZF0B74KKKHS1JQ4075N9T).
-  // null when the queue was not fully drained (retro only fires on a clean drain).
+  // null when the queue was not fully emptied (retro only fires on a clean run).
   // { status: 'skipped', reason } when nothing was completed.
   // { status: 'ran', ... } on the happy path (proposal written, absorbed, cycle advanced).
   // { status: 'failed', error } when the retro threw (cycle not advanced).

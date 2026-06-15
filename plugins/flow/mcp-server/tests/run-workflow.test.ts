@@ -1,7 +1,7 @@
 /**
- * Story 8.5 — drain workflow structural integrity.
+ * Story 8.5 — run workflow structural integrity.
  *
- * The stateless drain runs under the Workflow primitive (`export const meta`,
+ * The stateless run runs under the Workflow primitive (`export const meta`,
  * top-level `await`/`return`), so it cannot be unit-executed here. This file
  * is a structure/integrity anchor: the script parses, declares its meta,
  * accounts for every ref in a structured return (no-silent-failures surface),
@@ -9,7 +9,7 @@
  * at the source level.
  *
  * **End-to-end orchestration behaviour** is now exercised in
- * `tests/drain-workflow-e2e.test.ts` — that test actually runs the workflow
+ * `tests/run-workflow-e2e.test.ts` — that test actually runs the workflow
  * against a real scratch repo and proves a broken seam is detected. Any
  * source-text assertion that merely checks a token exists in the workflow
  * source ("shape assertion") should live here ONLY if it guards a regression
@@ -25,20 +25,20 @@ import { readFileSync } from "node:fs";
 import * as vm from "node:vm";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DRAIN = path.resolve(HERE, "..", "..", "workflows", "drain.workflow.js");
-const SRC = readFileSync(DRAIN, "utf8");
+const RUN = path.resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+const SRC = readFileSync(RUN, "utf8");
 
-describe("Story 8.5 — drain workflow integrity", () => {
+describe("Story 8.5 — run workflow integrity", () => {
   it("parses as a Workflow-runtime script (export/meta/top-level await+return)", () => {
     // Wrap the body in an async fn so top-level await/return are valid for parse.
     const wrapped = "(async()=>{" + SRC.replace("export const meta", "const meta") + "})()";
     expect(() => new vm.Script(wrapped)).not.toThrow();
   });
 
-  it("declares meta.name = flow-drain with a drain phase", () => {
+  it("declares meta.name = flow-run with a run phase", () => {
     expect(SRC).toMatch(/export const meta\s*=/);
-    expect(SRC).toContain("name: 'flow-drain'");
-    expect(SRC).toContain("title: 'drain'");
+    expect(SRC).toContain("name: 'flow-run'");
+    expect(SRC).toContain("title: 'run'");
   });
 
   it("accounts for every ref in a structured return (no silent failures)", () => {
@@ -47,7 +47,7 @@ describe("Story 8.5 — drain workflow integrity", () => {
     // the source level AND is not otherwise covered by the e2e smoke (the e2e
     // proves the runtime enforces it; this proves the fields are defined in the
     // return statement, which is a distinct regression surface).
-    for (const field of ["completed", "merged", "pausedForHuman", "blocked", "drainedReason"]) {
+    for (const field of ["completed", "merged", "pausedForHuman", "blocked", "runReason"]) {
       expect(SRC).toContain(field);
     }
   });
@@ -56,23 +56,23 @@ describe("Story 8.5 — drain workflow integrity", () => {
   // "switches on the verified seam discriminants" were pure shape assertions —
   // they checked that token strings exist in the source but proved nothing about
   // whether the tools are actually called or the discriminants are actually
-  // handled. Those checks have been removed in favour of drain-workflow-e2e.test.ts,
+  // handled. Those checks have been removed in favour of run-workflow-e2e.test.ts,
   // which actually claims a story, drives it through the loop, and asserts a broken
   // seam is detected — something a source-text string search cannot do.
 
-  it("classifies drain exits with explicit reasons (no budget-exhausted mislabel)", () => {
+  it("classifies run exits with explicit reasons (no budget-exhausted mislabel)", () => {
     // The happy unattended path keys off the real claimNextStory empty-queue signal.
-    expect(SRC).toContain("queue-drained");
+    expect(SRC).toContain("queue-emptied");
     // Hitting the optional cap is its OWN named exit, not a queue state.
     expect(SRC).toContain("max-stories-reached");
-    // `drained` is the positive full-drain signal, not the old sentinel diff.
-    expect(SRC).toContain("drained: drainedReason === 'queue-drained'");
+    // `queueEmptied` is the positive full-empty signal, not the old sentinel diff.
+    expect(SRC).toContain("queueEmptied: runReason === 'queue-emptied'");
     // The mislabelled token-budget placeholder is gone entirely.
     expect(SRC).not.toContain("budget-exhausted");
   });
 
-  it("treats maxStories as an optional cap (unbounded drain until queue empty by default)", () => {
-    // No hard default-1 cap: an omitted maxStories drains the whole queue.
+  it("treats maxStories as an optional cap (unbounded run until queue empty by default)", () => {
+    // No hard default-1 cap: an omitted maxStories empties the whole queue.
     expect(SRC).not.toContain("A.maxStories || 1");
     expect(SRC).toContain("Infinity");
   });
@@ -82,7 +82,7 @@ describe("Story 8.5 — drain workflow integrity", () => {
     // mutating axis (the `retryable` flag): read-only/idempotent seams run on the
     // cheaper Haiku (a garble just re-invokes), while MUTATING seams stay on the
     // more-reliable Sonnet — Haiku garbled exactly such a verdict relay on the first
-    // multi-story drain (story 8.13), and a garbled mutating relay pauses the story.
+    // multi-story run (story 8.13), and a garbled mutating relay pauses the story.
     // A per-call `modelOverride` may force a specific model, bypassing the default tier.
     expect(SRC).toContain("model: modelOverride || (retryable ? 'haiku' : 'sonnet')");
     // Story 8.20: the dev's EDITING SURFACE is its own worktree — the dev agent is
@@ -110,7 +110,7 @@ describe("Story 8.5 — drain workflow integrity", () => {
 
   it("forces a reliable model for the LARGE persona relays (2026-06-13 startup fix)", () => {
     // buildPersonaSpawnPrompt returns the full role system prompt — the only large
-    // verbatim payload in the drain, and it grows as the team accrues knowledge entries.
+    // verbatim payload in the run, and it grows as the team accrues knowledge entries.
     // Haiku could not reliably emit it through StructuredOutput (it printed the answer as
     // plain text and threw, killing the run at startup), so both persona seams pass an
     // explicit modelOverride past the swallow arg. Assert both opt out of the cheap tier.
@@ -121,11 +121,11 @@ describe("Story 8.5 — drain workflow integrity", () => {
 
 // ---------------------------------------------------------------------------
 // Review fix-now batch (2026-06-11) — structural anchors for the three
-// workflow-level fixes. The drain script can't be unit-executed here, so these
+// workflow-level fixes. The run script can't be unit-executed here, so these
 // assert the load-bearing tokens are present (same approach as the suite above).
 // ---------------------------------------------------------------------------
 
-describe("review fix-now batch — drain workflow anchors", () => {
+describe("review fix-now batch — run workflow anchors", () => {
   it("B2: a rework-exhausted story lands in the blocked bucket (never vanishes)", () => {
     // After the rework loop falls through without a green verdict, the story must
     // be pushed to `blocked` with a `rework-exhausted` reason — not silently
@@ -136,16 +136,16 @@ describe("review fix-now batch — drain workflow anchors", () => {
 
   it("D5: spawning with an empty persona fails loud (no unguarded agent)", () => {
     // An empty dev/reviewer persona would drop the evidence-only discipline; the
-    // drain must throw rather than spawn an unguarded agent.
+    // run must throw rather than spawn an unguarded agent.
     expect(SRC).toContain("empty generalist-dev persona");
     expect(SRC).toContain("empty generalist-reviewer persona");
     expect(SRC).toMatch(/if \(!devPersona\.trim\(\)\) throw/);
     expect(SRC).toMatch(/if \(!reviewerPersona\.trim\(\)\) throw/);
   });
 
-  it("B4: a declared-dependency hold surfaces WAITING, not a clean drain", () => {
-    // The drain must recognise the new claimNextStory outcome and log WAITING so a
-    // queue held by an unmerged declared dependency is not reported as drained.
+  it("B4: a declared-dependency hold surfaces WAITING, not a clean empty", () => {
+    // The run must recognise the new claimNextStory outcome and log WAITING so a
+    // queue held by an unmerged declared dependency is not reported as emptied.
     expect(SRC).toContain("waiting-on-unmerged-dependency");
   });
 });
@@ -153,7 +153,7 @@ describe("review fix-now batch — drain workflow anchors", () => {
 // ---------------------------------------------------------------------------
 // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2 + AC3 structural-anchor tests.
 //
-// AC2: the drain reads each claimed story's persisted lane and sets the dev/reviewer
+// AC2: the run reads each claimed story's persisted lane and sets the dev/reviewer
 //      model and review depth from resolveBuildPlan before spawning the dev,
 //      defaulting to the current tier when lane is absent.
 //
@@ -162,9 +162,9 @@ describe("review fix-now batch — drain workflow anchors", () => {
 //      in front of the unchanged hard gates.
 // ---------------------------------------------------------------------------
 
-describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2: resolveBuildPlan wired in the drain", () => {
+describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2: resolveBuildPlan wired in the run", () => {
   it("calls resolveBuildPlan as a seam after each claim (structural anchor)", () => {
-    // The drain must invoke resolveBuildPlan via the CLI seam to read the
+    // The run must invoke resolveBuildPlan via the CLI seam to read the
     // persisted lane from the manifest and return the build plan.
     expect(SRC).toContain("resolveBuildPlan");
   });
@@ -200,7 +200,7 @@ describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2: resolveBuildPlan wire
 
   it("defaults to the current tier when lane is absent (fail-soft seam, backwards-compatible)", () => {
     // When resolveBuildPlan returns a garbled relay or no devReviewerModel, the
-    // drain falls back to storyModel=null and uses execModel (the run-level default).
+    // run falls back to storyModel=null and uses execModel (the run-level default).
     // This keeps full backwards compatibility with existing launch scripts.
     expect(SRC).toContain("storyModel = null");
     // agentModel is computed as storyModel || execModel — the fallback chain.
@@ -219,7 +219,7 @@ describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC2: resolveBuildPlan wire
 describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC3: hard gates unchanged by fast-lane routing", () => {
   it("runDevTerminalAction call site is unchanged (still uses the same seam label pattern)", () => {
     // The hard pre-PR gate (runDevTerminalAction) is invoked by the DEV subagent
-    // via the CLI prompt — the drain's prompt string still references it unchanged.
+    // via the CLI prompt — the run's prompt string still references it unchanged.
     expect(SRC).toContain("runDevTerminalAction");
   });
 
@@ -229,8 +229,8 @@ describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC3: hard gates unchanged 
     expect(SRC).toContain("gate:${ref}");
   });
 
-  it("runDevTerminalAction is still in the dev prompt (the dev calls it, not the drain)", () => {
-    // The drain passes runDevTerminalAction to the dev subagent via prompt text —
+  it("runDevTerminalAction is still in the dev prompt (the dev calls it, not the run)", () => {
+    // The run passes runDevTerminalAction to the dev subagent via prompt text —
     // the instruction is still there verbatim.
     expect(SRC).toContain("node ${CLI} runDevTerminalAction");
   });

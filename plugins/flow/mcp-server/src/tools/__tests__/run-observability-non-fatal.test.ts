@@ -1,5 +1,5 @@
 /**
- * Drain observability-seam non-fatal integration test — Story 8.21.
+ * Run observability-seam non-fatal integration test — Story 8.21.
  *
  * Story 8.18 added the progress heartbeat: a start line and an elapsed done line
  * bracketing each major per-story phase (dev-build, review, gate), emitted through
@@ -8,7 +8,7 @@
  * line — but neither the wrappers nor `processStory` caught a *hard rejection* from
  * the underlying courier call, and `processStory` is awaited with no surrounding
  * guard. So a hard failure on one of the six observability calls per story would
- * propagate and abort the entire drain — the opposite of what an observability-only
+ * propagate and abort the entire run — the opposite of what an observability-only
  * feature should be able to do.
  *
  * Story 8.21 makes the read-only / observability seams swallow their own hard
@@ -19,7 +19,7 @@
  *   AC1 — an observability seam that hard-fails (throws) does not propagate; the
  *         story proceeds to its normal outcome bucket.
  *   AC2 — a run where EVERY progress seam throws produces an IDENTICAL structured
- *         result (buckets + drain reason) to a run where they succeed, differing
+ *         result (buckets + run reason) to a run where they succeed, differing
  *         only in the absence of the progress lines (strengthening 8.18's
  *         equivalence guarantee from garble-only to hard-failure).
  *   AC3 — the swallow-guard is scoped to observability seams only: a load-bearing
@@ -27,14 +27,14 @@
  *         blocked outcome carrying the failure reason, never silently swallowed or
  *         treated as a success.
  *
- * How it runs the real workflow: `drain.workflow.js` is a plain script body that
+ * How it runs the real workflow: `run.workflow.js` is a plain script body that
  * reaches every decision through injected globals — `args` (a JSON string),
  * `agent` (the subagent/seam courier), `log` (the operator narrator), and `phase`
  * (the phase marker). It uses top-level `await` and top-level `return`. We read
  * the real workflow source and wrap it in an `AsyncFunction` whose parameters ARE
  * those globals, so the body runs verbatim with our stubs. Nothing in the workflow
  * is mocked — only its injected seam surface. The progress seams run the REAL
- * drain-phase tools so the asserted lines are the production lines.
+ * run-phase tools so the asserted lines are the production lines.
  */
 
 import { readFileSync } from "node:fs";
@@ -42,12 +42,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { drainPhaseStart, drainPhaseDone } from "../drain-phase-progress.js";
+import { runPhaseStart, runPhaseDone } from "../run-phase-progress.js";
 
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → up to mcp-server → up to plugins/flow → workflows/.
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -62,7 +62,7 @@ interface AgentCall {
 const REF = "bmad:8.21";
 const PR = 9191;
 
-interface DrainOpts {
+interface RunOpts {
   /** When true, every progress-heartbeat seam (start AND done) hard-throws. */
   progressThrows?: boolean;
   /**
@@ -78,7 +78,7 @@ interface DrainOpts {
  * structured result (or the thrown error), the captured narrator lines, and the
  * captured agent calls.
  */
-async function runDrain(opts: DrainOpts = {}): Promise<{
+async function runRun(opts: RunOpts = {}): Promise<{
   result: any;
   thrown: unknown;
   logs: string[];
@@ -91,7 +91,7 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
   const calls: AgentCall[] = [];
@@ -111,11 +111,11 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
         return {
           next: "spawn-dev",
           ref: REF,
-          title: "Drain observability seams are non-fatal to the run",
+          title: "Run observability seams are non-fatal to the run",
           manifestPath: "/tmp/does-not-matter.yaml",
         };
       }
-      return { next: "queue-drained" };
+      return { next: "queue-emptied" };
     }
     if (label.startsWith("pd:")) {
       return { next: "spawn-reviewer", prNumber: PR, reviewerPrompt: "REV-PERSONA" };
@@ -128,11 +128,11 @@ async function runDrain(opts: DrainOpts = {}): Promise<{
     // production lines. (The throw branch is handled in `agent`, below.)
     if (label.startsWith("progress-start:")) {
       const phase = label.split(":").pop();
-      return drainPhaseStart({ ref: REF, phase: phase as any });
+      return runPhaseStart({ ref: REF, phase: phase as any });
     }
     if (label.startsWith("progress-done:")) {
       const phase = label.split(":").pop();
-      return drainPhaseDone({ ref: REF, phase: phase as any, startedAtMs: Date.now() - 5000 });
+      return runPhaseDone({ ref: REF, phase: phase as any, startedAtMs: Date.now() - 5000 });
     }
     return { _unstubbed: label };
   };
@@ -201,17 +201,17 @@ function isProgressLogLine(l: string): boolean {
   return /^8\.21 (dev-build|review|gate): (start|done)/.test(l);
 }
 
-describe("drain observability seams are non-fatal (Story 8.21)", () => {
+describe("run observability seams are non-fatal (Story 8.21)", () => {
   it("AC1: a progress seam that hard-throws does not escape; the story still reaches its bucket", async () => {
-    const { result, thrown, logs } = await runDrain({ progressThrows: true });
+    const { result, thrown, logs } = await runRun({ progressThrows: true });
 
     // No exception escaped the run.
     expect(thrown).toBeUndefined();
 
     // The story still reached its normal outcome bucket (gate paused for a human),
     // exactly as if the heartbeat line had simply been suppressed.
-    expect(result.drainedReason).toBe("queue-drained");
-    expect(result.drained).toBe(true);
+    expect(result.runReason).toBe("queue-emptied");
+    expect(result.queueEmptied).toBe(true);
     expect(result.completed).toEqual([REF]);
     expect(result.blocked).toEqual([]);
     expect(result.pausedForHuman).toEqual([
@@ -225,17 +225,17 @@ describe("drain observability seams are non-fatal (Story 8.21)", () => {
   });
 
   it("AC2: a run where every progress seam throws is structurally identical to one where they succeed", async () => {
-    const succeed = await runDrain({});
-    const throwAll = await runDrain({ progressThrows: true });
+    const succeed = await runRun({});
+    const throwAll = await runRun({ progressThrows: true });
 
     // Neither run threw.
     expect(succeed.thrown).toBeUndefined();
     expect(throwAll.thrown).toBeUndefined();
 
-    // Identical structured result — buckets AND drain reason — proving the
+    // Identical structured result — buckets AND run reason — proving the
     // observability hard-failure changes NO control flow.
     expect(throwAll.result).toEqual(succeed.result);
-    expect(succeed.result.drainedReason).toBe("queue-drained");
+    expect(succeed.result.runReason).toBe("queue-emptied");
 
     // The ONLY difference is the absence of the progress lines: the succeed run
     // emits the six heartbeat lines; the throw-all run emits none of them.
@@ -253,7 +253,7 @@ describe("drain observability seams are non-fatal (Story 8.21)", () => {
     // Inject a hard failure into the MUTATING verdict seam (swallow=false). The
     // seam layer's fail-loud _parseError channel must fire — the story must NOT be
     // treated as a success, and the failure reason must be preserved in its bucket.
-    const { result, thrown } = await runDrain({ garbleSeamPrefix: "verdict:" });
+    const { result, thrown } = await runRun({ garbleSeamPrefix: "verdict:" });
 
     // The mutating failure surfaces as a real outcome — the run did not silently
     // swallow it (it never reached the green-verdict completion path).

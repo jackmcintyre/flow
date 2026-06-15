@@ -21,7 +21,7 @@ export interface EmitFrictionOpts {
   kind: "empty-input" | "missing-cited-source" | "forced-fallback" | "repeated-retry";
   /** Role name of the agent experiencing the friction (kebab-cased). */
   role: string;
-  /** Drain-session ULID. */
+  /** Run-session ULID. */
   session_id: string;
   /** Story ref (e.g. "native:01HZ..."). */
   story_id: string;

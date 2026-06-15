@@ -5,7 +5,7 @@
  * The generalist-dev surfaces at most ONE reusable retro lesson per story.
  * When it does, it calls this tool exactly once — BEFORE emitting the handoff
  * phrase — to write (or update) the per-ref `dev-result.json` under the
- * session directory. The drain's FORWARD half later reads the captured lesson
+ * session directory. The run's FORWARD half later reads the captured lesson
  * off that file and attaches it to the done manifest via `recordStoryRetro`,
  * before the merge gate runs.
  *
@@ -24,7 +24,7 @@
  *   4. Write back to the per-ref path via `atomicWriteFile`.
  *
  * **Fail-soft at the orchestration layer:** this tool itself fails loud on a
- * malformed lesson (a real validation bug), but the drain invites the dev to
+ * malformed lesson (a real validation bug), but the run invites the dev to
  * call it only OPTIONALLY and contains any failure so it never blocks the
  * build, the handoff, or the merge.
  *
@@ -46,7 +46,7 @@ import { LessonSchema } from "../schemas/story-retro.js";
 export interface RecordDevLessonOptions {
   /** Absolute path to the target repository root. */
   targetRepoRoot: string;
-  /** ULID of the calling (drain) session. */
+  /** ULID of the calling (run) session. */
   sessionUlid: string;
   /** Story ref (e.g. `"native:01HZ..."`), used to derive the per-ref result path. */
   ref: string;

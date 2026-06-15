@@ -213,7 +213,7 @@ function makeOpts() {
 // ---------------------------------------------------------------------------
 
 describe("(a) READY FOR MERGE → done-ready-for-merge, manifest STAYS in in-progress/", () => {
-  // fix/drain-isolation-coordination-honesty: processReviewerTranscript NO LONGER
+  // fix/run-isolation-coordination-honesty: processReviewerTranscript NO LONGER
   // completes the story on READY. The manifest stays in in-progress/; the
   // auto-merge GATE owns the done/ move and makes it only after confirming CI
   // green, so "done == reviewer-approved AND CI-green" holds by construction.

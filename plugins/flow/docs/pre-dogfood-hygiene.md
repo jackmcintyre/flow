@@ -43,7 +43,7 @@ find .flow/state -mindepth 1 2>/dev/null || echo "ok"
 ```
 
 ```bash
-# 7. Pending ship-story cleanups drained
+# 7. Pending ship-story cleanups emptied
 python3 .claude/skills/ship-story/scripts/ship.py pending-cleanup
 #   expected: {"pending": []}
 ```

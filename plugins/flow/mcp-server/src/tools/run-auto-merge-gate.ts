@@ -441,7 +441,7 @@ export async function runAutoMergeGate(
   // stamped). Without this fallback the gate sees `undefined` and always pauses
   // (`no-tier-no-signal`).
   //
-  // fix/drain-isolation-coordination-honesty: the manifest is in IN-PROGRESS/ when
+  // fix/run-isolation-coordination-honesty: the manifest is in IN-PROGRESS/ when
   // the gate runs. completeStory no longer runs at verdict time — the gate's caller
   // moves the story to done/ only AFTER this gate confirms CI is green, so done/
   // means "reviewer-approved AND CI-green" by construction. Read risk_tier from
@@ -539,7 +539,7 @@ export async function runAutoMergeGate(
   // ------------------------------------------------------------------
   // Best-effort `needs-human` labeller. Resolves owner/repo, then POSTs the
   // label. NEVER throws: a thrown subprocess/parse error here would exit the gate
-  // non-zero, and the drain's one-shot seam courier can garble a failed command
+  // non-zero, and the run's one-shot seam courier can garble a failed command
   // into a non-JSON relay — the 2026-06-03 PR #277 failure, where a bare
   // `BLOCKED` token broke the gate seam so the story paused with a SyntaxError
   // reason and no label. On any failure the label is skipped and the cause is
@@ -628,7 +628,7 @@ export async function runAutoMergeGate(
   // Step 9: Execute the side-effect for the (CI-gated) decision. Every branch
   // returns a clean, schema-valid result and NEVER lets a subprocess failure
   // throw out of the gate — a raw throw exits the process non-zero, and the
-  // drain's one-shot seam courier can relay a failed command as garbled non-JSON
+  // run's one-shot seam courier can relay a failed command as garbled non-JSON
   // (the PR #277 `BLOCKED`-token seam break). An operational failure (merge
   // refused, label API hiccup, missing permission) folds into pause-needs-human;
   // the operator picks it up from the human-needed bucket with the cause in

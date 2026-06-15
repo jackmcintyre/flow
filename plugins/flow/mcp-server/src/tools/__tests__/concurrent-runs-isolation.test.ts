@@ -1,7 +1,7 @@
 /**
- * Integration tests for TRUE drain parallelism — Story 8.20 (part 1).
+ * Integration tests for TRUE run parallelism — Story 8.20 (part 1).
  *
- * 8.20 makes each dev's editing surface its own worktree, so multiple drains can
+ * 8.20 makes each dev's editing surface its own worktree, so multiple empties can
  * run against the same repository at once without corrupting each other's
  * in-flight changes. These tests drive two real dev flows
  * (materialise-worktree → edit-in-worktree → commit/push/PR) CONCURRENTLY against
@@ -16,10 +16,10 @@
  *   AC4 — cleanup is concurrency- and crash-safe: a mid-build failure in one flow
  *         leaves a concurrently-running flow's worktree intact and leaves NO
  *         leftover worktree for the failed story; and a worktree left behind by a
- *         worker from a prior, now-dead session is reaped on a subsequent drain
+ *         worker from a prior, now-dead session is reaped on a subsequent run
  *         (the stale-reap keys on the live session, not just the live path).
  *
- * vitest: plugins/flow/mcp-server/src/tools/__tests__/concurrent-drains-isolation.test.ts
+ * vitest: plugins/flow/mcp-server/src/tools/__tests__/concurrent-runs-isolation.test.ts
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -76,7 +76,7 @@ interface TestContext {
 }
 
 async function setupRepo(): Promise<TestContext> {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "concurrent-drains-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "concurrent-runs-"));
   const repoRoot = path.join(tmp, "work");
   const originDir = path.join(tmp, "origin.git");
   await fs.mkdir(repoRoot, { recursive: true });
@@ -207,7 +207,7 @@ async function real(p: string): Promise<string> {
 /**
  * Run one full dev flow: materialise the worktree, write the dev's own edit into
  * it, then commit/push/PR. Returns the worktree handle + result (or the thrown
- * error). Models exactly what one drain worker does.
+ * error). Models exactly what one run worker does.
  */
 async function runDevFlow(
   ctx: TestContext,
@@ -264,7 +264,7 @@ afterEach(async () => {
   await fs.rm(path.dirname(ctx.repoRoot), { recursive: true, force: true });
 });
 
-describe("concurrent drains — AC3 (two concurrent devs produce two non-cross-contaminated commits)", () => {
+describe("concurrent runs — AC3 (two concurrent devs produce two non-cross-contaminated commits)", () => {
   it("each commit contains exactly its own story's changes; neither leaks into the other", async () => {
     const prUrlForCwd = (cwd: string): string => {
       if (cwd.includes(STORY_A.ref)) return STORY_A.prUrl;
@@ -416,7 +416,7 @@ describe("concurrent drains — AC3 (two concurrent devs produce two non-cross-c
    * AC1 leak detection: a builder that DOES leak (writes to absolute shared-copy path)
    * is caught by the pre-PR leak gate (PrePrLeakDetectedError) and no PR is opened.
    * This verifies the deterministic safety net (AC2 behaviour surfaced from the
-   * concurrent-drain perspective).
+   * concurrent-run perspective).
    */
   it("AC1 (leak gate): a builder that dirtied the shared master copy is stopped BEFORE opening a PR", async () => {
     // Materialise A's worktree.
@@ -467,7 +467,7 @@ describe("concurrent drains — AC3 (two concurrent devs produce two non-cross-c
   });
 });
 
-describe("concurrent drains — AC4 (cleanup is concurrency- and crash-safe)", () => {
+describe("concurrent runs — AC4 (cleanup is concurrency- and crash-safe)", () => {
   it("a mid-build failure in one flow leaves a concurrent flow's worktree intact and leaks no worktree", async () => {
     const prUrlForCwd = (cwd: string): string =>
       cwd.includes(STORY_A.ref) ? STORY_A.prUrl : STORY_B.prUrl;
@@ -489,7 +489,7 @@ describe("concurrent drains — AC4 (cleanup is concurrency- and crash-safe)", (
     expect(aWtBefore).toContain(aReal);
     await expect(fs.access(path.join(a.worktreePath, STORY_A.ownFile))).resolves.toBeUndefined();
 
-    // Clean up the failed flow's worktree (what the drain does after a worker
+    // Clean up the failed flow's worktree (what the run does after a worker
     // returns) — it removes ONLY B's worktree, never A's.
     await b.cleanup();
     const afterBCleanup = await registeredWorktrees(ctx.repoRoot);
@@ -503,7 +503,7 @@ describe("concurrent drains — AC4 (cleanup is concurrency- and crash-safe)", (
     expect(finalWts.filter((w) => w.includes(STORY_A.ref))).toEqual([]);
   });
 
-  it("reaps a worktree left behind by a prior, now-dead session on a subsequent drain", async () => {
+  it("reaps a worktree left behind by a prior, now-dead session on a subsequent run", async () => {
     const deadSession = "01HZDEADSESSION0000000000";
 
     // A prior worker (now-dead session) left a worktree behind — model it by
@@ -527,7 +527,7 @@ describe("concurrent drains — AC4 (cleanup is concurrency- and crash-safe)", (
     });
     const liveReal = await real(live.worktreePath);
 
-    // The next drain's crash-recovery reap, keyed on the LIVE session.
+    // The next run's crash-recovery reap, keyed on the LIVE session.
     const { reaped } = await reapStaleDevStoryWorktrees({
       targetRepoRoot: ctx.repoRoot,
       currentSessionUlid: SESSION_ULID,

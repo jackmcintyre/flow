@@ -2,10 +2,10 @@
  * Regression tests for concurrent git-lock-contention retry in the mutating
  * git helpers — `gitCreateBranch`, `gitCommit`, `gitPush` (src/lib/git.ts).
  *
- * Concurrent drain workers (Story 8.22) run these ops against the SAME shared
+ * Concurrent run workers (Story 8.22) run these ops against the SAME shared
  * `.git` (worktrees share the common dir; they push to one origin). Git does NOT
  * serialise concurrent ref/config/push transactions — the loser exits non-zero
- * with a transient lock error. This surfaced as a flaky `concurrent-drains-
+ * with a transient lock error. This surfaced as a flaky `concurrent-runs-
  * isolation` test that reds CI under load. The helpers now retry transient lock
  * failures with a short backoff and re-throw any non-lock failure unchanged.
  *

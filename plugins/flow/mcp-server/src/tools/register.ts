@@ -431,7 +431,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "markStoryReady",
     description:
       "Set the operator `ready` flag on an un-claimed backlog item (Story 9.1). " +
-      "The drain claims an item only once it is dependency-ready AND marked ready. " +
+      "The run claims an item only once it is dependency-ready AND marked ready. " +
       "Writes the manifest in-place (no state-directory move); no-op if the flag " +
       "already holds the requested value; raises NotAnEligibleBacklogItemError for " +
       "anything that is not an un-claimed to-do/ item.",
@@ -649,7 +649,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   // mandatory runReviewerSession call, ONLY when the review surfaced one reusable
   // lesson. It validates the lesson against the existing LessonSchema and MERGES
   // only the `lesson` field onto the per-ref reviewer-result.json (never clobbering
-  // the binding verdict). The drain then forwards that lesson onto the done
+  // the binding verdict). The run then forwards that lesson onto the done
   // manifest via recordStoryRetro before the merge gate runs.
   server.registerTool({
     name: "recordReviewerLesson",
@@ -972,14 +972,14 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   });
 
   // Story 4.3b — claimNextStory: single-iteration outer claim-loop step.
-  // The SKILL.md prose calls this in a loop until queue-drained or
+  // The SKILL.md prose calls this in a loop until queue-emptied or
   // waiting-on-in-progress is returned.
   server.registerTool({
     name: "claimNextStory",
     description:
       "Claim the next ready story from the backlog for the current session. " +
       "Returns { next: 'spawn-dev', ref, title, manifestPath, chatLog } when a story is claimed, " +
-      "{ next: 'queue-drained', chatLog } when both to-do/ and in-progress/ are empty, or " +
+      "{ next: 'queue-emptied', chatLog } when both to-do/ and in-progress/ are empty, or " +
       "{ next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. " +
       "Story 4.3b.",
     inputSchema: claimNextStoryInputSchema,
@@ -1530,7 +1530,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. " +
       "An operational gh failure (merge refused, label API hiccup, missing permission) NEVER throws: " +
       "it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, " +
-      "so the gate's stdout stays JSON-only and the drain seam cannot break. " +
+      "so the gate's stdout stays JSON-only and the run seam cannot break. " +
       "Story 4.10b.",
     inputSchema: runAutoMergeGateInputSchema,
     handler: async (args) => {
@@ -1879,7 +1879,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   // seam. Enumerates the live hired roster (same source as getTeamSnapshot) and returns
   // the deterministic lens→role binding via resolveLensRoleBinding (bipartite matching).
   // Registered here (MCP) AND in the CLI TOOLS map so it is callable on the no-MCP
-  // drain/gate path: node dist/cli.js resolveLensRoles --json '{"targetRepoRoot":"..."}'.
+  // run/gate path: node dist/cli.js resolveLensRoles --json '{"targetRepoRoot":"..."}'.
   // Throws LensJudgeUnavailableError when the roster cannot staff all five distinct judges.
   server.registerTool({
     name: "resolveLensRoles",
@@ -2044,8 +2044,8 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   // - full/absent → current Sonnet default + full review (no-regression pin)
   // When manifestPath is provided, reads the lane from the persisted execution
   // manifest (written at scan time by classifyStoryLane). The load-bearing
-  // decision lives here (not in drain.workflow.js or agent prose) so it is
-  // unit-testable without the Workflow runtime. Callable on the no-MCP drain path:
+  // decision lives here (not in run.workflow.js or agent prose) so it is
+  // unit-testable without the Workflow runtime. Callable on the no-MCP run path:
   //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
   server.registerTool({
     name: "resolveBuildPlan",

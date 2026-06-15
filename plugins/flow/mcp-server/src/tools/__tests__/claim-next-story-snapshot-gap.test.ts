@@ -177,7 +177,7 @@ describe("AC1: loser arriving in the rename→snapshot gap moves on gracefully",
       });
 
       // Must NOT throw — run keeps going.
-      expect(["waiting-on-in-progress", "queue-drained"]).toContain(result.next);
+      expect(["waiting-on-in-progress", "queue-emptied"]).toContain(result.next);
     },
     15_000,
   );

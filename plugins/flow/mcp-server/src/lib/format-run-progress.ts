@@ -1,8 +1,8 @@
 /**
- * `formatDrainProgress` — Story 8.18.
+ * `formatRunProgress` — Story 8.18.
  *
- * Renders the operator-facing progress lines the drain emits as it enters and
- * leaves each major per-story phase (dev-build, review, gate). The drain loop
+ * Renders the operator-facing progress lines the run emits as it enters and
+ * leaves each major per-story phase (dev-build, review, gate). The run loop
  * runs a single long `agent()` call for the dev-build span and emits nothing
  * between `claimed <ref>` and `-> PR #<n>`; to an operator a long silent build
  * is indistinguishable from a hang. These lines bracket each phase with a
@@ -11,7 +11,7 @@
  *
  * Pure and deterministic — no I/O, no mutation of the input, no async, and it
  * never calls the wall clock itself. The caller supplies an elapsed-ms number
- * (the drain workflow derives it from the clock seam the Workflow runtime
+ * (the run workflow derives it from the clock seam the Workflow runtime
  * allows, since workflow scripts cannot call `Date.now()`/`new Date()` for
  * resume-determinism). The returned string is always a single line (no `\n`).
  *
@@ -39,19 +39,19 @@ function _shortHandle(ref: string): string {
   return localPart;
 }
 
-/** The major per-story phases the drain brackets with progress lines. */
-export type DrainPhase = "dev-build" | "review" | "gate";
+/** The major per-story phases the run brackets with progress lines. */
+export type RunPhase = "dev-build" | "review" | "gate";
 
 /** Whether the line marks entering a phase or leaving it. */
-export type DrainTransition = "start" | "done";
+export type RunTransition = "start" | "done";
 
 /**
  * The set of phases the helper treats as the long-running one. Only
  * `dev-build` carries the "longest phase" marker on its start line — it is the
- * single long agent call (roughly ten minutes in the first real drain) where a
+ * single long agent call (roughly ten minutes in the first real run) where a
  * multi-minute gap is expected, not a hang. `review` and `gate` are short.
  */
-const LONG_PHASES: ReadonlySet<DrainPhase> = new Set<DrainPhase>(["dev-build"]);
+const LONG_PHASES: ReadonlySet<RunPhase> = new Set<RunPhase>(["dev-build"]);
 
 /**
  * The marker text appended to the long phase's start line. Asserted present
@@ -83,7 +83,7 @@ export function formatElapsed(elapsedMs: number): string {
 }
 
 /**
- * Format a single drain progress line for the narrator.
+ * Format a single run progress line for the narrator.
  *
  * For a `start` transition:
  *   `<ref> <phase>: start` — and, for the long phase only, the
@@ -104,10 +104,10 @@ export function formatElapsed(elapsedMs: number): string {
  *   Only used (and only meaningful) for the `done` transition.
  * @returns A single-line, human-readable progress line.
  */
-export function formatDrainProgress(
+export function formatRunProgress(
   ref: string,
-  phase: DrainPhase,
-  transition: DrainTransition,
+  phase: RunPhase,
+  transition: RunTransition,
   elapsedMs = 0,
 ): string {
   const handle = _shortHandle(ref);

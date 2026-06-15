@@ -46,7 +46,7 @@ interface BacklogDashboardEntry {
   ready: boolean;
   /**
    * Claimable iff the item is a `to-do/` item that is blessed (`ready`),
-   * dependency-satisfied, and not withdrawn — exactly the drain's claim
+   * dependency-satisfied, and not withdrawn — exactly the run's claim
    * eligibility. Distinct from `ready`: a blessed item blocked on an unmet
    * dependency is `ready` but NOT `claimable`.
    */
@@ -86,7 +86,7 @@ export function deriveEpic(ref: string): string | null {
 /**
  * Compute claimability from an inventory entry: claimable iff it is a `to-do/`
  * item that is blessed (`ready`), dependency-satisfied (`depsReady`), and not
- * withdrawn. This mirrors the drain's claim eligibility (deps-ready AND ready,
+ * withdrawn. This mirrors the run's claim eligibility (deps-ready AND ready,
  * an un-withdrawn to-do item). Pure.
  */
 function isClaimableEntry(entry: BacklogInventoryEntry): boolean {
@@ -123,7 +123,7 @@ export async function getBacklogDashboard(opts: {
 
   // Story native:01KTSR3E7FE61XB2PN8VJ24289: build held-refs from to-do entries
   // that are NOT claimable, so the dashboard's expected-work counter line reflects
-  // the same population the drain would encounter on the next claim pass.
+  // the same population the run would encounter on the next claim pass.
   const refsHeld: HeldRef[] = backlog_inventory
     .filter((e) => e.state === "to-do" && !isClaimableEntry(e) && !e.withdrawn)
     .map((e): HeldRef => {

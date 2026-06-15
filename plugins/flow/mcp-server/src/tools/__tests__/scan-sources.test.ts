@@ -25,7 +25,7 @@ import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { scanSources } from "../scan-sources.js";
 import { writeNativeStory } from "../write-native-story.js";
-import { claimNextStory, QUEUE_DRAINED_LINE } from "../claim-next-story.js";
+import { claimNextStory, QUEUE_EMPTIED_LINE } from "../claim-next-story.js";
 
 // A valid Crockford Base32 ULID (uppercase, 26 chars, no I/L/O/U).
 const STORY_ULID = "01HZDRF000000000000000009A";
@@ -112,8 +112,8 @@ describe("scan-sources Story 9.1 (AC5) — fresh manifests default ready: false"
 
     // (ii) The claim entry point does not return it — fail-closed.
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
-    expect(claim.next).toBe("queue-drained");
-    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(claim.next).toBe("queue-emptied");
+    expect(claim.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 });
 

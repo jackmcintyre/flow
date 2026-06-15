@@ -1,7 +1,7 @@
 /**
  * `materialiseDevStoryWorktree` — Story 8.16, superseded by Story 8.20.
  *
- * Cuts a dedicated git worktree for the drain's generalist-dev step so the dev
+ * Cuts a dedicated git worktree for the run's generalist-dev step so the dev
  * **edits and builds inside the worktree**, not in the orchestrating session's
  * `targetRepoRoot` checkout. This is the true-parallelism substrate: when the
  * dev's *editing surface* (not merely its commit) is its own worktree, two devs
@@ -14,7 +14,7 @@
  *   still edited in the shared `targetRepoRoot`, and this helper transplanted
  *   the dev's own changed paths into the worktree afterwards (current-dirty
  *   minus a pre-edit baseline) then reverted them in the checkout on cleanup.
- *   That baseline-diff attribution is correct for a *serial* drain but breaks
+ *   That baseline-diff attribution is correct for a *serial* run but breaks
  *   under concurrency: two devs editing the same checkout each see the other's
  *   edits as "their own", and one flow's cleanup reverts files the other is
  *   still editing.
@@ -67,7 +67,7 @@ export interface DevStoryWorktreeResult {
   setupLog: string[];
   /**
    * Best-effort teardown: removes THIS worktree only. Errors become warnings,
-   * NOT fatal — repeated drains must not accumulate orphaned worktrees, and a
+   * NOT fatal — repeated runs must not accumulate orphaned worktrees, and a
    * failure mid-build must not leave the worktree wedged. Crucially it touches
    * ONLY this story's worktree path, so a concurrent flow's worktree is never
    * disturbed (8.20 AC4).
@@ -116,7 +116,7 @@ async function runGit(
 // so the retry policy (regex / attempt budget / backoff / sleep) is shared from
 // there rather than duplicated here. The prior code comment claiming git
 // "serialises" concurrent worktree adds was wrong; it surfaced as the flaky
-// `concurrent-drains-isolation` test that reds CI under load.
+// `concurrent-runs-isolation` test that reds CI under load.
 
 /**
  * Sanitise a story ref into a filesystem-safe worktree directory segment.
@@ -287,7 +287,7 @@ export async function materialiseDevStoryWorktree(
           `failed (exit ${remove.exitCode}): ${remove.stderr}. ` +
           `Run 'git worktree prune' to clean up.`,
       );
-      // Belt-and-braces: also try a raw fs.rm + prune so a future drain's
+      // Belt-and-braces: also try a raw fs.rm + prune so a future run's
       // stale-reap does not trip over a half-removed directory.
       try {
         await fs.rm(worktreePath, { recursive: true, force: true });
@@ -335,7 +335,7 @@ export interface ReapStaleDevStoryWorktreesResult {
  *
  * Best-effort and read-tolerant: a non-zero `git worktree list` (e.g. not a
  * repo) returns an empty result rather than throwing, so a degraded git state
- * never blocks the drain.
+ * never blocks the run.
  */
 export async function reapStaleDevStoryWorktrees(opts: {
   targetRepoRoot: string;

@@ -140,7 +140,7 @@ describe("AC3: crash-interrupted story (claimed_by set, no snapshot) is recovera
   it(
     "claimStory with a NEW sessionUlid also re-establishes the snapshot (after orphan reattach scenario)",
     async () => {
-      // Simulate what the drain does: reattachOrphan rewrites claimed_by to the
+      // Simulate what the run does: reattachOrphan rewrites claimed_by to the
       // new session's ULID. Then claimStory is called with the new session.
       // We simulate this by writing the crashed manifest with NEW_SESSION's claimed_by.
       await seedCrashedManifest(SESSION_ULID);

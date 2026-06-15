@@ -15,7 +15,7 @@ This is the cockpit's **read surface**. It renders the outstanding backlog as **
 
 - **state** — which state bucket the item sits in (`to-do`, `in-progress`, `blocked`, `done`, or `native-source-only`).
 - **readiness** — `ready` (approved via `/flow:ready`) or `not ready` (behind the readiness brake).
-- **claimability** — `claimable` when the drain would claim it (a `to-do` item that is approved AND dependency-satisfied AND not withdrawn); otherwise `not claimable`. An approved item that is still blocked on an unmet dependency reads `ready` but `not claimable` — do not misread it as buildable.
+- **claimability** — `claimable` when the run would claim it (a `to-do` item that is approved AND dependency-satisfied AND not withdrawn); otherwise `not claimable`. An approved item that is still blocked on an unmet dependency reads `ready` but `not claimable` — do not misread it as buildable.
 
 This is a **read-only** view: it mutates nothing, starts no build, and touches no git. The table is **generated output**, not a checked-in file — there is nothing here to hand-edit, which is the old failure mode the cockpit replaces. Everything flows through the `getBacklogDashboard` tool; this skill never reads or writes a manifest file directly and never runs a git command.
 

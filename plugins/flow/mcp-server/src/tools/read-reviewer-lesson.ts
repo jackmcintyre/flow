@@ -2,7 +2,7 @@
  * `readReviewerLesson` CLI read seam — Story native:01KT6GSV8KTTKKHPRGEJWJAGZV
  * (learning-loop producer — FORWARD half, read side).
  *
- * The drain's FORWARD step needs the lesson the reviewer captured (via
+ * The run's FORWARD step needs the lesson the reviewer captured (via
  * `recordReviewerLesson`) off the per-ref `reviewer-result.json`, so it can hand
  * it to `recordStoryRetro` and land it on the done manifest before the merge gate
  * runs. This is that read: a thin, read-only, idempotent seam over
@@ -14,7 +14,7 @@
  *   - A result file carrying a lesson                 → `{ lesson: <lesson> }`
  *
  * A malformed result file still throws `ReviewerResultFileMalformedError` from
- * `readReviewerResultFile` (a real corruption a human should see), but the drain
+ * `readReviewerResultFile` (a real corruption a human should see), but the run
  * wraps this seam in the swallow/non-fatal variant so even that never blocks the
  * merge — the FORWARD is best-effort and fail-soft by contract.
  */
@@ -25,7 +25,7 @@ import type { Lesson } from "../schemas/story-retro.js";
 export interface ReadReviewerLessonOptions {
   /** Absolute path to the target repository root. */
   targetRepoRoot: string;
-  /** ULID of the calling (drain) session. */
+  /** ULID of the calling (run) session. */
   sessionUlid: string;
   /** Story ref, used to derive the per-ref result path. */
   ref: string;

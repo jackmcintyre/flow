@@ -1,18 +1,18 @@
 /**
- * `blockStory` MCP tool — fix/drain-isolation-coordination-honesty.
+ * `blockStory` MCP tool — fix/run-isolation-coordination-honesty.
  *
  * Move a story THIS session owns from `in-progress/` to `blocked/` as a clean
  * state change, stamping a caller-supplied `blocked_by` reason. This is the live
- * drain's "give up on this story" primitive — the generalisation of
+ * run's "give up on this story" primitive — the generalisation of
  * `blockOrphanNoTranscript` (which is orphan-recovery-only and hardcodes its
  * reason) for a story the CURRENT session claimed.
  *
- * Why it exists (the non-termination fix): the drain used to bucket a given-up
+ * Why it exists (the non-termination fix): the run used to bucket a given-up
  * story as `blocked` in its RESULT object but leave the manifest sitting in
  * `in-progress/`. `claimNextStory` counts every `in-progress/` manifest, so it
  * kept returning `waiting-on-in-progress` forever and the loop re-polled without
  * end. Moving the manifest off `in-progress/` at the give-up point is what lets
- * the queue actually drain.
+ * the queue actually run.
  *
  * Eligibility / safety (mirrors `completeStory`):
  *   - The manifest MUST be in `in-progress/` (else ManifestNotFoundError).

@@ -32,10 +32,10 @@
  *   (f) Reviewer BLOCKED passthrough.
  *   (g) Tool count assertion (22 tools, contains new tools, does not contain runDevSession).
  *
- * AC4 (4.3c) — two-story drain via processReviewerTranscript internal seam:
+ * AC4 (4.3c) — two-story run via processReviewerTranscript internal seam:
  *   Two stories driven through claimNextStory → processDevTranscript →
  *   processReviewerTranscript (which internally calls completeStory and returns
- *   completed: true), then third claimNextStory returns queue-drained.
+ *   completed: true), then third claimNextStory returns queue-emptied.
  *   (h) Blocked branch: processReviewerTranscript does NOT move manifest, returned
  *       object has no `completed` field.
  *   (i) Reviewer-grammar-drift branch: same MUST NOT pattern as (h).
@@ -235,7 +235,7 @@ beforeEach(async () => {
 
   // Mock deriveSourceBaseline so completeStory's hand-edit guard passes for
   // the fixture STORY_REF (which has a non-Crockford ULID / no source file).
-  // The two-story drain tests override this mock to use real source resolution.
+  // The two-story run tests override this mock to use real source resolution.
   mockDeriveSourceBaseline.mockResolvedValue({
     sourceHash: "a".repeat(64),
     sourceFields: {
@@ -338,7 +338,7 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
       `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for the merge gate`,
     );
 
-    // fix/drain-isolation-coordination-honesty: the verdict step NO LONGER moves
+    // fix/run-isolation-coordination-honesty: the verdict step NO LONGER moves
     // the manifest. It STAYS in in-progress/ (the merge gate completes it later,
     // only after confirming CI green). done/ is empty at this point.
     const ipRaw = await fs.readFile(manifestPath, "utf8");
@@ -398,7 +398,7 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     );
     expect(hasNeedsChangesLog).toBe(true);
 
-    // fix/drain-isolation-coordination-honesty: the READY verdict no longer moves
+    // fix/run-isolation-coordination-honesty: the READY verdict no longer moves
     // the manifest — it STAYS in in-progress/ (the gate completes it later). The
     // blocked_by stamped on the prior NEEDS CHANGES round remains on the manifest;
     // it is stripped by completeStory when the gate later moves it to done/.
@@ -482,7 +482,7 @@ describe("AC4(d): two-iteration NEEDS CHANGES × 2 → READY FOR MERGE (revision
     ).length;
     expect(needsChangesCount).toBe(2);
 
-    // fix/drain-isolation-coordination-honesty: the READY verdict no longer moves
+    // fix/run-isolation-coordination-honesty: the READY verdict no longer moves
     // the manifest — it STAYS in in-progress/ after the final READY (the gate
     // completes it later, only on confirmed-green CI). done/ is empty here.
     const ipRaw = await fs.readFile(manifestPath, "utf8");
@@ -634,7 +634,7 @@ describe("AC4(g): tool count and required tools present", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4 (4.3c): Two-story drain with completeStory — green path
+// AC4 (4.3c): Two-story run with completeStory — green path
 // ---------------------------------------------------------------------------
 
 /**
@@ -685,7 +685,7 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
       "",
       "## Narrative",
       "",
-      `As a dev, I want ${title.toLowerCase()} so that I can verify the drain.`,
+      `As a dev, I want ${title.toLowerCase()} so that I can verify the run.`,
       "",
       "## Acceptance Criteria",
       "",
@@ -745,7 +745,7 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
   return { root, refA, refB };
 }
 
-describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript internal seam", () => {
+describe("AC4 (4.3c): green-path two-story run via processReviewerTranscript internal seam", () => {
   let twoStoryRoot: string;
 
   beforeEach(async () => {
@@ -760,7 +760,7 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     await fs.rm(twoStoryRoot, { recursive: true, force: true });
   });
 
-  it("drives two stories through claim → dev → reviewer-ready (internal completeStory), then queue-drained", async () => {
+  it("drives two stories through claim → dev → reviewer-ready (internal completeStory), then queue-emptied", async () => {
     const sessionUlid = "01HZSESSION4_3CTWO_STORY_0001";
     const { root, refA, refB } = await buildTwoStoryWorkspace(twoStoryRoot);
 
@@ -813,7 +813,7 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     expect(reviewerA.completed).toBe(true);
     syntheticChatLog.push(...reviewerA.chatLog);
 
-    // fix/drain-isolation-coordination-honesty: the verdict step no longer moves
+    // fix/run-isolation-coordination-honesty: the verdict step no longer moves
     // refA — it STAYS in in-progress/ (the gate, not exercised here, completes it
     // later). It is NOT in done/. A non-overlapping sibling (refB) is still
     // claimable while refA sits in-progress.
@@ -903,15 +903,15 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     expect(readyIdxB).toBeGreaterThanOrEqual(0);
     expect(doneIdxB).toBeGreaterThan(readyIdxB);
 
-    // AC4(e): fix/drain-isolation-coordination-honesty — with both stories driven
+    // AC4(e): fix/run-isolation-coordination-honesty — with both stories driven
     // to a READY verdict but NOT yet completed (the gate, not exercised here, owns
     // the done/ move), they STAY in in-progress/. The to-do queue is empty but
     // in-progress/ is not, so a third claim reports waiting-on-in-progress (not
-    // queue-drained — that would falsely imply nothing is outstanding).
+    // queue-emptied — that would falsely imply nothing is outstanding).
     const claimThird = await claimNextStory({ targetRepoRoot: root, sessionUlid });
     expect(claimThird.next).toBe("waiting-on-in-progress");
 
-    // AC4(f): final on-disk state — to-do drained; BOTH stories sit in in-progress/
+    // AC4(f): final on-disk state — to-do emptied; BOTH stories sit in in-progress/
     // awaiting the gate; done/ is empty (nothing was completed by the inner cycle).
     const todoFiles = await fs.readdir(path.join(root, ".flow", "state", "to-do"));
     expect(todoFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);

@@ -150,7 +150,7 @@ async function seedRatioVerdicts(
 
 /**
  * Build the in-progress manifest YAML. The auto-merge gate reads risk_tier from
- * the IN-PROGRESS manifest (fix/drain-isolation-coordination-honesty): completeStory
+ * the IN-PROGRESS manifest (fix/run-isolation-coordination-honesty): completeStory
  * now runs AFTER the gate confirms CI green, so the manifest sits in in-progress/
  * at gate time, not done/.
  */
@@ -828,7 +828,7 @@ describe("AC5(e) — low + insufficient-data pauses", () => {
 
 // Note: the former AC5(f)/AC5(i) "structural SKILL.md check" tests (which read
 // skills/start/SKILL.md to assert the orchestration prose invoked runAutoMergeGate
-// under the right branch) were removed when /flow:start was retired — the drain
+// under the right branch) were removed when /flow:start was retired — the run
 // workflow is the orchestration now, and the gate TOOL is covered by the cases
 // above + below. (daemon-retirement, 2026-05-30)
 
@@ -940,7 +940,7 @@ describe("AC5(k) — dryRun: true skips gh shell-out", () => {
 //
 // The gate is a terminal seam in an unattended loop: a merge that gh refuses must
 // NOT throw out of the gate (a raw throw exits the process non-zero, which the
-// drain's one-shot seam courier can relay as garbled non-JSON — the PR #277 seam
+// run's one-shot seam courier can relay as garbled non-JSON — the PR #277 seam
 // break). It folds into a clean pause-needs-human/merge-failed result with the
 // cause recorded in chatLog, and the PR is still flagged needs-human.
 // ---------------------------------------------------------------------------
@@ -992,7 +992,7 @@ describe("AC5(l) — recoverable gh error on pr merge folds to pause-needs-human
 // A missing pr-merge permission used to throw GhSubcommandDeniedError out of the
 // gate. It now folds to pause-needs-human/merge-failed with the denial surfaced
 // in chatLog — the misconfiguration is visible (the story sits in the human bucket)
-// but the drain seam never breaks.
+// but the run seam never breaks.
 // ---------------------------------------------------------------------------
 
 describe("AC5(m) — pr-merge denied without permission folds to pause-needs-human", () => {
@@ -1047,11 +1047,11 @@ describe("AC5(m) — pr-merge denied without permission folds to pause-needs-hum
 
 // ---------------------------------------------------------------------------
 // PR #277 regression — a side-effect failure on the PAUSE path never breaks the
-// drain's JSON seam.
+// run's JSON seam.
 //
 // The 2026-06-03 failure: a medium-risk PR paused, the gate's label gh call
 // failed and threw, the gate exited non-zero with a verbose error blob, and the
-// drain's seam courier garbled it into a bare `BLOCKED` token that broke JSON
+// run's seam courier garbled it into a bare `BLOCKED` token that broke JSON
 // parsing — so the story paused with a SyntaxError reason and no label. The fix
 // makes the pause path fold any labeller failure into a clean result, preserving
 // the real decision/reason and keeping stdout JSON-only.

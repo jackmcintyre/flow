@@ -5,7 +5,7 @@
  * persistent MCP server in the loop. Each invocation runs a tool function over
  * the filesystem and exits — so the cascade-SIGTERM (which only kills a
  * long-lived stdio server child sitting in the host's process group) cannot
- * occur by construction. Consumed by the spike `drain` workflow's seam-agents,
+ * occur by construction. Consumed by the spike `run` workflow's seam-agents,
  * which shell out to this CLI and read the JSON it prints.
  *
  * Usage:
@@ -18,8 +18,8 @@
  * dropped by JSON.stringify). On failure: {"error":{...}} and a non-zero exit
  * (2 for a typed DomainError, 1 otherwise, 64/65 for usage errors).
  *
- * This is the one-shot seam transport the stateless `drain` workflow's seam-agents
- * shell out to — no persistent MCP server on the drain path. Reuses every tool
+ * This is the one-shot seam transport the stateless `run` workflow's seam-agents
+ * shell out to — no persistent MCP server on the run path. Reuses every tool
  * function unchanged; see plugins/flow/mcp-server/src/tools/register.ts for the
  * same functions wired to the MCP transport (interactive skills still use that).
  */
@@ -30,7 +30,7 @@ import { getStatus } from "./tools/get-status.js";
 import { openCycle } from "./tools/open-cycle.js";
 import { gatherRetroInputs } from "./tools/gather-retro-inputs.js";
 import { mintSessionUlid } from "./tools/mint-session-ulid.js";
-import { drainPhaseStart, drainPhaseDone } from "./tools/drain-phase-progress.js";
+import { runPhaseStart, runPhaseDone } from "./tools/run-phase-progress.js";
 import { scanSources } from "./tools/scan-sources.js";
 import { createSmokeScratchRepo } from "./tools/create-smoke-scratch-repo.js";
 import { instantiatePersona } from "./tools/instantiate-persona.js";
@@ -84,14 +84,14 @@ type ToolFn = (args: any) => unknown | Promise<unknown>;
 const TOOLS: Record<string, ToolFn> = {
   getStatus,
   // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — open a new work cycle. Exposed on
-  // the CLI seam so the drain / skill workflows can open a cycle without a
+  // the CLI seam so the run / skill workflows can open a cycle without a
   // persistent MCP session. `gatherRetroInputs` is registered alongside it so
   // the no-MCP retro path can gather the (now cycle-scoped) bundle one-shot.
   openCycle,
   gatherRetroInputs,
   mintSessionUlid,
-  drainPhaseStart,
-  drainPhaseDone,
+  runPhaseStart,
+  runPhaseDone,
   scanSources,
   createSmokeScratchRepo,
   instantiatePersona,
@@ -114,12 +114,12 @@ const TOOLS: Record<string, ToolFn> = {
   reattachOrphan,
   blockOrphanNoTranscript,
   reapStaleWorktrees,
-  // Story 9.1 readiness brake (the "bless" mutation). The drain runs MCP-free, so
+  // Story 9.1 readiness brake (the "bless" mutation). The run runs MCP-free, so
   // blessing the next story needed a hand-written `node` helper until this was a
-  // first-class CLI seam (Epic 10 drain fix-plan, Fix 1). Now `/flow:ready` and the
+  // first-class CLI seam (Epic 10 run fix-plan, Fix 1). Now `/flow:ready` and the
   // cutover scan→bless step round-trip through the same one-shot transport.
   markStoryReady,
-  // Epic 10 drain fix-plan, Fix 2b — clean-root guard. The drain calls this after
+  // Epic 10 run fix-plan, Fix 2b — clean-root guard. The run calls this after
   // each story to detect (and non-destructively stash) any dev edits that leaked
   // into the shared root checkout under bgIsolation:'none', so the next worktree
   // is cut from a clean base.
@@ -133,35 +133,35 @@ const TOOLS: Record<string, ToolFn> = {
   aggregateJudgePanel,
   adjudicateQualityLead,
   // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — friction-signal write seam.
-  // Registered here so drain-path agents (seam-agents running node dist/cli.js)
+  // Registered here so run-path agents (seam-agents running node dist/cli.js)
   // can emit friction events without a persistent MCP server in the loop.
   recordAgentFriction,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
-  // Callable on the no-MCP drain/gate path: node dist/cli.js resolveLensRoles --json
+  // Callable on the no-MCP run/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
   // calls this instead of the previously hard-coded lensRoles block.
   resolveLensRoles,
   // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer.
-  // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP drain-path
+  // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP run-path
   // seam-agent) calls it via `node dist/cli.js recordReviewerLesson --json` to
   // merge one reusable lesson onto the per-ref reviewer-result.json.
-  // recordStoryRetro is the FORWARD seam: the drain reads that captured lesson and
+  // recordStoryRetro is the FORWARD seam: the run reads that captured lesson and
   // attaches it to the done manifest (`node dist/cli.js recordStoryRetro --json`)
   // before the merge gate runs. readReviewerLesson is the read side of FORWARD —
   // a thin read-only seam returning { lesson } off the reviewer-result.json so the
-  // drain knows whether (and what) to forward. All three must be on the CLI seam
-  // because the drain runs MCP-free.
+  // run knows whether (and what) to forward. All three must be on the CLI seam
+  // because the run runs MCP-free.
   recordReviewerLesson,
   readReviewerLesson,
   recordStoryRetro,
   // Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder lesson capture seam.
-  // recordDevLesson is the CAPTURE seam: the dev (a no-MCP drain-path agent)
+  // recordDevLesson is the CAPTURE seam: the dev (a no-MCP run-path agent)
   // calls it via `node dist/cli.js recordDevLesson --json` to write one reusable
   // lesson onto the per-ref dev-result.json BEFORE emitting the handoff phrase.
   // readDevLesson is the read side of FORWARD — a thin read-only seam returning
-  // { lesson } off the dev-result.json so the drain knows whether (and what)
+  // { lesson } off the dev-result.json so the run knows whether (and what)
   // to forward to the done manifest alongside the reviewer lesson.
-  // Both must be on the CLI seam because the drain runs MCP-free.
+  // Both must be on the CLI seam because the run runs MCP-free.
   recordDevLesson,
   readDevLesson,
   // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
@@ -171,7 +171,7 @@ const TOOLS: Record<string, ToolFn> = {
   // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — pre-judge lane classifier.
   // Pure deterministic function: classifies a story into 'fast' or 'full'
   // from its execution-manifest signals before the costly judge panel runs.
-  // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
+  // Callable on the no-MCP run/gate path: node dist/cli.js classifyStoryLane
   // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
   classifyStoryLane,
   // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — fast-lane judge plan resolver.
@@ -186,7 +186,7 @@ const TOOLS: Record<string, ToolFn> = {
   // reviewDepth }. fast → haiku + light review; full/absent → sonnet + full
   // review (no-regression pin). When manifestPath is provided, reads the
   // lane from the persisted execution manifest written at scan time.
-  // Callable on the no-MCP drain path:
+  // Callable on the no-MCP run path:
   //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
   resolveBuildPlan,
   // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — discard an un-claimed native draft.
@@ -195,14 +195,14 @@ const TOOLS: Record<string, ToolFn> = {
   // Callable on the no-MCP seam:
   //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
   discardDraft,
-  // fix/drain-isolation-coordination-honesty — blockStory: the live drain's
+  // fix/run-isolation-coordination-honesty — blockStory: the live run's
   // "give up on this story" seam. Moves a story THIS session owns from
   // in-progress/ to blocked/ with a give-up reason, so an abandoned story stops
-  // counting as live work and the queue can drain (the non-termination fix).
+  // counting as live work and the queue can run (the non-termination fix).
   //   node dist/cli.js blockStory --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","blockedBy":"worker-threw"}'
   blockStory,
   // Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline AC extraction for native stories.
-  // Called by the drain BEFORE spawning the builder worktree, so the builder receives
+  // Called by the run BEFORE spawning the builder worktree, so the builder receives
   // its ACs inline and never needs to resolve a .flow/native-stories path from within
   // its isolated work copy (.flow is gitignored — not present in builder worktrees).
   //   node dist/cli.js extractNativeStoryAcs --json '{"targetRepoRoot":"...","ref":"native:01KT..."}'
@@ -215,7 +215,7 @@ const TOOLS: Record<string, ToolFn> = {
   //   <hook stdin> | node dist/cli.js captureSkillInvoke --json "$PAYLOAD"
   captureSkillInvoke,
   // Story native:01KV2Z67850XWWQV0AY2N05JSX — auto-absorb note-tier retro proposals.
-  // Called by the drain's post-retro step after the retro-analyst writes its
+  // Called by the run's post-retro step after the retro-analyst writes its
   // proposals. Reads the proposal file by timestamp, filters to note-tier
   // persona-append proposals, and applies them autonomously (up to the per-run
   // ceiling; higher-stakes proposals stay pending for the operator).
@@ -223,8 +223,8 @@ const TOOLS: Record<string, ToolFn> = {
   //   node dist/cli.js autoAbsorbProposalFile --json
   //     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T10:00:00.000Z"}'
   autoAbsorbProposalFile,
-  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the drain.
-  // The drain spawns the retro-analyst subagent after the queue drains. To build the
+  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the run.
+  // The run spawns the retro-analyst subagent after the queue empties. To build the
   // analyst's system prompt, it calls readCatalogue via this seam rather than reading
   // the catalogue file in-workflow (the Workflow runtime does not have fs access).
   // pluginRoot is the root of the flow plugin directory (NOT the target repo root).
@@ -266,7 +266,7 @@ async function main(): Promise<void> {
 
   // Entry-point required-field validation using the shared input contract
   // (Story native:01KV45Y13EQYVZP98PR8A9F40P). Tools absent from the schema
-  // map are CLI-only (drain internals) and bypass this check — their own
+  // map are CLI-only (run internals) and bypass this check — their own
   // implementations handle validation.
   const schema = TOOL_INPUT_SCHEMAS[tool];
   if (schema !== undefined && typeof args === "object" && args !== null) {

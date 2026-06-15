@@ -39,7 +39,7 @@ export interface DevOutcome {
  *
  * Layout: `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<sanitised-ref>/dev-outcome.json`.
  *
- * A drain run shares ONE session ULID across every story it processes, so the
+ * A run shares ONE session ULID across every story it processes, so the
  * dev-outcome (PR-pointer) record must be namespaced per story ref — otherwise a
  * later/concurrent story clobbers an earlier one's PR record and crash-recovery
  * can resume an unbuilt story against a sibling's already-merged PR (the

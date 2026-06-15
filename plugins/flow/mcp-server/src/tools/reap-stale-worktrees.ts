@@ -4,7 +4,7 @@
  * Crash-orphan reaping for dev-story worktrees. A worker that dies mid-build
  * leaves a worktree keyed by its now-dead session id; the per-path stale-reap in
  * `materialiseDevStoryWorktree` only matches the *live* session's own path, so
- * cross-session leftovers would otherwise accumulate forever. The drain's
+ * cross-session leftovers would otherwise accumulate forever. The run's
  * crash-recovery phase calls this BEFORE the main loop (alongside
  * `scanOrphanedInProgress`) to remove worktrees left by dead sessions, keying
  * the keep/skip decision on the live session id — exactly as the crash-recovery
@@ -32,9 +32,9 @@ export async function reapStaleWorktrees(opts: {
   isSessionAliveImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<boolean>;
 }): Promise<ReapStaleWorktreesResult> {
   // INITIAL HEARTBEAT (Story native:01KTSQWJ — the liveness WRITE side). This is
-  // the drain's first session-bearing seam in the recover phase, so establishing
+  // the run's first session-bearing seam in the recover phase, so establishing
   // the heartbeat here makes this run visible as alive BEFORE it does any long
-  // work (a concurrently-starting second drain must not treat us as a dead orphan
+  // work (a concurrently-starting second run must not treat us as a dead orphan
   // while our first build is in flight). Fail-soft: a heartbeat write must never
   // break reaping — a missed write just means the next per-story seam refreshes it.
   try {

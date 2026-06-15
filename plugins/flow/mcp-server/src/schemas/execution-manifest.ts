@@ -265,10 +265,10 @@ export const ExecutionManifestSchema = z
         "reviewer-grammar",
         "deps-drift",
         "needs-human-decision",
-        // Drain give-up reasons (fix/drain-isolation-coordination-honesty): the
-        // drain abandons a story it cannot finish and MUST move the manifest out
+        // Run give-up reasons (fix/run-isolation-coordination-honesty): the
+        // run abandons a story it cannot finish and MUST move the manifest out
         // of in-progress/ so it stops counting as live work (the non-termination
-        // fix). Each names WHY the drain gave up.
+        // fix). Each names WHY the run gave up.
         "rework-exhausted",
         "verdict-failed",
         "worker-threw",
@@ -321,18 +321,18 @@ export const ExecutionManifestSchema = z
     rework_count: z.number().int().nonnegative().optional(),
 
     /**
-     * Count of times the autonomous drain has re-claimed this story after a
+     * Count of times the autonomous run has re-claimed this story after a
      * prior run left it orphaned in `in-progress/` (a crash/interruption).
      * `undefined` ≡ `0`. Incremented in-place by `reattachOrphan` each time the
-     * drain auto-resumes the orphan. The drain caps resumes on this count so a
+     * run auto-resumes the orphan. The run caps resumes on this count so a
      * genuinely-broken story cannot loop forever — past the cap it is blocked
      * (`orphan-no-transcript`) for a human instead of re-resumed.
      *
      * Distinct from `rework_count` (NEEDS CHANGES rounds within one session);
      * this counts crash-resumptions across sessions. Added in the crash-recovery
-     * change (drain auto-resume).
+     * change (run auto-resume).
      */
-    drain_resume_attempts: z.number().int().nonnegative().optional(),
+    run_resume_attempts: z.number().int().nonnegative().optional(),
 
     /**
      * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).

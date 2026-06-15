@@ -1096,7 +1096,7 @@ describe("runDevTerminalAction — pre-PR sync gate (AC2: genuine conflict)", ()
 // root checkout is dirty), `runDevTerminalAction` MUST stop BEFORE creating the
 // PR and throw `PrePrLeakDetectedError`. No `gh pr create` is ever called.
 //
-// Setup mirrors concurrent-drains-isolation.test.ts: a real bare origin, a work
+// Setup mirrors concurrent-runs-isolation.test.ts: a real bare origin, a work
 // checkout, a materialised worktree for the dev. The "leak" is simulated by
 // writing directly to the ORCHESTRATING ROOT (not the worktree), which is exactly
 // what a builder using an absolute shared-copy path would do.

@@ -8,11 +8,11 @@
  *      the pruned set — bmadToNativeIngest is absent, all others present.
  *
  * AC3: Any removed tool that had a workflow-seam entry is confirmed NOT to exist
- *      in the drain workflow file, proving no live seam was cut.
+ *      in the run workflow file, proving no live seam was cut.
  *      (bmadToNativeIngest had no workflow-seam entry, so this test verifies
  *      the seam files are clean.)
  *
- * AC4: The five always-preserved tools (drainPhaseStart, drainPhaseDone,
+ * AC4: The five always-preserved tools (runPhaseStart, runPhaseDone,
  *      guardCleanRoot, readReviewerLesson, reapStaleWorktrees) are confirmed
  *      reachable via the auditor's reachability graph.
  *
@@ -37,10 +37,10 @@ const __dirname = path.dirname(__filename);
 /** Path to the committed tool-list snapshot. */
 const SNAPSHOT_PATH = path.resolve(__dirname, "..", "tool-inventory.snapshot.json");
 
-/** Path to the drain workflow file. */
-const DRAIN_WORKFLOW_PATH = path.resolve(
+/** Path to the run workflow file. */
+const RUN_WORKFLOW_PATH = path.resolve(
   __dirname,
-  "../../../../workflows/drain.workflow.js",
+  "../../../../workflows/run.workflow.js",
 );
 
 describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.ts", () => {
@@ -101,14 +101,14 @@ describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.
   // AC3 — No live workflow seam was cut
   // ---------------------------------------------------------------------------
 
-  describe("AC3 — removed tool had no workflow seam entry (drain smoke clean)", () => {
-    it("bmadToNativeIngestTool does not appear in drain.workflow.js seam calls", () => {
-      // Read the drain workflow source and check that the removed tool is absent
+  describe("AC3 — removed tool had no workflow seam entry (run smoke clean)", () => {
+    it("bmadToNativeIngestTool does not appear in run.workflow.js seam calls", () => {
+      // Read the run workflow source and check that the removed tool is absent
       // from the node CLI seam pattern. This proves the seam was never wired in,
-      // so no live drain step was cut by the removal.
-      let drainSource: string;
+      // so no live run step was cut by the removal.
+      let runSource: string;
       try {
-        drainSource = readFileSync(DRAIN_WORKFLOW_PATH, "utf8");
+        runSource = readFileSync(RUN_WORKFLOW_PATH, "utf8");
       } catch {
         // If the workflow file cannot be found, skip — environment issue not a code issue.
         return;
@@ -119,7 +119,7 @@ describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.
       const seamPattern = /node\s+\$\{CLI\}\s+([a-zA-Z][a-zA-Z0-9_]*)/g;
       const seamsFound: string[] = [];
       let m: RegExpExecArray | null;
-      while ((m = seamPattern.exec(drainSource)) !== null) {
+      while ((m = seamPattern.exec(runSource)) !== null) {
         seamsFound.push(m[1]);
       }
 
@@ -141,8 +141,8 @@ describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.
 
   describe("AC4 — always-preserved tools are reachable and registered", () => {
     const PRESERVED_TOOLS = [
-      "drainPhaseStart",
-      "drainPhaseDone",
+      "runPhaseStart",
+      "runPhaseDone",
       "guardCleanRoot",
       "readReviewerLesson",
       "reapStaleWorktrees",
@@ -164,8 +164,8 @@ describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.
 
     it("the reachable set (union of all entry-point classes) contains all five preserved tools", () => {
       const report = buildReachabilityReport();
-      // drainPhaseStart, drainPhaseDone, guardCleanRoot, reapStaleWorktrees, and
-      // readReviewerLesson are all reachable via the drain workflow seam (node CLI calls).
+      // runPhaseStart, runPhaseDone, guardCleanRoot, reapStaleWorktrees, and
+      // readReviewerLesson are all reachable via the run workflow seam (node CLI calls).
       // They may or may not be in the MCP register.ts snapshot (readReviewerLesson is CLI-only).
       // The key invariant is that they appear in the overall reachable set.
       for (const tool of PRESERVED_TOOLS) {

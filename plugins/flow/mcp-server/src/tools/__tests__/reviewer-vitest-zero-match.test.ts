@@ -7,7 +7,7 @@
  * convention sets the marker to a SOURCE-FILE path, which matches no test name, so
  * vitest skips every test and exits 0 — a VACUOUS PASS that signed off a whole
  * class of acceptance criteria without running a single test (reproduced:
- * `vitest --run -t "drain.workflow.js"` → all skipped, exit 0). This test pins the
+ * `vitest --run -t "run.workflow.js"` → all skipped, exit 0). This test pins the
  * fix: zero executed tests is never a pass.
  *
  * vitest: plugins/flow/mcp-server/src/tools/__tests__/reviewer-vitest-zero-match.test.ts
@@ -76,7 +76,7 @@ describe("runVitestCheck — zero-executed guard (fix 01KV43ET)", () => {
     const result = await runVitestCheck(
       0,
       null,
-      "drain.workflow.js", // a source-file marker — matches no test name
+      "run.workflow.js", // a source-file marker — matches no test name
       "dummy.test.ts",
       tmpRoot,
       makeExecaStub(ALL_SKIPPED, 0),
@@ -128,7 +128,7 @@ describe("runVitestCheck — zero-executed guard (fix 01KV43ET)", () => {
     const result = await runVitestCheck(
       0,
       null,
-      "drain.workflow.js",
+      "run.workflow.js",
       "dummy.test.ts",
       tmpRoot,
       makeExecaStub(NO_FILES, 1),

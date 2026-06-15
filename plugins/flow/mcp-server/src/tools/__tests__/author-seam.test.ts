@@ -41,7 +41,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { DisciplineViolationError, WrongAdapterError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { scanSources } from "../scan-sources.js";
-import { claimNextStory, QUEUE_DRAINED_LINE } from "../claim-next-story.js";
+import { claimNextStory, QUEUE_EMPTIED_LINE } from "../claim-next-story.js";
 import { markStoryReady } from "../mark-story-ready.js";
 
 const SESSION_ULID = "01HZSESSION00000000000099";
@@ -169,8 +169,8 @@ describe("author seam AC2 — passing draft is parked not-ready in the backlog",
 
     // The claim entry point does not return it (fail-closed readiness brake).
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
-    expect(claim.next).toBe("queue-drained");
-    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(claim.next).toBe("queue-emptied");
+    expect(claim.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 });
 
@@ -256,7 +256,7 @@ describe("author seam AC1 — inline approval prompt flips readiness via markSto
     expect(result.ready).toBe(true);
     expect(result.noop).toBe(false);
 
-    // Story is now claimable — claimNextStory returns it (not queue-drained).
+    // Story is now claimable — claimNextStory returns it (not queue-emptied).
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
     expect(claim.next).toBe("spawn-dev");
     if (claim.next === "spawn-dev") {
@@ -277,8 +277,8 @@ describe("author seam AC1 — inline approval prompt flips readiness via markSto
 
     // The build loop cannot claim it.
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
-    expect(claim.next).toBe("queue-drained");
-    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(claim.next).toBe("queue-emptied");
+    expect(claim.chatLog).toContain(QUEUE_EMPTIED_LINE);
   });
 
   it("silence / non-yes: markStoryReady(ready:false) is a no-op that keeps the story not-ready", async () => {
@@ -299,7 +299,7 @@ describe("author seam AC1 — inline approval prompt flips readiness via markSto
 
     // Story is still not claimable.
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
-    expect(claim.next).toBe("queue-drained");
+    expect(claim.next).toBe("queue-emptied");
   });
 });
 
@@ -327,8 +327,8 @@ describe("auto-materialise AC1 — to-do manifest created immediately on writeNa
 
     // Without blessing, the claim entry point must refuse this story.
     const claim = await claimNextStory({ targetRepoRoot: root, sessionUlid: SESSION_ULID });
-    expect(claim.next).toBe("queue-drained");
-    expect(claim.chatLog).toContain(QUEUE_DRAINED_LINE);
+    expect(claim.next).toBe("queue-emptied");
+    expect(claim.chatLog).toContain(QUEUE_EMPTIED_LINE);
 
     // Verify the ref is in to-do/ (not absent — was materialised).
     const manifestPath = path.join(root, ".flow", "state", "to-do", `${ref}.yaml`);

@@ -30,7 +30,7 @@ Owns the backlog: drives the planning conversation, shapes source stories agains
 - Run the planning conversation: extract requirements, surface ambiguity, sequence the next batch of stories.
 - Shape source stories that satisfy the five planning-discipline rules (clear AC, no compound stories, no premature optimisation, dependencies declared, risk tier tagged).
 - Re-shape stories that came back with a NEEDS CHANGES verdict citing a planning issue.
-- Keep the ready queue stocked relative to the dev loop's drain rate.
+- Keep the ready queue stocked relative to the dev loop's run rate.
 
 ## Out of mandate
 

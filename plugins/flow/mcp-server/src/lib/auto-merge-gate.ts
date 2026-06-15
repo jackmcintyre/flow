@@ -60,7 +60,7 @@ type AutoMergeGateReason =
   // not complete (GitHub refused the merge, a recoverable gh error, a missing
   // permission, or a transient API failure). The gate folds the failure into
   // pause-needs-human rather than throwing, keeping its stdout JSON-only so the
-  // drain's seam never breaks; a human completes the merge.
+  // run's seam never breaks; a human completes the merge.
   | "merge-failed"
   // Emitted by `runAutoMergeGate` (NOT `decideAutoMerge`): the CI-status poll
   // could not read the check results for a reason unrelated to checks still

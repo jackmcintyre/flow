@@ -124,7 +124,7 @@ export async function processDevTranscript(
   const execaImpl = opts.execaImpl ?? defaultExeca;
   const chatLog: string[] = [];
 
-  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The drain
+  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The run
   // calls processDevTranscript right after the long dev build returns, so this is
   // the post-build refresh that bounds the longest gap between heartbeats to a
   // single build (the pre-build refresh is in claimNextStory). Fail-soft: a missed
@@ -264,7 +264,7 @@ export async function processDevTranscript(
       // dev opened a PR by hand after the pre-PR gate refused, so nothing recorded
       // the PR. Ask GitHub directly for an open PR on this story's reproduced branch
       // and route it to review ON THE SAME PASS — the in-line analogue of the #287
-      // orphan-scan recovery. Without this, a green PR is stranded until the next drain.
+      // orphan-scan recovery. Without this, a green PR is stranded until the next run.
       const recovered = await findOpenPrForRef({
         targetRepoRoot,
         ref,

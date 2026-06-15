@@ -565,7 +565,7 @@ describe("gitCommit — conventional shape (Task 2.3)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// stashWorkingTree (Epic 10 drain fix-plan — Fix 2b, clean-root guard)
+// stashWorkingTree (Epic 10 run fix-plan — Fix 2b, clean-root guard)
 // ---------------------------------------------------------------------------
 
 describe("stashWorkingTree", () => {
@@ -578,7 +578,7 @@ describe("stashWorkingTree", () => {
     const result = await stashWorkingTree({
       cwd: "/tmp/repo",
       paths: ["src/a.ts", "src/b.ts"],
-      message: "flow-drain clean-root guard: native:01ABC",
+      message: "flow-run clean-root guard: native:01ABC",
       execaImpl: spy as unknown as Parameters<typeof stashWorkingTree>[0]["execaImpl"],
     });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -586,7 +586,7 @@ describe("stashWorkingTree", () => {
       "git",
       [
         "-C", "/tmp/repo", "stash", "push", "-u",
-        "-m", "flow-drain clean-root guard: native:01ABC",
+        "-m", "flow-run clean-root guard: native:01ABC",
         "--", "src/a.ts", "src/b.ts",
       ],
       { reject: false },
