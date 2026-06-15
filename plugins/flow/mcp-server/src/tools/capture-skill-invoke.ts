@@ -53,10 +53,38 @@ export interface CaptureSkillInvokeDeps {
 }
 
 /**
- * Best-effort resolve a skill's file path + frontmatter `version:` from the
- * plugin root the hook runs under (`CLAUDE_PLUGIN_ROOT`). NEVER throws — on any
- * miss it returns safe, schema-valid defaults (the `skill_version`/`skill_path`
- * fields are not the join key for effectiveness scoring; `skill_name` is).
+ * Best-effort read of the plugin's single overall version from its manifest
+ * (`<pluginRoot>/.claude-plugin/plugin.json`). Used as the fallback skill
+ * version for skills whose own SKILL.md declares no `version:` line — which is
+ * MOST skills, so without this fallback most `skill.invoke` events recorded a
+ * meaningless "unknown". NEVER throws — any miss returns "unknown".
+ */
+async function resolvePluginVersion(
+  pluginRoot: string,
+  readFileImpl: (filePath: string) => Promise<string>,
+): Promise<string> {
+  try {
+    const manifestPath = path.join(pluginRoot, ".claude-plugin", "plugin.json");
+    const raw = await readFileImpl(manifestPath);
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    if (typeof parsed.version === "string" && parsed.version.length > 0) {
+      return parsed.version;
+    }
+  } catch {
+    // fall through to "unknown"
+  }
+  return "unknown";
+}
+
+/**
+ * Best-effort resolve a skill's file path + version from the plugin root the
+ * hook runs under (`CLAUDE_PLUGIN_ROOT`). A skill that declares its own
+ * `version:` line keeps that declared version (passthrough); a skill with no
+ * version line of its own falls back to the plugin's overall manifest version
+ * rather than recording "unknown" (most skills carry no version line). NEVER
+ * throws — on any miss it returns safe, schema-valid defaults (the
+ * `skill_version`/`skill_path` fields are not the join key for effectiveness
+ * scoring; `skill_name` is).
  */
 async function resolveSkillMeta(
   skillName: string,
@@ -72,10 +100,17 @@ async function resolveSkillMeta(
     try {
       const raw = await readFileImpl(skillPath);
       const match = raw.match(/^version:\s*(.+?)\s*$/m);
-      const skillVersion = match && match[1] ? match[1].trim() : "unknown";
+      if (match && match[1]) {
+        // The skill declares its own version — keep it untouched.
+        return { skillPath, skillVersion: match[1].trim(), skillScope: "plugin" };
+      }
+      // No version line of its own — fall back to the plugin's overall version.
+      const skillVersion = await resolvePluginVersion(pluginRoot, readFileImpl);
       return { skillPath, skillVersion, skillScope: "plugin" };
     } catch {
-      // fall through to defaults
+      // Skill file unreadable — still prefer the plugin-version fallback over "unknown".
+      const skillVersion = await resolvePluginVersion(pluginRoot, readFileImpl);
+      return { skillPath, skillVersion, skillScope: "plugin" };
     }
   }
   return { skillPath: skillName, skillVersion: "unknown", skillScope: "plugin" };

@@ -149,6 +149,126 @@ describe("captureSkillInvoke — AC2 field derivation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FIX 2 (native:01KV4YGR) — plugin-manifest version fallback for skills that
+// declare no version line of their own (the real cause of the live "unknown").
+// ---------------------------------------------------------------------------
+
+describe("captureSkillInvoke — plugin-version fallback", () => {
+  it("falls back to the plugin manifest version when the skill declares none", async () => {
+    const pluginRoot = path.join(tmpRoot, "plugin");
+    const skillPath = path.join(pluginRoot, "skills", "status", "SKILL.md");
+    const manifestPath = path.join(
+      pluginRoot,
+      ".claude-plugin",
+      "plugin.json",
+    );
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:status"), {
+      pluginRoot,
+      // status-style frontmatter carries NO `version:` line — like most skills.
+      readFileImpl: async (filePath: string) => {
+        if (filePath === skillPath) {
+          return "---\nname: flow:status\ndescription: x\n---\nbody\n";
+        }
+        if (filePath === manifestPath) {
+          return JSON.stringify({ name: "flow", version: "1.2.3" });
+        }
+        throw new Error(`unexpected read: ${filePath}`);
+      },
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    const data = (calls[0] as Record<string, unknown>).data as Record<
+      string,
+      unknown
+    >;
+    expect(data.skill_version).toBe("1.2.3");
+    expect(data.skill_version).not.toBe("unknown");
+    expect(data.skill_path).toBe(skillPath);
+  });
+
+  it("keeps a skill's own declared version, unaffected by the fallback (passthrough)", async () => {
+    const pluginRoot = path.join(tmpRoot, "plugin");
+    const skillPath = path.join(pluginRoot, "skills", "board", "SKILL.md");
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:board"), {
+      pluginRoot,
+      readFileImpl: async (filePath: string) => {
+        if (filePath === skillPath) {
+          return "---\nname: flow:board\nversion: 7.7.7\n---\nbody\n";
+        }
+        // The manifest must NOT be consulted when the skill declares its own
+        // version — reading it here would be a fallback-over-reach bug.
+        throw new Error(`unexpected read: ${filePath}`);
+      },
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    const data = (calls[0] as Record<string, unknown>).data as Record<
+      string,
+      unknown
+    >;
+    expect(data.skill_version).toBe("7.7.7");
+  });
+
+  it("records 'unknown' fail-soft when neither the skill file nor the manifest is readable", async () => {
+    const pluginRoot = path.join(tmpRoot, "plugin");
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:ghost"), {
+      pluginRoot,
+      readFileImpl: async (filePath: string) => {
+        throw new Error(`ENOENT: ${filePath}`);
+      },
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    const data = (calls[0] as Record<string, unknown>).data as Record<
+      string,
+      unknown
+    >;
+    expect(data.skill_version).toBe("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 1 (native:01KV4YGR) — the board view is recorded exactly once: its old
+// in-skill prose-call capture is gone, leaving the automatic hook as the sole
+// recorder (no double-count relative to every other skill).
+// ---------------------------------------------------------------------------
+
+describe("captureSkillInvoke — board view recorded exactly once", () => {
+  it("board/SKILL.md no longer carries a prose-call telemetry capture", async () => {
+    const skillMd = path.resolve(
+      __dirname,
+      "../../../../skills/board/SKILL.md",
+    );
+    const raw = await fs.readFile(skillMd, "utf8");
+    // The Story 6.8 prose-call (mint + recordSkillInvoke) is the double-count
+    // source; it must be gone now that the deterministic hook records every use.
+    expect(raw).not.toContain("recordSkillInvoke");
+  });
+
+  it("the deterministic capture funnels exactly one event per single invocation", async () => {
+    const result = await captureSkillInvoke(
+      skillPayload("flow:board", { cwd: tmpRoot }),
+      {
+        recordImpl: (opts) => recordSkillInvoke({ ...opts, now: FIXED_NOW }),
+        pluginRoot: undefined,
+      },
+    );
+    expect(result).toEqual({ recorded: true });
+    const events = await readTelemetryEvents(tmpRoot);
+    expect(events).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC3 — fail-soft: never throws, never records on bad input
 // ---------------------------------------------------------------------------
 
