@@ -43815,7 +43815,14 @@ var TOOLS = {
   // Fail-soft: never throws — returns { absorbed, pending, absorbedIds, errors }.
   //   node dist/cli.js autoAbsorbProposalFile --json
   //     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T10:00:00.000Z"}'
-  autoAbsorbProposalFile
+  autoAbsorbProposalFile,
+  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the drain.
+  // The drain spawns the retro-analyst subagent after the queue drains. To build the
+  // analyst's system prompt, it calls readCatalogue via this seam rather than reading
+  // the catalogue file in-workflow (the Workflow runtime does not have fs access).
+  // pluginRoot is the root of the flow plugin directory (NOT the target repo root).
+  //   node dist/cli.js readCatalogue --json '{"pluginRoot":"...","role":"retro-analyst"}'
+  readCatalogue
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

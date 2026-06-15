@@ -73,6 +73,11 @@ const MAX_REPOLL = Number.isInteger(A.maxRepoll) && A.maxRepoll > 0 ? A.maxRepol
 // when no per-story override is resolved; it continues to work as before so
 // existing launch scripts are unaffected.
 const execModel = (A && A.devReviewerModel) || 'sonnet'
+// PLUGIN ROOT: derived from the CLI path so the drain can call readCatalogue
+// without knowing the plugin install location up front. The CLI always lives at
+// <pluginRoot>/mcp-server/dist/cli.js — strip the three trailing path segments.
+// This is the only path derivation in the drain; it is pure string manipulation.
+const PLUGIN_ROOT = CLI ? CLI.replace(/\/mcp-server\/dist\/cli\.js$/, '') : ''
 // AUTO-ABSORB RETRO PROPOSALS (Story native:01KV2Z67850XWWQV0AY2N05JSX — note-tier
 // auto-absorption). When the retro-analyst has written its proposals for this cycle
 // (via writeRetroProposal), the drain can auto-absorb note-tier persona-append
@@ -830,7 +835,169 @@ async function drainWorker(workerId) {
 // all) is belt-and-braces: even a worker that somehow rejects past its own catch
 // cannot reject the pool and abort the run.
 const workerCount = Math.max(1, Math.min(MAX_CONCURRENCY, MAX === Infinity ? MAX_CONCURRENCY : MAX))
+// AT-MOST-ONCE guard (Story native:01KV2ZF0B74KKKHS1JQ4075N9T AC4): a
+// run-scoped boolean prevents a second retro firing in the same drain run
+// (e.g. if a concurrent worker finishing triggers another drained-check).
+// Set to true immediately before the retro step begins; checked at the top
+// of the auto-retro block.
+let retroFiredThisRun = false
 await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => drainWorker(w)))
+
+// ── UNATTENDED AUTO-RETRO (Story native:01KV2ZF0B74KKKHS1JQ4075N9T) ─────────
+// When the queue fully drains (drainedReason === 'queue-drained'), the drain
+// automatically closes the learning loop:
+//   1. If no stories were completed this run → skip (nothing to reflect on).
+//   2. Set retroFiredThisRun = true (at-most-once guard; AC4).
+//   3. try: spawn the retro-analyst, writeRetroProposal, auto-absorb note-tier,
+//      THEN (and ONLY then) advance the cycle via openCycle.
+//   4. catch: do NOT advance the cycle; record failure outcome; exit normally.
+//
+// Trigger point: after all workers settle, when the queue is genuinely empty.
+// The at-most-once guard (retroFiredThisRun) prevents a second fire even if
+// this section is somehow re-entered (e.g. by a future concurrent finaliser).
+// Fail-soft contract: any throw inside the try block is caught here; the entire
+// retro block is wrapped in try/catch; the drain never crashes from a retro error.
+//
+// Relationship to the RETRO_PROPOSAL_TIMESTAMP path below: that path absorbs
+// proposals written by a PRIOR (operator-triggered) retro. This path triggers
+// the retro itself. They are orthogonal; the at-most-once guard is per-run
+// scoped (not persisted), so only one unattended retro fires per drain run.
+let autoRetroOutcome = null
+if (drainedReason === 'queue-drained' && !retroFiredThisRun) {
+  if (completed.length === 0) {
+    // AC2: no stories completed → skip; do not call the retro-analyst; do not
+    // advance the cycle; surface the skip reason in the run summary.
+    autoRetroOutcome = { status: 'skipped', reason: 'no-completed-stories' }
+    log('auto-retro: skipped — no stories were completed in this run (nothing to reflect on)')
+  } else {
+    // Set the flag BEFORE the try block so a concurrent observer cannot enter
+    // this block even if the try yields (cooperative async, but be explicit).
+    retroFiredThisRun = true
+    log(`auto-retro: ${completed.length} story(ies) completed — running unattended retrospective`)
+    try {
+      // ── GATHER RETRO INPUTS ──────────────────────────────────────────────
+      // Seam: read-only/idempotent → retryable. A garbled relay produces an
+      // empty bundle; the analyst writes a zero-proposal file rather than crash.
+      const retroInputs = await seam(
+        `node ${CLI} gatherRetroInputs --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`,
+        'auto-retro:gather',
+        true, // retryable — reading done/ manifests is idempotent
+      )
+      const doneManifestsForRetro = retroInputs && !retroInputs._parseError
+        ? (retroInputs.doneManifests || [])
+        : []
+      const priorProposalsForRetro = retroInputs && !retroInputs._parseError
+        ? (retroInputs.priorProposals || [])
+        : []
+
+      // ── READ THE RETRO-ANALYST CATALOGUE PROMPT ──────────────────────────
+      // Seam: read-only/idempotent → retryable. pluginRoot is derived from
+      // the CLI path (PLUGIN_ROOT, set above from CLI).
+      const catalogue = await seam(
+        `node ${CLI} readCatalogue --json '${J({ pluginRoot: PLUGIN_ROOT, role: 'retro-analyst' })}'`,
+        'auto-retro:catalogue',
+        true,
+      )
+      // The catalogue tool returns a CatalogueRole; sections.Prompt is the
+      // retro-analyst's system prompt (the same field the /flow:retro skill uses).
+      // Fall back gracefully on a garbled relay — an empty prompt lets the analyst
+      // still run with just the initial-context block.
+      const retroAnalystPrompt = catalogue && !catalogue._parseError && catalogue.sections
+        ? (catalogue.sections.Prompt || '')
+        : ''
+
+      // ── SPAWN THE RETRO-ANALYST SUBAGENT ─────────────────────────────────
+      // Same spawn pattern as the /flow:retro skill: agent() with the catalogue
+      // prompt as the system prompt, initial-context block carrying the bundle.
+      // The subagent calls writeRetroProposal and emits the locked handoff phrase:
+      //   "Handoff to operator — retro proposal ready for review at <absPath>"
+      const retroContext = `targetRepoRoot: ${REPO}\nsessionUlid: ${SU}\ndoneManifests: ${J(doneManifestsForRetro)}\ntelemetrySummary: ${J(retroInputs && !retroInputs._parseError ? retroInputs.telemetrySummary : { events: [], skipped_count: 0 })}\npriorProposals: ${J(priorProposalsForRetro)}\nruleRegistry: ${J(retroInputs && !retroInputs._parseError ? retroInputs.ruleRegistry : null)}\nfireCountSignal: ${J(retroInputs && !retroInputs._parseError ? retroInputs.fireCountSignal : null)}\nrecurringFriction: ${J(retroInputs && !retroInputs._parseError ? retroInputs.recurringFriction : [])}\nskillEffectiveness: ${J(retroInputs && !retroInputs._parseError ? retroInputs.skillEffectiveness : { per_skill: {} })}`
+      log('auto-retro: spawning retro-analyst subagent')
+      const retroFinal = await agent(
+        (retroAnalystPrompt ? retroAnalystPrompt + '\n\n' : '') +
+        `<initial-context>\n${retroContext}\n</initial-context>`,
+        { label: 'auto-retro:analyst', phase: 'drain', model: 'sonnet' },
+      )
+      const retroText = String(retroFinal || '')
+
+      // ── PARSE HANDOFF PHRASE TO GET PROPOSAL PATH ────────────────────────
+      // The retro-analyst emits: "Handoff to operator — retro proposal ready
+      // for review at <absPath>"
+      const RETRO_HANDOFF_RE = /Handoff to operator — retro proposal ready for review at (.+?)(?:\n|$)/
+      const handoffMatch = retroText.match(RETRO_HANDOFF_RE)
+      if (!handoffMatch) {
+        // Analyst did not complete the proposal write — fail-soft, no cycle advance.
+        throw new Error('retro-analyst did not emit the locked handoff phrase — proposal write incomplete or failed')
+      }
+      const proposalAbsPath = handoffMatch[1].trim()
+      log(`auto-retro: retro-analyst wrote proposal at ${proposalAbsPath}`)
+
+      // ── EXTRACT ISO TIMESTAMP FROM PROPOSAL PATH ─────────────────────────
+      // The proposal file is named <isoTimestamp>.md (Story 6.3).
+      const proposalFilename = proposalAbsPath.split('/').pop() || ''
+      const proposalTimestamp = proposalFilename.endsWith('.md')
+        ? proposalFilename.slice(0, -'.md'.length)
+        : proposalFilename
+
+      // ── AUTO-ABSORB NOTE-TIER LESSONS ────────────────────────────────────
+      // Reuse the existing autoAbsorbProposalFile seam (Story native:01KV2Z67).
+      // Fail-soft: retryable+swallow — absorption is best-effort.
+      const absorb = await seam(
+        `node ${CLI} autoAbsorbProposalFile --json '${J({ targetRepoRoot: REPO, proposalFileTimestamp: proposalTimestamp })}'`,
+        'auto-retro:absorb',
+        true, // retryable — reading a proposal file is idempotent
+        true, // swallow — best-effort
+      )
+      const absorbResult = absorb && !absorb._parseError ? absorb : { absorbed: 0, pending: 0, absorbedIds: [], errors: [] }
+      if (absorbResult.absorbed > 0) {
+        log(`auto-retro: auto-absorbed ${absorbResult.absorbed} note-tier lesson(s) (${absorbResult.absorbedIds.join(', ')})`)
+      }
+      if (absorbResult.errors && absorbResult.errors.length > 0) {
+        log(`auto-retro: ${absorbResult.errors.length} absorption error(s) — some lessons left pending`)
+      }
+
+      // ── ADVANCE THE CYCLE ────────────────────────────────────────────────
+      // STRICTLY gated on the confirmed durable proposal write (the handoff
+      // phrase above confirms writeRetroProposal returned). A failure before
+      // this point lands in the catch block and skips openCycle — no completed
+      // work is ever dropped from the next cycle's window by a failed retro.
+      // This gate is the mirror of the identical gate in /flow:retro (Step 6).
+      const openCycleResult = await seam(
+        `node ${CLI} openCycle --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`,
+        'auto-retro:open-cycle',
+        false, // mutation — one-shot; do NOT retry (idempotency is achieved by the
+               // retroFiredThisRun guard, not by re-running openCycle)
+      )
+      const cycleAdvanced = openCycleResult && !openCycleResult._parseError
+      if (cycleAdvanced) {
+        log(`auto-retro: cycle advanced to ${openCycleResult.cycleUlid} (opened at ${openCycleResult.openedAt})`)
+      } else {
+        log(`auto-retro: openCycle relay garbled — cycle may not have advanced (seam error: ${openCycleResult?._parseError || 'unknown'})`)
+      }
+
+      autoRetroOutcome = {
+        status: 'ran',
+        proposalPath: proposalAbsPath,
+        proposalTimestamp,
+        absorbedCount: absorbResult.absorbed,
+        absorbedIds: absorbResult.absorbedIds,
+        pendingCount: absorbResult.pending,
+        absorbErrors: absorbResult.errors || [],
+        cycleAdvanced,
+        cycleUlid: cycleAdvanced ? openCycleResult.cycleUlid : null,
+      }
+      log(`auto-retro: completed — ${absorbResult.absorbed} lesson(s) absorbed, ${absorbResult.pending} pending for operator, cycle ${cycleAdvanced ? 'advanced' : 'NOT advanced (openCycle relay error)'}`)
+    } catch (e) {
+      // AC3 fail-soft contract: a retro failure is a clean, reported no-op.
+      // Do NOT call openCycle. Do NOT mutate any state. Record the failure
+      // outcome. Exit normally. The drain does not crash; no completed work is
+      // lost from the next cycle's window (cycle boundary not moved).
+      const msg = String(e && e.message ? e.message : e)
+      autoRetroOutcome = { status: 'failed', error: msg }
+      log(`auto-retro: retrospective did not complete — cycle NOT advanced; completed work preserved in current window. Reason: ${msg.slice(0, 200)}`)
+    }
+  }
+}
 
 // AUTO-ABSORB POST-RETRO (Story native:01KV2Z67850XWWQV0AY2N05JSX): if the
 // caller provided a retroProposalTimestamp, run the note-tier auto-absorb step
@@ -886,4 +1053,10 @@ return {
   blocked,
   // Auto-absorb summary (null when no retroProposalTimestamp was provided).
   autoAbsorbResult,
+  // Unattended auto-retro summary (Story native:01KV2ZF0B74KKKHS1JQ4075N9T).
+  // null when the queue was not fully drained (retro only fires on a clean drain).
+  // { status: 'skipped', reason } when nothing was completed.
+  // { status: 'ran', ... } on the happy path (proposal written, absorbed, cycle advanced).
+  // { status: 'failed', error } when the retro threw (cycle not advanced).
+  autoRetroOutcome,
 }

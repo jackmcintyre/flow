@@ -73,6 +73,7 @@ import { blockStory } from "./tools/block-story.js";
 import { extractNativeStoryAcs } from "./tools/extract-native-story-acs.js";
 import { captureSkillInvoke } from "./tools/capture-skill-invoke.js";
 import { autoAbsorbProposalFile } from "./tools/auto-absorb-retro-proposals.js";
+import { readCatalogue } from "./tools/read-catalogue.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -222,6 +223,13 @@ const TOOLS: Record<string, ToolFn> = {
   //   node dist/cli.js autoAbsorbProposalFile --json
   //     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T10:00:00.000Z"}'
   autoAbsorbProposalFile,
+  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the drain.
+  // The drain spawns the retro-analyst subagent after the queue drains. To build the
+  // analyst's system prompt, it calls readCatalogue via this seam rather than reading
+  // the catalogue file in-workflow (the Workflow runtime does not have fs access).
+  // pluginRoot is the root of the flow plugin directory (NOT the target repo root).
+  //   node dist/cli.js readCatalogue --json '{"pluginRoot":"...","role":"retro-analyst"}'
+  readCatalogue,
 };
 
 function emit(obj: unknown): void {
