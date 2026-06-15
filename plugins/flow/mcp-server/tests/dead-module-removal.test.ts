@@ -199,141 +199,149 @@ beforeAll(async () => {
 }, 30_000);
 
 // ---------------------------------------------------------------------------
-// AC1: bundle-reachability check exits 0 with zero violations
+// Outer describe: name matches the vitest: marker in the story ACs so that
+// `pnpm vitest --run -t "plugins/flow/mcp-server/tests/dead-module-removal.test.ts"`
+// selects all tests in this file (the -t flag filters by test name, not file name).
 // ---------------------------------------------------------------------------
 
-describe("AC1: bundle-reachability check (assert-bundle.mjs)", () => {
-  it("spawns assert-bundle.mjs on the committed dist files and exits 0 with OK output", async () => {
-    const distIndex = resolve(SERVER_ROOT, "dist/index.js");
-    const distCli = resolve(SERVER_ROOT, "dist/cli.js");
+describe("plugins/flow/mcp-server/tests/dead-module-removal.test.ts", () => {
+  // ---------------------------------------------------------------------------
+  // AC1: bundle-reachability check exits 0 with zero violations
+  // ---------------------------------------------------------------------------
 
-    const result = await execa(
-      "node",
-      [join(SCRIPTS_DIR, "assert-bundle.mjs"), distIndex, distCli],
-      { cwd: SERVER_ROOT, reject: false },
-    );
+  describe("AC1: bundle-reachability check (assert-bundle.mjs)", () => {
+    it("spawns assert-bundle.mjs on the committed dist files and exits 0 with OK output", async () => {
+      const distIndex = resolve(SERVER_ROOT, "dist/index.js");
+      const distCli = resolve(SERVER_ROOT, "dist/cli.js");
 
-    expect(
-      result.exitCode ?? result.signal ?? "killed",
-      `assert-bundle.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-
-    // The script prints "assert-bundle: OK  <file>" for each passing file.
-    expect(result.stdout).toMatch(/assert-bundle: OK/);
-    expect(result.stdout).not.toMatch(/assert-bundle: FAIL/);
-  }, 30_000);
-});
-
-// ---------------------------------------------------------------------------
-// AC2: tool-reachability auditor exits 0 with zero unreachable tools
-// ---------------------------------------------------------------------------
-
-describe("AC2: tool-reachability auditor (audit-tool-reachability.mjs)", () => {
-  it("spawns audit-tool-reachability.mjs and exits 0 reporting zero unreachable tools", async () => {
-    const result = await execa(
-      "node",
-      [join(SCRIPTS_DIR, "audit-tool-reachability.mjs")],
-      { cwd: SERVER_ROOT, reject: false },
-    );
-
-    expect(
-      result.exitCode ?? result.signal ?? "killed",
-      `audit-tool-reachability.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-
-    // The report prints "(none — all registered tools are reachable)" when the
-    // unreachable set is empty. Assert this marker is present.
-    expect(
-      result.stdout,
-      `Expected zero unreachable tools but found some.\nReport:\n${result.stdout}`,
-    ).toMatch(/none.*all registered tools are reachable/i);
-  }, 30_000);
-});
-
-// ---------------------------------------------------------------------------
-// AC4: clean-install boot check exits 0
-// ---------------------------------------------------------------------------
-
-describe("AC4: clean-install boot check (assert-clean-install.mjs)", () => {
-  it("spawns assert-clean-install.mjs and exits 0 confirming the bundle boots without node_modules", async () => {
-    const result = await execa(
-      "node",
-      [join(SCRIPTS_DIR, "assert-clean-install.mjs")],
-      { cwd: SERVER_ROOT, reject: false },
-    );
-
-    expect(
-      result.exitCode ?? result.signal ?? "killed",
-      `assert-clean-install.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-
-    expect(result.stdout).toMatch(/assert-clean-install: OK/);
-  }, 90_000);
-});
-
-// ---------------------------------------------------------------------------
-// AC5: three-detector intersection is empty — no source file qualifies for removal
-// ---------------------------------------------------------------------------
-
-describe("AC5: three-detector dead-set intersection is empty", () => {
-  /**
-   * A source file is a removal CANDIDATE only when ALL THREE detectors agree:
-   *   Detector 1 — bundle-dead: listed in BUNDLE_DEAD (not reachable from either
-   *                bundle entry point, confirmed by bundle-coverage.test.ts)
-   *   Detector 2 — tool-unreachable: proxy = also bundle-dead (every tool wired
-   *                into the MCP server is reachable via register.ts → bundle;
-   *                bundle-dead files are unreachable from ALL tool entry-points)
-   *   Detector 3 — zero-test-coverage: not imported by any test file
-   *
-   * If the intersection is empty, no removals are needed.
-   */
-  it("no source file is bundle-dead AND unimported by tests (intersection is empty)", () => {
-    // The removal candidates: files that are bundle-dead AND have no test imports.
-    const removalCandidates = [...BUNDLE_DEAD].filter(
-      (f) => !testImportedFiles.has(f),
-    );
-
-    expect(
-      removalCandidates,
-      `Found source files dead in ALL three detectors (bundle-dead + no test imports).\n` +
-        `These are removal candidates:\n` +
-        removalCandidates.map((f) => `  - ${f}`).join("\n") +
-        `\n\nIf this list is non-empty, delete the listed files and update\n` +
-        `BUNDLE_DEAD in dead-module-removal.test.ts and KNOWN_DEAD in bundle-coverage.test.ts.`,
-    ).toEqual([]);
-  });
-
-  it("every bundle-dead source file has test coverage (is imported by at least one test)", () => {
-    // Secondary assertion: every bundle-dead file is kept alive by at least one
-    // test import. This documents WHY the intersection is empty.
-    const deadButCovered = [...BUNDLE_DEAD].filter((f) => testImportedFiles.has(f));
-    const deadAndUncovered = [...BUNDLE_DEAD].filter((f) => !testImportedFiles.has(f));
-
-    expect(
-      deadAndUncovered,
-      `Bundle-dead files with zero test coverage (removal candidates):\n` +
-        deadAndUncovered.map((f) => `  - ${f}`).join("\n"),
-    ).toEqual([]);
-
-    // Informational: log the covered-but-dead set so reviewers can see which
-    // files are tech debt kept alive only by test imports.
-    if (deadButCovered.length > 0) {
-      console.info(
-        `[dead-module-removal] Bundle-dead files kept alive by test imports (tech debt, not removable yet):\n` +
-          deadButCovered.map((f) => `  - ${f}`).join("\n"),
+      const result = await execa(
+        "node",
+        [join(SCRIPTS_DIR, "assert-bundle.mjs"), distIndex, distCli],
+        { cwd: SERVER_ROOT, reject: false },
       );
-    }
+
+      expect(
+        result.exitCode ?? result.signal ?? "killed",
+        `assert-bundle.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      ).toBe(0);
+
+      // The script prints "assert-bundle: OK  <file>" for each passing file.
+      expect(result.stdout).toMatch(/assert-bundle: OK/);
+      expect(result.stdout).not.toMatch(/assert-bundle: FAIL/);
+    }, 30_000);
   });
 
-  it("any source file reachable from register.ts or cli.ts does not appear in the removal list", () => {
-    // AC5 literal: any file reachable transitively from the entry roots must NOT
-    // appear in the removal list. Bundle-reachable files are by construction NOT
-    // in BUNDLE_DEAD, so the removal candidates (intersection of BUNDLE_DEAD and
-    // no-test-import) never include a bundle-reachable file.
-    // We assert the removal candidate set is empty to enforce this for all files.
-    const removalCandidates = [...BUNDLE_DEAD].filter(
-      (f) => !testImportedFiles.has(f),
-    );
-    expect(removalCandidates).toEqual([]);
+  // ---------------------------------------------------------------------------
+  // AC2: tool-reachability auditor exits 0 with zero unreachable tools
+  // ---------------------------------------------------------------------------
+
+  describe("AC2: tool-reachability auditor (audit-tool-reachability.mjs)", () => {
+    it("spawns audit-tool-reachability.mjs and exits 0 reporting zero unreachable tools", async () => {
+      const result = await execa(
+        "node",
+        [join(SCRIPTS_DIR, "audit-tool-reachability.mjs")],
+        { cwd: SERVER_ROOT, reject: false },
+      );
+
+      expect(
+        result.exitCode ?? result.signal ?? "killed",
+        `audit-tool-reachability.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      ).toBe(0);
+
+      // The report prints "(none — all registered tools are reachable)" when the
+      // unreachable set is empty. Assert this marker is present.
+      expect(
+        result.stdout,
+        `Expected zero unreachable tools but found some.\nReport:\n${result.stdout}`,
+      ).toMatch(/none.*all registered tools are reachable/i);
+    }, 30_000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC4: clean-install boot check exits 0
+  // ---------------------------------------------------------------------------
+
+  describe("AC4: clean-install boot check (assert-clean-install.mjs)", () => {
+    it("spawns assert-clean-install.mjs and exits 0 confirming the bundle boots without node_modules", async () => {
+      const result = await execa(
+        "node",
+        [join(SCRIPTS_DIR, "assert-clean-install.mjs")],
+        { cwd: SERVER_ROOT, reject: false },
+      );
+
+      expect(
+        result.exitCode ?? result.signal ?? "killed",
+        `assert-clean-install.mjs exited non-zero.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      ).toBe(0);
+
+      expect(result.stdout).toMatch(/assert-clean-install: OK/);
+    }, 90_000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC5: three-detector intersection is empty — no source file qualifies for removal
+  // ---------------------------------------------------------------------------
+
+  describe("AC5: three-detector dead-set intersection is empty", () => {
+    /**
+     * A source file is a removal CANDIDATE only when ALL THREE detectors agree:
+     *   Detector 1 — bundle-dead: listed in BUNDLE_DEAD (not reachable from either
+     *                bundle entry point, confirmed by bundle-coverage.test.ts)
+     *   Detector 2 — tool-unreachable: proxy = also bundle-dead (every tool wired
+     *                into the MCP server is reachable via register.ts → bundle;
+     *                bundle-dead files are unreachable from ALL tool entry-points)
+     *   Detector 3 — zero-test-coverage: not imported by any test file
+     *
+     * If the intersection is empty, no removals are needed.
+     */
+    it("no source file is bundle-dead AND unimported by tests (intersection is empty)", () => {
+      // The removal candidates: files that are bundle-dead AND have no test imports.
+      const removalCandidates = [...BUNDLE_DEAD].filter(
+        (f) => !testImportedFiles.has(f),
+      );
+
+      expect(
+        removalCandidates,
+        `Found source files dead in ALL three detectors (bundle-dead + no test imports).\n` +
+          `These are removal candidates:\n` +
+          removalCandidates.map((f) => `  - ${f}`).join("\n") +
+          `\n\nIf this list is non-empty, delete the listed files and update\n` +
+          `BUNDLE_DEAD in dead-module-removal.test.ts and KNOWN_DEAD in bundle-coverage.test.ts.`,
+      ).toEqual([]);
+    });
+
+    it("every bundle-dead source file has test coverage (is imported by at least one test)", () => {
+      // Secondary assertion: every bundle-dead file is kept alive by at least one
+      // test import. This documents WHY the intersection is empty.
+      const deadButCovered = [...BUNDLE_DEAD].filter((f) => testImportedFiles.has(f));
+      const deadAndUncovered = [...BUNDLE_DEAD].filter((f) => !testImportedFiles.has(f));
+
+      expect(
+        deadAndUncovered,
+        `Bundle-dead files with zero test coverage (removal candidates):\n` +
+          deadAndUncovered.map((f) => `  - ${f}`).join("\n"),
+      ).toEqual([]);
+
+      // Informational: log the covered-but-dead set so reviewers can see which
+      // files are tech debt kept alive only by test imports.
+      if (deadButCovered.length > 0) {
+        console.info(
+          `[dead-module-removal] Bundle-dead files kept alive by test imports (tech debt, not removable yet):\n` +
+            deadButCovered.map((f) => `  - ${f}`).join("\n"),
+        );
+      }
+    });
+
+    it("any source file reachable from register.ts or cli.ts does not appear in the removal list", () => {
+      // AC5 literal: any file reachable transitively from the entry roots must NOT
+      // appear in the removal list. Bundle-reachable files are by construction NOT
+      // in BUNDLE_DEAD, so the removal candidates (intersection of BUNDLE_DEAD and
+      // no-test-import) never include a bundle-reachable file.
+      // We assert the removal candidate set is empty to enforce this for all files.
+      const removalCandidates = [...BUNDLE_DEAD].filter(
+        (f) => !testImportedFiles.has(f),
+      );
+      expect(removalCandidates).toEqual([]);
+    });
   });
 });
