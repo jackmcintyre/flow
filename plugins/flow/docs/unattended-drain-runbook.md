@@ -41,7 +41,27 @@ After approving, confirm the manifests are present (`.flow/state/to-do/`) and
 
 ## 2. Launch the drain
 
-Run the `flow-drain` workflow via the Workflow tool. It takes three inputs:
+> **Canonical launch path: `/flow:flow-drain`**
+>
+> The `/flow:flow-drain` skill (Story native:01KTMKPHNDMBFS4APB5RKGZWR4) is the
+> canonical way to start the drain. It automatically resolves `targetRepoRoot`
+> from the Claude Code workspace and `cli` from the plugin install location,
+> pre-flight-checks both paths, and forwards any optional run knobs you name.
+> Use it in preference to constructing the raw Workflow invocation by hand.
+>
+> ```text
+> /flow:flow-drain
+> /flow:flow-drain maxStories=3
+> /flow:flow-drain maxConcurrency=1 devReviewerModel=opus
+> ```
+>
+> The raw Workflow invocation documented below remains valid as a fallback when
+> the skill is unavailable (e.g. working from a dev `--plugin-dir` checkout
+> that predates Story native:01KTMKPHNDMBFS4APB5RKGZWR4).
+
+### Raw Workflow invocation (fallback)
+
+Run the `flow-drain` workflow directly via the Workflow tool. It takes three inputs:
 
 | Arg | Required | What it is |
 |-----|----------|------------|
