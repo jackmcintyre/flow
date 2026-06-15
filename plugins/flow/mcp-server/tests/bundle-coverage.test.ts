@@ -180,6 +180,11 @@ const KNOWN_DEAD = new Set<string>([
   // Orphaned implementation files — no non-test caller imports them at runtime.
   // Each was once wired in but became unreachable after a refactor.
   // TODO(cleanup): confirm these are safe to delete and remove them in a sweep.
+  // Story native:01KT7S0E2 removed bmadToNativeIngest from the MCP+CLI seams
+  // (auditor-confirmed orphan — no skill, workflow, or peer ever called it).
+  // The source file is preserved for now because tests import it directly;
+  // delete it in a follow-up cleanup once dependent tests are updated.
+  "src/tools/bmad-to-native-ingest.ts",
   "src/adapters/native/classify-story-files.ts",
   "src/lib/ask-mode-allowed-tools.ts",
   "src/lib/ask-mode-prompt.ts",

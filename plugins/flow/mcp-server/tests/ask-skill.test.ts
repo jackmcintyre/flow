@@ -527,7 +527,8 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
     // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver) = 53 total.
     // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary) = 54 total.
     // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft) = 55 total.
-    expect(result.tools.length).toBe(55);
+    // Story native:01KT7S0E2 removed bmadToNativeIngest (auditor-confirmed orphan) = 54 total.
+    expect(result.tools.length).toBe(54);
 
     // /flow:ask registers no new MCP tool.
     expect(toolNames).not.toContain("ask");
