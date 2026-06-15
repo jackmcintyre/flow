@@ -38,6 +38,11 @@ const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
 ) => (...args: unknown[]) => Promise<unknown>;
 
+// NOTE: The outer describe name MUST match the vitest: marker used in the story's ACs
+// ("plugins/flow/mcp-server/tests/drain-auto-retro.test.ts") so that
+// `pnpm vitest --run -t "<that-path>"` finds and executes these tests.
+describe("plugins/flow/mcp-server/tests/drain-auto-retro.test.ts", () => {
+
 // ---------------------------------------------------------------------------
 // Minimal scratch repo setup (lighter than createSmokeScratchRepo — no git)
 // ---------------------------------------------------------------------------
@@ -573,4 +578,6 @@ describe("AC4 — at-most-once guard: retroFiredThisRun prevents a second auto-r
     },
     60_000,
   );
-});
+}); // end describe: AC4
+
+}); // end outer describe: plugins/flow/mcp-server/tests/drain-auto-retro.test.ts
