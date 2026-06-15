@@ -609,18 +609,19 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story 9.4 added adjudicateQualityLead (Quality Lead). 40 → 41.
     // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
     // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
-    // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
-    // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
-    // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
-    // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
-    // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
-    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
-    // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 50 → 51.
-    // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
-    // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 52 → 53.
-    // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 53 → 54.
-    // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 54 → 55.
-    expect(registeredTools.length).toBe(55);
+    // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam, removed in
+    // native:01KT7S0E2 as auditor-confirmed orphan). 44 → 45 → 44.
+    // FU2 added resolveLensRoles (deterministic lens→role binding). 44 → 45.
+    // FU7 added recordAgentFriction (agent friction signal). 45 → 46.
+    // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 46 → 47.
+    // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 47 → 48.
+    // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 48 → 49.
+    // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 49 → 50.
+    // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 50 → 51.
+    // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 51 → 52.
+    // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 52 → 53.
+    // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 53 → 54.
+    expect(registeredTools.length).toBe(54);
   });
 });
 

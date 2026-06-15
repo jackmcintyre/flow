@@ -602,29 +602,30 @@ describe("AC4(g): tool count and required tools present", () => {
       // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
       expect(toolNames).toContain("recordSkillInvoke");
       expect(toolNames).toContain("computeSkillEffectiveness");
-      // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam). 44 → 45.
-      expect(toolNames).toContain("bmadToNativeIngest");
-      // FU2 added resolveLensRoles (deterministic lens→role binding). 45 → 46.
+      // Story 10.5 added bmadToNativeIngest (BMad → native ingest seam, removed in
+      // native:01KT7S0E2 as auditor-confirmed orphan). 44 → 45 → 44.
+      expect(toolNames).not.toContain("bmadToNativeIngest");
+      // FU2 added resolveLensRoles (deterministic lens→role binding). 44 → 45.
       expect(toolNames).toContain("resolveLensRoles");
-      // FU7 added recordAgentFriction (agent friction signal). 46 → 47.
+      // FU7 added recordAgentFriction (agent friction signal). 45 → 46.
       expect(toolNames).toContain("recordAgentFriction");
-      // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 47 → 48.
+      // Story native:01KT484NY4HCBPBTT6VEY1Q0CS added openCycle (cycle boundary). 46 → 47.
       expect(toolNames).toContain("openCycle");
-      // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 48 → 49.
+      // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV added recordReviewerLesson (learning-loop capture). 47 → 48.
       expect(toolNames).toContain("recordReviewerLesson");
-      // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 49 → 50.
+      // Story native:01KT6QEWY794ZY0DH6JHQFWG6V added recallLesson (on-demand lesson recall). 48 → 49.
       expect(toolNames).toContain("recallLesson");
-      // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 50 → 51.
+      // Story native:01KTKJXP6DWN5YHKVG96DH16V0 added classifyStoryLane (pre-judge lane classifier). 49 → 50.
       expect(toolNames).toContain("classifyStoryLane");
-      // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 51 → 52.
+      // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 added resolveJudgePlan (fast-lane judge plan resolver). 50 → 51.
       expect(toolNames).toContain("resolveJudgePlan");
-      // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 52 → 53.
+      // Story native:01KTKK3HQYNFS1M1ZR9TG02G1F added resolveBuildPlan (fast-lane build plan resolver). 51 → 52.
       expect(toolNames).toContain("resolveBuildPlan");
-      // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 53 → 54.
+      // Story native:01KTZGEW6TSC6M84P9KJ7FD96S added summariseRetroProposal (retro inline summary). 52 → 53.
       expect(toolNames).toContain("summariseRetroProposal");
-      // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 54 → 55.
+      // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 53 → 54.
       expect(toolNames).toContain("discardDraft");
-      expect(toolNames.length).toBe(55);
+      expect(toolNames.length).toBe(54);
     } finally {
       await client.close();
       await server.close();
