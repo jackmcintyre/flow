@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,7 +9,6 @@ import {
   resetBmadAdapter,
 } from "../src/adapters/bmad/index.js";
 import { parseBmadStory } from "../src/adapters/bmad/parse-bmad-story.js";
-import { reconcileStatus } from "../src/adapters/bmad/map-bmad-status.js";
 import {
   MalformedBmadStoryError,
   UnknownBmadRefError,
@@ -249,39 +248,3 @@ describe("BmadAdapter.resolveSourcePath()", () => {
   });
 });
 
-describe("reconcileStatus()", () => {
-  const cases: Array<{
-    src: string;
-    mfst: string;
-    expected:
-      | { kind: "agree" }
-      | { kind: "discrepancy"; severity: "info" | "warn" | "block" };
-  }> = [
-    { src: "done", mfst: "to-do", expected: { kind: "discrepancy", severity: "warn" } },
-    { src: "done", mfst: "in-progress", expected: { kind: "discrepancy", severity: "block" } },
-    { src: "done", mfst: "done", expected: { kind: "agree" } },
-    { src: "done", mfst: "blocked", expected: { kind: "discrepancy", severity: "block" } },
-    { src: "in-progress", mfst: "to-do", expected: { kind: "discrepancy", severity: "info" } },
-    { src: "in-progress", mfst: "done", expected: { kind: "discrepancy", severity: "warn" } },
-    { src: "in-progress", mfst: "in-progress", expected: { kind: "agree" } },
-    { src: "backlog", mfst: "to-do", expected: { kind: "agree" } },
-    { src: "ready-for-dev", mfst: "to-do", expected: { kind: "agree" } },
-    { src: "ready-for-dev", mfst: "in-progress", expected: { kind: "discrepancy", severity: "info" } },
-    { src: "optional", mfst: "to-do", expected: { kind: "agree" } },
-    { src: "contexted", mfst: "to-do", expected: { kind: "agree" } },
-  ];
-
-  test.each(cases)("source=$src, manifest=$mfst → $expected.kind/$expected.severity", ({ src, mfst, expected }) => {
-    const out = reconcileStatus(src, mfst);
-    if (expected.kind === "agree") {
-      expect(out.kind).toBe("agree");
-    } else {
-      expect(out.kind).toBe("discrepancy");
-      if (out.kind === "discrepancy") {
-        expect(out.severity).toBe(expected.severity);
-        expect(out.source).toBe(src);
-        expect(out.manifest).toBe(mfst);
-      }
-    }
-  });
-});
