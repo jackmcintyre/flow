@@ -69,6 +69,7 @@ import { resolveBuildPlan } from "./tools/resolve-build-plan.js";
 import { discardDraft } from "./tools/discard-draft.js";
 import { blockStory } from "./tools/block-story.js";
 import { extractNativeStoryAcs } from "./tools/extract-native-story-acs.js";
+import { captureSkillInvoke } from "./tools/capture-skill-invoke.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -192,6 +193,13 @@ const TOOLS: Record<string, ToolFn> = {
   // its isolated work copy (.flow is gitignored — not present in builder worktrees).
   //   node dist/cli.js extractNativeStoryAcs --json '{"targetRepoRoot":"...","ref":"native:01KT..."}'
   extractNativeStoryAcs,
+  // Story native:01KV4610DTPJJR5E5JJN7P235D — deterministic skill.invoke capture.
+  // Called by the flow plugin's PreToolUse hook on the `Skill` tool (hooks/hooks.json
+  // → scripts/skill-invoke-hook.sh). Takes the raw Claude Code hook payload, derives
+  // the skill.invoke data (skill name from tool_input.skill), and funnels it through
+  // recordSkillInvoke. FAIL-SOFT: never throws — returns { recorded, reason }.
+  //   <hook stdin> | node dist/cli.js captureSkillInvoke --json "$PAYLOAD"
+  captureSkillInvoke,
 };
 
 function emit(obj: unknown): void {
