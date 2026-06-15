@@ -25,6 +25,7 @@
  */
 
 import { DomainError } from "./errors.js";
+import { TOOL_INPUT_SCHEMAS } from "./schemas/tool-input-schemas.js";
 import { getStatus } from "./tools/get-status.js";
 import { openCycle } from "./tools/open-cycle.js";
 import { gatherRetroInputs } from "./tools/gather-retro-inputs.js";
@@ -261,6 +262,28 @@ async function main(): Promise<void> {
   } catch (err) {
     emit({ error: { kind: "bad-json", detail: (err as Error).message, received: json } });
     process.exit(65);
+  }
+
+  // Entry-point required-field validation using the shared input contract
+  // (Story native:01KV45Y13EQYVZP98PR8A9F40P). Tools absent from the schema
+  // map are CLI-only (drain internals) and bypass this check — their own
+  // implementations handle validation.
+  const schema = TOOL_INPUT_SCHEMAS[tool];
+  if (schema !== undefined && typeof args === "object" && args !== null) {
+    const missing = (schema.required ?? []).filter(
+      (k) => !Object.prototype.hasOwnProperty.call(args as object, k),
+    );
+    if (missing.length > 0) {
+      emit({
+        error: {
+          kind: "missing-required-fields",
+          tool,
+          missing,
+          required: schema.required,
+        },
+      });
+      process.exit(65);
+    }
   }
 
   const fn = TOOLS[tool] as ToolFn;

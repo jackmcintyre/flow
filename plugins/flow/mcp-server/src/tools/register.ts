@@ -2,6 +2,62 @@ import { z } from "zod";
 import { DomainError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { AiEngineeringTeamServer } from "../server.js";
+import {
+  acceptProposalInputSchema,
+  adjudicateQualityLeadInputSchema,
+  aggregateJudgePanelInputSchema,
+  applyReviewerLabelsInputSchema,
+  blockOrphanNoTranscriptInputSchema,
+  buildPersonaSpawnPromptInputSchema,
+  claimNextStoryInputSchema,
+  claimStoryInputSchema,
+  classifyRiskTierInputSchema,
+  classifyStoryLaneInputSchema,
+  completeStoryInputSchema,
+  computeAgreementInputSchema,
+  computeSkillEffectivenessInputSchema,
+  createSmokeScratchRepoInputSchema,
+  discardDraftInputSchema,
+  gatherRetroInputsInputSchema,
+  getBacklogDashboardInputSchema,
+  getStatusInputSchema,
+  getTeamSnapshotInputSchema,
+  instantiatePersonaInputSchema,
+  listClaimableTodosInputSchema,
+  lookupRoleByDomainInputSchema,
+  markStoryReadyInputSchema,
+  markWithdrawnInputSchema,
+  mintSessionUlidInputSchema,
+  openCycleInputSchema,
+  postReviewerCommentsInputSchema,
+  processDevTranscriptInputSchema,
+  processReviewerTranscriptInputSchema,
+  processReviewerYieldInputSchema,
+  readBacklogInventoryInputSchema,
+  readCatalogueInputSchema,
+  readCustomRoleInputSchema,
+  readPersonaInputSchema,
+  readRepoSignalsInputSchema,
+  reattachOrphanInputSchema,
+  recallLessonInputSchema,
+  recordAgentFrictionInputSchema,
+  recordReviewerLessonInputSchema,
+  recordSkillInvokeInputSchema,
+  recordStoryRetroInputSchema,
+  resolveBuildPlanInputSchema,
+  resolveJudgePlanInputSchema,
+  resolveLensRolesInputSchema,
+  runAutoMergeGateInputSchema,
+  runDevTerminalActionInputSchema,
+  runReviewerSessionInputSchema,
+  scanOrphanedInProgressInputSchema,
+  scanSourcesInputSchema,
+  summariseRetroProposalInputSchema,
+  validatePlannerBacklogInputSchema,
+  writeLensVerdictInputSchema,
+  writeNativeStoryInputSchema,
+  writeRetroProposalInputSchema,
+} from "../schemas/tool-input-schemas.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
@@ -79,13 +135,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "getStatus",
     description:
       "Return a typed status report for the resolved target repo (plugin version, adapter, standards-doc state, cycle).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: getStatusInputSchema,
     handler: async (args) => {
       const root = z.string().min(1).parse(args.targetRepoRoot);
       const report = await getStatus({ targetRepoRoot: root });
@@ -112,14 +162,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "getStatus reports the new ULID instead of 'none' and gatherRetroInputs scopes its " +
       "bundle to work completed at or after the new cycle's opened_at. Returns " +
       "{ cycleUlid, openedAt, priorCycleUlid, archivePath }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: openCycleInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -149,13 +192,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "readCatalogue",
     description:
       "Read a catalogue role file from plugins/flow/catalogue/ and return its parsed frontmatter and body sections (FR82, FR83).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        role: { type: "string" },
-      },
-      required: ["role"],
-    },
+    inputSchema: readCatalogueInputSchema,
     handler: async (args) => {
       const parsed = z.object({ role: z.string().min(1) }).parse(args);
       const result = await readCatalogue({
@@ -172,14 +209,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "instantiatePersona",
     description:
       "Materialise a persona file at <target-repo>/team/<role>/PERSONA.md by copying the catalogue verbatim and stamping hired_at + catalogue_version; refuses on existing persona (FR89).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "role"],
-    },
+    inputSchema: instantiatePersonaInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -202,14 +232,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "readPersona",
     description:
       "Read a persona file at <target-repo>/team/<role>/PERSONA.md and return parsed frontmatter + body sections (FR93).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "role"],
-    },
+    inputSchema: readPersonaInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -228,14 +251,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "lookupRoleByDomain",
     description:
       "Exact-match a domain string against hired personas' domain frontmatter; returns { role } or { role: null } (FR99).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        domain: { type: "string" },
-      },
-      required: ["targetRepoRoot", "domain"],
-    },
+    inputSchema: lookupRoleByDomainInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -255,13 +271,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "readRepoSignals",
     description:
       "Return a typed RepoSignals payload (languages, layout, README excerpt, recent commit titles, dependency manifests) for the resolved target repo. Used by /hire (FR85).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: readRepoSignalsInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({ targetRepoRoot: z.string().min(1) })
@@ -282,14 +292,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "readCustomRole",
     description:
       "Read an operator-authored custom role file from <target-repo>/team/custom/<role>.md and return its parsed CatalogueRole. Used by /hire to support the FR92 manual escape hatch.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "role"],
-    },
+    inputSchema: readCustomRoleInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -313,14 +316,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "getTeamSnapshot",
     description:
       "Return a typed snapshot of the hired team — roles, domains, fire counts from telemetry, recent persona-knowledge entries. Used by /flow:team (FR108, NFR28). Pure file reads; no LLM in the loop.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        knowledgeLimit: { type: "number" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: getTeamSnapshotInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -351,90 +347,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "state-mutating story with no integration AC). On a successful write, emits exactly one " +
       "draft.authored telemetry event. Used by the planner subagent (/flow:plan) and the author " +
       "subagent (/flow:author) (Story 3.4 / 9.2).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        title: { type: "string" },
-        // Story 10.2 — the narrative is a structured { role, want, so_that }.
-        narrative: {
-          type: "object",
-          properties: {
-            role: { type: "string" },
-            want: { type: "string" },
-            so_that: { type: "string" },
-          },
-          required: ["role", "want", "so_that"],
-        },
-        acceptance_criteria: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              text: { type: "string" },
-              kind: { type: "string", enum: ["integration", "unit"] },
-              // Story 10.1 — required per-AC verification directive.
-              verification: {
-                type: "object",
-                properties: {
-                  type: { type: "string", enum: ["vitest", "artifact"] },
-                  target: { type: "string" },
-                },
-                required: ["type", "target"],
-              },
-            },
-            required: ["text", "kind", "verification"],
-          },
-        },
-        // Story 10.2 — ≥1 task, each mapped to ≥1 AC id.
-        tasks: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              text: { type: "string" },
-              ac_refs: { type: "array", items: { type: "string" } },
-            },
-            required: ["text", "ac_refs"],
-          },
-        },
-        // Story 10.2 — ≥1 repo-relative cited source path.
-        cited_sources: { type: "array", items: { type: "string" } },
-        implementation_notes: { type: "string" },
-        // Story 10.8 — three OPTIONAL build-ready fields that fill the
-        // `## Implementation Notes` sub-sections. The zod schema accepts them;
-        // they were previously missing from this advertised schema, so the
-        // author subagent never knew to set them and every draft rendered the
-        // hollow "TBD by dev" defaults — which the gate-1 Considered lens bounces.
-        // Surface + describe them so the author fills them (especially risk).
-        files_touched: {
-          type: "string",
-          description:
-            "Build-ready '### Files touched' content: the new (NEW) and updated (UPDATE) files this story creates/changes. Omitting it renders a TBD-by-dev placeholder.",
-        },
-        definition_of_done: {
-          type: "string",
-          description:
-            "Build-ready '### Definition of Done' content: the checklist of what must be true to ship (ACs met, build/tests green, dist rebuilt and committed, PR green). Omitting it renders a generic default.",
-        },
-        risk_reasoning: {
-          type: "string",
-          description:
-            "Build-ready '### Risk' content: the highest-risk failure mode for this story and how it is caught. REQUIRED: omitting it or leaving the default placeholder causes the write tool to refuse with a DisciplineViolationError (placeholder-risk). A terse one-liner is enough — name the failure mode and the mitigation.",
-        },
-        depends_on: { type: "array", items: { type: "string" } },
-        sessionUlid: { type: "string" },
-      },
-      required: [
-        "targetRepoRoot",
-        "title",
-        "narrative",
-        "acceptance_criteria",
-        "tasks",
-        "cited_sources",
-        "depends_on",
-      ],
-    },
+    inputSchema: writeNativeStoryInputSchema,
     handler: async (args) => {
       try {
         const result = await writeNativeStory(args);
@@ -464,46 +377,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Returns { ok: true } on pass or { ok: false; violations } on any failure. " +
       "The planner MUST call this before every writeNativeStory and before emitting the handoff phrase. " +
       "Throws WrongAdapterError if the active adapter is not 'native' (Story 3.5).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        pendingStories: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              narrative: { type: "string" },
-              acceptance_criteria: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    text: { type: "string" },
-                    kind: { type: "string", enum: ["integration", "unit"] },
-                  },
-                  required: ["text", "kind"],
-                },
-              },
-              implementation_notes: { type: "string" },
-              depends_on: { type: "array", items: { type: "string" } },
-              ship_gate: { type: "boolean" },
-              state_mutating: { type: ["boolean", "string"] },
-            },
-            required: [
-              "title",
-              "narrative",
-              "acceptance_criteria",
-              "depends_on",
-              "ship_gate",
-              "state_mutating",
-            ],
-          },
-        },
-      },
-      required: ["targetRepoRoot", "pendingStories"],
-    },
+    inputSchema: validatePlannerBacklogInputSchema,
     handler: async (args) => {
       try {
         const result = await validatePlannerBacklog(args);
@@ -529,14 +403,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "markWithdrawn",
     description:
       "Mark an execution manifest withdrawn (FR78). External-adapter discard path. Native discard uses writeNativeStory with a revert/deprecate story instead.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref"],
-    },
+    inputSchema: markWithdrawnInputSchema,
     handler: async (args) => {
       try {
         const result = await markWithdrawn(args);
@@ -568,16 +435,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Writes the manifest in-place (no state-directory move); no-op if the flag " +
       "already holds the requested value; raises NotAnEligibleBacklogItemError for " +
       "anything that is not an un-claimed to-do/ item.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        ready: { type: "boolean" },
-        sessionUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "ready"],
-    },
+    inputSchema: markStoryReadyInputSchema,
     handler: async (args) => {
       try {
         const result = await markStoryReady(args);
@@ -611,15 +469,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Optional `ref` returns only the matching entry; optional `includeSpecText` enriches each returned entry with `specText` + `riskTier` (used by the gate-1 judge workflow). " +
       "MalformedExecutionManifestError surfaces verbatim. " +
       "Used by the /flow:plan skill to derive re-open mode and assemble <initial-context>.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        includeSpecText: { type: "boolean" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: readBacklogInventoryInputSchema,
     handler: async (args) => {
       try {
         const result = await readBacklogInventory(args);
@@ -653,13 +503,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "state, readiness (the Story 9.1 ready flag), and claimability (dependency-satisfied AND ready, " +
       "an un-withdrawn to-do item). Never mutates state and never writes a file. " +
       "MalformedExecutionManifestError surfaces verbatim. Used by the /flow:board skill.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: getBacklogDashboardInputSchema,
     handler: async (args) => {
       const root = z.string().min(1).parse(args.targetRepoRoot);
       try {
@@ -686,16 +530,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "claimStory",
     description:
       "Atomically claim a story for dev work (FR17) — moves manifest from to-do/ to in-progress/, stamps claimed_by with the caller's session ULID, refuses if any depends_on ref is not in done/ (FR18) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "sessionUlid"],
-    },
+    inputSchema: claimStoryInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -732,16 +567,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "completeStory",
     description:
       "Atomically complete a claimed story (FR19) — moves manifest from in-progress/ to done/, preserves claimed_by, refuses if the caller's session ULID does not match the manifest's claimed_by (WrongClaimantError) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "sessionUlid"],
-    },
+    inputSchema: completeStoryInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -786,16 +612,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "or in-progress/. Throws ManifestNotFoundError when the ref does not exist anywhere. " +
       "Throws MalformedStoryRetroPayloadError when the payload fails schema validation " +
       "(closed kind enum, pitfall requires failure_class, etc.).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        payload: { type: "object" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "payload"],
-    },
+    inputSchema: recordStoryRetroInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -846,16 +663,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Throws MalformedStoryRetroPayloadError on a bad lesson; ReviewerResultFileMissingError " +
       "when no reviewer-result.json exists (runReviewerSession was not called first). " +
       "Idempotent: merging the same lesson twice writes a byte-identical file.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        lesson: { type: "object" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],
-    },
+    inputSchema: recordReviewerLessonInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -904,21 +712,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "immutable). Refuses malformed payloads with MalformedRetroProposalError — closed " +
       "discriminated union over seven types (rule, rule-retirement, skill-create, " +
       "skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        isoTimestamp: { type: "string" },
-        proposals: { type: "array" },
-        cycleWindow: {
-          // null or { from, to } — surfaced as plain object so the JSON-schema
-          // hint isn't too tight; Zod inside the handler is the real gate.
-          type: ["object", "null"],
-        },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "isoTimestamp", "proposals"],
-    },
+    inputSchema: writeRetroProposalInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -979,16 +773,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "AmbiguousProposalIdError (id matched in two files — a bug, ids are unique), and " +
       "ProposalKindNotApplicableYetError (no registered handler for the kind — fail-closed; in " +
       "Story 6.4 the production registry is empty so every kind fails closed). Story 6.4.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        proposalId: { type: "string" },
-        confirm: { type: "boolean" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "proposalId"],
-    },
+    inputSchema: acceptProposalInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1035,13 +820,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "prior retro-proposal paths { path, iso_timestamp } sorted ascending (contents NOT " +
       "loaded), and the parsed docs/discipline-rules.yaml registry (or null when absent — " +
       "absence is not an error). Pure read; no writes, no network.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: gatherRetroInputsInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -1079,10 +858,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Mint a fresh session ULID for a /flow:start invocation. Pure — no IO. " +
       "Called once per /flow:start invocation; the returned ULID is re-used for " +
       "every claimStory call in that session. Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
+    inputSchema: mintSessionUlidInputSchema,
     handler: async (_args) => {
       const result = mintSessionUlid();
       return {
@@ -1103,13 +879,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Returns { todos: ClaimableCandidate[], inProgressCount: number } where todos " +
       "are filtered by isClaimable, sorted alphabetically by ref, and annotated with " +
       "depsReady (true iff all depends_on refs are in done/). Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: listClaimableTodosInputSchema,
     handler: async (args) => {
       const parsed = z.object({ targetRepoRoot: z.string().min(1) }).parse(args);
       try {
@@ -1143,14 +913,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "the five required sections (Domain, Mandate, Out of mandate, Prompt, Knowledge) " +
       "plus a Locked phrases sentinel block. Returns { systemPrompt: string }. " +
       "Propagates PersonaFileNotFoundError if the team persona is absent. Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "role"],
-    },
+    inputSchema: buildPersonaSpawnPromptInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1193,11 +956,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "scanSources",
     description:
       "Project the active adapter's source stories into execution manifests under <target-repo>/.flow/state/to-do/<ref>.yaml. Idempotent on re-scan; refreshes source_hash for manifests still in to-do/. Used by /<plugin>:scan (Story 3.2).",
-    inputSchema: {
-      type: "object",
-      properties: { targetRepoRoot: { type: "string" } },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: scanSourcesInputSchema,
     handler: async (args) => {
       const parsed = z.object({ targetRepoRoot: z.string().min(1) }).parse(args);
       try {
@@ -1223,14 +982,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "{ next: 'queue-drained', chatLog } when both to-do/ and in-progress/ are empty, or " +
       "{ next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. " +
       "Story 4.3b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid"],
-    },
+    inputSchema: claimNextStoryInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1264,16 +1016,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Returns { next: 'spawn-reviewer', reviewerPrompt, chatLog } on a valid handoff, or " +
       "{ next: 'done-blocked-handoff-grammar', chatLog } on grammar drift (stamps blocked_by in the manifest). " +
       "MUST be called with the verbatim full transcript — no summarisation. Story 4.3b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        devTranscript: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "devTranscript"],
-    },
+    inputSchema: processDevTranscriptInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1314,16 +1057,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Throws ReviewerFirstCallSkippedError (stamps blocked_by: reviewer-no-session-result) when reviewer-result.json is absent — " +
       "the reviewer subagent skipped the mandatory runReviewerSession first call (Story 5.21 seam). " +
       "Story 4.3b / Story 4.6 revision 2 / Story 5.21.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        manifestPath: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"],
-    },
+    inputSchema: processReviewerTranscriptInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1363,36 +1097,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "defaults to 20 min. A hung or crawling build that exceeds the budget is terminated " +
       "and reported as a build failure with a clear timed-out reason. " +
       "(Story native:01KTN5E6T75XKDX8A0SGBVPRYS)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        title: { type: "string" },
-        type: { type: "string" },
-        body: { type: "string" },
-        summary: { type: "string" },
-        manifestPath: { type: "string" },
-        sessionUlid: { type: "string" },
-        base: { type: "string" },
-        buildTestTimeoutMs: {
-          type: "number",
-          description:
-            "Per-run time budget (milliseconds) for the build/test gates. " +
-            "Defaults to 1 200 000 (20 min). Set to 0 to disable the budget.",
-        },
-      },
-      required: [
-        "targetRepoRoot",
-        "ref",
-        "title",
-        "type",
-        "body",
-        "summary",
-        "manifestPath",
-        "sessionUlid",
-      ],
-    },
+    inputSchema: runDevTerminalActionInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1437,16 +1142,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Returns { next: 'skipped-no-session-result', postedReviewId: null } when the file is absent, " +
       "or { next: 'posted', postedReviewId, inlineCommentCount, verdictLine } on success. " +
       "All composition is deterministic (no LLM step). Story 4.6b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref"],
-    },
+    inputSchema: postReviewerCommentsInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1486,17 +1182,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "or { next: 'applied', labelsApplied: string[] } on success. " +
       "Propagates GhRecoverableError, GhApiResponseShapeError, and ReviewerResultFileMalformedError uncaught. " +
       "Story 4.8 (FR36, FR37, FR38).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        verdictOverride: { type: "string", enum: ["reviewer-failure"] },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref"],
-    },
+    inputSchema: applyReviewerLabelsInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1542,18 +1228,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "(stamps blocked_by: routing-self-yield). " +
       "Emits a yield.handoff telemetry event on the success branch only (FR103, NFR29). " +
       "NOT in subagent allowlists — called by SKILL.md prose only. Story 4.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        fromRole: { type: "string" },
-        reviewerTranscript: { type: "string" },
-        manifestPath: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "fromRole", "reviewerTranscript", "manifestPath"],
-    },
+    inputSchema: processReviewerYieldInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1597,17 +1272,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "`<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning. " +
       "Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, acResults, and recommendedVerdict. " +
       "All read and execution errors propagate uncaught. MUST be the reviewer persona's FIRST action. Story 4.6.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        prNumber: { type: "number" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"],
-    },
+    inputSchema: runReviewerSessionInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1646,18 +1311,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "when no rule matches. Propagates MalformedRiskTieringSpecError and ShippedRiskTieringDefaultMissingError verbatim. " +
       "In v1, this tool is called internally by runReviewerSession; it is exposed as an MCP tool for future direct callers. " +
       "Story 4.9b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        pluginRoot: { type: "string" },
-        storyId: { type: "string" },
-        changedPaths: { type: "array", items: { type: "string" } },
-        commitMessages: { type: "array", items: { type: "string" } },
-        diffSize: { type: "number" },
-      },
-      required: ["targetRepoRoot", "pluginRoot", "storyId", "changedPaths", "commitMessages", "diffSize"],
-    },
+    inputSchema: classifyRiskTierInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1704,14 +1358,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "or null when resolved-pair count < lastNVerdicts (insufficient data). " +
       "Throws AgreementWindowInvalidError on invalid lastNVerdicts (0, negative, non-integer). " +
       "Story 4.10.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        lastNVerdicts: { type: "number" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: computeAgreementInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot as string,
@@ -1753,36 +1400,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "are CLOSED enums; an unknown value raises MalformedSkillInvokeInputError and writes nothing. " +
       "Emits exactly one skill.invoke event via the telemetry logger (which stamps ts). " +
       "Returns { recorded: true } on success. Touches no .flow/state manifest.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        agent: { type: "string" },
-        storyId: { type: "string" },
-        data: {
-          type: "object",
-          properties: {
-            skill_name: { type: "string" },
-            skill_path: { type: "string" },
-            skill_version: { type: "string" },
-            skill_scope: { type: "string", enum: ["project", "persona", "plugin"] },
-            invocation_source: {
-              type: "string",
-              enum: ["user-slash-command", "agent-call"],
-            },
-          },
-          required: [
-            "skill_name",
-            "skill_path",
-            "skill_version",
-            "skill_scope",
-            "invocation_source",
-          ],
-        },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "agent", "data"],
-    },
+    inputSchema: recordSkillInvokeInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -1842,14 +1460,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "{ per_skill, window_size, sample_size, malformed_lines } — an empty per_skill map on " +
       "no data (never null, never an error on empty/malformed input). Malformed JSONL lines " +
       "are skipped and counted. Throws SkillEffectivenessWindowInvalidError on an invalid window.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        window: { type: "number" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: computeSkillEffectivenessInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot as string,
@@ -1887,14 +1498,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     name: "createSmokeScratchRepo",
     description:
       "Create a disposable smoke-harness scratch repo seeded with git init + empty commit + minimal .flow/config.yaml + .flow/standards.md. Used by the /flow:smoke skill as the first checkpoint step.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        label: { type: "string" },
-        parentDir: { type: "string" },
-      },
-      required: ["label"],
-    },
+    inputSchema: createSmokeScratchRepoInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({ label: z.string().min(1), parentDir: z.string().min(1).optional() })
@@ -1928,20 +1532,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, " +
       "so the gate's stdout stays JSON-only and the drain seam cannot break. " +
       "Story 4.10b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        prNumber: { type: "number" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        thresholdOverride: { type: "number" },
-        lastNVerdictsOverride: { type: "number" },
-        dryRun: { type: "boolean" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"],
-    },
+    inputSchema: runAutoMergeGateInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot as string,
@@ -1981,14 +1572,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "is defined and does not match sessionUlid. Returns orphans in alphabetical ref order, " +
       "each with hasTranscript flag indicating whether the Story 5.10 transcript file exists. " +
       "Pure read-only — no write side-effects. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid"],
-    },
+    inputSchema: scanOrphanedInProgressInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2024,15 +1608,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "path of the orphan-recovery branch in /flow:start. " +
       "Throws NotAnOrphanError when claimed_by already matches currentSessionUlid (race). " +
       "Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        currentSessionUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "currentSessionUlid"],
-    },
+    inputSchema: reattachOrphanInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2068,15 +1644,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "from in-progress/ to blocked/ and stamping blocked_by: orphan-no-transcript. " +
       "Used by the no-transcript path of the orphan-recovery branch in /flow:start. " +
       "Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        staleUlid: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref", "staleUlid"],
-    },
+    inputSchema: blockOrphanNoTranscriptInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2116,19 +1684,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<ref>/judge-<lens>.json. " +
       "Returns { resultFilePath }. Each lens judge calls this once; the panel reads the file back " +
       "(deterministic-seam discipline — the panel consumes files, never transcripts).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        lens: { type: "string", enum: [...LENS_NAMES] },
-        role: { type: "string" },
-        pass: { type: "boolean" },
-        missed: { type: "string" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "lens", "role", "pass", "missed"],
-    },
+    inputSchema: writeLensVerdictInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2179,28 +1735,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "flag or any manifest — that decision is Story 9.4's. Throws LensJudgeUnavailableError (a lens has no " +
       "role), DuplicateLensJudgeError (a role is shared across lenses), and LensVerdictFileMalformedError (a " +
       "verdict file is absent / unparseable / fails schema / disagrees on lens|role).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        draft: {
-          type: "object",
-          properties: {
-            ref: { type: "string" },
-            title: { type: "string" },
-            specText: { type: "string" },
-            changedPaths: { type: "array", items: { type: "string" } },
-            commitMessages: { type: "array", items: { type: "string" } },
-            diffSize: { type: "number" },
-          },
-          required: ["ref", "title", "specText"],
-        },
-        lensRoles: { type: "object" },
-        tier0: { type: "string", enum: ["pass", "fail"] },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "draft"],
-    },
+    inputSchema: aggregateJudgePanelInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2265,37 +1800,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "AdjudicationVerdictSchema) to <targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<ref>/adjudication-verdict.json " +
       "— the canonical record the dashboard (9.5) and the calibration loop (judge-the-judge) read. Emits one " +
       "quality.adjudicated telemetry event on every decision. Returns { verdict, verdictFilePath, blessed? }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        panel: {
-          type: "object",
-          properties: {
-            tier0: { type: "string", enum: ["pass", "fail"] },
-            lenses: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  lens: { type: "string", enum: [...LENS_NAMES] },
-                  role: { type: "string" },
-                  pass: { type: "boolean" },
-                  missed: { type: "string" },
-                },
-                required: ["lens", "role", "pass", "missed"],
-              },
-            },
-          },
-          required: ["tier0", "lenses"],
-        },
-        round: { type: "number" },
-        k: { type: "number" },
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "panel"],
-    },
+    inputSchema: adjudicateQualityLeadInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2346,20 +1851,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "recurringFriction in the retro bundle, so the retro-analyst can draft a fix proposal " +
       "for a seam that agents are silently compensating for. " +
       "Story native:01KT2RAXBSQ91Y80Z51DD26KPX.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        agent: { type: "string" },
-        story_id: { type: "string" },
-        session_id: { type: "string" },
-        kind: { type: "string" },
-        expected: { type: "string" },
-        observed: { type: "string" },
-        role: { type: "string" },
-      },
-      required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"],
-    },
+    inputSchema: recordAgentFrictionInputSchema,
     handler: async (args) => {
       try {
         const result = await recordAgentFriction(args as Parameters<typeof recordAgentFriction>[0]);
@@ -2402,13 +1894,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Read-only: does NOT mutate state. Used by both the interactive /flow:judge skill and " +
       "the unattended gate-1.workflow.js (via the CLI seam) so no operator ever hand-picks " +
       "judge assignments.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["targetRepoRoot"],
-    },
+    inputSchema: resolveLensRolesInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2452,15 +1938,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "when the id is unknown (soft miss — never throws on a missing lesson). " +
       "Throws PersonaFileNotFoundError when team/<role>/PERSONA.md is absent. " +
       "Read-only: never mutates state.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-        id: { type: "string" },
-      },
-      required: ["targetRepoRoot", "role", "id"],
-    },
+    inputSchema: recallLessonInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2509,16 +1987,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "classifier independently returns 'fast'; a 'full' hint always wins. " +
       "Returns { lane, matched_rule, evidence: { risk_tier, cited_sources_count, security_paths, author_hint } }. " +
       "The post-build classifyRiskTier on the real diff remains the safety backstop.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        risk_tier: { type: "string", enum: ["low", "medium", "high"] },
-        cited_sources: { type: "array", items: { type: "string" } },
-        lane_hint: { type: "string", enum: ["fast", "full"] },
-      },
-      required: ["storyId"],
-    },
+    inputSchema: classifyStoryLaneInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2553,15 +2022,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "fast → { skip: false, lenses: ['structure+verifiability'], perLensModel: { 'structure+verifiability': 'sonnet' } }. " +
       "fast + detector_confirmed_dead=true → { skip: true, lenses: [], perLensModel: {} } (auto-bless bypass — merge gate remains the safety net). " +
       "Returns { skip, lenses, perLensModel }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        lane: { type: "string", enum: ["fast", "full"] },
-        detector_confirmed_dead: { type: "boolean" },
-      },
-      required: ["storyId"],
-    },
+    inputSchema: resolveJudgePlanInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2598,15 +2059,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "The dev's pre-PR build+test gate (runDevTerminalAction) and merge gate (runAutoMergeGate) " +
       "are unchanged -- the cheaper path sits entirely in front of the same hard gates. " +
       "Returns { devReviewerModel, reviewDepth }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        lane: { type: "string", enum: ["fast", "full"] },
-        manifestPath: { type: "string" },
-      },
-      required: ["storyId"],
-    },
+    inputSchema: resolveBuildPlanInputSchema,
     handler: async (args) => {
       const parsed = z
         .object({
@@ -2646,17 +2099,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "the skill MUST render a plain 'no recommended changes this cycle' statement. " +
       "No writes, no mutations — strictly read-only. " +
       "Throws MalformedRetroProposalError if the file's frontmatter fails schema validation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        absPath: {
-          type: "string",
-          description:
-            "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md).",
-        },
-      },
-      required: ["absPath"],
-    },
+    inputSchema: summariseRetroProposalInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
@@ -2704,14 +2147,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "When the ref is absent from every state directory the action is a clean no-op " +
       "(returns { removed:false, noop:true }) — idempotent on double-call. " +
       "Used by the /flow:ready skill; the skill never deletes files or runs git itself.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-      },
-      required: ["targetRepoRoot", "ref"],
-    },
+    inputSchema: discardDraftInputSchema,
     handler: async (args) => {
       try {
         const parsed = z
