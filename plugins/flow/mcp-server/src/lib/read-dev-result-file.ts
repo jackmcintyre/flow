@@ -21,7 +21,7 @@ import type { Lesson } from "../schemas/story-retro.js";
  * `recordDevLesson` — there is no prior mandatory dev-result writer.
  */
 export interface DevResultFileShape {
-  /** ULID of the drain session that produced this file. */
+  /** ULID of the run session that produced this file. */
   sessionUlid: string;
   /** Story ref (e.g. `"native:01HZ..."`). */
   ref: string;

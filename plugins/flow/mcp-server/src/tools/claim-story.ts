@@ -173,7 +173,7 @@ export async function claimStory(opts: {
   }
 
   // Crash-recovery re-baseline succeeded — the snapshot is now written and the
-  // story is resumable. Return early so the caller (e.g. the drain's orphan-
+  // story is resumable. Return early so the caller (e.g. the run's orphan-
   // recovery path) can proceed with building the already-claimed story.
   if (crashRecoveryRebaselined) {
     return { ref, absPath: absInProgressPath };

@@ -11,7 +11,7 @@
  *  - `gate-1.workflow.js` (unattended gate-1 path, via the CLI seam)
  *
  * Registered in both the MCP server (tools/register.ts) and the CLI TOOLS map
- * (cli.ts) so it is callable on the no-MCP drain/gate path:
+ * (cli.ts) so it is callable on the no-MCP run/gate path:
  *   node dist/cli.js resolveLensRoles --json '{"targetRepoRoot":"..."}'
  */
 

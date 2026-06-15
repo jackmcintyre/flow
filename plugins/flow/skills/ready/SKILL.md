@@ -10,13 +10,13 @@ allowed_tools: [listClaimableTodos, markStoryReady, discardDraft]
 
 # What this skill does
 
-This is the **intake cockpit** for the readiness brake (Epic 9). The drain only ever claims a backlog item once you have explicitly marked it **ready** — a freshly-scanned item sits in the backlog but is *not claimable* until you approve it here. `/flow:ready` lets you:
+This is the **intake cockpit** for the readiness brake (Epic 9). The run only ever claims a backlog item once you have explicitly marked it **ready** — a freshly-scanned item sits in the backlog but is *not claimable* until you approve it here. `/flow:ready` lets you:
 
 1. **See the backlog** — every un-claimed item in `to-do/`, with its readiness flag and whether its dependencies are satisfied.
 2. **Toggle readiness** — flip a chosen item to ready (admit it to the claim queue) or back to not-ready (park it behind the brake).
 3. **Discard a draft** — permanently remove an un-built draft that you have decided not to build, so it never reappears after a scan.
 
-Readiness is a flat operator flag on the item's manifest, orthogonal to its status. Marking an item ready does **not** move it between states, does **not** start any build, and does **not** touch git — it only flips the gate the drain checks before claiming. Everything flows through the `markStoryReady` or `discardDraft` tools; this skill never edits a manifest file directly, never deletes a file directly, and never runs a git command.
+Readiness is a flat operator flag on the item's manifest, orthogonal to its status. Marking an item ready does **not** move it between states, does **not** start any build, and does **not** touch git — it only flips the gate the run checks before claiming. Everything flows through the `markStoryReady` or `discardDraft` tools; this skill never edits a manifest file directly, never deletes a file directly, and never runs a git command.
 
 # Prerequisites
 
@@ -30,7 +30,7 @@ A target repo with `.flow/config.yaml` resolved and at least one scanned backlog
    - `shortHandle` alongside `ref` and `title` — display the short handle (`shortHandle` field from each `ClaimableCandidate`) as the primary identifier on each line (e.g. `[01KT1NR9] native:01KT1NR9… — My story title`). The short handle is always non-empty and is much more readable at a glance than the full ref.
    - **ready** — `ready` (approved, claimable) or `not ready` (behind the brake)
    - **deps** — `deps ready` when `depsReady` is true; otherwise `waiting on: <unmet depends_on refs>`
-   - A one-line note that an item is only claimed by the drain when it is BOTH `ready` AND `deps ready`.
+   - A one-line note that an item is only claimed by the run when it is BOTH `ready` AND `deps ready`.
    If `todos` is empty, say the backlog has no un-claimed items and point the operator at `/flow:scan` (to scan source stories) or `/flow:plan`.
 4. **Toggle readiness:** if the operator named an item (and a direction) when invoking the skill, or once they tell you which item to toggle and whether to mark it ready or not-ready, call the `markStoryReady` MCP tool with `{ targetRepoRoot, ref: <chosen ref>, ready: <true|false> }`. Do this once per chosen item.
    - On a real toggle it reports the new `ready` value and `noop: false`; when the item already held that value it reports `noop: true` (nothing changed).

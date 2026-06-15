@@ -1,7 +1,7 @@
 /**
- * Drain execution-model pin test — Story FU6 / native:01KT2PS8A5D13SBDDMKM04VN94.
+ * Run execution-model pin test — Story FU6 / native:01KT2PS8A5D13SBDDMKM04VN94.
  *
- * Verifies that the drain's dev and reviewer subagents receive the expected
+ * Verifies that the run's dev and reviewer subagents receive the expected
  * model option:
  *
  *   AC1 — with no devReviewerModel arg, both dev and reviewer calls receive
@@ -9,17 +9,17 @@
  *   AC2 — with devReviewerModel: 'opus' in the launch args, both dev and
  *         reviewer calls receive model: 'opus'.
  *
- * The seam-relay courier calls (label carries 'drain', 'persona:', 'claim:',
+ * The seam-relay courier calls (label carries 'run', 'persona:', 'claim:',
  * etc., OR agentOpts.schema is present) are NOT dev/reviewer direct calls and
  * must NOT be asserted on model in these ACs.
  *
- * How it runs the real workflow: `drain.workflow.js` is a plain script body that
+ * How it runs the real workflow: `run.workflow.js` is a plain script body that
  * reaches every decision through injected globals — `args` (a JSON string),
  * `agent` (the subagent/seam courier), `log` (the operator narrator), and `phase`
  * (the phase marker). It uses top-level `await` and top-level `return`. We read
  * the real workflow source and wrap it in an `AsyncFunction` whose parameters ARE
  * those globals, so the body runs verbatim with our stubs. The same pattern as
- * drain-observability-non-fatal.test.ts.
+ * run-observability-non-fatal.test.ts.
  */
 
 import { readFileSync } from "node:fs";
@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → up to mcp-server → up to plugins/flow → workflows/.
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -49,7 +49,7 @@ const PR = 7272;
  * Drive the real workflow body with stubbed seams.
  * Returns the structured result and the captured agent calls.
  */
-async function runDrain(extraArgs: Record<string, unknown> = {}): Promise<{
+async function runRun(extraArgs: Record<string, unknown> = {}): Promise<{
   result: any;
   thrown: unknown;
   calls: AgentCall[];
@@ -59,7 +59,7 @@ async function runDrain(extraArgs: Record<string, unknown> = {}): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const calls: AgentCall[] = [];
 
@@ -78,11 +78,11 @@ async function runDrain(extraArgs: Record<string, unknown> = {}): Promise<{
         return {
           next: "spawn-dev",
           ref: REF,
-          title: "Pin the drain's dev and reviewer to Sonnet by default",
+          title: "Pin the run's dev and reviewer to Sonnet by default",
           manifestPath: "/tmp/does-not-matter.yaml",
         };
       }
-      return { next: "queue-drained" };
+      return { next: "queue-emptied" };
     }
     if (label.startsWith("pd:")) {
       return { next: "spawn-reviewer", prNumber: PR, reviewerPrompt: "REV-PERSONA" };
@@ -147,16 +147,16 @@ function devAndReviewerCalls(calls: AgentCall[]): AgentCall[] {
   );
 }
 
-describe("drain execution-model pin (FU6 / native:01KT2PS8A5D13SBDDMKM04VN94)", () => {
+describe("run execution-model pin (FU6 / native:01KT2PS8A5D13SBDDMKM04VN94)", () => {
   it("AC1: with no devReviewerModel arg, dev and reviewer calls both receive model: 'sonnet'", async () => {
-    const { result, thrown, calls } = await runDrain();
+    const { result, thrown, calls } = await runRun();
 
     // Run completed without throwing.
     expect(thrown).toBeUndefined();
 
-    // The drain ran to completion (queue drained, one story processed).
-    expect(result.drainedReason).toBe("queue-drained");
-    expect(result.drained).toBe(true);
+    // The run ran to completion (queue emptied, one story processed).
+    expect(result.runReason).toBe("queue-emptied");
+    expect(result.queueEmptied).toBe(true);
 
     // At least one dev: and one rev: call must have been made.
     const direct = devAndReviewerCalls(calls);
@@ -169,14 +169,14 @@ describe("drain execution-model pin (FU6 / native:01KT2PS8A5D13SBDDMKM04VN94)", 
   });
 
   it("AC2: with devReviewerModel: 'opus', dev and reviewer calls both receive model: 'opus'", async () => {
-    const { result, thrown, calls } = await runDrain({ devReviewerModel: "opus" });
+    const { result, thrown, calls } = await runRun({ devReviewerModel: "opus" });
 
     // Run completed without throwing.
     expect(thrown).toBeUndefined();
 
-    // The drain ran to completion.
-    expect(result.drainedReason).toBe("queue-drained");
-    expect(result.drained).toBe(true);
+    // The run ran to completion.
+    expect(result.runReason).toBe("queue-emptied");
+    expect(result.queueEmptied).toBe(true);
 
     // At least one dev: and one rev: call must have been made.
     const direct = devAndReviewerCalls(calls);

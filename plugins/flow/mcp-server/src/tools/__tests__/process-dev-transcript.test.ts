@@ -240,7 +240,7 @@ describe("(a2) dev-outcome absent + no PR URL → recover open PR via gh pr list
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       ref: STORY_REF,
-      // Hands off cleanly, but carries NO PR URL — exactly what the drain passes
+      // Hands off cleanly, but carries NO PR URL — exactly what the run passes
       // (the synthesized handoff phrase) when no dev-outcome.json was written.
       devTranscript: HANDOFF_PHRASE,
       execaImpl: fakeExeca,

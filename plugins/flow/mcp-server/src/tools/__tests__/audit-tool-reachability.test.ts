@@ -6,7 +6,7 @@
  * Covers:
  *   (a) A synthetic registered-tools fixture + skill/workflow fixture proves the
  *       reachable-set union (AC1).
- *   (b) Workflow-only tools (drainPhaseStart, drainPhaseDone, guardCleanRoot,
+ *   (b) Workflow-only tools (runPhaseStart, runPhaseDone, guardCleanRoot,
  *       readReviewerLesson, reapStaleWorktrees) are absent from the unreachable
  *       list when they appear in a workflow seam call (AC2).
  *   (c) CLI-vs-workflow delta correctly identifies a TOOLS entry with no workflow
@@ -95,8 +95,8 @@ async function writeWorkflowJs(toolNames: string[]): Promise<string> {
   const lines = toolNames.map(
     (n) => "  await seam(`node ${CLI} " + n + " --json '${J({})}'`, `label:${n}`);",
   );
-  const content = `// synthetic drain.workflow.js\nconst CLI = '';\n${lines.join("\n")}\n`;
-  const p = path.join(workflowsDir, "drain.workflow.js");
+  const content = `// synthetic run.workflow.js\nconst CLI = '';\n${lines.join("\n")}\n`;
+  const p = path.join(workflowsDir, "run.workflow.js");
   await fs.writeFile(p, content, "utf-8");
   return p;
 }
@@ -166,25 +166,25 @@ describe("parseSkillAllowedTools", () => {
 
 describe("parseWorkflowSeamCalls", () => {
   it("extracts tool names from node CLI seam pattern", async () => {
-    await writeWorkflowJs(["drainPhaseStart", "drainPhaseDone", "claimNextStory"]);
+    await writeWorkflowJs(["runPhaseStart", "runPhaseDone", "claimNextStory"]);
     const result = parseWorkflowSeamCalls(path.join(tmpRoot, "workflows"));
-    expect(result.has("drainPhaseStart")).toBe(true);
-    expect(result.has("drainPhaseDone")).toBe(true);
+    expect(result.has("runPhaseStart")).toBe(true);
+    expect(result.has("runPhaseDone")).toBe(true);
     expect(result.has("claimNextStory")).toBe(true);
   });
 
   it("extracts the four known workflow-only tools from a realistic seam call", async () => {
     await writeWorkflowJs([
-      "drainPhaseStart",
-      "drainPhaseDone",
+      "runPhaseStart",
+      "runPhaseDone",
       "guardCleanRoot",
       "readReviewerLesson",
       "reapStaleWorktrees",
     ]);
     const result = parseWorkflowSeamCalls(path.join(tmpRoot, "workflows"));
     // AC2 — these must all be in the reachable-from-workflow set
-    expect(result.has("drainPhaseStart")).toBe(true);
-    expect(result.has("drainPhaseDone")).toBe(true);
+    expect(result.has("runPhaseStart")).toBe(true);
+    expect(result.has("runPhaseDone")).toBe(true);
     expect(result.has("guardCleanRoot")).toBe(true);
     expect(result.has("readReviewerLesson")).toBe(true);
     expect(result.has("reapStaleWorktrees")).toBe(true);
@@ -199,7 +199,7 @@ describe("parseWorkflowSeamCalls", () => {
     const workflowsDir = path.join(tmpRoot, "workflows");
     await fs.mkdir(workflowsDir, { recursive: true });
     await fs.writeFile(
-      path.join(workflowsDir, "drain.workflow.ts"),
+      path.join(workflowsDir, "run.workflow.ts"),
       "node ${CLI} someToolTs --json",
       "utf-8",
     );
@@ -210,11 +210,11 @@ describe("parseWorkflowSeamCalls", () => {
 
 describe("parseCliToolsMap", () => {
   it("extracts tool keys from the TOOLS: Record<string, ToolFn> block", async () => {
-    const cliPath = await writeCliTs(["getStatus", "drainPhaseStart", "mintSessionUlid"]);
+    const cliPath = await writeCliTs(["getStatus", "runPhaseStart", "mintSessionUlid"]);
     const source = await fs.readFile(cliPath, "utf-8");
     const result = parseCliToolsMap(source);
     expect(result.has("getStatus")).toBe(true);
-    expect(result.has("drainPhaseStart")).toBe(true);
+    expect(result.has("runPhaseStart")).toBe(true);
     expect(result.has("mintSessionUlid")).toBe(true);
   });
 
@@ -256,11 +256,11 @@ describe("buildReachabilityReport (AC1, AC2, AC3)", () => {
     expect(report.unreachable).not.toContain("toolBeta"); // reachable via workflow seam
   });
 
-  it("(AC2) workflow-only tools (drainPhaseStart etc.) do NOT appear in unreachable", async () => {
+  it("(AC2) workflow-only tools (runPhaseStart etc.) do NOT appear in unreachable", async () => {
     // These tools are called ONLY via workflow seam — not via skill allowed_tools
     const workflowOnlyTools = [
-      "drainPhaseStart",
-      "drainPhaseDone",
+      "runPhaseStart",
+      "runPhaseDone",
       "guardCleanRoot",
       "readReviewerLesson",
       "reapStaleWorktrees",
@@ -291,13 +291,13 @@ describe("buildReachabilityReport (AC1, AC2, AC3)", () => {
   });
 
   it("(AC3) cli-vs-workflow delta identifies TOOLS entries absent from workflow seam calls", async () => {
-    // CLI TOOLS: getStatus, drainPhaseStart, mintSessionUlid
-    // Workflow seam calls only: drainPhaseStart, mintSessionUlid
+    // CLI TOOLS: getStatus, runPhaseStart, mintSessionUlid
+    // Workflow seam calls only: runPhaseStart, mintSessionUlid
     // Delta should include: getStatus (in CLI, but no workflow seam call)
-    const registerTsPath = await writeRegisterTs(["getStatus", "drainPhaseStart", "mintSessionUlid"]);
-    const cliTsPath = await writeCliTs(["getStatus", "drainPhaseStart", "mintSessionUlid"]);
+    const registerTsPath = await writeRegisterTs(["getStatus", "runPhaseStart", "mintSessionUlid"]);
+    const cliTsPath = await writeCliTs(["getStatus", "runPhaseStart", "mintSessionUlid"]);
     await writeSkillMd("status", ["getStatus"]);
-    await writeWorkflowJs(["drainPhaseStart", "mintSessionUlid"]);
+    await writeWorkflowJs(["runPhaseStart", "mintSessionUlid"]);
 
     const report = buildReachabilityReport({
       registerTsPath,
@@ -309,8 +309,8 @@ describe("buildReachabilityReport (AC1, AC2, AC3)", () => {
 
     // getStatus is in CLI but not called by any workflow seam
     expect(report.cliVsWorkflowDelta).toContain("getStatus");
-    // drainPhaseStart is called by the workflow
-    expect(report.cliVsWorkflowDelta).not.toContain("drainPhaseStart");
+    // runPhaseStart is called by the workflow
+    expect(report.cliVsWorkflowDelta).not.toContain("runPhaseStart");
     expect(report.cliVsWorkflowDelta).not.toContain("mintSessionUlid");
   });
 
@@ -399,11 +399,11 @@ describe("audit-tool-reachability.mjs (AC4)", () => {
 // ---------------------------------------------------------------------------
 
 describe("AC2: real codebase — workflow-only tools not in unreachable", () => {
-  it("drainPhaseStart is not unreachable (it is called via workflow seam)", () => {
+  it("runPhaseStart is not unreachable (it is called via workflow seam)", () => {
     // Run against the real plugin root
     const report = buildReachabilityReport();
-    expect(report.unreachable).not.toContain("drainPhaseStart");
-    expect(report.unreachable).not.toContain("drainPhaseDone");
+    expect(report.unreachable).not.toContain("runPhaseStart");
+    expect(report.unreachable).not.toContain("runPhaseDone");
     expect(report.unreachable).not.toContain("guardCleanRoot");
     expect(report.unreachable).not.toContain("readReviewerLesson");
     expect(report.unreachable).not.toContain("reapStaleWorktrees");

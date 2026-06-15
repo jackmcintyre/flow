@@ -92,7 +92,7 @@ async function enumerateSourceFiles(): Promise<string[]> {
  * Build the workflow-only reachable set by scanning `plugins/flow/workflows/*.js`
  * for relative imports that resolve into `src/`.
  *
- * In practice the current workflow files (`drain.workflow.js`,
+ * In practice the current workflow files (`run.workflow.js`,
  * `gate-1.workflow.js`) do NOT import directly from src/ — they only call CLI
  * seams via `node ${CLI} <tool>`. The allowlist is empty today, but this
  * infrastructure ensures future workflows that do import from src/ are
@@ -189,7 +189,7 @@ const KNOWN_DEAD = new Set<string>([
   "src/lib/ask-mode-allowed-tools.ts",
   "src/lib/ask-mode-prompt.ts",
   "src/lib/explain-gate-reason.ts",
-  "src/lib/summarise-drain-result.ts",
+  "src/lib/summarise-run-result.ts",
   "src/lib/summarise-gate-outcome.ts",
   "src/skills/verdict-parser.ts",
   "src/state/derive-source-baseline.ts",
@@ -280,11 +280,11 @@ describe("bundle coverage (Story native:01KT7RVAKC56AZ6WP5XAD583AJ)", () => {
       const tmpWfDir = await mkdtemp(join(tmpdir(), "flow-wf-ac2-"));
       try {
         // The fake workflow lives at tmpWfDir/fake.workflow.js and imports
-        // ../mcp-server/src/lib/format-drain-progress.js (relative to itself).
-        const target = relative(tmpWfDir, resolve(SRC_DIR, "lib/format-drain-progress.js"));
+        // ../mcp-server/src/lib/format-run-progress.js (relative to itself).
+        const target = relative(tmpWfDir, resolve(SRC_DIR, "lib/format-run-progress.js"));
         await writeFile(
           join(tmpWfDir, "fake.workflow.js"),
-          `import { formatDrainProgress } from '${target}';\n`,
+          `import { formatRunProgress } from '${target}';\n`,
         );
 
         // Re-run the collector against the temp workflow dir.
@@ -308,14 +308,14 @@ describe("bundle coverage (Story native:01KT7RVAKC56AZ6WP5XAD583AJ)", () => {
 
         // The workflow import must resolve to the src/ path and appear as
         // reachable — so it would NOT be flagged as not-shipped (AC2).
-        expect(reachable.has("src/lib/format-drain-progress.ts")).toBe(true);
+        expect(reachable.has("src/lib/format-run-progress.ts")).toBe(true);
       } finally {
         await rm(tmpWfDir, { recursive: true, force: true }).catch(() => {});
       }
     });
 
-    it("current workflow files (drain + gate-1) do not produce any workflow-only reachable entries", () => {
-      // The actual drain.workflow.js and gate-1.workflow.js use CLI seams and
+    it("current workflow files (run + gate-1) do not produce any workflow-only reachable entries", () => {
+      // The actual run.workflow.js and gate-1.workflow.js use CLI seams and
       // do not import directly from src/. The workflow-reachable set is empty.
       expect(workflowReachable.size).toBe(0);
     });

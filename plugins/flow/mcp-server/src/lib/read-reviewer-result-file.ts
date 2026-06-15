@@ -22,7 +22,7 @@ export type { ReviewerResultFileShape };
 /**
  * Sanitise a story ref into a single path-safe directory segment (Story 8.15).
  *
- * A drain run shares ONE session ULID across every story it processes, so the
+ * A run shares ONE session ULID across every story it processes, so the
  * reviewer-result file must be namespaced per story ref to stop a later story
  * clobbering an earlier one's verdict. BMad refs carry a colon (`bmad:8.15`)
  * and native refs are ULIDs; the colon (and any other path-meaningful

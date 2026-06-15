@@ -112,13 +112,13 @@ export function assertNoNegativeFlags(
 }
 
 // ---------------------------------------------------------------------------
-// Concurrent git-lock contention retry (concurrent drains — Story 8.20/8.22).
+// Concurrent git-lock contention retry (concurrent runs — Story 8.20/8.22).
 //
 // Concurrent dev workers run mutating git ops (checkout -b, commit, push)
-// against the SAME shared `.git`: drain worktrees share the common dir, and they
+// against the SAME shared `.git`: run worktrees share the common dir, and they
 // push to one origin. Git does NOT fully serialise these — two workers can
 // collide on the config/index/ref/packed-refs locks and the loser exits non-zero
-// with a transient lock error. (Surfaced as a flaky `concurrent-drains-isolation`
+// with a transient lock error. (Surfaced as a flaky `concurrent-runs-isolation`
 // test that reds CI under load.) These helpers retry the transient lock failures
 // with a short backoff; a non-lock failure (bad ref, malformed message, remote
 // rejection, …) is re-thrown UNCHANGED on the first attempt, so every existing
@@ -149,7 +149,7 @@ const GIT_LOCK_BACKOFF_CAP_MS = 500;
  *
  * Why jitter: two concurrent workers that collide on a lock and then back off by
  * the SAME deterministic delay stay phase-locked and keep colliding — exactly the
- * lockstep that left the `concurrent-drains-isolation` test red on CI under load
+ * lockstep that left the `concurrent-runs-isolation` test red on CI under load
  * even with a (linear) retry already in place. Randomising each backoff into a
  * growing window decorrelates the workers so the loser reschedules into a
  * different slot. This is the standard "full jitter" policy (AWS architecture
@@ -295,7 +295,7 @@ export async function gitCommit(opts: {
   }
 
   // The commit updates the branch ref in the shared `.git`; under concurrent
-  // drains that ref update can lose a lock race. Retry on transient contention.
+  // runs that ref update can lose a lock race. Retry on transient contention.
   const commitResult = await retryGitOnLockContention(
     () => execaImpl("git", commitArgs),
     sleep,
@@ -374,7 +374,7 @@ export async function gitCreateBranch(opts: {
     );
   } else {
     // First-time path: create the branch exactly as before.
-    // `checkout -b` creates a ref in the shared `.git`; under concurrent drains
+    // `checkout -b` creates a ref in the shared `.git`; under concurrent runs
     // that ref creation can lose a lock race. Retry on transient contention.
     await retryGitOnLockContention(
       () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
@@ -410,7 +410,7 @@ export async function gitPush(opts: {
   const execaImpl = opts.execaImpl ?? defaultExeca;
   const sleep = opts.sleepImpl ?? defaultGitLockSleep;
 
-  // Concurrent drains push different branches to ONE origin; the origin's ref
+  // Concurrent runs push different branches to ONE origin; the origin's ref
   // transaction can lose a lock race. The thunk throws GitPushFailedError on any
   // non-zero exit; the retry wrapper retries it only when the stderr signals
   // lock contention, and re-throws the same GitPushFailedError otherwise.
@@ -443,7 +443,7 @@ export async function gitPush(opts: {
  * refusal applies even though the closed signature already admits no flags.
  *
  * Runs `git -C <root> fetch origin`. The fetch updates the remote-tracking ref
- * in the shared `.git`; under concurrent drains that ref update can lose a lock
+ * in the shared `.git`; under concurrent runs that ref update can lose a lock
  * race, so the spawn is wrapped in `retryGitOnLockContention` (a non-lock
  * failure is re-thrown unchanged).
  *
@@ -668,7 +668,7 @@ export async function readRecentCommitTitles(opts: {
  * Resolve the orchestrating checkout root from a working directory that may be a
  * git worktree.
  *
- * Story 8.20: the drain's dev edits inside its OWN worktree (cwd = worktree),
+ * Story 8.20: the run's dev edits inside its OWN worktree (cwd = worktree),
  * but the session ledger (`.flow/state/sessions/<sessionUlid>/dev-outcome.json`,
  * read by `processDevTranscript` against the orchestrating checkout) lives in the
  * orchestrating checkout, NOT the worktree's separate working tree. A worktree
@@ -698,7 +698,7 @@ export async function resolveSessionLedgerRoot(opts: {
   const commonDir = (typeof result.stdout === "string" ? result.stdout : "").trim();
   if (!commonDir) return opts.cwd;
   // `<root>/.git` → `<root>`. A bare repo would return the repo dir itself; the
-  // drain never runs against a bare repo, so the simple parent-of-.git holds.
+  // run never runs against a bare repo, so the simple parent-of-.git holds.
   return path.dirname(commonDir);
 }
 
@@ -711,7 +711,7 @@ export async function resolveSessionLedgerRoot(opts: {
  * untracked, renamed) in the working tree at `cwd`, parsed from
  * `git status --porcelain -z`.
  *
- * Story 8.20: the drain's dev now edits *inside* its own worktree, so the dev's
+ * Story 8.20: the run's dev now edits *inside* its own worktree, so the dev's
  * own changes are exactly the dirty set of that worktree (a worktree cut clean
  * from `base` contains nothing else). `runDevTerminalAction` stages this
  * explicit set rather than `git add .` — defence in depth so a `.flow/state`
@@ -764,16 +764,16 @@ export async function listDirtyPaths(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// stashWorkingTree (Epic 10 drain fix-plan — Fix 2b, clean-root guard)
+// stashWorkingTree (Epic 10 run fix-plan — Fix 2b, clean-root guard)
 // ---------------------------------------------------------------------------
 
 /**
  * Stash the working-tree changes at `cwd` onto the stash stack, non-destructively.
  *
- * Used by the drain's clean-root guard (`guardCleanRoot`): when the orchestrating
+ * Used by the run's clean-root guard (`guardCleanRoot`): when the orchestrating
  * root checkout is unexpectedly dirty after a story — the `bgIsolation: "none"`
  * leak, where the dev's edits land in the shared root instead of its own worktree
- * (Epic 10 drain retro, Issue B) — the guard stashes the leaked edits so the NEXT
+ * (Epic 10 run retro, Issue B) — the guard stashes the leaked edits so the NEXT
  * story's worktree is still cut from a clean base. A stash is fully recoverable
  * (`git stash list` / `git stash pop`), so this turns a silent leak into a
  * visible, safe one rather than discarding work.
@@ -791,7 +791,7 @@ export async function listDirtyPaths(opts: {
  * Returns `{ stashed }` — false when git reports nothing to stash (a benign race
  * where the dirty set cleared between detection and the stash, or a transient
  * index-lock collision). Best-effort: a non-zero exit returns `stashed: false` so
- * a guard call can never break the drain.
+ * a guard call can never break the run.
  *
  * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
  * `lib/git.ts` may spawn `git`) stays satisfied.
@@ -818,7 +818,7 @@ export async function stashWorkingTree(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// restoreRootHead (fix/drain-isolation-coordination-honesty — root-HEAD restore)
+// restoreRootHead (fix/run-isolation-coordination-honesty — root-HEAD restore)
 // ---------------------------------------------------------------------------
 
 /**
@@ -834,14 +834,14 @@ export async function stashWorkingTree(opts: {
  * HEAD. This does.
  *
  * It ONLY restores when HEAD is DETACHED or on a `story/`-prefixed branch (the
- * drain's own dev branches) — never when the root sits on a deliberate operator
+ * run's own dev branches) — never when the root sits on a deliberate operator
  * branch. The move is a plain `git checkout <baseBranch>` (NEVER `reset --hard`,
  * NEVER `-f`): all dev work is on the pushed story branch, so returning the root to
  * base discards nothing. The caller runs the clean-root stash FIRST, so the working
  * tree is clean and the checkout is safe.
  *
  * Best-effort: any git failure returns `{ headMoved: false }` with a note and never
- * throws — a guard step can never break the drain.
+ * throws — a guard step can never break the run.
  *
  * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
  * `lib/git.ts` may spawn `git`) stays satisfied.
@@ -875,7 +875,7 @@ export async function restoreRootHead(opts: {
   // Already on the base branch — nothing to do.
   if (onBranch === baseBranch) return { headMoved: false };
 
-  // Only undo the drain's OWN drift: a detached HEAD (left at a story commit) or a
+  // Only undo the run's OWN drift: a detached HEAD (left at a story commit) or a
   // story/* branch. Leave any deliberate operator branch untouched.
   if (!detached && !onBranch.startsWith("story/")) {
     return {

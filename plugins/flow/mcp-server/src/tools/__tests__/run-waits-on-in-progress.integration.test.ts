@@ -1,26 +1,26 @@
 /**
- * Integration tests for drain re-poll on waiting-on-in-progress
+ * Integration tests for run re-poll on waiting-on-in-progress
  * (Story native:01KTSQXBVE4WEJ2PQKVNHVFPS6).
  *
- * Proves that a drain run with a B-depends-on-A backlog (where A must finish
+ * Proves that a run with a B-depends-on-A backlog (where A must finish
  * before B becomes claimable) builds BOTH stories in one run rather than
  * stopping the moment the first `waiting-on-in-progress` result comes back.
  *
  * AC map:
  *   AC1 — B-depends-on-A backlog: both A and B are built in one run; the run
- *          ends with drained:true (queue-drained), not prematurely.
+ *          ends with queueEmptied:true (queue-emptied), not prematurely.
  *   AC2 — waiting-on-in-progress triggers a bounded re-poll, not a terminal
- *          stop: the drain reason is queue-drained, not waiting-on-in-progress.
- *   AC3 — a genuinely empty queue ends promptly as a clean, fully-drained
- *          finish (drained:true, drainedReason:'queue-drained').
+ *          stop: the run reason is queue-emptied, not waiting-on-in-progress.
+ *   AC3 — a genuinely empty queue ends promptly as a clean, fully-emptied
+ *          finish (queueEmptied:true, runReason:'queue-emptied').
  *
  * How this runs the real workflow:
- *   `drain.workflow.js` is a plain async script that injects every external
+ *   `run.workflow.js` is a plain async script that injects every external
  *   decision through globals (args, agent, log, phase, notify). We read the
  *   real source and wrap it in an AsyncFunction whose parameters ARE those
  *   globals, so the body runs verbatim with our stubs. Nothing in the workflow
  *   is mocked — only its injected seam surface, using the same pattern as
- *   drain-fault-injection.test.ts.
+ *   run-fault-injection.test.ts.
  */
 
 import { readFileSync } from "node:fs";
@@ -31,7 +31,7 @@ import { describe, expect, it } from "vitest";
 // ── Locate the real workflow source ─────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → mcp-server → plugins/flow → workflows/
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -51,14 +51,14 @@ const REF_B = "wip-test-story-b";
 // ── Core runner ─────────────────────────────────────────────────────────────
 
 /**
- * Drives the real drain workflow with a stateful claim stub that simulates a
+ * Drives the real run workflow with a stateful claim stub that simulates a
  * B-depends-on-A scenario:
  *
  *   Phase 1 — before A finishes: any claim call that is NOT for A returns
  *             `waiting-on-in-progress` (A is being built; nothing else is
  *             claimable yet).
  *   Phase 2 — after A finishes: the next claim call returns B (spawn-dev).
- *   Phase 3 — after B finishes: claim returns `queue-drained`.
+ *   Phase 3 — after B finishes: claim returns `queue-emptied`.
  *
  * The `aFinishedSignal` Promise resolves when the test harness decides A has
  * "settled" (i.e. the dev agent for A returned). This lets the stub transition
@@ -67,7 +67,7 @@ const REF_B = "wip-test-story-b";
  * `repollDelayMs` is passed to the workflow as the `repollDelayMs` arg so the
  * test does not block on real wall-clock time.
  */
-async function runDrainWithDependentStories(opts: {
+async function runRunWithDependentStories(opts: {
   maxConcurrency?: number;
   repollDelayMs?: number;
 }): Promise<{
@@ -81,7 +81,7 @@ async function runDrainWithDependentStories(opts: {
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
   let claimCallCount = 0;
@@ -104,7 +104,7 @@ async function runDrainWithDependentStories(opts: {
    *   - First call → A (spawn-dev)
    *   - While A is building (aDevCompleted=false) → waiting-on-in-progress
    *   - Once A is done, next call → B (spawn-dev)
-   *   - Once B is done, next call → queue-drained
+   *   - Once B is done, next call → queue-emptied
    */
   const claimResult = (): unknown => {
     claimCallCount++;
@@ -131,7 +131,7 @@ async function runDrainWithDependentStories(opts: {
       };
     }
     // Both done — queue exhausted.
-    return { next: "queue-drained" };
+    return { next: "queue-emptied" };
   };
 
   const seamResult = (label: string): unknown => {
@@ -210,10 +210,10 @@ async function runDrainWithDependentStories(opts: {
 }
 
 /**
- * Runs the drain with a truly empty queue (no stories at all).
- * Used by AC3 to verify the clean-drain path is unchanged.
+ * Runs the run with a truly empty queue (no stories at all).
+ * Used by AC3 to verify the clean-run path is unchanged.
  */
-async function runDrainEmptyQueue(): Promise<{
+async function runRunEmptyQueue(): Promise<{
   result: any;
   thrown: unknown;
 }> {
@@ -221,7 +221,7 @@ async function runDrainEmptyQueue(): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const agent = async (_prompt: string, agentOpts: { label?: string; schema?: unknown } = {}) => {
     const label = agentOpts.label ?? "";
@@ -231,7 +231,7 @@ async function runDrainEmptyQueue(): Promise<{
       if (label.startsWith("persona:reviewer")) return { stdout: JSON.stringify({ systemPrompt: "REV-PERSONA" }) };
       if (label === "worktree-reap") return { stdout: JSON.stringify({ reaped: [] }) };
       if (label === "orphan-scan") return { stdout: JSON.stringify({ orphans: [] }) };
-      if (label.startsWith("claim:")) return { stdout: JSON.stringify({ next: "queue-drained" }) };
+      if (label.startsWith("claim:")) return { stdout: JSON.stringify({ next: "queue-emptied" }) };
       return { stdout: JSON.stringify({ _unstubbed: label }) };
     }
     return "";
@@ -263,12 +263,12 @@ async function runDrainEmptyQueue(): Promise<{
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe(
-  "drain re-polls on waiting-on-in-progress instead of stopping (native:01KTSQXBVE4WEJ2PQKVNHVFPS6)",
+  "run re-polls on waiting-on-in-progress instead of stopping (native:01KTSQXBVE4WEJ2PQKVNHVFPS6)",
   () => {
     it(
-      "AC1 — a single-worker run with a B-depends-on-A backlog builds both stories and ends drained:true",
+      "AC1 — a single-worker run with a B-depends-on-A backlog builds both stories and ends queueEmptied:true",
       async () => {
-        const { result, thrown, logs } = await runDrainWithDependentStories({
+        const { result, thrown, logs } = await runRunWithDependentStories({
           maxConcurrency: 1,
           repollDelayMs: 0,
         });
@@ -276,10 +276,10 @@ describe(
         // The run finished cleanly (did not throw).
         expect(thrown).toBeUndefined();
 
-        // The run ended as a genuine full drain — not prematurely on
+        // The run ended as a genuine full empty — not prematurely on
         // waiting-on-in-progress or any other early-stop outcome.
-        expect(result.drainedReason).toBe("queue-drained");
-        expect(result.drained).toBe(true);
+        expect(result.runReason).toBe("queue-emptied");
+        expect(result.queueEmptied).toBe(true);
 
         // Both stories were accounted for in the run's outcome buckets.
         // A and B each land in either completed (+ possibly pausedForHuman)
@@ -298,7 +298,7 @@ describe(
         expect(inSomeBucket(REF_A), `${REF_A} must appear in an outcome bucket`).toBe(true);
         expect(inSomeBucket(REF_B), `${REF_B} must appear in an outcome bucket`).toBe(true);
 
-        // The drain narrated both stories being claimed.
+        // The run narrated both stories being claimed.
         const claimedLines = logs.filter((l) => l.startsWith("claimed "));
         expect(claimedLines.some((l) => l.includes(REF_A))).toBe(true);
         expect(claimedLines.some((l) => l.includes(REF_B))).toBe(true);
@@ -307,26 +307,26 @@ describe(
     );
 
     it(
-      "AC2 — the waiting-on-in-progress signal triggers a bounded re-poll; drainedReason is queue-drained, not waiting-on-in-progress",
+      "AC2 — the waiting-on-in-progress signal triggers a bounded re-poll; runReason is queue-emptied, not waiting-on-in-progress",
       async () => {
         // Two workers: worker 0 claims and builds A; worker 1 tries to claim
         // while A is in progress, sees waiting-on-in-progress, and re-polls
         // until A finishes. After A finishes, worker 1 picks up B and builds it.
-        // The key assertion: drainedReason is queue-drained (not the terminal
+        // The key assertion: runReason is queue-emptied (not the terminal
         // waiting-on-in-progress that the pre-fix code would have recorded).
-        const { result, thrown, waitingLogCount } = await runDrainWithDependentStories({
+        const { result, thrown, waitingLogCount } = await runRunWithDependentStories({
           maxConcurrency: 2,
           repollDelayMs: 0,
         });
 
         expect(thrown).toBeUndefined();
 
-        // The drain reason MUST be queue-drained — not waiting-on-in-progress.
-        // Before the fix, the drain would record waiting-on-in-progress as a
+        // The run reason MUST be queue-emptied — not waiting-on-in-progress.
+        // Before the fix, the run would record waiting-on-in-progress as a
         // terminal reason and stop. After the fix, it re-polls and eventually
-        // reaches queue-drained.
-        expect(result.drainedReason).toBe("queue-drained");
-        expect(result.drainedReason).not.toBe("waiting-on-in-progress");
+        // reaches queue-emptied.
+        expect(result.runReason).toBe("queue-emptied");
+        expect(result.runReason).not.toBe("waiting-on-in-progress");
 
         // The WAITING log line was emitted at least once, proving the re-poll
         // branch was exercised (not just skipped over or never hit).
@@ -336,16 +336,16 @@ describe(
     );
 
     it(
-      "AC3 — a genuinely empty queue ends promptly as a clean, fully-drained finish",
+      "AC3 — a genuinely empty queue ends promptly as a clean, fully-emptied finish",
       async () => {
-        const { result, thrown } = await runDrainEmptyQueue();
+        const { result, thrown } = await runRunEmptyQueue();
 
         expect(thrown).toBeUndefined();
 
-        // A truly empty queue must produce a clean drain — no re-polling loop,
-        // no false WAITING, no blocking. drained:true and drainedReason:'queue-drained'.
-        expect(result.drainedReason).toBe("queue-drained");
-        expect(result.drained).toBe(true);
+        // A truly empty queue must produce a clean run — no re-polling loop,
+        // no false WAITING, no blocking. queueEmptied:true and runReason:'queue-emptied'.
+        expect(result.runReason).toBe("queue-emptied");
+        expect(result.queueEmptied).toBe(true);
 
         // No stories were claimed (everything is empty).
         expect(result.completed).toHaveLength(0);
@@ -357,19 +357,19 @@ describe(
     );
 
     it(
-      "AC3 — a two-worker run with a B-depends-on-A backlog also ends drained:true",
+      "AC3 — a two-worker run with a B-depends-on-A backlog also ends queueEmptied:true",
       async () => {
         // Verify the fix works under concurrency too (maxConcurrency: 2): a second
         // worker that sees waiting-on-in-progress while worker 0 builds A must
         // re-poll and pick up B once A finishes, rather than stopping the whole run.
-        const { result, thrown } = await runDrainWithDependentStories({
+        const { result, thrown } = await runRunWithDependentStories({
           maxConcurrency: 2,
           repollDelayMs: 0,
         });
 
         expect(thrown).toBeUndefined();
-        expect(result.drainedReason).toBe("queue-drained");
-        expect(result.drained).toBe(true);
+        expect(result.runReason).toBe("queue-emptied");
+        expect(result.queueEmptied).toBe(true);
 
         const inSomeBucket = (ref: string) => {
           const pausedRefs = new Set(result.pausedForHuman.map((p: any) => p.ref));

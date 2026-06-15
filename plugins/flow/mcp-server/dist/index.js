@@ -37784,10 +37784,10 @@ var ExecutionManifestSchema = external_exports.object({
     "reviewer-grammar",
     "deps-drift",
     "needs-human-decision",
-    // Drain give-up reasons (fix/drain-isolation-coordination-honesty): the
-    // drain abandons a story it cannot finish and MUST move the manifest out
+    // Run give-up reasons (fix/run-isolation-coordination-honesty): the
+    // run abandons a story it cannot finish and MUST move the manifest out
     // of in-progress/ so it stops counting as live work (the non-termination
-    // fix). Each names WHY the drain gave up.
+    // fix). Each names WHY the run gave up.
     "rework-exhausted",
     "verdict-failed",
     "worker-threw",
@@ -37833,18 +37833,18 @@ var ExecutionManifestSchema = external_exports.object({
    */
   rework_count: external_exports.number().int().nonnegative().optional(),
   /**
-   * Count of times the autonomous drain has re-claimed this story after a
+   * Count of times the autonomous run has re-claimed this story after a
    * prior run left it orphaned in `in-progress/` (a crash/interruption).
    * `undefined` ≡ `0`. Incremented in-place by `reattachOrphan` each time the
-   * drain auto-resumes the orphan. The drain caps resumes on this count so a
+   * run auto-resumes the orphan. The run caps resumes on this count so a
    * genuinely-broken story cannot loop forever — past the cap it is blocked
    * (`orphan-no-transcript`) for a human instead of re-resumed.
    *
    * Distinct from `rework_count` (NEEDS CHANGES rounds within one session);
    * this counts crash-resumptions across sessions. Added in the crash-recovery
-   * change (drain auto-resume).
+   * change (run auto-resume).
    */
-  drain_resume_attempts: external_exports.number().int().nonnegative().optional(),
+  run_resume_attempts: external_exports.number().int().nonnegative().optional(),
   /**
    * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).
    * Written by `postReviewerComments` after a successful POST/PATCH.
@@ -49142,7 +49142,7 @@ var RecordAgentFrictionOptionsSchema = external_exports.object({
    * inside a story flow.
    */
   story_id: external_exports.string().min(1).optional(),
-  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  /** Run-session ULID (or any opaque caller-supplied identifier). */
   session_id: external_exports.string().min(1),
   /** The closed-enum friction category. */
   kind: external_exports.enum([
@@ -52240,7 +52240,7 @@ async function isSessionAlive(targetRepoRoot, sessionUlid, opts) {
 }
 
 // src/tools/claim-next-story.ts
-var QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
+var QUEUE_EMPTIED_LINE = "queue emptied \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 var WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
 var WAITING_ON_UNMERGED_OVERLAP_LINE = "WAITING \u2014 ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
 var WAITING_ON_UNMERGED_DEPENDENCY_LINE = "WAITING \u2014 ready story held for an unmerged declared dependency. Stop here or wait for the dependency PR to merge.";
@@ -52351,7 +52351,7 @@ async function claimNextStory(opts) {
         chatLog
       };
     }
-    chatLog.push(QUEUE_DRAINED_LINE);
+    chatLog.push(QUEUE_EMPTIED_LINE);
     chatLog.push(
       renderExpectedWorkCounters({
         filesSeenCount: 0,
@@ -52359,7 +52359,7 @@ async function claimNextStory(opts) {
         refsHeld: buildHeldRefs()
       })
     );
-    return { next: "queue-drained", chatLog };
+    return { next: "queue-emptied", chatLog };
   }
   if (eligible.length === 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
@@ -52431,7 +52431,7 @@ async function claimNextStory(opts) {
     );
     return { next: "waiting-on-in-progress", chatLog };
   }
-  chatLog.push(QUEUE_DRAINED_LINE);
+  chatLog.push(QUEUE_EMPTIED_LINE);
   chatLog.push(
     renderExpectedWorkCounters({
       filesSeenCount: 0,
@@ -52439,7 +52439,7 @@ async function claimNextStory(opts) {
       refsHeld: buildHeldRefs()
     })
   );
-  return { next: "queue-drained", chatLog };
+  return { next: "queue-emptied", chatLog };
 }
 
 // src/tools/process-dev-transcript.ts
@@ -55019,7 +55019,7 @@ async function scanOrphanedInProgress(opts) {
       hasTranscript,
       hasOpenPR,
       prNumber,
-      resumeAttempts: manifest.drain_resume_attempts ?? 0
+      resumeAttempts: manifest.run_resume_attempts ?? 0
     });
   }
   return { orphans };
@@ -55057,11 +55057,11 @@ async function reattachOrphan(opts) {
     throw new NotAnOrphanError({ ref, currentSessionUlid });
   }
   const staleUlid = manifest.claimed_by ?? "<absent>";
-  const resumeAttempts = (manifest.drain_resume_attempts ?? 0) + 1;
+  const resumeAttempts = (manifest.run_resume_attempts ?? 0) + 1;
   const updatedManifest = {
     ...manifest,
     claimed_by: currentSessionUlid,
-    drain_resume_attempts: resumeAttempts
+    run_resume_attempts: resumeAttempts
   };
   await writeManifest(absPath, updatedManifest);
   const chatLog = [
@@ -56133,7 +56133,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "markStoryReady",
-    description: "Set the operator `ready` flag on an un-claimed backlog item (Story 9.1). The drain claims an item only once it is dependency-ready AND marked ready. Writes the manifest in-place (no state-directory move); no-op if the flag already holds the requested value; raises NotAnEligibleBacklogItemError for anything that is not an un-claimed to-do/ item.",
+    description: "Set the operator `ready` flag on an un-claimed backlog item (Story 9.1). The run claims an item only once it is dependency-ready AND marked ready. Writes the manifest in-place (no state-directory move); no-op if the flag already holds the requested value; raises NotAnEligibleBacklogItemError for anything that is not an un-claimed to-do/ item.",
     inputSchema: markStoryReadyInputSchema,
     handler: async (args) => {
       try {
@@ -56494,7 +56494,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "claimNextStory",
-    description: "Claim the next ready story from the backlog for the current session. Returns { next: 'spawn-dev', ref, title, manifestPath, chatLog } when a story is claimed, { next: 'queue-drained', chatLog } when both to-do/ and in-progress/ are empty, or { next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. Story 4.3b.",
+    description: "Claim the next ready story from the backlog for the current session. Returns { next: 'spawn-dev', ref, title, manifestPath, chatLog } when a story is claimed, { next: 'queue-emptied', chatLog } when both to-do/ and in-progress/ are empty, or { next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. Story 4.3b.",
     inputSchema: claimNextStoryInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
@@ -56859,7 +56859,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "runAutoMergeGate",
-    description: "Auto-merge gate for a PR that has reached done-ready-for-merge (FR40/FR41/FR42). Reads done/<ref>.yaml for risk_tier, computeAgreement for the rolling agreement ratio, and workspace config plugin.agreement_threshold (default 0.8). Decision: low + met-threshold \u2192 gh pr merge --squash --delete-branch; all other branches \u2192 gh api POST /labels with needs-human. dryRun:true skips the gh shell-out. Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. An operational gh failure (merge refused, label API hiccup, missing permission) NEVER throws: it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, so the gate's stdout stays JSON-only and the drain seam cannot break. Story 4.10b.",
+    description: "Auto-merge gate for a PR that has reached done-ready-for-merge (FR40/FR41/FR42). Reads done/<ref>.yaml for risk_tier, computeAgreement for the rolling agreement ratio, and workspace config plugin.agreement_threshold (default 0.8). Decision: low + met-threshold \u2192 gh pr merge --squash --delete-branch; all other branches \u2192 gh api POST /labels with needs-human. dryRun:true skips the gh shell-out. Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. An operational gh failure (merge refused, label API hiccup, missing permission) NEVER throws: it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, so the gate's stdout stays JSON-only and the run seam cannot break. Story 4.10b.",
     inputSchema: runAutoMergeGateInputSchema,
     handler: async (args) => {
       const parsed = {

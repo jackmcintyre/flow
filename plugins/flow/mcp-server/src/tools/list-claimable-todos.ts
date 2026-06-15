@@ -6,7 +6,7 @@
  * (alphabetical ref order) projection used by the `/flow:start` skill.
  *
  * The return shape also includes `inProgressCount` so the skill can decide
- * the queue-drained condition without a separate filesystem call.
+ * the queue-emptied condition without a separate filesystem call.
  *
  * Per-candidate `depsReady` is computed by statting
  * `<targetRepoRoot>/.flow/state/done/<dep>.yaml` for each dep in

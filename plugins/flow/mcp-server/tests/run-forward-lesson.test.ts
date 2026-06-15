@@ -2,16 +2,16 @@
  * Integration tests for the learning-loop producer — Story
  * native:01KT6GSV8KTTKKHPRGEJWJAGZV (AC1 + AC2).
  *
- * The drain wires the CAPTURE → FORWARD chain through one-shot CLI seams:
+ * The run wires the CAPTURE → FORWARD chain through one-shot CLI seams:
  *   CAPTURE  — the reviewer optionally calls `recordReviewerLesson`, which merges
  *              ONE lesson onto the per-ref `reviewer-result.json`.
- *   FORWARD  — on a green verdict, BEFORE the merge gate runs, the drain reads the
+ *   FORWARD  — on a green verdict, BEFORE the merge gate runs, the run reads the
  *              captured lesson (`readReviewerLesson`) and, if present, forwards it
  *              onto the done manifest (`recordStoryRetro`).
  *
- * The drain workflow itself runs under the Workflow runtime (injected `agent` /
+ * The run workflow itself runs under the Workflow runtime (injected `agent` /
  * `seam` / `log` globals), so it cannot be unit-executed here. We test the chain
- * the drain wires at the TOOL boundary (the seams the workflow shells out to),
+ * the run wires at the TOOL boundary (the seams the workflow shells out to),
  * PLUS a structural anchor that asserts the workflow wires those exact seams in
  * the right order (FORWARD inside the green-verdict block, BEFORE the gate, with
  * the swallow/non-fatal variant). End-to-end behaviour is exercised tool-side;
@@ -121,11 +121,11 @@ async function buildWorkspaceRoot(scratch: string): Promise<string> {
 }
 
 /**
- * Simulate the drain's FORWARD step exactly as the workflow wires it: read the
+ * Simulate the run's FORWARD step exactly as the workflow wires it: read the
  * captured lesson, and if present, forward it onto the done manifest. Returns
  * whether a forward happened, so a test can assert the gate is still reached.
  */
-async function drainForwardStep(root: string): Promise<{ forwarded: boolean }> {
+async function runForwardStep(root: string): Promise<{ forwarded: boolean }> {
   const { lesson } = await readReviewerLesson({
     targetRepoRoot: root,
     sessionUlid: SESSION,
@@ -150,7 +150,7 @@ let root: string;
 let stateRoot: string;
 
 beforeEach(async () => {
-  scratch = await fs.mkdtemp(path.join(os.tmpdir(), "flow-drain-forward-lesson-"));
+  scratch = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-forward-lesson-"));
   root = await buildWorkspaceRoot(scratch);
   stateRoot = path.join(root, ".flow", "state");
 });
@@ -187,8 +187,8 @@ describe("learning-loop AC1 — a recorded lesson is forwarded onto the done man
     expect(merged.prNumber).toBe(42);
     expect(merged.lesson).toEqual(lesson);
 
-    // FORWARD — the drain's green-verdict step reads + forwards the lesson.
-    const { forwarded } = await drainForwardStep(root);
+    // FORWARD — the run's green-verdict step reads + forwards the lesson.
+    const { forwarded } = await runForwardStep(root);
     expect(forwarded).toBe(true);
 
     // The lesson is now on the done manifest, ready for the retro analyst.
@@ -217,8 +217,8 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
     });
     expect(lesson).toBeNull();
 
-    // Drain forward step does nothing — and the gate is still reached.
-    const { forwarded } = await drainForwardStep(root);
+    // Run forward step does nothing — and the gate is still reached.
+    const { forwarded } = await runForwardStep(root);
     expect(forwarded).toBe(false);
 
     const manifest = yamlParse(await fs.readFile(donePath, "utf8")) as Record<string, unknown>;
@@ -236,11 +236,11 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
     expect(lesson).toBeNull();
   });
 
-  it("contains a forwarding failure so the merge gate still runs (drain swallows it)", async () => {
+  it("contains a forwarding failure so the merge gate still runs (run swallows it)", async () => {
     // Capture a lesson, but DELETE the done manifest so the forward (recordStoryRetro)
-    // throws ManifestNotFoundError. The drain wraps the forward in the swallow
+    // throws ManifestNotFoundError. The run wraps the forward in the swallow
     // variant, so the merge gate still runs. We assert the throw is real here
-    // (proving the failure mode exists) and that the drain's swallow contract
+    // (proving the failure mode exists) and that the run's swallow contract
     // converts it into a no-op for the run.
     await seedReviewerResult(root, {});
     await recordReviewerLesson({
@@ -250,13 +250,13 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
       lesson: { kind: "tool-quirk" as const, text: "A seam swallows a forward error." },
     });
 
-    // No done manifest seeded → recordStoryRetro throws. Simulate the drain's
+    // No done manifest seeded → recordStoryRetro throws. Simulate the run's
     // swallow wrapper: catch the throw, log nothing, and PROCEED.
     let reachedGate = false;
     try {
-      await drainForwardStep(root);
+      await runForwardStep(root);
     } catch {
-      // swallowed — exactly what the drain's retryable+swallow seam does.
+      // swallowed — exactly what the run's retryable+swallow seam does.
     } finally {
       reachedGate = true; // the gate step runs regardless.
     }
@@ -265,7 +265,7 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
 
   it("recordReviewerLesson itself throws ReviewerResultFileMissingError when called before runReviewerSession", async () => {
     // No reviewer-result.json seeded — calling the capture tool is a caller-order
-    // bug; it fails loud (the drain's optional/fail-soft invitation contains it).
+    // bug; it fails loud (the run's optional/fail-soft invitation contains it).
     const err = await recordReviewerLesson({
       targetRepoRoot: root,
       sessionUlid: SESSION,
@@ -277,22 +277,22 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
 });
 
 // ---------------------------------------------------------------------------
-// Structural anchor — the drain workflow wires the FORWARD seams correctly
+// Structural anchor — the run workflow wires the FORWARD seams correctly
 // ---------------------------------------------------------------------------
 
-describe("learning-loop — drain workflow wires the capture+forward seams in order", () => {
+describe("learning-loop — run workflow wires the capture+forward seams in order", () => {
   const HERE = path.dirname(fileURLToPath(import.meta.url));
-  const DRAIN = path.resolve(HERE, "..", "..", "workflows", "drain.workflow.js");
+  const RUN = path.resolve(HERE, "..", "..", "workflows", "run.workflow.js");
 
   it("invites recordReviewerLesson in the reviewer prompt (optional, fail-soft)", async () => {
-    const src = await fs.readFile(DRAIN, "utf8");
+    const src = await fs.readFile(RUN, "utf8");
     expect(src).toContain("recordReviewerLesson");
     // The carve-out of the no-state-file rule for this one tool must be present.
     expect(src).toMatch(/recordReviewerLesson.*owns the lesson write/s);
   });
 
   it("forwards the captured lesson via recordStoryRetro AFTER a confirmed-green gate completes the story", async () => {
-    const src = await fs.readFile(DRAIN, "utf8");
+    const src = await fs.readFile(RUN, "utf8");
     // Anchor on the actual SEAM COMMANDS (`node ... <tool> --json`), not the bare
     // identifiers — the identifiers also appear in the surrounding comments.
     const gateSeamIdx = src.indexOf("runAutoMergeGate --json");
@@ -301,7 +301,7 @@ describe("learning-loop — drain workflow wires the capture+forward seams in or
     const forwardSeamIdx = src.indexOf("recordStoryRetro --json");
     expect(gateSeamIdx).toBeGreaterThan(-1);
     expect(completeSeamIdx).toBeGreaterThan(-1);
-    // fix/drain-isolation-coordination-honesty: the honesty rebuild reorders the
+    // fix/run-isolation-coordination-honesty: the honesty rebuild reorders the
     // tail. The GATE runs FIRST; completeStory moves the story to done/ ONLY on a
     // confirmed-green gate; and ONLY THEN is the lesson forwarded — recordStoryRetro
     // requires the manifest already in done/. So the order is strictly:
@@ -312,7 +312,7 @@ describe("learning-loop — drain workflow wires the capture+forward seams in or
   });
 
   it("forwards with the swallow/non-fatal variant so a forward error never blocks the merge", async () => {
-    const src = await fs.readFile(DRAIN, "utf8");
+    const src = await fs.readFile(RUN, "utf8");
     // Both forward seams use retryable=true AND swallow=true (the 4th arg).
     expect(src).toMatch(/readReviewerLesson --json[^\n]*`,\s*`lesson-read:\$\{ref\}`,\s*true,\s*true/);
     expect(src).toMatch(/recordStoryRetro --json[^\n]*`,\s*`lesson-forward:\$\{ref\}`,\s*true,\s*true/);

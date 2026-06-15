@@ -162,15 +162,15 @@ export async function processReviewerTranscript(
   const verdict: RecommendedVerdict = resultFile.recommendedVerdict;
 
   if (verdict === "READY FOR MERGE") {
-    // fix/drain-isolation-coordination-honesty: do NOT complete here. The manifest
+    // fix/run-isolation-coordination-honesty: do NOT complete here. The manifest
     // STAYS in in-progress/; the auto-merge GATE owns the done/ move and makes it
     // only after confirming the PR's CI is green. That makes "done == reviewer-
     // approved AND CI-green" hold by construction — a red / CI-rejected story can
     // never land in done/ wearing a merge-ready label (the #355 honesty bug).
-    // completeStory now runs in the drain AFTER the gate's green confirmation; any
+    // completeStory now runs in the run AFTER the gate's green confirmation; any
     // stale blocked_by from a prior NEEDS-CHANGES round is stripped there.
     // `completed: true` is retained as the "reviewer says ready-for-merge" signal
-    // (the drain switches on `next`, not this field); it no longer implies the
+    // (the run switches on `next`, not this field); it no longer implies the
     // manifest has moved to done/.
     chatLog.push(`reviewer verdict: READY FOR MERGE — story ${ref} ready for the merge gate`);
     return { next: "done-ready-for-merge", completed: true as const, chatLog };

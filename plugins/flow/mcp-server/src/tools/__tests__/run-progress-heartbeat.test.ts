@@ -1,23 +1,23 @@
 /**
- * Drain progress-heartbeat integration test — Story 8.18, AC3.
+ * Run progress-heartbeat integration test — Story 8.18, AC3.
  *
  * AC3: the progress lines are emitted through the existing narrator channel and
  *      change NO control flow — the set of result buckets (completed / merged /
- *      pausedForHuman / blocked) and the drain reason for a run are identical
- *      with and without the new lines. This existing-style drain integration
+ *      pausedForHuman / blocked) and the run reason for a run are identical
+ *      with and without the new lines. This existing-style run integration
  *      test (seams stubbed) asserts the run's structured result is unchanged and
  *      that the new progress lines appear in the captured narrator output.
  *
- * How it runs the real workflow: `drain.workflow.js` is a plain script body that
+ * How it runs the real workflow: `run.workflow.js` is a plain script body that
  * reaches every decision through injected globals — `args` (a JSON string),
  * `agent` (the subagent/seam courier), `log` (the operator narrator), and
  * `phase` (the phase marker). It uses top-level `await` and top-level `return`.
  * We read the real workflow source and wrap it in an `AsyncFunction` whose
  * parameters ARE those globals, so the body runs verbatim with our stubs. This
- * is the "existing-style drain integration test (with seams stubbed)" the AC
+ * is the "existing-style run integration test (with seams stubbed)" the AC
  * asks for: nothing in the workflow is mocked — only its injected seam surface.
  *
- * The clock seams (`drainPhaseStart`/`drainPhaseDone`) are exercised for real:
+ * The clock seams (`runPhaseStart`/`runPhaseDone`) are exercised for real:
  * the stub invokes the actual tool functions, so the asserted progress lines are
  * the lines the production tools produce, not test-local fabrications.
  */
@@ -28,17 +28,17 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  drainPhaseStart,
-  drainPhaseDone,
-} from "../drain-phase-progress.js";
-import { LONG_PHASE_MARKER } from "../../lib/format-drain-progress.js";
+  runPhaseStart,
+  runPhaseDone,
+} from "../run-phase-progress.js";
+import { LONG_PHASE_MARKER } from "../../lib/format-run-progress.js";
 
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → up to mcp-server → up to plugins/flow → workflows/.
 const WORKFLOW_PATH = resolve(
   HERE,
-  "../../../../workflows/drain.workflow.js",
+  "../../../../workflows/run.workflow.js",
 );
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
@@ -55,12 +55,12 @@ interface AgentCall {
  * Drive the real workflow body with stubbed seams. Returns the workflow's
  * structured result, the captured narrator lines, and the captured agent calls.
  *
- * `withHeartbeat` controls whether the progress seams (drainPhaseStart/Done) are
+ * `withHeartbeat` controls whether the progress seams (runPhaseStart/Done) are
  * served their real lines or treated as no-ops — the two runs must produce an
  * IDENTICAL structured result (AC3's "change no control flow"), differing only
  * in the narrator output.
  */
-async function runDrain(opts: { withHeartbeat: boolean }): Promise<{
+async function runRun(opts: { withHeartbeat: boolean }): Promise<{
   result: any;
   logs: string[];
   calls: AgentCall[];
@@ -72,7 +72,7 @@ async function runDrain(opts: { withHeartbeat: boolean }): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
   const calls: AgentCall[] = [];
@@ -88,17 +88,17 @@ async function runDrain(opts: { withHeartbeat: boolean }): Promise<{
     if (label.startsWith("persona:reviewer")) return { systemPrompt: "REV-PERSONA" };
     if (label === "orphan-scan") return { orphans: [] };
     if (label.startsWith("claim:")) {
-      // First claim hands out the one story; the second drains the queue.
+      // First claim hands out the one story; the second empties the queue.
       const idx = Number(label.split(":")[1]);
       if (idx === 0) {
         return {
           next: "spawn-dev",
           ref: REF,
-          title: "Drain progress heartbeat through long phases",
+          title: "Run progress heartbeat through long phases",
           manifestPath: "/tmp/does-not-matter.yaml",
         };
       }
-      return { next: "queue-drained" };
+      return { next: "queue-emptied" };
     }
     if (label.startsWith("baseline:")) return { dirtyPaths: [] };
     if (label.startsWith("pd:")) {
@@ -116,12 +116,12 @@ async function runDrain(opts: { withHeartbeat: boolean }): Promise<{
     if (label.startsWith("progress-start:")) {
       if (!opts.withHeartbeat) return {};
       const phase = label.split(":").pop();
-      return drainPhaseStart({ ref: REF, phase: phase as any });
+      return runPhaseStart({ ref: REF, phase: phase as any });
     }
     if (label.startsWith("progress-done:")) {
       if (!opts.withHeartbeat) return {};
       const phase = label.split(":").pop();
-      return drainPhaseDone({ ref: REF, phase: phase as any, startedAtMs: Date.now() - 5000 });
+      return runPhaseDone({ ref: REF, phase: phase as any, startedAtMs: Date.now() - 5000 });
     }
     return { _unstubbed: label };
   };
@@ -166,15 +166,15 @@ function normaliseLogs(logs: string[]): string[] {
   return logs.map((l) => l.replace(/done in .*/, "done in <elapsed>"));
 }
 
-describe("drain progress heartbeat (Story 8.18, AC3)", () => {
+describe("run progress heartbeat (Story 8.18, AC3)", () => {
   it("produces the same structured result with and without the heartbeat lines", async () => {
-    const withHb = await runDrain({ withHeartbeat: true });
-    const without = await runDrain({ withHeartbeat: false });
+    const withHb = await runRun({ withHeartbeat: true });
+    const without = await runRun({ withHeartbeat: false });
 
-    // Identical result buckets and drain reason — the lines change NO control flow.
+    // Identical result buckets and run reason — the lines change NO control flow.
     expect(withHb.result).toEqual(without.result);
-    expect(withHb.result.drainedReason).toBe("queue-drained");
-    expect(withHb.result.drained).toBe(true);
+    expect(withHb.result.runReason).toBe("queue-emptied");
+    expect(withHb.result.queueEmptied).toBe(true);
     expect(withHb.result.completed).toEqual(["bmad:8.18"]);
     expect(withHb.result.merged).toEqual([]);
     expect(withHb.result.blocked).toEqual([]);
@@ -184,7 +184,7 @@ describe("drain progress heartbeat (Story 8.18, AC3)", () => {
   });
 
   it("emits the new progress lines through the existing narrator channel", async () => {
-    const { logs } = await runDrain({ withHeartbeat: true });
+    const { logs } = await runRun({ withHeartbeat: true });
 
     // Each major phase emits a start line and a done-with-elapsed line.
     // Progress lines use the short handle (local part of the ref), so
@@ -198,7 +198,7 @@ describe("drain progress heartbeat (Story 8.18, AC3)", () => {
   });
 
   it("marks the dev-build start line as the long phase (and not the short phases)", async () => {
-    const { logs } = await runDrain({ withHeartbeat: true });
+    const { logs } = await runRun({ withHeartbeat: true });
 
     // Progress lines now use the short handle ("8.18" for bmad:8.18).
     const devStart = logs.find((l) => l.startsWith("8.18 dev-build: start"));
@@ -211,8 +211,8 @@ describe("drain progress heartbeat (Story 8.18, AC3)", () => {
   });
 
   it("adds ONLY narrator lines — the non-progress log lines are identical", async () => {
-    const withHb = normaliseLogs((await runDrain({ withHeartbeat: true })).logs);
-    const without = normaliseLogs((await runDrain({ withHeartbeat: false })).logs);
+    const withHb = normaliseLogs((await runRun({ withHeartbeat: true })).logs);
+    const without = normaliseLogs((await runRun({ withHeartbeat: false })).logs);
 
     // Progress lines now use the short handle ("8.18" for bmad:8.18).
     const isProgress = (l: string) =>

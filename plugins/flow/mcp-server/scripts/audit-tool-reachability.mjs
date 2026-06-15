@@ -214,7 +214,7 @@ export function parseCliToolsMap(source) {
   const block = source.slice(blockStart, blockEnd + 1);
 
   // Extract keys: lines of the form `  toolName,` or `  toolName:` (shorthand or explicit)
-  // In the CLI map, shorthand property names are used (e.g. `drainPhaseStart,`)
+  // In the CLI map, shorthand property names are used (e.g. `runPhaseStart,`)
   // Regex: match identifiers at the start of a property position
   const keyRe = /^\s{2}([a-zA-Z][a-zA-Z0-9_]*)\s*[,:{]/gm;
   let m;

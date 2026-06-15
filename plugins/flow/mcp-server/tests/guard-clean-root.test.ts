@@ -1,5 +1,5 @@
 /**
- * Integration tests for `guardCleanRoot` — Epic 10 drain fix-plan, Fix 2b.
+ * Integration tests for `guardCleanRoot` — Epic 10 run fix-plan, Fix 2b.
  *
  * Drives the tool against a REAL throwaway git repo (tests under tests/** may
  * spawn git and write files freely — the canonical-fs / git-spawn static guards
@@ -81,7 +81,7 @@ describe("guardCleanRoot — clean-root guard (Fix 2b)", () => {
 
     // The work is recoverable — one labelled stash entry.
     const stashList = await git(["stash", "list"]);
-    expect(stashList).toContain("flow-drain clean-root guard: native:01TEST");
+    expect(stashList).toContain("flow-run clean-root guard: native:01TEST");
   });
 
   it("is idempotent — a second call after a stash reports a clean root", async () => {
@@ -113,7 +113,7 @@ describe("guardCleanRoot — clean-root guard (Fix 2b)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Root-HEAD restore (fix/drain-isolation-coordination-honesty)
+// Root-HEAD restore (fix/run-isolation-coordination-honesty)
 //
 // The same bgIsolation leak that dirties the root can also move its HEAD: the
 // dev's `git checkout -b story/<ref>` + commit run in the SHARED ROOT, leaving it

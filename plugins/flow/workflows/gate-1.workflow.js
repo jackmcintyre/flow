@@ -4,7 +4,7 @@ export const meta = {
   // Workflow runtime requires `meta` to be a pure literal and rejects a
   // BinaryExpression here — a concatenated description makes the whole workflow
   // unlaunchable via the Workflow tool (the only path that runs gate-1).
-  description: 'Gate-1 workflow: deterministically fans out all five lens judges in parallel (per-lens model tiering: Structure+Discipline on Sonnet, the rest on Opus) and returns a structured pass/fail verdict with Quality Lead adjudication. round=1 k=1: a clean sweep blesses ready, any lens fail escalates. Mirrors drain.workflow.js seam() courier discipline (load-bearing decisions live in tool results, never agent prose). Story native:01KT1MP7TR651TAGVJ6EZSR589.',
+  description: 'Gate-1 workflow: deterministically fans out all five lens judges in parallel (per-lens model tiering: Structure+Discipline on Sonnet, the rest on Opus) and returns a structured pass/fail verdict with Quality Lead adjudication. round=1 k=1: a clean sweep blesses ready, any lens fail escalates. Mirrors run.workflow.js seam() courier discipline (load-bearing decisions live in tool results, never agent prose). Story native:01KT1MP7TR651TAGVJ6EZSR589.',
   phases: [
     { title: 'mint', detail: 'mint a session ULID and fetch the team roster + persona' },
     { title: 'judge', detail: 'fan out five lens judges in parallel; each writes its verdict file via writeLensVerdict' },
@@ -34,12 +34,12 @@ const J = (o) => JSON.stringify(o)
 
 // A SEAM: a cheap one-shot courier that runs ONE CLI command verbatim and returns
 // its single JSON line. The courier does zero reasoning, so its model is chosen by
-// seam kind to trim the harness-instantiation tax. Mirrors drain.workflow.js:
+// seam kind to trim the harness-instantiation tax. Mirrors run.workflow.js:
 // - read-only / idempotent seams (retryable=true) run on HAIKU; a garbled relay
 //   simply re-invokes, so the cheaper, marginally-garblier model costs only a rare retry.
 // - MUTATING seams (adjudicate, writeLensVerdict) leave retryable=false and stay on
 //   SONNET so a garble safely pauses rather than risk double-applying a mutation
-//   (Haiku garbled exactly such a verdict relay on drain 8.13).
+//   (Haiku garbled exactly such a verdict relay on run 8.13).
 const seam = async (cmd, label, retryable = false) => {
   const attempts = retryable ? 3 : 1
   let parsed = { _parseError: 'agent-null' }

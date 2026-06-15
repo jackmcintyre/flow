@@ -1,12 +1,12 @@
 /**
- * Drain concurrent-dispatch integration test — Story 8.22.
+ * Run concurrent-dispatch integration test — Story 8.22.
  *
- * AC1 — the main drain loop processes more than one claimed story at a time, up
+ * AC1 — the main run loop processes more than one claimed story at a time, up
  *       to a configured cap (`maxConcurrency`): given a backlog larger than the
  *       cap, at most `cap` stories are in flight at once, more than one IS in
  *       flight simultaneously, and every story is processed exactly once.
  * AC2 — concurrency changes throughput only, not the result: for a fixed backlog
- *       and fixed per-story outcomes, the result buckets and the drain reason are
+ *       and fixed per-story outcomes, the result buckets and the run reason are
  *       identical at cap 1 (serial) and cap N (concurrent), modulo the order of
  *       entries within a bucket.
  * AC3 — a per-worker hard failure is isolated: one worker that throws lands its
@@ -14,8 +14,8 @@
  *       aborts the run or disturbs a concurrently-running sibling — every sibling
  *       still reaches its correct bucket.
  *
- * How it runs the real workflow (same harness as drain-progress-heartbeat.test):
- * `drain.workflow.js` is a plain script body that reaches every decision through
+ * How it runs the real workflow (same harness as run-progress-heartbeat.test):
+ * `run.workflow.js` is a plain script body that reaches every decision through
  * injected globals — `args` (a JSON string), `agent` (the subagent/seam courier),
  * `log` (the operator narrator), and `phase` (the phase marker). It uses
  * top-level `await` and top-level `return`. We read the real workflow source and
@@ -38,7 +38,7 @@ import { describe, expect, it } from "vitest";
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → up to mcp-server → up to plugins/flow → workflows/.
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -59,7 +59,7 @@ type Outcome =
   | { kind: "dev-no-handoff" } // dev never emits the handoff phrase → blocked
   | { kind: "dev-throws" }; // dev agent() promise rejects → worker-level isolation
 
-interface DrainRunResult {
+interface RunRunResult {
   result: any;
   logs: string[];
   calls: AgentCall[];
@@ -75,7 +75,7 @@ const HANDOFF = (ref: string) => `Handoff to reviewer — story ${ref} ready for
  * Drive the real workflow body with stubbed seams against a backlog whose
  * per-story outcomes are fixed by `outcomes`.
  *
- * @param backlog   ordered list of refs the claim seam hands out (then drains).
+ * @param backlog   ordered list of refs the claim seam hands out (then empties).
  * @param outcomes  ref → fixed outcome the stubbed seams replay.
  * @param maxConcurrency  the cap passed to the workflow.
  * @param gateDev   when true, every `dev:` call blocks on a shared barrier until
@@ -84,12 +84,12 @@ const HANDOFF = (ref: string) => `Handoff to reviewer — story ${ref} ready for
  *                  meaningful (without it a fast stub could finish each dev before
  *                  the next is claimed and never overlap).
  */
-async function runDrain(opts: {
+async function runRun(opts: {
   backlog: string[];
   outcomes: Record<string, Outcome>;
   maxConcurrency: number;
   gateDev?: boolean;
-}): Promise<DrainRunResult> {
+}): Promise<RunRunResult> {
   const { backlog, outcomes, maxConcurrency, gateDev = false } = opts;
 
   // The runtime evaluates the workflow body with injected globals; it has no
@@ -99,7 +99,7 @@ async function runDrain(opts: {
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
   const calls: AgentCall[] = [];
@@ -155,7 +155,7 @@ async function runDrain(opts: {
     if (label === "worktree-reap") return { reaped: [] };
     if (label === "orphan-scan") return { orphans: [] };
     if (label.startsWith("claim:")) {
-      // Hand out backlog refs in order, then drain the queue. The workflow's own
+      // Hand out backlog refs in order, then run the queue. The workflow's own
       // claimsStarted counter is what enforces the cap; the index in the label is
       // a reservation slot, NOT a guaranteed position, so serve from a shared
       // cursor instead so concurrent claims each get the next distinct ref.
@@ -169,7 +169,7 @@ async function runDrain(opts: {
           manifestPath: `/tmp/${ref.replace(/[^a-z0-9]/gi, "_")}.yaml`,
         };
       }
-      return { next: "queue-drained" };
+      return { next: "queue-emptied" };
     }
     if (label.startsWith("pd:")) {
       const ref = refFromLabel(label, "pd:");
@@ -261,8 +261,8 @@ async function runDrain(opts: {
 function normaliseBuckets(result: any) {
   const byRef = (a: any, b: any) => String(a.ref ?? a).localeCompare(String(b.ref ?? b));
   return {
-    drainedReason: result.drainedReason,
-    drained: result.drained,
+    runReason: result.runReason,
+    queueEmptied: result.queueEmptied,
     completed: [...(result.completed ?? [])].sort(),
     merged: [...(result.merged ?? [])].sort(byRef),
     pausedForHuman: [...(result.pausedForHuman ?? [])].sort(byRef),
@@ -270,7 +270,7 @@ function normaliseBuckets(result: any) {
   };
 }
 
-describe("drain concurrent dispatch (Story 8.22)", () => {
+describe("run concurrent dispatch (Story 8.22)", () => {
   // A backlog of several stories, all happily merging. Cap below the backlog
   // size so the cap is the binding constraint.
   const sixRefs = ["s:1", "s:2", "s:3", "s:4", "s:5", "s:6"];
@@ -280,7 +280,7 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
 
   it("AC1: runs more than one story at once, never exceeds the cap, and processes each exactly once", async () => {
     const cap = 3;
-    const run = await runDrain({
+    const run = await runRun({
       backlog: sixRefs,
       outcomes: allMerge,
       maxConcurrency: cap,
@@ -309,12 +309,12 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
     expect(normaliseBuckets(run.result).merged.map((m: any) => m.ref)).toEqual([...sixRefs].sort());
     expect(run.result.blocked).toEqual([]);
     expect(run.result.pausedForHuman).toEqual([]);
-    expect(run.result.drainedReason).toBe("queue-drained");
-    expect(run.result.drained).toBe(true);
+    expect(run.result.runReason).toBe("queue-emptied");
+    expect(run.result.queueEmptied).toBe(true);
   });
 
   it("AC1: cap of 1 stays strictly serial (never more than one in flight)", async () => {
-    const run = await runDrain({
+    const run = await runRun({
       backlog: sixRefs,
       outcomes: allMerge,
       maxConcurrency: 1,
@@ -325,7 +325,7 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
     expect([...run.claimedRefs].sort()).toEqual([...sixRefs].sort());
   });
 
-  it("AC2: identical result buckets and drain reason at cap 1 vs cap N (modulo intra-bucket order)", async () => {
+  it("AC2: identical result buckets and run reason at cap 1 vs cap N (modulo intra-bucket order)", async () => {
     // A mixed, fixed outcome set exercising every bucket: merge, pause,
     // rework-then-merge, reviewer-block, dev-no-handoff.
     const refs = ["s:1", "s:2", "s:3", "s:4", "s:5"];
@@ -337,15 +337,15 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
       "s:5": { kind: "dev-no-handoff" },
     };
 
-    const serial = await runDrain({ backlog: refs, outcomes, maxConcurrency: 1 });
-    const concurrent = await runDrain({ backlog: refs, outcomes, maxConcurrency: 4, gateDev: false });
+    const serial = await runRun({ backlog: refs, outcomes, maxConcurrency: 1 });
+    const concurrent = await runRun({ backlog: refs, outcomes, maxConcurrency: 4, gateDev: false });
 
     // The two structured results are equal, modulo intra-bucket ordering.
     expect(normaliseBuckets(concurrent.result)).toEqual(normaliseBuckets(serial.result));
 
     // And the buckets are what the fixed outcomes dictate (sanity on the harness).
     const n = normaliseBuckets(serial.result);
-    expect(n.drainedReason).toBe("queue-drained");
+    expect(n.runReason).toBe("queue-emptied");
     expect(n.merged.map((m: any) => m.ref)).toEqual(["s:1", "s:3"]); // merge + rework-then-merge
     expect(n.pausedForHuman.map((p: any) => p.ref)).toEqual(["s:2"]);
     expect(n.completed.sort()).toEqual(["s:1", "s:2", "s:3"]); // every green verdict completes
@@ -360,8 +360,8 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
   it("AC2: the same total story COUNT is processed at cap 1 and cap N (none lost or double-counted)", async () => {
     const refs = ["s:1", "s:2", "s:3", "s:4", "s:5", "s:6", "s:7"];
     const outcomes = Object.fromEntries(refs.map((r) => [r, { kind: "merge" } as Outcome]));
-    const serial = await runDrain({ backlog: refs, outcomes, maxConcurrency: 1 });
-    const concurrent = await runDrain({ backlog: refs, outcomes, maxConcurrency: 5, gateDev: true });
+    const serial = await runRun({ backlog: refs, outcomes, maxConcurrency: 1 });
+    const concurrent = await runRun({ backlog: refs, outcomes, maxConcurrency: 5, gateDev: true });
 
     const count = (r: any) =>
       (r.completed?.length ?? 0) + (r.merged?.length ?? 0) +
@@ -387,16 +387,16 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
       "s:5": { kind: "pause" },
     };
 
-    const run = await runDrain({
+    const run = await runRun({
       backlog: refs,
       outcomes,
       maxConcurrency: 5, // all five concurrently → the throw happens alongside live siblings
       gateDev: true,
     });
 
-    // The run COMPLETED (did not abort) with the honest drain reason.
-    expect(run.result.drainedReason).toBe("queue-drained");
-    expect(run.result.drained).toBe(true);
+    // The run COMPLETED (did not abort) with the honest run reason.
+    expect(run.result.runReason).toBe("queue-emptied");
+    expect(run.result.queueEmptied).toBe(true);
 
     // The failed story is bucketed (blocked) carrying a reason — not lost, not faked-success.
     const failed = run.result.blocked.find((b: any) => b.ref === "s:3");
@@ -431,9 +431,9 @@ describe("drain concurrent dispatch (Story 8.22)", () => {
       "s:5": { kind: "merge" },
       "s:6": { kind: "merge" },
     };
-    const run = await runDrain({ backlog: refs, outcomes, maxConcurrency: 2 });
+    const run = await runRun({ backlog: refs, outcomes, maxConcurrency: 2 });
 
-    expect(run.result.drainedReason).toBe("queue-drained");
+    expect(run.result.runReason).toBe("queue-emptied");
     expect(run.result.blocked.map((b: any) => b.ref)).toEqual(["s:1"]);
     // All five healthy stories merged — the early crash did not stall the pool.
     expect(run.result.merged.map((m: any) => m.ref).sort()).toEqual([

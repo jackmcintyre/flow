@@ -1,11 +1,11 @@
 /**
- * `blockStory` unit test — fix/drain-isolation-coordination-honesty.
+ * `blockStory` unit test — fix/run-isolation-coordination-honesty.
  *
- * blockStory is the live drain's "give up on this story" primitive: it moves a
+ * blockStory is the live run's "give up on this story" primitive: it moves a
  * story THIS session owns from in-progress/ to blocked/ as a clean state change.
  * This is the non-termination fix's load-bearing seam — without moving an
  * abandoned story OUT of in-progress/, claimNextStory keeps reporting
- * waiting-on-in-progress and the drain spins forever.
+ * waiting-on-in-progress and the run spins forever.
  */
 
 import { promises as fs } from "node:fs";

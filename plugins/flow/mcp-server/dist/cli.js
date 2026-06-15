@@ -27895,10 +27895,10 @@ var ExecutionManifestSchema = external_exports.object({
     "reviewer-grammar",
     "deps-drift",
     "needs-human-decision",
-    // Drain give-up reasons (fix/drain-isolation-coordination-honesty): the
-    // drain abandons a story it cannot finish and MUST move the manifest out
+    // Run give-up reasons (fix/run-isolation-coordination-honesty): the
+    // run abandons a story it cannot finish and MUST move the manifest out
     // of in-progress/ so it stops counting as live work (the non-termination
-    // fix). Each names WHY the drain gave up.
+    // fix). Each names WHY the run gave up.
     "rework-exhausted",
     "verdict-failed",
     "worker-threw",
@@ -27944,18 +27944,18 @@ var ExecutionManifestSchema = external_exports.object({
    */
   rework_count: external_exports.number().int().nonnegative().optional(),
   /**
-   * Count of times the autonomous drain has re-claimed this story after a
+   * Count of times the autonomous run has re-claimed this story after a
    * prior run left it orphaned in `in-progress/` (a crash/interruption).
    * `undefined` ≡ `0`. Incremented in-place by `reattachOrphan` each time the
-   * drain auto-resumes the orphan. The drain caps resumes on this count so a
+   * run auto-resumes the orphan. The run caps resumes on this count so a
    * genuinely-broken story cannot loop forever — past the cap it is blocked
    * (`orphan-no-transcript`) for a human instead of re-resumed.
    *
    * Distinct from `rework_count` (NEEDS CHANGES rounds within one session);
    * this counts crash-resumptions across sessions. Added in the crash-recovery
-   * change (drain auto-resume).
+   * change (run auto-resume).
    */
-  drain_resume_attempts: external_exports.number().int().nonnegative().optional(),
+  run_resume_attempts: external_exports.number().int().nonnegative().optional(),
   /**
    * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).
    * Written by `postReviewerComments` after a successful POST/PATCH.
@@ -28411,7 +28411,7 @@ var RecordAgentFrictionOptionsSchema = external_exports.object({
    * inside a story flow.
    */
   story_id: external_exports.string().min(1).optional(),
-  /** Drain-session ULID (or any opaque caller-supplied identifier). */
+  /** Run-session ULID (or any opaque caller-supplied identifier). */
   session_id: external_exports.string().min(1),
   /** The closed-enum friction category. */
   kind: external_exports.enum([
@@ -30341,7 +30341,7 @@ function mintSessionUlid() {
   return { sessionUlid: ulid3() };
 }
 
-// src/lib/format-drain-progress.ts
+// src/lib/format-run-progress.ts
 function _shortHandle(ref) {
   const colon = ref.indexOf(":");
   const localPart = colon === -1 ? ref : ref.slice(colon + 1);
@@ -30362,7 +30362,7 @@ function formatElapsed(elapsedMs) {
   if (seconds === 60) return `${minutes + 1}m 0s`;
   return `${minutes}m ${seconds}s`;
 }
-function formatDrainProgress(ref, phase, transition, elapsedMs = 0) {
+function formatRunProgress(ref, phase, transition, elapsedMs = 0) {
   const handle = _shortHandle(ref);
   if (transition === "start") {
     const base = `${handle} ${phase}: start`;
@@ -30371,7 +30371,7 @@ function formatDrainProgress(ref, phase, transition, elapsedMs = 0) {
   return `${handle} ${phase}: done in ${formatElapsed(elapsedMs)}`;
 }
 
-// src/tools/drain-phase-progress.ts
+// src/tools/run-phase-progress.ts
 var KNOWN_PHASES = /* @__PURE__ */ new Set([
   "dev-build",
   "review",
@@ -30380,28 +30380,28 @@ var KNOWN_PHASES = /* @__PURE__ */ new Set([
 function assertPhase(phase) {
   if (typeof phase !== "string" || !KNOWN_PHASES.has(phase)) {
     throw new Error(
-      `drain-phase-progress: unknown phase ${JSON.stringify(phase)} (expected one of ${[...KNOWN_PHASES].join(", ")})`
+      `run-phase-progress: unknown phase ${JSON.stringify(phase)} (expected one of ${[...KNOWN_PHASES].join(", ")})`
     );
   }
   return phase;
 }
 function assertRef(ref) {
   if (typeof ref !== "string" || ref.length === 0) {
-    throw new Error("drain-phase-progress: `ref` is required and must be a non-empty string");
+    throw new Error("run-phase-progress: `ref` is required and must be a non-empty string");
   }
   return ref;
 }
-function drainPhaseStart(args) {
+function runPhaseStart(args) {
   const ref = assertRef(args?.ref);
   const phase = assertPhase(args?.phase);
-  return { line: formatDrainProgress(ref, phase, "start"), atMs: Date.now() };
+  return { line: formatRunProgress(ref, phase, "start"), atMs: Date.now() };
 }
-function drainPhaseDone(args) {
+function runPhaseDone(args) {
   const ref = assertRef(args?.ref);
   const phase = assertPhase(args?.phase);
   const startedAtMs = args?.startedAtMs;
   const elapsedMs = typeof startedAtMs === "number" && Number.isFinite(startedAtMs) ? Math.max(0, Date.now() - startedAtMs) : 0;
-  return { line: formatDrainProgress(ref, phase, "done", elapsedMs), elapsedMs };
+  return { line: formatRunProgress(ref, phase, "done", elapsedMs), elapsedMs };
 }
 
 // src/tools/create-smoke-scratch-repo.ts
@@ -39175,7 +39175,7 @@ async function isSessionAlive(targetRepoRoot, sessionUlid, opts) {
 }
 
 // src/tools/claim-next-story.ts
-var QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
+var QUEUE_EMPTIED_LINE = "queue emptied \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 var WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
 var WAITING_ON_UNMERGED_OVERLAP_LINE = "WAITING \u2014 ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
 var WAITING_ON_UNMERGED_DEPENDENCY_LINE = "WAITING \u2014 ready story held for an unmerged declared dependency. Stop here or wait for the dependency PR to merge.";
@@ -39286,7 +39286,7 @@ async function claimNextStory(opts) {
         chatLog
       };
     }
-    chatLog.push(QUEUE_DRAINED_LINE);
+    chatLog.push(QUEUE_EMPTIED_LINE);
     chatLog.push(
       renderExpectedWorkCounters({
         filesSeenCount: 0,
@@ -39294,7 +39294,7 @@ async function claimNextStory(opts) {
         refsHeld: buildHeldRefs()
       })
     );
-    return { next: "queue-drained", chatLog };
+    return { next: "queue-emptied", chatLog };
   }
   if (eligible.length === 0) {
     chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
@@ -39366,7 +39366,7 @@ async function claimNextStory(opts) {
     );
     return { next: "waiting-on-in-progress", chatLog };
   }
-  chatLog.push(QUEUE_DRAINED_LINE);
+  chatLog.push(QUEUE_EMPTIED_LINE);
   chatLog.push(
     renderExpectedWorkCounters({
       filesSeenCount: 0,
@@ -39374,7 +39374,7 @@ async function claimNextStory(opts) {
       refsHeld: buildHeldRefs()
     })
   );
-  return { next: "queue-drained", chatLog };
+  return { next: "queue-emptied", chatLog };
 }
 
 // src/tools/process-dev-transcript.ts
@@ -42299,7 +42299,7 @@ async function scanOrphanedInProgress(opts) {
       hasTranscript,
       hasOpenPR,
       prNumber,
-      resumeAttempts: manifest.drain_resume_attempts ?? 0
+      resumeAttempts: manifest.run_resume_attempts ?? 0
     });
   }
   return { orphans };
@@ -42337,11 +42337,11 @@ async function reattachOrphan(opts) {
     throw new NotAnOrphanError({ ref, currentSessionUlid });
   }
   const staleUlid = manifest.claimed_by ?? "<absent>";
-  const resumeAttempts = (manifest.drain_resume_attempts ?? 0) + 1;
+  const resumeAttempts = (manifest.run_resume_attempts ?? 0) + 1;
   const updatedManifest = {
     ...manifest,
     claimed_by: currentSessionUlid,
-    drain_resume_attempts: resumeAttempts
+    run_resume_attempts: resumeAttempts
   };
   await writeManifest(absPath, updatedManifest);
   const chatLog = [
@@ -42590,7 +42590,7 @@ async function guardCleanRoot(rawInput) {
   let stashed = false;
   let stashMessage;
   if (paths.length > 0) {
-    stashMessage = `flow-drain clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
+    stashMessage = `flow-run clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
     ({ stashed } = await stashWorkingTree({ cwd, paths, message: stashMessage }));
   }
   const head = await restoreRootHead({
@@ -44343,14 +44343,14 @@ async function autoAbsorbProposalFile(opts) {
 var TOOLS = {
   getStatus,
   // Story native:01KT484NY4HCBPBTT6VEY1Q0CS — open a new work cycle. Exposed on
-  // the CLI seam so the drain / skill workflows can open a cycle without a
+  // the CLI seam so the run / skill workflows can open a cycle without a
   // persistent MCP session. `gatherRetroInputs` is registered alongside it so
   // the no-MCP retro path can gather the (now cycle-scoped) bundle one-shot.
   openCycle,
   gatherRetroInputs,
   mintSessionUlid,
-  drainPhaseStart,
-  drainPhaseDone,
+  runPhaseStart,
+  runPhaseDone,
   scanSources,
   createSmokeScratchRepo,
   instantiatePersona,
@@ -44373,12 +44373,12 @@ var TOOLS = {
   reattachOrphan,
   blockOrphanNoTranscript,
   reapStaleWorktrees,
-  // Story 9.1 readiness brake (the "bless" mutation). The drain runs MCP-free, so
+  // Story 9.1 readiness brake (the "bless" mutation). The run runs MCP-free, so
   // blessing the next story needed a hand-written `node` helper until this was a
-  // first-class CLI seam (Epic 10 drain fix-plan, Fix 1). Now `/flow:ready` and the
+  // first-class CLI seam (Epic 10 run fix-plan, Fix 1). Now `/flow:ready` and the
   // cutover scan→bless step round-trip through the same one-shot transport.
   markStoryReady,
-  // Epic 10 drain fix-plan, Fix 2b — clean-root guard. The drain calls this after
+  // Epic 10 run fix-plan, Fix 2b — clean-root guard. The run calls this after
   // each story to detect (and non-destructively stash) any dev edits that leaked
   // into the shared root checkout under bgIsolation:'none', so the next worktree
   // is cut from a clean base.
@@ -44392,35 +44392,35 @@ var TOOLS = {
   aggregateJudgePanel,
   adjudicateQualityLead,
   // Story native:01KT2RAXBSQ91Y80Z51DD26KPX — friction-signal write seam.
-  // Registered here so drain-path agents (seam-agents running node dist/cli.js)
+  // Registered here so run-path agents (seam-agents running node dist/cli.js)
   // can emit friction events without a persistent MCP server in the loop.
   recordAgentFriction,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
-  // Callable on the no-MCP drain/gate path: node dist/cli.js resolveLensRoles --json
+  // Callable on the no-MCP run/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
   // calls this instead of the previously hard-coded lensRoles block.
   resolveLensRoles,
   // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer.
-  // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP drain-path
+  // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP run-path
   // seam-agent) calls it via `node dist/cli.js recordReviewerLesson --json` to
   // merge one reusable lesson onto the per-ref reviewer-result.json.
-  // recordStoryRetro is the FORWARD seam: the drain reads that captured lesson and
+  // recordStoryRetro is the FORWARD seam: the run reads that captured lesson and
   // attaches it to the done manifest (`node dist/cli.js recordStoryRetro --json`)
   // before the merge gate runs. readReviewerLesson is the read side of FORWARD —
   // a thin read-only seam returning { lesson } off the reviewer-result.json so the
-  // drain knows whether (and what) to forward. All three must be on the CLI seam
-  // because the drain runs MCP-free.
+  // run knows whether (and what) to forward. All three must be on the CLI seam
+  // because the run runs MCP-free.
   recordReviewerLesson,
   readReviewerLesson,
   recordStoryRetro,
   // Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder lesson capture seam.
-  // recordDevLesson is the CAPTURE seam: the dev (a no-MCP drain-path agent)
+  // recordDevLesson is the CAPTURE seam: the dev (a no-MCP run-path agent)
   // calls it via `node dist/cli.js recordDevLesson --json` to write one reusable
   // lesson onto the per-ref dev-result.json BEFORE emitting the handoff phrase.
   // readDevLesson is the read side of FORWARD — a thin read-only seam returning
-  // { lesson } off the dev-result.json so the drain knows whether (and what)
+  // { lesson } off the dev-result.json so the run knows whether (and what)
   // to forward to the done manifest alongside the reviewer lesson.
-  // Both must be on the CLI seam because the drain runs MCP-free.
+  // Both must be on the CLI seam because the run runs MCP-free.
   recordDevLesson,
   readDevLesson,
   // Story native:01KT6QEWY794ZY0DH6JHQFWG6V — on-demand lesson recall.
@@ -44430,7 +44430,7 @@ var TOOLS = {
   // Story native:01KTKJXP6DWN5YHKVG96DH16V0 — pre-judge lane classifier.
   // Pure deterministic function: classifies a story into 'fast' or 'full'
   // from its execution-manifest signals before the costly judge panel runs.
-  // Callable on the no-MCP drain/gate path: node dist/cli.js classifyStoryLane
+  // Callable on the no-MCP run/gate path: node dist/cli.js classifyStoryLane
   // --json '{"storyId":"...","risk_tier":"low","cited_sources":[...]}'.
   classifyStoryLane,
   // Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — fast-lane judge plan resolver.
@@ -44445,7 +44445,7 @@ var TOOLS = {
   // reviewDepth }. fast → haiku + light review; full/absent → sonnet + full
   // review (no-regression pin). When manifestPath is provided, reads the
   // lane from the persisted execution manifest written at scan time.
-  // Callable on the no-MCP drain path:
+  // Callable on the no-MCP run path:
   //   node dist/cli.js resolveBuildPlan --json '{"storyId":"...","manifestPath":"..."}'
   resolveBuildPlan,
   // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — discard an un-claimed native draft.
@@ -44454,14 +44454,14 @@ var TOOLS = {
   // Callable on the no-MCP seam:
   //   node dist/cli.js discardDraft --json '{"targetRepoRoot":"...","ref":"native:..."}'
   discardDraft,
-  // fix/drain-isolation-coordination-honesty — blockStory: the live drain's
+  // fix/run-isolation-coordination-honesty — blockStory: the live run's
   // "give up on this story" seam. Moves a story THIS session owns from
   // in-progress/ to blocked/ with a give-up reason, so an abandoned story stops
-  // counting as live work and the queue can drain (the non-termination fix).
+  // counting as live work and the queue can run (the non-termination fix).
   //   node dist/cli.js blockStory --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","blockedBy":"worker-threw"}'
   blockStory,
   // Story native:01KT6QGBWP7KJDVMHQK3MEKDXP — inline AC extraction for native stories.
-  // Called by the drain BEFORE spawning the builder worktree, so the builder receives
+  // Called by the run BEFORE spawning the builder worktree, so the builder receives
   // its ACs inline and never needs to resolve a .flow/native-stories path from within
   // its isolated work copy (.flow is gitignored — not present in builder worktrees).
   //   node dist/cli.js extractNativeStoryAcs --json '{"targetRepoRoot":"...","ref":"native:01KT..."}'
@@ -44474,7 +44474,7 @@ var TOOLS = {
   //   <hook stdin> | node dist/cli.js captureSkillInvoke --json "$PAYLOAD"
   captureSkillInvoke,
   // Story native:01KV2Z67850XWWQV0AY2N05JSX — auto-absorb note-tier retro proposals.
-  // Called by the drain's post-retro step after the retro-analyst writes its
+  // Called by the run's post-retro step after the retro-analyst writes its
   // proposals. Reads the proposal file by timestamp, filters to note-tier
   // persona-append proposals, and applies them autonomously (up to the per-run
   // ceiling; higher-stakes proposals stay pending for the operator).
@@ -44482,8 +44482,8 @@ var TOOLS = {
   //   node dist/cli.js autoAbsorbProposalFile --json
   //     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T10:00:00.000Z"}'
   autoAbsorbProposalFile,
-  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the drain.
-  // The drain spawns the retro-analyst subagent after the queue drains. To build the
+  // Story native:01KV2ZF0B74KKKHS1JQ4075N9T — unattended auto-retro in the run.
+  // The run spawns the retro-analyst subagent after the queue empties. To build the
   // analyst's system prompt, it calls readCatalogue via this seam rather than reading
   // the catalogue file in-workflow (the Workflow runtime does not have fs access).
   // pluginRoot is the root of the flow plugin directory (NOT the target repo root).

@@ -85,7 +85,7 @@ describe("composeCommitSubject with native ULID ref (AC1 + AC2)", () => {
 
 describe("composeCommitSubject with bmad-style ref (AC2)", () => {
   const ref = "bmad:8.18";
-  const title = "Multi-story concurrent drain";
+  const title = "Multi-story concurrent run";
   const type = "feat";
 
   it("uses the local part after the colon as the scope", () => {
@@ -104,7 +104,7 @@ describe("composeCommitSubject with bmad-style ref (AC2)", () => {
       ref,
       specPath: "_bmad-output/implementation-artifacts/8-18.md",
       acs: [{ index: 1, firstLine: "Given two dev workers" }],
-      summary: "Concurrent drain implementation.",
+      summary: "Concurrent run implementation.",
     });
     expect(body).toContain(`Story: ${ref}`);
     expect(body).toContain("bmad:8.18");

@@ -9,7 +9,7 @@
  * `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract`
  *
  * The SKILL.md prose drives the outer iteration loop by calling this tool
- * repeatedly until it returns `{ next: "queue-drained" }` or
+ * repeatedly until it returns `{ next: "queue-emptied" }` or
  * `{ next: "waiting-on-in-progress" }`. This keeps the prose's control flow
  * to a simple switch on `next` — no manual `to-do/` parsing, no ref picking,
  * no `claimStory` / `listClaimableTodos` calls from the prose layer.
@@ -41,9 +41,9 @@ import {
   type HeldRef,
 } from "../lib/expected-work-counters.js";
 
-/** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
-export const QUEUE_DRAINED_LINE =
-  "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
+/** Verbatim queue-emptied line from AC3 / AC5(iv) — do not paraphrase. */
+export const QUEUE_EMPTIED_LINE =
+  "queue emptied — to-do/ and in-progress/ are both empty. Stop here, or run /flow:plan to add work.";
 
 /** Verbatim waiting-on-in-progress line — do not paraphrase. */
 export const WAITING_ON_IN_PROGRESS_LINE =
@@ -52,7 +52,7 @@ export const WAITING_ON_IN_PROGRESS_LINE =
 /**
  * Verbatim waiting-on-unmerged-overlap line (Story native:01KTNH6N1E64W0EM3FS5A4B4TP) —
  * do not paraphrase. Returned when every ready story is parked solely because it
- * overlaps an approved-but-unmerged PR in done/. NOT a clean drain.
+ * overlaps an approved-but-unmerged PR in done/. NOT a clean run.
  */
 export const WAITING_ON_UNMERGED_OVERLAP_LINE =
   "WAITING — ready story held for an unmerged overlapping pull request. Stop here or wait for the overlapping PR to merge.";
@@ -61,7 +61,7 @@ export const WAITING_ON_UNMERGED_OVERLAP_LINE =
  * Verbatim waiting-on-unmerged-dependency line (review finding B4) — the twin of
  * the overlap hold above. Returned when every ready story is parked SOLELY because
  * a DECLARED dependency's PR is approved-but-unmerged. Without this the
- * declared-dep hold falls through to a false "queue drained". NOT a clean drain.
+ * declared-dep hold falls through to a false "queue emptied". NOT a clean run.
  */
 export const WAITING_ON_UNMERGED_DEPENDENCY_LINE =
   "WAITING — ready story held for an unmerged declared dependency. Stop here or wait for the dependency PR to merge.";
@@ -71,7 +71,7 @@ export interface ClaimNextStoryOptions {
   sessionUlid: string;
   /**
    * Test seam for the build-blind merge gate — override the "is this dependency
-   * merged?" check. Production callers (the drain via the CLI seam, the MCP
+   * merged?" check. Production callers (the run via the CLI seam, the MCP
    * handler) omit it and the real GitHub-backed check runs.
    */
   isDependencyMerged?: SingleDependencyMergedCheck;
@@ -91,12 +91,12 @@ export type ClaimNextStoryResult =
       manifestPath: string;
       chatLog: string[];
     }
-  | { next: "queue-drained"; chatLog: string[] }
+  | { next: "queue-emptied"; chatLog: string[] }
   | { next: "waiting-on-in-progress"; chatLog: string[] }
   | {
       /**
        * Every ready story is parked solely because it overlaps an approved-but-unmerged
-       * pull request in done/. This is NOT a clean drain — the queue is not empty.
+       * pull request in done/. This is NOT a clean run — the queue is not empty.
        * `heldRefs` names the held story ref(s) so the operator knows what to wait for.
        */
       next: "waiting-on-unmerged-overlap";
@@ -107,7 +107,7 @@ export type ClaimNextStoryResult =
       /**
        * Twin of the overlap hold (finding B4): every ready story is parked solely
        * because a DECLARED dependency's PR is approved-but-unmerged. Also NOT a
-       * clean drain. `heldRefs` names the held story ref(s).
+       * clean run. `heldRefs` names the held story ref(s).
        */
       next: "waiting-on-unmerged-dependency";
       heldRefs: string[];
@@ -118,7 +118,7 @@ export type ClaimNextStoryResult =
  * Claim the next ready story from the to-do queue.
  *
  * Single-iteration outer claim-loop step: the SKILL.md prose calls this in
- * a loop until it returns `queue-drained` or `waiting-on-in-progress`.
+ * a loop until it returns `queue-emptied` or `waiting-on-in-progress`.
  *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.sessionUlid - ULID minted by `mintSessionUlid`; stamped as
@@ -131,7 +131,7 @@ export async function claimNextStory(
   const { targetRepoRoot, sessionUlid } = opts;
   const chatLog: string[] = [];
 
-  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The drain
+  // HEARTBEAT REFRESH (Story native:01KTSQWJ — liveness WRITE side). The run
   // calls claimNextStory once per story, immediately before the long dev build,
   // so refreshing here keeps this session visible as alive across the build that
   // follows. Combined with the post-build refresh in processDevTranscript, the
@@ -150,7 +150,7 @@ export async function claimNextStory(
   // The readiness brake is fail-closed: an item whose dependencies are all
   // satisfied is still NOT claimed until the operator marks it `ready: true`
   // via the markStoryReady tool (the /flow:ready skill). This is the single
-  // chokepoint the drain hits, so the gate lives here in the claim entry point.
+  // chokepoint the run hits, so the gate lives here in the claim entry point.
   //
   // Story native:01KTSR3E7FE61XB2PN8VJ24289: also track the two pre-filter hold
   // categories so every hold reason is represented in the expected-work summary.
@@ -202,11 +202,11 @@ export async function claimNextStory(
   // Track ready candidates that were dropped ONLY by the cited-source overlap gate
   // against an unmerged done/ sibling (not by declared deps, not by a pending/in-progress
   // blocker). These are the stories that produce a WAITING/parked outcome rather than a
-  // genuine clean drain.
+  // genuine clean run.
   const heldOnUnmergedOverlapRefs: string[] = [];
   // Track ready candidates dropped ONLY because a DECLARED dependency's PR is not
   // yet merged (review finding B4 — the twin of the overlap hold). Without this
-  // an all-deps-blocked queue reports a false clean drain.
+  // an all-deps-blocked queue reports a false clean run.
   const heldOnUnmergedDepRefs: string[] = [];
   // Story native:01KTSR3E7FE61XB2PN8VJ24289: track ready candidates dropped
   // because an EARLIER cited-source overlap is still in-flight (to-do or
@@ -223,8 +223,8 @@ export async function claimNextStory(
         ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
       });
       if (!allMerged) {
-        // Held solely by an unmerged declared dependency — track it so the drain
-        // reports WAITING instead of a false "queue-drained" (finding B4).
+        // Held solely by an unmerged declared dependency — track it so the run
+        // reports WAITING instead of a false "queue-emptied" (finding B4).
         heldOnUnmergedDepRefs.push(c.ref);
         continue;
       }
@@ -253,7 +253,7 @@ export async function claimNextStory(
       });
       if (overlapInFlight) {
         // Held SOLELY by an in-flight done/ overlap (open PR). Track it so the
-        // drain reports WAITING instead of a false "queue-drained".
+        // run reports WAITING instead of a false "queue-emptied".
         heldOnUnmergedOverlapRefs.push(c.ref);
         continue;
       }
@@ -286,10 +286,10 @@ export async function claimNextStory(
     return held;
   }
 
-  // Queue-drained check: no eligible candidates AND no in-progress.
+  // Queue-emptied check: no eligible candidates AND no in-progress.
   if (eligible.length === 0 && inProgressCount === 0) {
     // If EVERY non-eligible ready candidate was dropped solely by the cited-source
-    // overlap gate against an unmerged done/ PR, we must NOT report a clean drain —
+    // overlap gate against an unmerged done/ PR, we must NOT report a clean run —
     // the queue is not empty. Return the WAITING/parked outcome naming the held refs.
     if (heldOnUnmergedOverlapRefs.length > 0) {
       const held = heldOnUnmergedOverlapRefs.join(", ");
@@ -310,7 +310,7 @@ export async function claimNextStory(
       };
     }
     // Twin of the above (finding B4): every ready candidate dropped solely by an
-    // unmerged DECLARED dependency. Also NOT a clean drain — surface WAITING.
+    // unmerged DECLARED dependency. Also NOT a clean run — surface WAITING.
     if (heldOnUnmergedDepRefs.length > 0) {
       const held = heldOnUnmergedDepRefs.join(", ");
       chatLog.push(`${WAITING_ON_UNMERGED_DEPENDENCY_LINE} Held: ${held}`);
@@ -327,7 +327,7 @@ export async function claimNextStory(
         chatLog,
       };
     }
-    chatLog.push(QUEUE_DRAINED_LINE);
+    chatLog.push(QUEUE_EMPTIED_LINE);
     chatLog.push(
       renderExpectedWorkCounters({
         filesSeenCount: 0,
@@ -335,7 +335,7 @@ export async function claimNextStory(
         refsHeld: buildHeldRefs(),
       }),
     );
-    return { next: "queue-drained", chatLog };
+    return { next: "queue-emptied", chatLog };
   }
 
   // If there are no eligible todos but inProgress > 0, the session cannot
@@ -430,7 +430,7 @@ export async function claimNextStory(
 
   // All eligible candidates were lost to concurrent workers. Re-evaluate the
   // queue state: if anything is now in-progress (claimed by the winners), wait
-  // rather than falsely reporting the queue as drained.
+  // rather than falsely reporting the queue as emptied.
   const { inProgressCount: refreshedInProgress } = await listClaimableTodos({
     targetRepoRoot,
   });
@@ -445,7 +445,7 @@ export async function claimNextStory(
     );
     return { next: "waiting-on-in-progress", chatLog };
   }
-  chatLog.push(QUEUE_DRAINED_LINE);
+  chatLog.push(QUEUE_EMPTIED_LINE);
   chatLog.push(
     renderExpectedWorkCounters({
       filesSeenCount: 0,
@@ -453,5 +453,5 @@ export async function claimNextStory(
       refsHeld: buildHeldRefs(),
     }),
   );
-  return { next: "queue-drained", chatLog };
+  return { next: "queue-emptied", chatLog };
 }

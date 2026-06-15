@@ -3,7 +3,7 @@
  *
  * AC1: there is a defined, parseable way for the dev step to signal that the
  * story has hit a decision a human must make, carrying the question text,
- * distinct from a normal handoff, a domain-yield, and a hard block. The drain's
+ * distinct from a normal handoff, a domain-yield, and a hard block. The run's
  * dev-transcript processing (`processDevTranscript`) recognises this signal and
  * routes the story to a human-needed outcome rather than treating it as a
  * successful handoff or a silent failure. This vitest drives the dev step

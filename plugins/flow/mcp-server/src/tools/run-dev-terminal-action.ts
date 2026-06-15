@@ -11,7 +11,7 @@
  *
  * Worktree isolation (Story 8.16, superseded by Story 8.20): by default the dev
  * edits, builds, commits, and opens the PR *inside its own git worktree*. The
- * drain workflow spawns the dev subagent with the runtime's per-agent
+ * run workflow spawns the dev subagent with the runtime's per-agent
  * `isolation: 'worktree'` primitive, so the dev's working directory — the
  * `targetRepoRoot` it passes to this tool — *is* a worktree cut clean from the
  * base, distinct from the orchestrating session's checkout. Because that
@@ -149,7 +149,7 @@ export async function runDevTerminalAction(opts: {
   /** Per-run time budget for build/test gates. Defaults to `DEFAULT_BUILD_TEST_TIMEOUT_MS`. */
   buildTestTimeoutMs?: number;
   /**
-   * Inline acceptance criteria text, extracted by the drain orchestrator from
+   * Inline acceptance criteria text, extracted by the run orchestrator from
    * the native story spec in the orchestrating checkout's `.flow/native-stories/`
    * folder. When provided, the builder uses these ACs directly and DOES NOT
    * attempt to read a spec file from its own worktree.
@@ -209,7 +209,7 @@ export async function runDevTerminalAction(opts: {
   // orchestrator (native stories: Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1).
   // Native story specs live in `.flow/native-stories/` which is gitignored and only
   // present in the orchestrating checkout — NOT in the builder's isolated worktree.
-  // When the drain passes `inlineAcs`, the builder uses them directly and skips the
+  // When the run passes `inlineAcs`, the builder uses them directly and skips the
   // file read entirely, so no file-not-found error can arise on the spec path.
   // For non-native stories (specs tracked in git and present in the worktree), the
   // existing `extractAcsFromSpec` call applies unchanged.
@@ -296,7 +296,7 @@ export async function runDevTerminalAction(opts: {
     // (vii-b) Pre-PR sync gate (Story native:01KT40THFTS10F9PT37KCW9PF4). Fetch
     // origin and rebase the freshly-created story branch onto the latest
     // `origin/main` BEFORE the build/test gates and BEFORE the push. Rationale:
-    // under a concurrent drain two stories cut their branches from the same base;
+    // under a concurrent run two stories cut their branches from the same base;
     // if one merges first and both touched a shared file, the second story's PR
     // would open with a merge conflict and fail to merge cleanly (the PR #264
     // registry-collision scar). Rebasing here opens the PR already-integrated and
@@ -555,7 +555,7 @@ export async function runDevTerminalAction(opts: {
         })
       : targetRepoRoot;
     // Story native:01KT3YDHM10FPQ77N22BTJP9AF: namespace the PR-pointer record
-    // per story ref. A drain run shares one sessionUlid across every story, so a
+    // per story ref. A run shares one sessionUlid across every story, so a
     // run-shared dev-outcome.json let a later/concurrent story clobber an
     // earlier one's PR record — crash-recovery then resumed an unbuilt story
     // against a sibling's PR. devOutcomeFilePath derives the same per-ref path

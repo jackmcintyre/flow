@@ -1,17 +1,17 @@
 /**
- * Deterministic structure tests for `plugins/flow/skills/flow-drain/SKILL.md`
+ * Deterministic structure tests for `plugins/flow/skills/run/SKILL.md`
  * (Story native:01KTMKPHNDMBFS4APB5RKGZWR4).
  *
  * AC1 — path-resolution contract: the skill resolves targetRepoRoot from the
  *   workspace context and the engine CLI path from CLAUDE_PLUGIN_ROOT, then
- *   validates both on disk before invoking the drain.
+ *   validates both on disk before invoking the run.
  *
  * AC2 — preflight-error contract: when the engine file cannot be found the
- *   skill emits a clear human-readable message and does NOT start the drain.
+ *   skill emits a clear human-readable message and does NOT start the run.
  *
  * AC3 — run-knob forwarding contract: the skill accepts maxStories,
  *   maxConcurrency, and devReviewerModel and forwards them unchanged to the
- *   drain workflow.
+ *   run workflow.
  *
  * These assertions guard against the "file exists but is empty or incomplete"
  * failure mode that an integration test with a mocked skill loader would miss.
@@ -25,8 +25,8 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Resolve the skill file path relative to this test file.
-// This file lives at:   plugins/flow/mcp-server/src/skills/flow-drain-skill-shape.test.ts
-// Skill file lives at:  plugins/flow/skills/flow-drain/SKILL.md
+// This file lives at:   plugins/flow/mcp-server/src/skills/flow-run-skill-shape.test.ts
+// Skill file lives at:  plugins/flow/skills/run/SKILL.md
 // Walk up: src/skills → src → mcp-server → flow → plugins → SKILL.md
 const SKILL_PATH = path.resolve(
   HERE,
@@ -34,7 +34,7 @@ const SKILL_PATH = path.resolve(
   "..", // mcp-server/
   "..", // flow/
   "skills",
-  "flow-drain",
+  "run",
   "SKILL.md",
 );
 
@@ -42,9 +42,9 @@ const SKILL_PATH = path.resolve(
 const PREFLIGHT_CHECK_LINE =
   'test -f "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/cli.js" && echo "ok" || echo "missing"';
 const ENGINE_MISSING_ERROR =
-  "Error: the drain engine file could not be found at ${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/cli.js.";
+  "Error: the run engine file could not be found at ${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/cli.js.";
 
-describe("plugins/flow/skills/flow-drain/SKILL.md structural assertions", () => {
+describe("plugins/flow/skills/run/SKILL.md structural assertions", () => {
   let skillContent: string;
 
   it("SKILL.md exists and is non-empty", async () => {
@@ -52,12 +52,12 @@ describe("plugins/flow/skills/flow-drain/SKILL.md structural assertions", () => 
     expect(skillContent.length).toBeGreaterThan(0);
   });
 
-  it("front-matter name is exactly 'flow:flow-drain'", async () => {
+  it("front-matter name is exactly 'flow:run'", async () => {
     const content = await fs.readFile(SKILL_PATH, "utf8");
     const frontmatterMatch = /^---\n([\s\S]*?)\n---/.exec(content);
     expect(frontmatterMatch, "front-matter block must be present").not.toBeNull();
     const frontmatter = frontmatterMatch![1]!;
-    expect(frontmatter).toMatch(/^name:\s*flow:flow-drain\s*$/m);
+    expect(frontmatter).toMatch(/^name:\s*flow:run\s*$/m);
   });
 
   // AC1: path-resolution contract
@@ -82,9 +82,9 @@ describe("plugins/flow/skills/flow-drain/SKILL.md structural assertions", () => 
     expect(content).toContain(ENGINE_MISSING_ERROR);
   });
 
-  it("AC2: instructs to NOT attempt to start the drain on missing engine file", async () => {
+  it("AC2: instructs to NOT attempt to start the run on missing engine file", async () => {
     const content = await fs.readFile(SKILL_PATH, "utf8");
-    expect(content).toContain("Do NOT attempt to start the drain");
+    expect(content).toContain("Do NOT attempt to start the run");
   });
 
   // AC3: run-knob forwarding contract
@@ -103,7 +103,7 @@ describe("plugins/flow/skills/flow-drain/SKILL.md structural assertions", () => 
     expect(content).toContain("devReviewerModel");
   });
 
-  it("AC3: instructs to forward run knobs unchanged to the drain workflow", async () => {
+  it("AC3: instructs to forward run knobs unchanged to the run workflow", async () => {
     const content = await fs.readFile(SKILL_PATH, "utf8");
     // The skill must document forwarding the args to the Workflow tool
     expect(content).toContain("Workflow");

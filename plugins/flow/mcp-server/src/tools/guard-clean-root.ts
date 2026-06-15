@@ -1,15 +1,15 @@
 /**
- * `guardCleanRoot` tool — Epic 10 drain fix-plan, Fix 2b (clean-root guard).
+ * `guardCleanRoot` tool — Epic 10 run fix-plan, Fix 2b (clean-root guard).
  *
- * The drain isolates each dev's edits by cutting a per-story git worktree
+ * The run isolates each dev's edits by cutting a per-story git worktree
  * (`isolation: 'worktree'`, Story 8.20). In a BACKGROUND job the repo's
  * `worktree.bgIsolation: "none"` setting can suppress that, pinning the dev's
- * edits to the SHARED root checkout instead of its own worktree (Epic 10 drain
+ * edits to the SHARED root checkout instead of its own worktree (Epic 10 run
  * retro, Issue B). The leak recurred 0/5 across the 10.1→10.5 batch, so it is a
  * real failure mode of unconfirmed frequency — not yet worth a durable fix, but
  * worth a cheap, protective guard.
  *
- * This tool is that guard. The drain calls it AFTER each story settles: it asks
+ * This tool is that guard. The run calls it AFTER each story settles: it asks
  * `listDirtyPaths` whether the orchestrating root checkout carries any tracked
  * working-tree changes (operational `.flow/**` state is gitignored and dropped,
  * so only a genuine source leak shows), and if so it stashes exactly those paths
@@ -20,10 +20,10 @@
  *
  * Pure orchestration over the two sanctioned git-spawn helpers in `lib/git.ts`
  * (`listDirtyPaths` + `stashWorkingTree`). Best-effort by construction — it never
- * throws on a degraded git state, so a guard call can never break the drain.
+ * throws on a degraded git state, so a guard call can never break the run.
  *
  * Idempotent: a second call after a successful stash finds the root clean and
- * returns `{ dirty: false }` (so the drain's seam may safely retry a garbled relay).
+ * returns `{ dirty: false }` (so the run's seam may safely retry a garbled relay).
  */
 
 import * as path from "node:path";
@@ -50,7 +50,7 @@ export interface GuardCleanRootResult {
   /**
    * True when the root checkout's HEAD had drifted off the base branch (detached
    * at a story commit or on a `story/*` branch — the bgIsolation leak) and was
-   * restored. fix/drain-isolation-coordination-honesty.
+   * restored. fix/run-isolation-coordination-honesty.
    */
   headMoved: boolean;
   /** Where HEAD was before the restore (e.g. `detached@abc1234` or a branch name). */
@@ -72,7 +72,7 @@ export async function guardCleanRoot(
   let stashed = false;
   let stashMessage: string | undefined;
   if (paths.length > 0) {
-    stashMessage = `flow-drain clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
+    stashMessage = `flow-run clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
     ({ stashed } = await stashWorkingTree({ cwd, paths, message: stashMessage }));
   }
 

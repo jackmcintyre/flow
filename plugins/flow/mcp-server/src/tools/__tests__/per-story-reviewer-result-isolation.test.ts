@@ -1,12 +1,12 @@
 /**
  * Story 8.15 — per-story reviewer-result isolation within a session.
  *
- * A `flow-drain` run shares ONE session ULID across every story it processes.
+ * A `flow-run` run shares ONE session ULID across every story it processes.
  * Before 8.15 the reviewer verdict was stored at a single per-session path
  * (`.flow/state/sessions/<sessionUlid>/reviewer-result.json`), so the next
  * story's `runReviewerSession` clobbered the previous story's verdict — making a
  * failed verdict-seam unrecoverable, and corrupting verdicts outright under a
- * future parallel drain.
+ * future parallel run.
  *
  * This suite exercises the WRITER (`runReviewerSession`) and the READER
  * (`processReviewerTranscript`, plus its shared `readReviewerResultFile`)

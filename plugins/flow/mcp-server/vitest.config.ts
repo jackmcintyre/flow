@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// CI gets the proven, faster settings; a developer machine (where the drain's
+// CI gets the proven, faster settings; a developer machine (where the run's
 // per-story pre-PR test gate runs) gets a hard-bounded footprint so a runaway
 // run can never drag the box into swap. GitHub Actions sets `CI`.
 const isCI = !!process.env.CI;
@@ -12,7 +12,7 @@ export default defineConfig({
     // process) per CPU core, and each fork inherits the `test` script's large
     // `--max-old-space-size`, so on a many-core machine a single run can spawn
     // ~10–19 heavy processes at once — fine on a CI runner (≤4 cores), but it
-    // starved a developer machine into a hard reboot mid-drain.
+    // starved a developer machine into a hard reboot mid-run.
     pool: "forks",
     poolOptions: {
       forks: {

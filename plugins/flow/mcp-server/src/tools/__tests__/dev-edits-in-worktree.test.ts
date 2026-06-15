@@ -1,6 +1,6 @@
 /**
- * Integration tests for the drain's dev step editing INSIDE its own worktree —
- * Story 8.20 (true drain parallelism, part 1: the isolation substrate).
+ * Integration tests for the run's dev step editing INSIDE its own worktree —
+ * Story 8.20 (true run parallelism, part 1: the isolation substrate).
  *
  * Story 8.16 isolated only the dev's git *work product* (branch/commit/PR) by
  * transplanting the dev's changed paths from the shared orchestrating checkout
@@ -47,7 +47,7 @@ const REF = "8-20-edit-in-worktree";
 const TITLE = "Each dev edits in its own worktree";
 const TYPE = "feat";
 const BODY = "Make the dev's editing surface its own worktree.";
-const SUMMARY = "Edit-in-worktree isolation on the drain dev step.";
+const SUMMARY = "Edit-in-worktree isolation on the run dev step.";
 const FAKE_PR_URL = "https://github.com/owner/repo/pull/820";
 const SESSION_ULID = "01HZSESSION00000000008200";
 const SOURCE_HASH = "c".repeat(64);

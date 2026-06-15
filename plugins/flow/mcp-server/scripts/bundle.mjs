@@ -18,7 +18,7 @@
  * `assert-bundle`). See memory `plugin-not-bundled-install-broken`.
  *
  * Outputs overwrite the tsc stubs at the SAME paths that
- * `.claude-plugin/plugin.json#mcpServers` and `workflows/drain.workflow.js`
+ * `.claude-plugin/plugin.json#mcpServers` and `workflows/run.workflow.js`
  * already reference, so no caller path changes. Wired into `pnpm build` after
  * `tsc` + `normalise-dist`.
  *
@@ -42,7 +42,7 @@ const OUT_DIR = process.env["CREW_BUNDLE_OUT_DIR"]
 /** @type {{ entry: string; out: string; metaOut: string }[]} */
 const ENTRYPOINTS = [
   { entry: "src/index.ts", out: "index.js", metaOut: "bundle-meta-index.json" }, // MCP stdio server (plugin.json)
-  { entry: "src/cli.ts", out: "cli.js", metaOut: "bundle-meta-cli.json" }, //     stateless CLI seam (drain)
+  { entry: "src/cli.ts", out: "cli.js", metaOut: "bundle-meta-cli.json" }, //     stateless CLI seam (run)
 ];
 
 for (const { entry, out, metaOut } of ENTRYPOINTS) {
@@ -59,7 +59,7 @@ for (const { entry, out, metaOut } of ENTRYPOINTS) {
     // lets the drift test do a temp-dir rebuild also redirects the metafiles.
     metafile: true,
     // NOT minified — deliberately. Minification mangles class names, and the
-    // drain classifies failures on `DomainError.name` (the class name, e.g.
+    // the run classifies failures on `DomainError.name` (the class name, e.g.
     // `NotAnEligibleBacklogItemError`). A minified bundle returns `name: "un"`,
     // silently breaking error routing on a clean install. (esbuild `keepNames`
     // would preserve `.name`, but on this load-bearing path the unminified bundle

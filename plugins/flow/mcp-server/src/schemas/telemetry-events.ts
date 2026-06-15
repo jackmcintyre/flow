@@ -361,7 +361,7 @@ export const SkillInvokeEventSchema = TelemetryEventBase.extend({
  *                these short and structural.
  *
  * The envelope's `agent` field carries the role that experienced the friction;
- * `session_id` is the drain-session ULID; `story_id` is the ref when the
+ * `session_id` is the run-session ULID; `story_id` is the ref when the
  * friction occurred inside a story flow (optional — tools can emit friction
  * outside a story).
  *

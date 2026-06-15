@@ -1,22 +1,22 @@
 /**
- * Unit tests for `summariseDrainResult` — Story 8.7.
+ * Unit tests for `summariseRunResult` — Story 8.7.
  *
- * AC1: formats a populated drain result into a one-line summary.
+ * AC1: formats a populated run result into a one-line summary.
  * AC2: handles an all-empty result (and missing optional arrays) gracefully.
  */
 
 import { describe, expect, it } from "vitest";
 import {
-  summariseDrainResult,
-  type DrainResult,
-} from "../summarise-drain-result.js";
+  summariseRunResult,
+  type RunResult,
+} from "../summarise-run-result.js";
 
-describe("summariseDrainResult", () => {
+describe("summariseRunResult", () => {
   // AC1 — populated result.
-  it("formats a populated drain result into a one-line summary", () => {
-    const result: DrainResult = {
+  it("formats a populated run result into a one-line summary", () => {
+    const result: RunResult = {
       sessionUlid: "01KST0WDFQRHWQ9B54X1M7K387",
-      drainedReason: "queue-drained",
+      runReason: "queue-emptied",
       completed: ["bmad:8.5", "bmad:8.6", "bmad:8.7"],
       merged: [
         { ref: "bmad:8.5", prNumber: 201 },
@@ -28,15 +28,15 @@ describe("summariseDrainResult", () => {
       blocked: [],
     };
 
-    expect(summariseDrainResult(result)).toBe(
-      "drain 01KST0WDFQRHWQ9B54X1M7K387: 3 completed, 2 merged, 1 paused-for-human, 0 blocked (drainedReason: queue-drained)",
+    expect(summariseRunResult(result)).toBe(
+      "run 01KST0WDFQRHWQ9B54X1M7K387: 3 completed, 2 merged, 1 paused-for-human, 0 blocked (runReason: queue-emptied)",
     );
   });
 
   it("reflects each count from its corresponding array's length", () => {
-    const result: DrainResult = {
+    const result: RunResult = {
       sessionUlid: "S1",
-      drainedReason: "r",
+      runReason: "r",
       completed: ["a"],
       merged: [
         { ref: "a", prNumber: 1 },
@@ -55,28 +55,28 @@ describe("summariseDrainResult", () => {
       ],
     };
 
-    expect(summariseDrainResult(result)).toBe(
-      "drain S1: 1 completed, 2 merged, 3 paused-for-human, 4 blocked (drainedReason: r)",
+    expect(summariseRunResult(result)).toBe(
+      "run S1: 1 completed, 2 merged, 3 paused-for-human, 4 blocked (runReason: r)",
     );
   });
 
   it("is a single line (contains no newline)", () => {
-    const result: DrainResult = {
+    const result: RunResult = {
       sessionUlid: "S",
-      drainedReason: "queue-drained",
+      runReason: "queue-emptied",
       completed: [],
       merged: [],
       pausedForHuman: [],
       blocked: [],
     };
 
-    expect(summariseDrainResult(result)).not.toContain("\n");
+    expect(summariseRunResult(result)).not.toContain("\n");
   });
 
   it("does not mutate the input", () => {
-    const result: DrainResult = {
+    const result: RunResult = {
       sessionUlid: "S",
-      drainedReason: "queue-drained",
+      runReason: "queue-emptied",
       completed: ["a"],
       merged: [{ ref: "a", prNumber: 1 }],
       pausedForHuman: [],
@@ -84,37 +84,37 @@ describe("summariseDrainResult", () => {
     };
     const snapshot = JSON.parse(JSON.stringify(result));
 
-    summariseDrainResult(result);
+    summariseRunResult(result);
 
     expect(result).toEqual(snapshot);
   });
 
   // AC2 — all-empty arrays.
   it("renders the same shape with every count 0 for an all-empty result", () => {
-    const result: DrainResult = {
+    const result: RunResult = {
       sessionUlid: "01KST0WDFQRHWQ9B54X1M7K387",
-      drainedReason: "queue-drained",
+      runReason: "queue-emptied",
       completed: [],
       merged: [],
       pausedForHuman: [],
       blocked: [],
     };
 
-    expect(summariseDrainResult(result)).toBe(
-      "drain 01KST0WDFQRHWQ9B54X1M7K387: 0 completed, 0 merged, 0 paused-for-human, 0 blocked (drainedReason: queue-drained)",
+    expect(summariseRunResult(result)).toBe(
+      "run 01KST0WDFQRHWQ9B54X1M7K387: 0 completed, 0 merged, 0 paused-for-human, 0 blocked (runReason: queue-emptied)",
     );
   });
 
   // AC2 — missing optional arrays treated as empty, not thrown.
   it("treats missing (undefined) optional arrays as empty and does not throw", () => {
-    const result: DrainResult = {
+    const result: RunResult = {
       sessionUlid: "01KST0WDFQRHWQ9B54X1M7K387",
-      drainedReason: "queue-drained",
+      runReason: "queue-emptied",
     };
 
-    expect(() => summariseDrainResult(result)).not.toThrow();
-    expect(summariseDrainResult(result)).toBe(
-      "drain 01KST0WDFQRHWQ9B54X1M7K387: 0 completed, 0 merged, 0 paused-for-human, 0 blocked (drainedReason: queue-drained)",
+    expect(() => summariseRunResult(result)).not.toThrow();
+    expect(summariseRunResult(result)).toBe(
+      "run 01KST0WDFQRHWQ9B54X1M7K387: 0 completed, 0 merged, 0 paused-for-human, 0 blocked (runReason: queue-emptied)",
     );
   });
 });

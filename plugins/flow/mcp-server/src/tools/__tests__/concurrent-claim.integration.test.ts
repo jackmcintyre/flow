@@ -10,7 +10,7 @@
  *        exactly once, no story ever built twice, no available story silently skipped.
  *
  * Uses a real tmpdir + real fs ops (no mocking). Two concurrent
- * `claimNextStory` calls simulate two drain workers calling the seam in
+ * `claimNextStory` calls simulate two run workers calling the seam in
  * parallel with the same session ULID (same session is fine — the atomic rename
  * is the only coordination surface, not the ULID).
  */
@@ -104,7 +104,7 @@ afterEach(async () => {
 
 describe("AC1 + AC2: two workers with two ready stories", () => {
   it(
-    "both workers claim one story each; queue drains fully with no story built twice and none silently skipped",
+    "both workers claim one story each; queue empties fully with no story built twice and none silently skipped",
     async () => {
       // Seed two ready stories. Worker 1 will claim A (first in alpha order),
       // Worker 2 will attempt A too, lose the race, and fall through to B.
@@ -167,7 +167,7 @@ describe("AC1 + AC2: two workers with two ready stories", () => {
 // AC1 — three stories, two workers; all three must get built
 // ---------------------------------------------------------------------------
 
-describe("AC1: three stories, two workers — queue fully drains", () => {
+describe("AC1: three stories, two workers — queue fully empties", () => {
   it(
     "two workers on a three-story queue: first two are claimed in parallel, third is claimed on the next pass",
     async () => {
@@ -192,8 +192,8 @@ describe("AC1: three stories, two workers — queue fully drains", () => {
       // r3 can be spawn-dev (third story claimed) or waiting-on-in-progress
       // (third story still in to-do/ but temporarily "blocked" by the two
       // in-progress stories). Either outcome is correct; the important constraint
-      // is that r3 is NOT queue-drained and the third story is NOT silently lost.
-      expect(r3.next).not.toBe("queue-drained");
+      // is that r3 is NOT queue-emptied and the third story is NOT silently lost.
+      expect(r3.next).not.toBe("queue-emptied");
 
       // After all three settle, every story must appear in in-progress/ or
       // still be in to-do/ (i.e. nothing disappears).
@@ -212,7 +212,7 @@ describe("AC1: three stories, two workers — queue fully drains", () => {
 
 describe("AC2: one story, two workers — contested story built exactly once", () => {
   it(
-    "one worker wins the rename race and returns spawn-dev; the other falls through to queue-drained (no second build)",
+    "one worker wins the rename race and returns spawn-dev; the other falls through to queue-emptied (no second build)",
     async () => {
       // Only one story in the queue.
       await seedTodoStory(makeTodoManifest(STORY_REF_A));
@@ -230,12 +230,12 @@ describe("AC2: one story, two workers — contested story built exactly once", (
       if (winner.next !== "spawn-dev") return;
       expect(winner.ref).toBe(STORY_REF_A);
 
-      // The loser reports queue-drained or waiting-on-in-progress — NOT spawn-dev
+      // The loser reports queue-emptied or waiting-on-in-progress — NOT spawn-dev
       // for the same story, so the story is never built twice.
       const loserResults = [result1, result2].filter((r) => r.next !== "spawn-dev");
       expect(loserResults).toHaveLength(1);
       const loser = loserResults[0]!;
-      expect(loser.next === "queue-drained" || loser.next === "waiting-on-in-progress").toBe(true);
+      expect(loser.next === "queue-emptied" || loser.next === "waiting-on-in-progress").toBe(true);
 
       // The story lands in exactly one state directory.
       const inProgress = await listInProgressRefs(tmpRoot);
@@ -274,7 +274,7 @@ describe("AC4 (integration): a genuine claim error still propagates — not swal
       );
 
       // claimNextStory must throw (MalformedExecutionManifestError from the
-      // listClaimableTodos → parseExecutionManifest path), NOT silently drain.
+      // listClaimableTodos → parseExecutionManifest path), NOT silently run.
       await expect(
         claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID }),
       ).rejects.toThrow();

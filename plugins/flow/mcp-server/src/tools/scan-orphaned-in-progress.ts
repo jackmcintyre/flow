@@ -30,7 +30,7 @@ import { isSessionAlive } from "../lib/session-liveness.js";
 interface OrphanedManifest {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
   ref: string;
-  /** Story title from the manifest — needed by the drain to re-run the dev phase. */
+  /** Story title from the manifest — needed by the run to re-run the dev phase. */
   title: string;
   /** The stale `claimed_by` ULID from the manifest. */
   staleUlid: string;
@@ -58,8 +58,8 @@ interface OrphanedManifest {
    */
   prNumber: number | null;
   /**
-   * The story's crash-resume count so far (manifest `drain_resume_attempts`,
-   * `0` if unset). The drain caps resumptions on this so a doomed story cannot
+   * The story's crash-resume count so far (manifest `run_resume_attempts`,
+   * `0` if unset). The run caps resumptions on this so a doomed story cannot
    * loop forever. Added in the crash-recovery change.
    */
   resumeAttempts: number;
@@ -230,7 +230,7 @@ export async function scanOrphanedInProgress(
     }
 
     // Recover the PR number (if any) from the stale session's dev-outcome.json
-    // so the drain can resume at review without re-running dev. Defensive: a
+    // so the run can resume at review without re-running dev. Defensive: a
     // malformed/absent outcome file must NOT abort the whole scan — treat as null.
     //
     // The recorded dev-outcome number always WINS when present (preserves the
@@ -258,7 +258,7 @@ export async function scanOrphanedInProgress(
       hasTranscript,
       hasOpenPR,
       prNumber,
-      resumeAttempts: manifest.drain_resume_attempts ?? 0,
+      resumeAttempts: manifest.run_resume_attempts ?? 0,
     });
   }
 

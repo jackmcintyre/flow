@@ -1,20 +1,20 @@
 /**
  * @group e2e
  *
- * Drain workflow end-to-end integration smoke — Story native:01KT7RR9TFD7RGD34D2BFDXH90.
+ * Run workflow end-to-end integration smoke — Story native:01KT7RR9TFD7RGD34D2BFDXH90.
  *
- * Proves the drain orchestration runs an actual claim→dev→review→verdict→gate
+ * Proves the run orchestration runs an actual claim→dev→review→verdict→gate
  * loop against a real throwaway scratch repo (seeded by `createSmokeScratchRepo`)
  * and that a real orchestration regression (a broken seam) fails the suite
- * visibly — something the shape-only drain-workflow.test.ts cannot do.
+ * visibly — something the shape-only run-workflow.test.ts cannot do.
  *
  * Architecture:
- *   - The drain workflow is a plain .js script body driven by injected globals
+ *   - The run workflow is a plain .js script body driven by injected globals
  *     (args, agent, log, phase, notify). We use the AsyncFunction runner from
- *     drain-fault-injection.test.ts.
+ *     run-fault-injection.test.ts.
  *   - PURE STATE seams (mintSessionUlid, claimNextStory, scanOrphanedInProgress,
  *     reapStaleWorktrees, resolveBuildPlan, completeStory, blockStory,
- *     drainPhaseStart/Done, guardCleanRoot) call the REAL CLI binary
+ *     runPhaseStart/Done, guardCleanRoot) call the REAL CLI binary
  *     (`node dist/cli.js <tool>`) against the real scratch repo — end-to-end
  *     state changes happen on disk, not in memory.
  *   - AI / GITHUB seams (buildPersonaSpawnPrompt, processDevTranscript,
@@ -44,7 +44,6 @@ import { stringify as yamlStringify } from "yaml";
 import { execa } from "execa";
 
 import { createSmokeScratchRepo } from "../src/tools/create-smoke-scratch-repo.js";
-import { drainPhaseStart, drainPhaseDone } from "../src/tools/drain-phase-progress.js";
 
 // ---------------------------------------------------------------------------
 // Locate workflow + CLI
@@ -52,7 +51,7 @@ import { drainPhaseStart, drainPhaseDone } from "../src/tools/drain-phase-progre
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // tests/ → mcp-server → plugins/flow → workflows/
-const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "drain.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "run.workflow.js");
 // tests/ → mcp-server → dist/cli.js
 const CLI = resolve(HERE, "..", "dist", "cli.js");
 
@@ -82,17 +81,17 @@ async function seedClaimableStory(repo: string, ref: string): Promise<void> {
     depends_on: [],
     acceptance_criteria: [
       {
-        text: "**Given** a test setup, **When** the smoke runs, **Then** the story drains.",
+        text: "**Given** a test setup, **When** the smoke runs, **Then** the story runs.",
         kind: "integration",
-        verification: { type: "vitest", target: "tests/drain-workflow-e2e.test.ts" },
+        verification: { type: "vitest", target: "tests/run-workflow-e2e.test.ts" },
       },
     ],
     title: "E2E smoke story",
-    narrative: "As a smoke harness, I want a claimable story, so that the drain loop can exercise it.",
+    narrative: "As a smoke harness, I want a claimable story, so that the run loop can exercise it.",
     narrative_struct: {
       role: "smoke harness",
       want: "a claimable story",
-      so_that: "the drain loop can exercise it",
+      so_that: "the run loop can exercise it",
     },
     tasks: [{ text: "Implement the smoke story.", ac_refs: ["AC1"] }],
     cited_sources: [],
@@ -110,7 +109,7 @@ async function seedClaimableStory(repo: string, ref: string): Promise<void> {
 
 beforeAll(async () => {
   ({ scratchRoot, cleanup: scratchCleanup } = await createSmokeScratchRepo({
-    label: "drain-e2e",
+    label: "run-e2e",
   }));
 }, 30_000);
 
@@ -123,7 +122,7 @@ afterEach(async () => {
   // Re-create the scratch repo entirely to avoid state leakage between test cases.
   if (scratchCleanup) await scratchCleanup();
   ({ scratchRoot, cleanup: scratchCleanup } = await createSmokeScratchRepo({
-    label: "drain-e2e",
+    label: "run-e2e",
   }));
 }, 30_000);
 
@@ -141,7 +140,7 @@ async function callCli(toolName: string, toolArgs: object): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Core drain runner
+// Core run runner
 // ---------------------------------------------------------------------------
 
 /**
@@ -208,7 +207,7 @@ function stubSeamResult(label: string, refFromLabel: (l: string) => string | und
   return { ok: true };
 }
 
-interface RunDrainOpts {
+interface RunOpts {
   /**
    * When set, this seam label prefix is made to throw, simulating a broken step.
    * Used for the negative-control test (AC2).
@@ -218,7 +217,7 @@ interface RunDrainOpts {
   sessionUlid?: string;
 }
 
-async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
+async function runRunE2e(opts: RunOpts = {}): Promise<{
   result: any;
   thrown: unknown;
   logs: string[];
@@ -227,7 +226,7 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
     /^export\s+const\s+meta\b/m,
     "const meta",
   );
-  const body = `${source}\n//# sourceURL=drain.workflow.js`;
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
 
   const logs: string[] = [];
 
@@ -237,7 +236,7 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
     ((await callCli("mintSessionUlid", {})) as { sessionUlid: string }).sessionUlid;
 
   // Recover the ref from a seam label by scanning the claim-indexed refs.
-  // The drain encodes ref into the label (e.g. `pd:native:01KT…:0`).
+  // The run encodes ref into the label (e.g. `pd:native:01KT…:0`).
   // Since we don't know refs ahead of time we extract them from labels by matching
   // the `native:` prefix pattern.
   const refFromLabel = (label: string): string | undefined => {
@@ -245,8 +244,8 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
     return m ? m[0] : undefined;
   };
 
-  // Tool name extraction from a drain seam command.
-  // The drain invokes: `node ${CLI} <toolName> --json <args>`
+  // Tool name extraction from a run seam command.
+  // The run invokes: `node ${CLI} <toolName> --json <args>`
   // Strip the node + CLI path to get the tool name.
   const toolNameFromCmd = (cmd: string): string | null => {
     // cmd is like: `node /path/to/cli.js toolName --json '{...}'`
@@ -261,7 +260,7 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
     if (flagIdx === -1) return "{}";
     // Everything after `--json ` is the args JSON (may be single-quoted)
     const rest = cmd.slice(flagIdx + 7).trim();
-    // Strip outer single quotes if present (the drain wraps args in single quotes
+    // Strip outer single quotes if present (the run wraps args in single quotes
     // in the seam command string: `node ${CLI} tool --json '${JSON.stringify(args)}'`)
     if (rest.startsWith("'") && rest.endsWith("'")) {
       return rest.slice(1, -1);
@@ -300,7 +299,7 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
               toolArgs = {};
             }
 
-            // Rewrite targetRepoRoot to our scratch repo (the drain passes the
+            // Rewrite targetRepoRoot to our scratch repo (the run passes the
             // real REPO path in args, which is set from our args.targetRepoRoot).
             if ("targetRepoRoot" in toolArgs && typeof (toolArgs as any).targetRepoRoot === "string") {
               (toolArgs as any).targetRepoRoot = scratchRoot;
@@ -347,8 +346,8 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
     targetRepoRoot: scratchRoot,
     cli: CLI,
     maxConcurrency: 1,
-    // No maxStories cap — we want the drain to run until the queue is empty
-    // so the run exits with 'queue-drained', not 'max-stories-reached'.
+    // No maxStories cap — we want the run to run until the queue is empty
+    // so the run exits with 'queue-emptied', not 'max-stories-reached'.
     repollDelayMs: 0,
     maxRepoll: 3,
   });
@@ -371,15 +370,15 @@ async function runDrainE2e(opts: RunDrainOpts = {}): Promise<{
 
 describe("AC1 — story advances from claim through dev, review, verdict, and gate without manual intervention", () => {
   it(
-    "a seeded claimable story drains to pausedForHuman (Stage-1 gate outcome) and the run reports queue-drained",
+    "a seeded claimable story runs to pausedForHuman (Stage-1 gate outcome) and the run reports queue-emptied",
     async () => {
       const REF = "native:01KT7RR9SMOKE00000000001";
       await seedClaimableStory(scratchRoot, REF);
 
-      const { result, thrown, logs } = await runDrainE2e();
+      const { result, thrown, logs } = await runRunE2e();
 
       // The run returned without throwing.
-      expect(thrown, `drain threw: ${thrown}`).toBeUndefined();
+      expect(thrown, `run threw: ${thrown}`).toBeUndefined();
       expect(result).toBeDefined();
 
       // The claim succeeded — the story was picked up.
@@ -399,9 +398,9 @@ describe("AC1 — story advances from claim through dev, review, verdict, and ga
       ];
       expect(allTerminal.some((r: string) => r === REF || r.includes("01KT7RR9SMOKE")), "story should be in a terminal bucket").toBe(true);
 
-      // The drain reason is queue-drained (the single story was claimed and processed).
-      expect(result.drainedReason).toBe("queue-drained");
-      expect(result.drained).toBe(true);
+      // The run reason is queue-emptied (the single story was claimed and processed).
+      expect(result.runReason).toBe("queue-emptied");
+      expect(result.queueEmptied).toBe(true);
 
       // No story was silently dropped into blocked unexpectedly.
       expect(result.blocked.filter((b: any) => b.ref === REF || String(b.ref).includes("01KT7RR9SMOKE"))).toHaveLength(0);
@@ -415,7 +414,7 @@ describe("AC1 — story advances from claim through dev, review, verdict, and ga
       const REF = "native:01KT7RR9SMOKE00000000002";
       await seedClaimableStory(scratchRoot, REF);
 
-      const { result, thrown } = await runDrainE2e();
+      const { result, thrown } = await runRunE2e();
 
       expect(thrown).toBeUndefined();
       // The story reached a terminal bucket — never stayed in to-do/.
@@ -448,22 +447,22 @@ describe("AC1 — story advances from claim through dev, review, verdict, and ga
 
 describe("AC2 — a deliberately broken seam makes the run exit red with the broken step name", () => {
   it(
-    "breaking the claimNextStory seam produces a failure result — the run does not reach queue-drained",
+    "breaking the claimNextStory seam produces a failure result — the run does not reach queue-emptied",
     async () => {
       const REF = "native:01KT7RR9SMOKE00000000003";
       await seedClaimableStory(scratchRoot, REF);
 
       // Break the claim seam — every claim call throws. The seam is NOT
       // swallow=true and NOT inside processStory's try/catch, so the worker itself
-      // throws; Promise.allSettled() swallows it and drainedReason stays 'incomplete'.
-      const { result, thrown, logs } = await runDrainE2e({ brokenSeamPrefix: "claim:" });
+      // throws; Promise.allSettled() swallows it and runReason stays 'incomplete'.
+      const { result, thrown, logs } = await runRunE2e({ brokenSeamPrefix: "claim:" });
 
       // The top-level runner does NOT throw (Promise.allSettled swallows worker throws).
       expect(thrown).toBeUndefined();
 
-      // The run did NOT successfully drain the queue — something failed.
-      expect(result.drained, "broken claim seam should not produce a clean drain").toBe(false);
-      expect(result.drainedReason, "drain reason should not be queue-drained when claim is broken").not.toBe("queue-drained");
+      // The run did NOT successfully empty the queue — something failed.
+      expect(result.queueEmptied, "broken claim seam should not produce a clean empty").toBe(false);
+      expect(result.runReason, "run reason should not be queue-emptied when claim is broken").not.toBe("queue-emptied");
 
       // No story was successfully completed or paused (the claim never succeeded).
       const greenTerminals = [
@@ -475,8 +474,8 @@ describe("AC2 — a deliberately broken seam makes the run exit red with the bro
 
       // The logs confirm something went wrong.
       const logStr = logs.join("\n");
-      // The drain's log should include session startup info (mint succeeded).
-      expect(logStr).toMatch(/drain session=/);
+      // The run's log should include session startup info (mint succeeded).
+      expect(logStr).toMatch(/run session=/);
     },
     120_000,
   );
@@ -489,12 +488,12 @@ describe("AC2 — a deliberately broken seam makes the run exit red with the bro
 
       // Break the verdict seam only — the claim succeeds, dev succeeds, review succeeds,
       // but the verdict relay throws.
-      const { result, thrown } = await runDrainE2e({ brokenSeamPrefix: "verdict:" });
+      const { result, thrown } = await runRunE2e({ brokenSeamPrefix: "verdict:" });
 
       // The run should NOT throw at the top level (per-worker isolation).
-      expect(thrown, `drain should not throw at top level; threw: ${thrown}`).toBeUndefined();
+      expect(thrown, `run should not throw at top level; threw: ${thrown}`).toBeUndefined();
 
-      // The story landed in blocked with the worker-threw reason (drainWorker backstop).
+      // The story landed in blocked with the worker-threw reason (runWorker backstop).
       const blocked = result.blocked.find(
         (b: any) => b.ref && (b.ref.includes("01KT7RR9SMOKE00000000004") || String(b.ref).includes("SMOKE"))
       );
@@ -506,9 +505,9 @@ describe("AC2 — a deliberately broken seam makes the run exit red with the bro
       const tail = String(blocked?.tail ?? "");
       expect(tail).toMatch(/injected-failure|verdict|broken/i);
 
-      // The run still ended with a drain reason.
-      expect(typeof result.drainedReason).toBe("string");
-      expect(result.drainedReason.length).toBeGreaterThan(0);
+      // The run still ended with a run reason.
+      expect(typeof result.runReason).toBe("string");
+      expect(result.runReason.length).toBeGreaterThan(0);
     },
     120_000,
   );
@@ -527,16 +526,16 @@ describe("AC2 — harness can detect a real orchestration regression (structural
 
       // Seed both stories before running — each test has its own fresh scratch repo.
       await seedClaimableStory(scratchRoot, REF_CLEAN);
-      const cleanRun = await runDrainE2e({ sessionUlid: undefined });
+      const cleanRun = await runRunE2e({ sessionUlid: undefined });
 
       // Reset for the broken run.
       if (scratchCleanup) await scratchCleanup();
-      ({ scratchRoot, cleanup: scratchCleanup } = await createSmokeScratchRepo({ label: "drain-e2e" }));
+      ({ scratchRoot, cleanup: scratchCleanup } = await createSmokeScratchRepo({ label: "run-e2e" }));
       await seedClaimableStory(scratchRoot, REF_BROKEN);
-      const brokenRun = await runDrainE2e({ brokenSeamPrefix: "verdict:" });
+      const brokenRun = await runRunE2e({ brokenSeamPrefix: "verdict:" });
 
-      // CLEAN: drained fully and the story was not blocked.
-      expect(cleanRun.result.drainedReason).toBe("queue-drained");
+      // CLEAN: emptied fully and the story was not blocked.
+      expect(cleanRun.result.runReason).toBe("queue-emptied");
       expect(cleanRun.result.blocked).toHaveLength(0);
 
       // BROKEN: at least one story was blocked (the broken verdict seam killed it).

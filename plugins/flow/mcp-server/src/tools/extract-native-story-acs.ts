@@ -3,14 +3,14 @@
  *
  * Reads a native story spec from the orchestrating checkout's
  * `.flow/native-stories/<ULID>.md` folder and returns the structured
- * acceptance criteria. Called by the drain BEFORE spawning the builder worktree,
+ * acceptance criteria. Called by the run BEFORE spawning the builder worktree,
  * so the builder receives its ACs inline and never needs to resolve a `.flow`
  * path from within its isolated work copy.
  *
  * Native story specs live in `.flow/native-stories/` which is gitignored —
  * present only in the orchestrating checkout, not in builder worktrees. This
  * tool runs on the orchestrating side (where `.flow` exists) and returns the
- * ACs as structured JSON so the drain can pass them inline to the builder.
+ * ACs as structured JSON so the run can pass them inline to the builder.
  *
  * Usage (via CLI seam):
  *   node dist/cli.js extractNativeStoryAcs --json '{"targetRepoRoot":"...","ref":"native:01KT..."}'
@@ -19,7 +19,7 @@
  *   { acs: Array<{ index: number; firstLine: string; tag: string|null; body: string[] }> }
  *
  * Fail-soft: if the spec file does not exist or cannot be parsed, returns
- * { acs: [] } so the drain degrades gracefully (the builder falls back to its
+ * { acs: [] } so the run degrades gracefully (the builder falls back to its
  * existing file-read path, which will surface the "file not found" as a clear
  * error rather than a silent wrong result).
  */
@@ -53,7 +53,7 @@ export async function extractNativeStoryAcs(opts: {
     return { acs };
   } catch {
     // Fail-soft: if the spec cannot be read (file not found, parse error, etc.),
-    // return an empty array. The drain degrades gracefully — the builder falls
+    // return an empty array. The run degrades gracefully — the builder falls
     // back to its own file-read path, which surfaces a clear file-not-found error
     // rather than a silent wrong result.
     return { acs: [] };

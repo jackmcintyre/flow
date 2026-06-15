@@ -101,7 +101,7 @@ function isCanonicalPath(
 
 /**
  * Monotonic per-process counter that makes each `atomicWriteFile` temp sibling
- * unique. Paired with `process.pid` (unique across concurrent drain processes)
+ * unique. Paired with `process.pid` (unique across concurrent run processes)
  * it guarantees two writers targeting the SAME final path never share one temp
  * file — see `atomicWriteFile` for why a fixed `.tmp` raced under concurrency.
  */
@@ -116,10 +116,10 @@ let atomicWriteSeq = 0;
  * syscall so readers never see a partial file.
  *
  * **Why the temp name is unique per call (not a fixed `<absPath>.tmp`):** under
- * concurrent drains two flows can target the SAME final path (e.g. a shared
+ * concurrent runs two flows can target the SAME final path (e.g. a shared
  * session's `dev-outcome.json`). With a fixed `.tmp` sibling, flow A's `rename`
  * consumes `<f>.tmp` and flow B's `rename` then hits `ENOENT` because its temp
- * was renamed out from under it — the consistent `concurrent-drains-isolation`
+ * was renamed out from under it — the consistent `concurrent-runs-isolation`
  * CI red (mis-attributed to git-lock contention). A unique `<f>.<pid>.<seq>.tmp`
  * per call gives each writer its own temp, so every `rename` succeeds; the final
  * file is simply last-writer-wins (atomic, never partial). A failed `rename`

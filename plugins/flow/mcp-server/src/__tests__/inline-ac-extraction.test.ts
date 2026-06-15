@@ -7,22 +7,22 @@
  *   Then the builder has the full acceptance criteria available from the start
  *   without reading any file outside its own work copy.
  *
- * AC2 (unit) — drain.workflow.js:
- *   Given a drain run that spawns a builder for a native story,
+ * AC2 (unit) — run.workflow.js:
+ *   Given a run run that spawns a builder for a native story,
  *   When the orchestrator prepares the build context,
  *   Then the story's acceptance criteria are extracted by the orchestrator and
  *   passed inline to the builder — the builder's own file-read of the spec is
  *   not required for it to proceed.
  *
  * The AC1 integration test drives `runDevTerminalAction` with `inlineAcs` set
- * (simulating what the drain passes) and a `specPath` that does NOT exist in
+ * (simulating what the run passes) and a `specPath` that does NOT exist in
  * the worktree. The test asserts the tool succeeds — the ACs come from the
  * inline parameter, not the missing file.
  *
- * The AC2 unit test reads drain.workflow.js and asserts:
- *   a) The drain calls `extractNativeStoryAcs` before spawning the dev for
+ * The AC2 unit test reads run.workflow.js and asserts:
+ *   a) The run calls `extractNativeStoryAcs` before spawning the dev for
  *      native stories.
- *   b) The drain passes `inlineAcs` in the `runDevTerminalAction` JSON args
+ *   b) The run passes `inlineAcs` in the `runDevTerminalAction` JSON args
  *      given to the builder's prompt.
  *   c) No `.flow/native-stories` path resolution is delegated to the builder
  *      — the builder-side code only consumes `inlineAcs`, never reads .flow.
@@ -41,12 +41,12 @@ import { atomicWriteFile } from "../lib/managed-fs.js";
 import { runDevTerminalAction } from "../tools/run-dev-terminal-action.js";
 
 // ---------------------------------------------------------------------------
-// Drain workflow source (for AC2 structural assertions)
+// Run workflow source (for AC2 structural assertions)
 // ---------------------------------------------------------------------------
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DRAIN = path.resolve(HERE, "..", "..", "..", "workflows", "drain.workflow.js");
-const SRC = readFileSync(DRAIN, "utf8");
+const RUN = path.resolve(HERE, "..", "..", "..", "workflows", "run.workflow.js");
+const SRC = readFileSync(RUN, "utf8");
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -62,7 +62,7 @@ const SESSION_ULID = "01HZINLINE00000000000TEST1";
 const SOURCE_HASH = "a".repeat(64);
 
 /**
- * The inline ACs the drain extracts from .flow/native-stories/<ULID>.md and
+ * The inline ACs the run extracts from .flow/native-stories/<ULID>.md and
  * passes to the builder via runDevTerminalAction's `inlineAcs` parameter.
  * Shape mirrors AcEntry from extract-acs-from-spec.ts.
  */
@@ -79,10 +79,10 @@ const INLINE_ACS = [
   },
   {
     index: 2,
-    firstLine: "Given a drain run that spawns a builder for a native story, When the orchestrator prepares the build context",
+    firstLine: "Given a run run that spawns a builder for a native story, When the orchestrator prepares the build context",
     tag: null,
     body: [
-      "**Given** a drain run that spawns a builder for a native story,",
+      "**Given** a run run that spawns a builder for a native story,",
       "**When** the orchestrator prepares the build context,",
       "**Then** the story's acceptance criteria are extracted by the orchestrator and passed inline to the builder.",
     ],
@@ -131,9 +131,9 @@ async function setupRepo(): Promise<TestContext> {
         verification: { type: "vitest", target: "plugins/flow/mcp-server/src/tools/run-dev-terminal-action.ts" },
       },
       {
-        text: "Given a drain run that spawns a builder for a native story, When the orchestrator prepares the build context, Then the story's acceptance criteria are extracted by the orchestrator and passed inline to the builder.",
+        text: "Given a run run that spawns a builder for a native story, When the orchestrator prepares the build context, Then the story's acceptance criteria are extracted by the orchestrator and passed inline to the builder.",
         kind: "unit",
-        verification: { type: "vitest", target: "plugins/flow/workflows/drain.workflow.js" },
+        verification: { type: "vitest", target: "plugins/flow/workflows/run.workflow.js" },
       },
     ],
     title: TITLE,
@@ -220,6 +220,7 @@ describe("AC1 — builder uses inline ACs and does not fail on missing .flow spe
     await expect(fs.access(absSpecPath)).rejects.toThrow();
 
     // The tool MUST succeed using the inline ACs, not by reading the absent spec.
+    // (simulating what the run passes)
     const result = await runDevTerminalAction({
       targetRepoRoot: ctx.repoRoot,
       ref: REF,
@@ -273,31 +274,31 @@ describe("AC1 — builder uses inline ACs and does not fail on missing .flow spe
 });
 
 // ---------------------------------------------------------------------------
-// AC2 — unit test on drain.workflow.js (structural anchor)
+// AC2 — unit test on run.workflow.js (structural anchor)
 // ---------------------------------------------------------------------------
 
-describe("AC2 — drain extracts ACs for native stories and passes them inline to the builder (unit)", () => {
-  it("drain parses as a valid workflow script (sanity check)", () => {
+describe("AC2 — run extracts ACs for native stories and passes them inline to the builder (unit)", () => {
+  it("run parses as a valid workflow script (sanity check)", () => {
     const wrapped = "(async()=>{" + SRC.replace("export const meta", "const meta") + "})()";
     expect(() => new vm.Script(wrapped)).not.toThrow();
   });
 
-  it("drain registers extractNativeStoryAcs as a seam call for native story refs", () => {
-    // The drain must call extractNativeStoryAcs via the CLI seam for native stories.
+  it("run registers extractNativeStoryAcs as a seam call for native story refs", () => {
+    // The run must call extractNativeStoryAcs via the CLI seam for native stories.
     expect(SRC).toContain("extractNativeStoryAcs");
     // The seam call should be gated on the native: prefix check.
     expect(SRC).toMatch(/ref\.startsWith\(['"]native:['"]\)/);
   });
 
-  it("drain passes the extracted ACs as inlineAcs to the builder's runDevTerminalAction args", () => {
-    // The drain's dev prompt must include inlineAcs in the runDevTerminalAction JSON args.
+  it("run passes the extracted ACs as inlineAcs to the builder's runDevTerminalAction args", () => {
+    // The run's dev prompt must include inlineAcs in the runDevTerminalAction JSON args.
     expect(SRC).toContain("inlineAcs");
     // The runDevArgs object is augmented with inlineAcs before being JSON-serialised
-    // into the dev prompt — assert the key is present in the drain source.
+    // into the dev prompt — assert the key is present in the run source.
     expect(SRC).toMatch(/runDevArgs\.inlineAcs\s*=/);
   });
 
-  it("drain calls extractNativeStoryAcs via the retryable read-only seam pattern", () => {
+  it("run calls extractNativeStoryAcs via the retryable read-only seam pattern", () => {
     // The seam is read-only / idempotent — it should be called with retryable=true
     // (the third positional argument to seam()). The label starts with 'native-acs:'.
     expect(SRC).toContain("native-acs:");
@@ -305,26 +306,26 @@ describe("AC2 — drain extracts ACs for native stories and passes them inline t
     expect(SRC).toMatch(/extractNativeStoryAcs.*native-acs:\$\{ref\}.*true/s);
   });
 
-  it("drain fails soft when extractNativeStoryAcs returns empty — does not block the story", () => {
-    // The drain must guard: only assign inlineAcs when acs.length > 0. An empty
+  it("run fails soft when extractNativeStoryAcs returns empty — does not block the story", () => {
+    // The run must guard: only assign inlineAcs when acs.length > 0. An empty
     // or errored result falls back to null, leaving the builder to use its own
     // file-read path (which surfaces a clear ENOENT rather than a silent wrong result).
     expect(SRC).toContain("acsResult.acs.length > 0");
     expect(SRC).toContain("storyInlineAcs = null");
   });
 
-  it("drain also extracts inline ACs for native orphan resumes", () => {
-    // The orphan-resume path mirrors the main drain loop: it also extracts ACs
+  it("run also extracts inline ACs for native orphan resumes", () => {
+    // The orphan-resume path mirrors the main run loop: it also extracts ACs
     // inline for native orphans so a resumed builder has its spec available.
     expect(SRC).toContain("orphanInlineAcs");
     expect(SRC).toContain("orphanAcsResult.acs.length > 0");
   });
 
   it("the builder's runDevTerminalAction call site receives inlineAcs from the orchestrator", () => {
-    // The drain builds runDevArgs, conditionally appends inlineAcs, then
+    // The run builds runDevArgs, conditionally appends inlineAcs, then
     // JSON-serialises the whole object into the dev prompt. Assert the pattern.
     expect(SRC).toContain("runDevArgs");
-    // The drain only appends inlineAcs when they are non-null and non-empty.
+    // The run only appends inlineAcs when they are non-null and non-empty.
     expect(SRC).toMatch(/if \(inlineAcs && Array\.isArray\(inlineAcs\) && inlineAcs\.length > 0\)/);
   });
 });

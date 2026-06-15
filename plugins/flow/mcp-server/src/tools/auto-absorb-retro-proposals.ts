@@ -3,7 +3,7 @@
  *
  * Story native:01KV2Z67850XWWQV0AY2N05JSX
  *
- * After a retro cycle writes its proposals, the drain calls this function to
+ * After a retro cycle writes its proposals, the run calls this function to
  * apply the safe subset unattended. Only proposals that pass BOTH conditions
  * are eligible:
  *
@@ -17,13 +17,13 @@
  * boundary.
  *
  * Per-run ceiling: at most `maxAutoAbsorb` (default 5) note-tier lessons are
- * applied per drain cycle. Once the cap is reached, remaining note-tier
+ * applied per run cycle. Once the cap is reached, remaining note-tier
  * proposals are left pending — not dropped, just not auto-applied.
  *
  * Fail-soft seam: the entire function is wrapped in try/catch per proposal.
  * On any error: log it, treat the proposal as pending, continue. The caller
  * receives a non-throwing summary. Absorption is best-effort and must never
- * block a merge, propagate an exception up the drain loop, or corrupt state.
+ * block a merge, propagate an exception up the run loop, or corrupt state.
  *
  * Commit identity: auto-absorbed commits carry an `auto-absorbed` token in
  * the commit message, distinct from operator-accepted commits (which use
@@ -432,23 +432,23 @@ async function applySingleProposal(opts: ApplySingleOpts): Promise<string> {
 // ---------------------------------------------------------------------------
 
 /**
- * CLI-callable seam invoked by the drain's post-retro step.
+ * CLI-callable seam invoked by the run's post-retro step.
  *
  * Reads the retro-proposal file at
  * `<targetRepoRoot>/.flow/retro-proposals/<proposalFileTimestamp>.md`,
  * parses its frontmatter, and calls `autoAbsorbRetroProposals` with the
  * full proposals list.
  *
- * Returns the absorption summary in a drain-friendly shape:
+ * Returns the absorption summary in a run-friendly shape:
  *   { absorbed: number, pending: number, absorbedIds: string[], errors: string[] }
  *
  * Fail-soft by construction (autoAbsorbRetroProposals never throws).
  *
- * Called from drain.workflow.js after the retro-analyst writes its proposals:
+ * Called from run.workflow.js after the retro-analyst writes its proposals:
  *   node dist/cli.js autoAbsorbProposalFile --json
  *     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T..."}'
  *
- * Story native:01KV2Z67850XWWQV0AY2N05JSX — Task 3 (drain wiring seam).
+ * Story native:01KV2Z67850XWWQV0AY2N05JSX — Task 3 (run wiring seam).
  */
 export async function autoAbsorbProposalFile(opts: {
   /** Absolute path to the target repo root. */

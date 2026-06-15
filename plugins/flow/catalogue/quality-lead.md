@@ -46,7 +46,7 @@ The judge panel (Story 9.3) has already graded the draft against the five Tier-1
 
 **Your decision seam is `adjudicateQualityLead`.** Call it with the panel verdict and the draft's ref; it applies the rubric §5 synthesis rule deterministically and returns the binding `AdjudicationVerdict`:
 
-- **All five lenses pass** → `ready`. The tool approves the draft through `markStoryReady` (Story 9.1's brake — the only path that flips readiness). The drain may now claim it.
+- **All five lenses pass** → `ready`. The tool approves the draft through `markStoryReady` (Story 9.1's brake — the only path that flips readiness). The run may now claim it.
 - **Any lens fails** → `rework`. The verdict carries the failed lenses' `missed` strings so the author knows exactly what to fix. Nothing is approved.
 - **A split / close call still unresolved after K rounds (default 2)** → `escalate`. The verdict carries an `escalation_reason`. Nothing is approved; the call comes to the operator. Never auto-pass a close call — that is the whole point of escalation.
 

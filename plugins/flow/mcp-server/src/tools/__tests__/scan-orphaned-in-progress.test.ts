@@ -37,7 +37,7 @@ function makeManifestYaml(
   opts: {
     claimed_by?: string;
     omitClaimedBy?: boolean;
-    drain_resume_attempts?: number;
+    run_resume_attempts?: number;
     blocked_by?: string;
   } = {},
 ): string {
@@ -58,8 +58,8 @@ function makeManifestYaml(
   if (!opts.omitClaimedBy) {
     manifest["claimed_by"] = opts.claimed_by ?? CURRENT_SESSION_ULID;
   }
-  if (opts.drain_resume_attempts !== undefined) {
-    manifest["drain_resume_attempts"] = opts.drain_resume_attempts;
+  if (opts.run_resume_attempts !== undefined) {
+    manifest["run_resume_attempts"] = opts.run_resume_attempts;
   }
   if (opts.blocked_by !== undefined) {
     manifest["blocked_by"] = opts.blocked_by;
@@ -91,7 +91,7 @@ async function seedInProgressManifest(
   opts?: {
     claimed_by?: string;
     omitClaimedBy?: boolean;
-    drain_resume_attempts?: number;
+    run_resume_attempts?: number;
     blocked_by?: string;
   },
 ): Promise<string> {
@@ -190,7 +190,7 @@ describe("scanOrphanedInProgress — crash-recovery fields", () => {
     const ref = "native:01JVWX2STALE0000000000009";
     await seedInProgressManifest(stateRoot, ref, {
       claimed_by: STALE_ULID_A,
-      drain_resume_attempts: 2,
+      run_resume_attempts: 2,
     });
     await seedDevOutcome(tmpDir, STALE_ULID_A, ref, 42);
 
@@ -315,7 +315,7 @@ describe("scanOrphanedInProgress — open-PR fallback for prNumber", () => {
 // ---------------------------------------------------------------------------
 // AC1 (story native:01KT3YDHM10FPQ77N22BTJP9AF): a crash-recovery scan must
 // never cross-attribute a sibling's PR. Two stories built concurrently in ONE
-// drain run share a single session ULID; before the per-ref fix they wrote to
+// run run share a single session ULID; before the per-ref fix they wrote to
 // the same `dev-outcome.json`, so recovery resumed whichever story it scanned
 // against the last-written PR — marking an unbuilt story done against a
 // sibling's already-merged PR (the 2026-06-02 regression). With the per-ref
@@ -326,7 +326,7 @@ describe("scanOrphanedInProgress — sibling PR is never cross-attributed (AC1)"
   it("recovers each concurrently-built story's OWN prNumber when both share one session ULID", async () => {
     const refA = "native:01JVWX2STALE000000000A0001";
     const refB = "native:01JVWX2STALE000000000B0002";
-    // Both stories were claimed by the SAME (now-stale) drain session — the
+    // Both stories were claimed by the SAME (now-stale) run session — the
     // concurrency case that drove the regression.
     await seedInProgressManifest(stateRoot, refA, { claimed_by: STALE_ULID_A });
     await seedInProgressManifest(stateRoot, refB, { claimed_by: STALE_ULID_A });

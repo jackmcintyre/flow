@@ -134,7 +134,7 @@ export async function completeStory(opts: {
 
   // Step 5: Field rewrite.
   // Set status to "done". Preserve claimed_by verbatim for retros.
-  // STRIP any stale `blocked_by` (fix/drain-isolation-coordination-honesty): a
+  // STRIP any stale `blocked_by` (fix/run-isolation-coordination-honesty): a
   // story can reach completion after one or more NEEDS-CHANGES rounds stamped
   // `blocked_by: reviewer-verdict-needs-changes` on the in-progress manifest. A
   // DONE manifest must never carry a block reason — leaving it produced the

@@ -50,7 +50,7 @@ const RecordAgentFrictionOptionsSchema = z
      * inside a story flow.
      */
     story_id: z.string().min(1).optional(),
-    /** Drain-session ULID (or any opaque caller-supplied identifier). */
+    /** Run-session ULID (or any opaque caller-supplied identifier). */
     session_id: z.string().min(1),
     /** The closed-enum friction category. */
     kind: z.enum([

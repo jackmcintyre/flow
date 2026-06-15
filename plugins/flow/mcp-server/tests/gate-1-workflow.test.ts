@@ -7,7 +7,7 @@
  * `resolveJudgePlan` to drive its lens fan-out, takes the auto-bless path on
  * skip=true, and defaults to the full panel when lane is absent.
  *
- * Mirrors the structural-anchor approach of tests/drain-workflow.test.ts.
+ * Mirrors the structural-anchor approach of tests/run-workflow.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";

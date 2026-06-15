@@ -21,7 +21,7 @@ import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import {
   claimNextStory,
-  QUEUE_DRAINED_LINE,
+  QUEUE_EMPTIED_LINE,
   WAITING_ON_IN_PROGRESS_LINE,
   WAITING_ON_UNMERGED_OVERLAP_LINE,
   WAITING_ON_UNMERGED_DEPENDENCY_LINE,
@@ -153,7 +153,7 @@ describe("AC2 — held stories are counted and named when no eligible story is f
     await seedTodoStory(makeTodoManifest(REF_A, { ready: false }));
 
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    expect(result.next).toBe("queue-drained");
+    expect(result.next).toBe("queue-emptied");
 
     // The chatLog must include the expected-work counter line naming the held story.
     const counterLine = result.chatLog.find((l) => l.includes("expected-work:"));
@@ -169,7 +169,7 @@ describe("AC2 — held stories are counted and named when no eligible story is f
     await seedTodoStory(makeTodoManifest(REF_A, { depends_on: [DEP_REF] }));
 
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    expect(result.next).toBe("queue-drained");
+    expect(result.next).toBe("queue-emptied");
 
     const counterLine = result.chatLog.find((l) => l.includes("expected-work:"));
     expect(counterLine).toBeDefined();
@@ -236,7 +236,7 @@ describe("AC2 — held stories are counted and named when no eligible story is f
     await seedTodoStory(makeTodoManifest(REF_B, { depends_on: [DEP_REF] }));
 
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    expect(result.next).toBe("queue-drained");
+    expect(result.next).toBe("queue-emptied");
 
     const counterLine = result.chatLog.find((l) => l.includes("expected-work:"));
     expect(counterLine).toBeDefined();
@@ -272,8 +272,8 @@ describe("AC2 — held stories are counted and named when no eligible story is f
 describe("AC4 on claim surface — explicit zero counter when queue is truly empty", () => {
   it("emits an explicit zero-held counter line when both to-do/ and in-progress/ are empty", async () => {
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
-    expect(result.next).toBe("queue-drained");
-    expect(result.chatLog.some((l) => l === QUEUE_DRAINED_LINE)).toBe(true);
+    expect(result.next).toBe("queue-emptied");
+    expect(result.chatLog.some((l) => l === QUEUE_EMPTIED_LINE)).toBe(true);
 
     const counterLine = result.chatLog.find((l) => l.includes("expected-work:"));
     expect(counterLine).toBeDefined();

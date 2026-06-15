@@ -5,7 +5,7 @@
  * The reviewer surfaces at most ONE reusable retro lesson per story. When it
  * does, it calls this tool exactly once — AFTER its mandatory `runReviewerSession`
  * call — to MERGE that lesson onto the EXISTING per-ref `reviewer-result.json`
- * that `runReviewerSession` already wrote. The drain's FORWARD half later reads
+ * that `runReviewerSession` already wrote. The run's FORWARD half later reads
  * the captured lesson off that file and attaches it to the done manifest via
  * `recordStoryRetro`, before the merge gate runs.
  *
@@ -30,7 +30,7 @@
  *      reader/writer shares), via `atomicWriteFile`.
  *
  * **Fail-soft at the orchestration layer:** this tool itself fails loud on a
- * malformed lesson or a missing verdict file (a real caller bug), but the drain
+ * malformed lesson or a missing verdict file (a real caller bug), but the run
  * invites the reviewer to call it only OPTIONALLY and contains any failure so it
  * never blocks review / build / merge.
  *
@@ -54,7 +54,7 @@ import type { ReviewerResultFileShape } from "./run-reviewer-session.js";
 export interface RecordReviewerLessonOptions {
   /** Absolute path to the target repository root. */
   targetRepoRoot: string;
-  /** ULID of the calling (drain) session — the session the verdict file lives under. */
+  /** ULID of the calling (run) session — the session the verdict file lives under. */
   sessionUlid: string;
   /** Story ref (e.g. `"native:01HZ..."`), used to derive the per-ref result path. */
   ref: string;

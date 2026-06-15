@@ -1,7 +1,7 @@
 /**
  * Session-liveness primitive — Story native:01KTSQWJ62C4XQBDK4NXTEPQC0.
  *
- * Each drain run writes a heartbeat file (`heartbeat.json`) in its session
+ * Each run writes a heartbeat file (`heartbeat.json`) in its session
  * folder (`.flow/state/sessions/<ulid>/`) while it is executing. The heartbeat
  * carries the process id and a refresh timestamp. Two seams gate on it:
  *
@@ -39,9 +39,9 @@
  *
  * ### Refresh model & staleness window
  *
- * The drain has no background timer (it runs as a sequential workflow and is
+ * The run has no background timer (it runs as a sequential workflow and is
  * suspended inside long `agent()` build calls), so the heartbeat is NOT refreshed
- * on a fixed interval. Instead it is refreshed EVENT-DRIVEN through the drain's
+ * on a fixed interval. Instead it is refreshed EVENT-DRIVEN through the run's
  * own per-story seams: an initial write when the run starts (the reap/recover
  * seam), then again on every `claimNextStory` (before a build) and every
  * `processDevTranscript` (after a build). The longest possible gap between two
@@ -50,7 +50,7 @@
  * at that point and the post-build seam refreshes).
  *
  * `HEARTBEAT_STALE_MS` (30 min) must comfortably exceed that one-build ceiling so
- * a live drain mid-build is never falsely judged dead (the dangerous direction —
+ * a live run mid-build is never falsely judged dead (the dangerous direction —
  * a false-dead verdict force-deletes a live run's work). 30 min = 1.5× the 20-min
  * build ceiling. Erring large is safe here: a false-ALIVE verdict only delays
  * recovery of a genuinely dead run until the window lapses (the next sweep gets
@@ -67,10 +67,10 @@ import { atomicWriteFile } from "./managed-fs.js";
 
 /**
  * How old (ms) the heartbeat timestamp may be before we consider the session
- * dead. Internal: the drain refreshes the heartbeat through its per-story seams,
+ * dead. Internal: the run refreshes the heartbeat through its per-story seams,
  * so the longest gap between refreshes is one dev build (hard-bounded by the
  * 20-min build timeout). 30 min = 1.5× that ceiling — comfortably larger so a
- * live drain mid-build is never judged dead. See the module doc for the
+ * live run mid-build is never judged dead. See the module doc for the
  * event-driven refresh model and the false-dead-vs-false-alive rationale.
  */
 const HEARTBEAT_STALE_MS = 30 * 60_000; // 30 minutes
@@ -125,7 +125,7 @@ function heartbeatFilePath(
  * The write is idempotent: each call stamps a fresh `updatedAt` over the same
  * path; last-writer-wins is fine because only one process owns a given session.
  *
- * Callers (drain loop) should refresh on an interval; the initial write
+ * Callers (run loop) should refresh on an interval; the initial write
  * establishes the file so a newly-started session is immediately visible as
  * alive to a concurrently-starting sweep.
  */

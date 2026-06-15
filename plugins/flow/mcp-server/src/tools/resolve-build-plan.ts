@@ -22,13 +22,13 @@
  * front of the same hard gates.
  *
  * **Why these models?**
- * The drain's existing `devReviewerModel` arg already accepts any model string
+ * The run's existing `devReviewerModel` arg already accepts any model string
  * as an override channel (Story FU6). `resolveBuildPlan` is the authoritative
  * mapping from lane → model for per-story routing; operators can still override
  * the whole run via the launch arg (which takes precedence over any per-story
  * lane in practice if set explicitly).
  *
- * Per the drain cost-reduction plan (Phase 3), this subsumes the previously-
+ * Per the run cost-reduction plan (Phase 3), this subsumes the previously-
  * deferred risk-tier model routing.
  */
 
@@ -38,7 +38,7 @@ import { parse as yamlParse } from "yaml";
 
 // ---------------------------------------------------------------------------
 // Constants — the fast-lane model tier.
-// The full-lane default matches the FU6 Sonnet pin in drain.workflow.js.
+// The full-lane default matches the FU6 Sonnet pin in run.workflow.js.
 // ---------------------------------------------------------------------------
 
 /** Model used for both dev and reviewer on the fast lane. */

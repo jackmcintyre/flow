@@ -52,7 +52,7 @@ export interface ApplyReviewerLabelsOptions {
   sessionUlid: string;
   /**
    * Story ref (e.g. `"bmad:8.15"`). Required to derive the per-story
-   * reviewer-result path (Story 8.15) so a multi-story drain reads THIS
+   * reviewer-result path (Story 8.15) so a multi-story run reads THIS
    * story's verdict, not whichever story last ran in the shared session.
    */
   ref: string;
