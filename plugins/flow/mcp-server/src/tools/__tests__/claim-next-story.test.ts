@@ -117,7 +117,7 @@ async function seedInProgressStory(manifest: ExecutionManifest): Promise<void> {
 
 async function seedDoneStory(
   ref: string,
-  opts: { cited_sources?: string[] } = {},
+  opts: { cited_sources?: string[]; pr_number?: number } = {},
 ): Promise<void> {
   // A minimal done manifest for dependency satisfaction checks.
   const manifest: ExecutionManifest = {
@@ -133,6 +133,7 @@ async function seedDoneStory(
     withdrawn: false,
     ready: true,
     ...(opts.cited_sources ? { cited_sources: opts.cited_sources } : {}),
+    ...(opts.pr_number !== undefined ? { pr_number: opts.pr_number } : {}),
   };
   await atomicWriteFile(
     path.join(doneDir, `${ref}.yaml`),
@@ -539,13 +540,13 @@ describe("cited-source overlap gate", () => {
     // Story native:01KTNH6N1E64W0EM3FS5A4B4TP: this case now returns
     // waiting-on-unmerged-overlap (NOT queue-drained) so the operator sees the
     // correct WAITING/parked signal rather than a false clean-drain all-clear.
-    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false, // A's PR not merged
+      isOverlapBlockerInFlight: async () => true, // A's PR still open (in flight)
     });
 
     // B is held by the overlap gate — returns WAITING, NOT queue-drained.
@@ -562,13 +563,13 @@ describe("cited-source overlap gate", () => {
   });
 
   it("claims the later story once the earlier overlapping done/ story IS merged", async () => {
-    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED] });
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => true, // A's PR merged → B may build on top
+      isOverlapBlockerInFlight: async () => false, // A's PR merged → not in flight → B may build on top
     });
 
     expect(result.next).toBe("spawn-dev");
@@ -582,13 +583,13 @@ describe("cited-source overlap gate", () => {
     // Before this fix, A was NOT blocked (s.ref < ref guard ignored B).
     // After this fix, A must wait until B's PR merges — both stories can no longer
     // build blindly against the same baseline at once.
-    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED] });
+    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED], pr_number: 902 });
     await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false, // B's PR NOT merged
+      isOverlapBlockerInFlight: async () => true, // B's PR still open (in flight)
     });
 
     // A is held by the overlap gate — returns WAITING, not spawn-dev.
@@ -607,13 +608,13 @@ describe("cited-source overlap gate", () => {
   it("(AC2 / order-independent fix) releases the EARLIER story once the LATER overlapping done/ story IS merged", async () => {
     // Same setup as above, but B's PR is confirmed merged.
     // A should now be free to start.
-    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED] });
+    await seedDoneStory(STORY_REF_B, { cited_sources: [SHARED], pr_number: 902 });
     await seedTodoStory(makeTodoManifest(STORY_REF_A, { cited_sources: [SHARED] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => true, // B's PR merged → A may build
+      isOverlapBlockerInFlight: async () => false, // B's PR merged → not in flight → A may build
     });
 
     expect(result.next).toBe("spawn-dev");
@@ -770,13 +771,13 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
     // STORY_REF_A (earlier) is approved into done/ but its PR is NOT merged.
     // STORY_REF_B (later, ready) cites the same file — it must be held, not
     // claimed, and the result must NOT be queue-drained.
-    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false, // A's PR not merged
+      isOverlapBlockerInFlight: async () => true, // A's PR still open (in flight)
     });
 
     // Must NOT be queue-drained.
@@ -827,13 +828,13 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
   // AC3: the overlap hold decision itself is unchanged — the held story is NOT claimed.
   it("AC3 — the overlap hold decision is preserved: the held story is not claimed", async () => {
     // Same setup as AC1 — overlap hold must still prevent claiming B.
-    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false,
+      isOverlapBlockerInFlight: async () => true,
     });
 
     // The hold decision fires — we did NOT get spawn-dev.
@@ -855,19 +856,45 @@ describe("Story native:01KTNH6N1E64W0EM3FS5A4B4TP — WAITING when ready story h
   });
 
   it("once the overlapping PR merges, the held story is claimed normally", async () => {
-    // Same setup but now the PR merges → B is immediately claimable.
-    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] });
+    // Same setup but now the PR merges → A is no longer in flight → B claimable.
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE], pr_number: 901 });
     await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => true, // A's PR merged → B may build
+      isOverlapBlockerInFlight: async () => false, // A's PR merged → not in flight → B may build
     });
 
     expect(result.next).toBe("spawn-dev");
     if (result.next !== "spawn-dev") return;
     expect(result.ref).toBe(STORY_REF_B);
+  });
+
+  // The slug-reproduction false-block fix: a historical done/ overlap blocker
+  // with NO recorded pr_number is settled (its work is already on main), so it
+  // does NOT hold the candidate — and no GitHub probe is made for it.
+  it("a done/ overlap blocker with no pr_number does NOT hold the candidate (false-block fix)", async () => {
+    // A reached done/ without a recorded pr_number (legacy / manually-shipped).
+    await seedDoneStory(STORY_REF_A, { cited_sources: [SHARED_FILE] }); // no pr_number
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { cited_sources: [SHARED_FILE] }));
+
+    let probed = false;
+    const result = await claimNextStory({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      // Must never be consulted for a no-pr_number blocker — it is settled by
+      // the absence of a pr_number alone.
+      isOverlapBlockerInFlight: async () => {
+        probed = true;
+        return true;
+      },
+    });
+
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
+    expect(probed).toBe(false);
   });
 });
 

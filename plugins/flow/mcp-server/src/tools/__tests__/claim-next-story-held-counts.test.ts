@@ -105,7 +105,10 @@ async function seedInProgressStory(manifest: ExecutionManifest): Promise<void> {
   );
 }
 
-async function seedDoneStory(ref: string, opts: { cited_sources?: string[] } = {}): Promise<void> {
+async function seedDoneStory(
+  ref: string,
+  opts: { cited_sources?: string[]; pr_number?: number } = {},
+): Promise<void> {
   const manifest: ExecutionManifest = {
     ref,
     status: "done",
@@ -119,6 +122,7 @@ async function seedDoneStory(ref: string, opts: { cited_sources?: string[] } = {
     withdrawn: false,
     ready: true,
     ...(opts.cited_sources ? { cited_sources: opts.cited_sources } : {}),
+    ...(opts.pr_number !== undefined ? { pr_number: opts.pr_number } : {}),
   };
   await atomicWriteFile(
     path.join(doneDir, `${ref}.yaml`),
@@ -206,13 +210,13 @@ describe("AC2 — held stories are counted and named when no eligible story is f
     // considered "earlier" and thus blocks the later todo story.
     const EARLIER_DONE_REF = "native:01J9P0K2N3MZX0YV4S5RTQ4000";
     const LATER_TODO_REF = "native:01J9P0K2N3MZX0YV4S5RTQ4ZZZ";
-    await seedDoneStory(EARLIER_DONE_REF, { cited_sources: [SHARED_SRC] });
+    await seedDoneStory(EARLIER_DONE_REF, { cited_sources: [SHARED_SRC], pr_number: 902 });
     await seedTodoStory(makeTodoManifest(LATER_TODO_REF, { cited_sources: [SHARED_SRC] }));
 
     const result = await claimNextStory({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
-      isDependencyMerged: async () => false,
+      isOverlapBlockerInFlight: async () => true, // earlier story's PR still open
     });
     expect(result.next).toBe("waiting-on-unmerged-overlap");
 

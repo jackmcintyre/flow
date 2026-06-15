@@ -201,3 +201,138 @@ export async function areDependenciesMerged(opts: {
 
   return true;
 }
+
+/**
+ * Overlap-gate variant — "is this cited-source overlap blocker still IN FLIGHT?"
+ *
+ * The cited-source overlap gate (cited-source-overlap.ts) routes done/ siblings
+ * that touch a shared file into a merge check. The DECLARED-dependency check
+ * above ({@link areDependenciesMerged}) asks "prove it MERGED, else wait",
+ * because a dependent genuinely needs the dependency's code on main. The OVERLAP
+ * gate has a weaker, different need: it must only avoid building BLIND against a
+ * shared-file change that is NOT YET on main. A blocker whose work is already on
+ * main (merged) is harmless — the candidate's worktree, cut from current main,
+ * already contains it.
+ *
+ * So the correct overlap signal is "does this blocker still have an OPEN PR?"
+ * (its change is in flight, not yet on main) — NOT "prove it merged". This
+ * inverts the fail direction: when we cannot positively identify an OPEN PR, we
+ * DO NOT block. That fixes the slug-reproduction false-block — a historical
+ * done/ story whose PR merged long ago (and whose title-derived branch slug no
+ * longer matches its real, deleted branch) is recognised as settled instead of
+ * being treated as un-merged forever.
+ *
+ * A done/ blocker with NO recorded `pr_number` is treated as settled WITHOUT a
+ * GitHub call: `pr_number` is stamped at PR-open time, so a done/ manifest that
+ * lacks it predates that recording (legacy / manually-shipped) and its work is
+ * therefore already on main — it cannot be an in-flight open PR. Only blockers
+ * that DO carry a `pr_number` are probed (`gh pr view <n>`); they block iff the
+ * PR is still OPEN. This both fixes the false-block and avoids a fan-out of
+ * GitHub calls over dozens of ancient siblings.
+ *
+ * **Fail direction:** a `gh` error while probing a recorded PR number is
+ * conservative-blocking (a transient outage briefly stalls a chain, never a
+ * blind build); an unreadable/malformed/absent manifest or a missing
+ * `pr_number` is settled (not blocking) — the historical-work direction.
+ */
+export async function isOverlapBlockerInFlight(opts: {
+  targetRepoRoot: string;
+  prNumber: number;
+  execaImpl?: typeof defaultExeca;
+}): Promise<boolean> {
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+  try {
+    const result = await execaImpl(
+      "gh",
+      ["pr", "view", String(opts.prNumber), "--json", "state"],
+      { cwd: opts.targetRepoRoot },
+    );
+    const stdout = (result.stdout ?? "").trim();
+    if (stdout === "") return true; // cannot read state → conservative block
+    const parsed: unknown = JSON.parse(stdout);
+    const state =
+      typeof parsed === "object" && parsed !== null && "state" in parsed
+        ? (parsed as { state: unknown }).state
+        : undefined;
+    // In flight (blocks) iff the PR is still OPEN. MERGED → on main (safe);
+    // CLOSED → abandoned, will never land (safe).
+    return state === "OPEN";
+  } catch {
+    // gh missing / auth / network / non-zero exit / unparseable → conservative
+    // block (transient; never lets a blind build proceed against a live PR).
+    return true;
+  }
+}
+
+/** Injectable single-blocker in-flight probe (the real {@link isOverlapBlockerInFlight} in prod). */
+export type OverlapBlockerInFlightCheck = (opts: {
+  targetRepoRoot: string;
+  prNumber: number;
+}) => Promise<boolean>;
+
+/**
+ * True iff ANY cited-source overlap blocker is still in flight (an OPEN PR whose
+ * change is not yet on main). See {@link isOverlapBlockerInFlight} for the
+ * per-blocker semantics and the settled-when-no-`pr_number` rule.
+ *
+ * Pre-condition (caller `claimNextStory`): every ref is a done/ overlap blocker
+ * surfaced by `findOverlapBlockers`. Reads each blocker's done/ manifest for its
+ * `pr_number`; blockers without one are settled (historical → already on main).
+ */
+export async function anyOverlapBlockerInFlight(opts: {
+  targetRepoRoot: string;
+  blockers: readonly string[];
+  isInFlight?: OverlapBlockerInFlightCheck;
+}): Promise<boolean> {
+  const isInFlight = opts.isInFlight ?? isOverlapBlockerInFlight;
+  const doneDir = path.join(opts.targetRepoRoot, ".flow", "state", "done");
+  // Memo so a blocker shared across the candidate's overlap set is probed once.
+  const seen = new Map<string, boolean>();
+
+  for (const ref of opts.blockers) {
+    const cached = seen.get(ref);
+    if (cached !== undefined) {
+      if (cached) return true;
+      continue;
+    }
+
+    const depPath = path.join(doneDir, `${ref}.yaml`);
+    let raw: string;
+    try {
+      raw = await fs.readFile(depPath, "utf8");
+    } catch {
+      // Unreadable done manifest → cannot identify an open PR → settled.
+      seen.set(ref, false);
+      continue;
+    }
+
+    let prNumber: number | undefined;
+    try {
+      const manifest = parseExecutionManifest(yamlParse(raw) as unknown, {
+        absPath: depPath,
+      });
+      prNumber = manifest.pr_number;
+    } catch {
+      // Malformed done manifest → cannot identify an open PR → settled.
+      seen.set(ref, false);
+      continue;
+    }
+
+    if (prNumber === undefined) {
+      // Legacy / manually-shipped done story (predates pr_number recording): its
+      // work is already on main, so it is not an in-flight open PR. Settled
+      // without a GitHub call — this is the slug-reproduction false-block fix.
+      seen.set(ref, false);
+      continue;
+    }
+
+    const inFlight = await isInFlight({
+      targetRepoRoot: opts.targetRepoRoot,
+      prNumber,
+    });
+    seen.set(ref, inFlight);
+    if (inFlight) return true;
+  }
+
+  return false;
+}
