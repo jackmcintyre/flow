@@ -481,6 +481,10 @@ export async function runDevTerminalAction(opts: {
       return {
         ...ac,
         coveringCheck: manifestAc?.verification?.target,
+        // Carry the verification KIND too (vitest = runnable test, artifact =
+        // state location) so composePrBody renders a "Run X" instruction only
+        // where a real runnable check exists. (native:01KV4R2Q.)
+        verificationType: manifestAc?.verification?.type,
       };
     });
 

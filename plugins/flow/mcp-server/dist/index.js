@@ -49339,7 +49339,10 @@ var DEFAULT_DEFINITION_OF_DONE = [
 ].join("\n");
 var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
 function renderNarrativeSentence(narrative) {
-  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+  return `As ${indefiniteArticle(narrative.role)} ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+}
+function indefiniteArticle(noun) {
+  return /^[aeiou]/i.test(noun.trim()) ? "an" : "a";
 }
 function renderNativeStoryBody(input) {
   const lines = [`# ${input.title}`, ""];
@@ -51352,6 +51355,9 @@ ${machineBlock}
 
 ${opts.summary}`;
 }
+function isRunnableCheck(ac) {
+  return ac.verificationType === "vitest" && Boolean(ac.coveringCheck);
+}
 function buildApproverSummary(opts) {
   const { title, narrative, acs, riskTier } = opts;
   const whatChangedLines = [];
@@ -51371,11 +51377,9 @@ function buildApproverSummary(opts) {
   const why = narrative ? narrative : "No narrative was provided for this story.";
   const howLines = [];
   if (acs.length > 0) {
-    howLines.push(
-      "Each acceptance criterion is covered by an automated check. To verify:"
-    );
+    howLines.push("To verify each acceptance criterion:");
     for (const ac of acs) {
-      if (ac.coveringCheck) {
+      if (isRunnableCheck(ac)) {
         howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
       } else {
         howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
@@ -51386,7 +51390,7 @@ function buildApproverSummary(opts) {
       "You can also read the change in the diff below and compare it against each criterion above."
     );
   } else {
-    howLines.push("No automated checks were listed for this change.");
+    howLines.push("No acceptance criteria were listed for this change.");
   }
   const howToCheck = howLines.join("\n");
   const riskLines = [];
@@ -51395,7 +51399,7 @@ function buildApproverSummary(opts) {
     riskLines.push("");
   }
   riskLines.push(
-    "This change is additive and scoped to the files listed in the diff. It does not modify shared state, database schemas, or authentication paths unless explicitly stated in the acceptance criteria above."
+    "The change is scoped to the files in the diff below. Review the diff to judge its actual blast radius \u2014 including any effect on shared state, data schemas, or authentication paths \u2014 before approving."
   );
   riskLines.push("");
   riskLines.push(
@@ -51410,8 +51414,12 @@ function buildApproverSummary(opts) {
   if (acs.length > 0) {
     evidenceLines.push("Per-criterion covering checks:");
     for (const ac of acs) {
-      if (ac.coveringCheck) {
-        evidenceLines.push(`- AC${ac.index} \u2192 \`${ac.coveringCheck}\``);
+      if (isRunnableCheck(ac)) {
+        evidenceLines.push(`- AC${ac.index} \u2192 \`${ac.coveringCheck}\` (automated test)`);
+      } else if (ac.coveringCheck) {
+        evidenceLines.push(
+          `- AC${ac.index} \u2192 verify at \`${ac.coveringCheck}\` (not an automated test)`
+        );
       } else {
         evidenceLines.push(`- AC${ac.index} \u2192 no structured verification target recorded`);
       }
@@ -52146,7 +52154,7 @@ async function extractAcsFromSpec(specPath) {
       if (/^##+ /.test(candidate)) break;
       body.push(candidate);
       if (firstLine === "" && candidate.trim().length > 0) {
-        firstLine = candidate.trim().slice(0, 120);
+        firstLine = candidate.trim();
       }
     }
     results.push({ index, firstLine, tag, body });
@@ -52583,7 +52591,11 @@ async function runDevTerminalAction(opts) {
       const manifestAc = manifestAcsByIndex.get(ac.index);
       return {
         ...ac,
-        coveringCheck: manifestAc?.verification?.target
+        coveringCheck: manifestAc?.verification?.target,
+        // Carry the verification KIND too (vitest = runnable test, artifact =
+        // state location) so composePrBody renders a "Run X" instruction only
+        // where a real runnable check exists. (native:01KV4R2Q.)
+        verificationType: manifestAc?.verification?.type
       };
     });
     const prBody = composePrBody({

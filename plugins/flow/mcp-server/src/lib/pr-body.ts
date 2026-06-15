@@ -172,7 +172,7 @@ export function composeCommitSubject(opts: {
  * Story: <ref>
  * Spec: <specPath>
  * ACs:
- * - [ ] AC1: <first line, truncated to 120 chars>
+ * - [ ] AC1: <full criterion text>
  * ...
  * <!-- /flow:pr:machine -->
  * ```
@@ -184,10 +184,16 @@ export function composeCommitSubject(opts: {
  *
  * The approver summary is built solely from handoff-available inputs:
  * - `title` and `narrative` — from the story spec / manifest.
- * - `acs[].firstLine` — first line of each AC body (truncated to 120 chars).
- * - `acs[].coveringCheck` — the AC's vitest/artifact verification target,
- *   carried from the manifest's `acceptance_criteria[].verification.target`.
- *   If absent, the evidence section notes the AC by text only.
+ * - `acs[].firstLine` — the full criterion text of each AC (untruncated), so
+ *   the approver sees the complete Given/When/Then assertion.
+ * - `acs[].coveringCheck` — the AC's verification target, carried from the
+ *   manifest's `acceptance_criteria[].verification.target`. If absent, the
+ *   evidence section notes the AC by text only.
+ * - `acs[].verificationType` — the AC's verification kind, carried from the
+ *   manifest's `acceptance_criteria[].verification.type`: `"vitest"` is a
+ *   runnable test, `"artifact"` is a state location. A "Run X" instruction is
+ *   shown ONLY for runnable (`vitest`) targets; a non-runnable target shows the
+ *   criterion text alone with no false automated-check claim.
  * - `riskTier` — the story's classified risk tier, passed in by the caller
  *   (`run-dev-terminal-action.ts`). `composePrBody` does NOT compute risk.
  * - The pre-PR build-and-test gate result: always stated as "passed" here
@@ -197,7 +203,12 @@ export function composeCommitSubject(opts: {
 export function composePrBody(opts: {
   ref: string;
   specPath: string;
-  acs: Array<{ index: number; firstLine: string; coveringCheck?: string }>;
+  acs: Array<{
+    index: number;
+    firstLine: string;
+    coveringCheck?: string;
+    verificationType?: "vitest" | "artifact";
+  }>;
   summary: string;
   /** Story title — assembled into the "What changed" section. */
   title?: string;
@@ -246,10 +257,31 @@ export function composePrBody(opts: {
  * fields) so the approver can rely on a fixed, predictable shape. If a
  * field is absent the section falls back to a minimal but honest placeholder.
  */
+/**
+ * An AC carries a *runnable* check only when its verification kind is `vitest`
+ * AND a target string is present. An `artifact` (state-location) target, or any
+ * AC with no recorded target, is NOT runnable: the PR body must not tell the
+ * approver to "Run" it, nor claim it is covered by an automated check.
+ *
+ * A missing/undefined `verificationType` is treated as non-runnable — the safe,
+ * honest default (we cannot promise a runnable check we cannot identify).
+ */
+function isRunnableCheck(ac: {
+  coveringCheck?: string;
+  verificationType?: "vitest" | "artifact";
+}): boolean {
+  return ac.verificationType === "vitest" && Boolean(ac.coveringCheck);
+}
+
 function buildApproverSummary(opts: {
   title?: string;
   narrative?: string;
-  acs: Array<{ index: number; firstLine: string; coveringCheck?: string }>;
+  acs: Array<{
+    index: number;
+    firstLine: string;
+    coveringCheck?: string;
+    verificationType?: "vitest" | "artifact";
+  }>;
   riskTier?: string;
 }): string {
   const { title, narrative, acs, riskTier } = opts;
@@ -278,13 +310,14 @@ function buildApproverSummary(opts: {
   // --- Section 3: How to check it yourself ---
   const howLines: string[] = [];
   if (acs.length > 0) {
-    howLines.push(
-      "Each acceptance criterion is covered by an automated check. To verify:",
-    );
+    howLines.push("To verify each acceptance criterion:");
     for (const ac of acs) {
-      if (ac.coveringCheck) {
+      if (isRunnableCheck(ac)) {
         howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
       } else {
+        // Non-runnable target (a state location / artifact) or no recorded
+        // check: show the criterion text alone. Never print "Run X" for
+        // something the approver cannot run, and make no automated-check claim.
         howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
       }
     }
@@ -293,7 +326,7 @@ function buildApproverSummary(opts: {
       "You can also read the change in the diff below and compare it against each criterion above.",
     );
   } else {
-    howLines.push("No automated checks were listed for this change.");
+    howLines.push("No acceptance criteria were listed for this change.");
   }
   const howToCheck = howLines.join("\n");
 
@@ -304,9 +337,9 @@ function buildApproverSummary(opts: {
     riskLines.push("");
   }
   riskLines.push(
-    "This change is additive and scoped to the files listed in the diff. " +
-    "It does not modify shared state, database schemas, or authentication paths " +
-    "unless explicitly stated in the acceptance criteria above.",
+    "The change is scoped to the files in the diff below. Review the diff to " +
+    "judge its actual blast radius — including any effect on shared state, data " +
+    "schemas, or authentication paths — before approving.",
   );
   riskLines.push("");
   riskLines.push(
@@ -326,8 +359,14 @@ function buildApproverSummary(opts: {
   if (acs.length > 0) {
     evidenceLines.push("Per-criterion covering checks:");
     for (const ac of acs) {
-      if (ac.coveringCheck) {
-        evidenceLines.push(`- AC${ac.index} → \`${ac.coveringCheck}\``);
+      if (isRunnableCheck(ac)) {
+        evidenceLines.push(`- AC${ac.index} → \`${ac.coveringCheck}\` (automated test)`);
+      } else if (ac.coveringCheck) {
+        // A recorded but non-runnable target (e.g. an artifact / state path):
+        // point at it for manual inspection, but do not call it an automated test.
+        evidenceLines.push(
+          `- AC${ac.index} → verify at \`${ac.coveringCheck}\` (not an automated test)`,
+        );
       } else {
         evidenceLines.push(`- AC${ac.index} → no structured verification target recorded`);
       }

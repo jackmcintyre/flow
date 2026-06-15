@@ -442,3 +442,140 @@ describe("composePrBody", () => {
     expect(body).toContain("## Evidence");
   });
 });
+
+// ---------------------------------------------------------------------------
+// composePrBody — honest acceptance criteria & verification (native:01KV4R2Q)
+// ---------------------------------------------------------------------------
+
+describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () => {
+  const LONG_AC =
+    "**Given** a criterion that runs to several sentences well beyond one hundred " +
+    "and twenty characters, **When** the build loop opens the PR, **Then** the " +
+    "approver sees the complete assertion, not a clipped first line.";
+
+  it("AC1: renders the full criterion text in BOTH the approver summary and the machine block", () => {
+    expect(LONG_AC.length).toBeGreaterThan(120);
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: ".flow/native-stories/01KV4R2Q.md",
+      acs: [
+        {
+          index: 1,
+          firstLine: LONG_AC,
+          coveringCheck: "src/lib/__tests__/pr-body.test.ts",
+          verificationType: "vitest",
+        },
+      ],
+      summary: "Summary",
+      title: "Title",
+      narrative: "Narrative",
+      riskTier: "medium",
+    });
+    const machineIdx = body.indexOf("<!-- flow:pr:machine -->");
+    // Full text appears in the approver summary (above the machine block)...
+    expect(body.slice(0, machineIdx)).toContain(LONG_AC);
+    // ...and verbatim in the machine block checklist.
+    expect(body.slice(machineIdx)).toContain(`- [ ] AC1: ${LONG_AC}`);
+  });
+
+  it("AC2: a runnable (vitest) target gets a real Run instruction; a state-location (artifact) target shows criterion text alone with no automated-check claim", () => {
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: "spec.md",
+      acs: [
+        {
+          index: 1,
+          firstLine: "Given a runnable check",
+          coveringCheck: "src/lib/__tests__/foo.test.ts",
+          verificationType: "vitest",
+        },
+        {
+          index: 2,
+          firstLine: "Given a state-location check",
+          coveringCheck: ".flow/state/done/",
+          verificationType: "artifact",
+        },
+      ],
+      summary: "Summary",
+      title: "Title",
+      narrative: "Narrative",
+      riskTier: "low",
+    });
+    const how = body.slice(
+      body.indexOf("## How to check it yourself"),
+      body.indexOf("## Risk and blast radius"),
+    );
+    // Runnable AC1 keeps a real Run instruction.
+    expect(how).toContain("AC1: Run `src/lib/__tests__/foo.test.ts`");
+    // Non-runnable AC2 shows the criterion text alone — never "Run `.flow/state/done/`".
+    expect(how).toContain("AC2: Given a state-location check");
+    expect(how).not.toContain("Run `.flow/state/done/`");
+    // The old false blanket "covered by an automated check" claim is gone.
+    expect(body).not.toContain("covered by an automated check");
+  });
+
+  it("AC2: Evidence labels a runnable target as an automated test and a state-location target as not", () => {
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: "spec.md",
+      acs: [
+        { index: 1, firstLine: "Runnable", coveringCheck: "foo.test.ts", verificationType: "vitest" },
+        { index: 2, firstLine: "State location", coveringCheck: ".flow/state/done/", verificationType: "artifact" },
+      ],
+      summary: "Summary",
+    });
+    const evidence = body.slice(
+      body.indexOf("## Evidence"),
+      body.indexOf("<!-- flow:pr:machine -->"),
+    );
+    expect(evidence).toContain("AC1 → `foo.test.ts` (automated test)");
+    expect(evidence).toContain("AC2 → verify at `.flow/state/done/` (not an automated test)");
+  });
+
+  it("AC2: an absent verification type defaults to non-runnable (no Run instruction)", () => {
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "Given no recorded type", coveringCheck: "some/path" }],
+      summary: "Summary",
+    });
+    const how = body.slice(
+      body.indexOf("## How to check it yourself"),
+      body.indexOf("## Risk and blast radius"),
+    );
+    expect(how).toContain("AC1: Given no recorded type");
+    expect(how).not.toContain("Run `some/path`");
+  });
+
+  it("AC3: the Risk section makes no fixed blanket safety claim", () => {
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text", coveringCheck: "x.test.ts", verificationType: "vitest" }],
+      summary: "Summary",
+      riskTier: "medium",
+    });
+    // The old unconditional boilerplate is gone.
+    expect(body).not.toContain(
+      "does not modify shared state, database schemas, or authentication paths",
+    );
+    // Replaced with a neutral "review the diff" framing.
+    const risk = body.slice(
+      body.indexOf("## Risk and blast radius"),
+      body.indexOf("## Evidence"),
+    );
+    expect(risk.toLowerCase()).toContain("review the diff");
+  });
+
+  it("AC4: a hand-written free-form summary is passed through verbatim, unaltered", () => {
+    const handWritten =
+      "## My own notes\nThis section was written by hand and must survive untouched.";
+    const body = composePrBody({
+      ref: "native:01KV4R2Q",
+      specPath: "spec.md",
+      acs: [{ index: 1, firstLine: "AC text", coveringCheck: "x.test.ts", verificationType: "vitest" }],
+      summary: handWritten,
+    });
+    expect(body).toContain(handWritten);
+  });
+});

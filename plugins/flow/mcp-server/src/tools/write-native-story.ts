@@ -156,7 +156,17 @@ export const DEFAULT_RISK_REASONING =
  * contract.
  */
 function renderNarrativeSentence(narrative: WriteNativeStoryInput["narrative"]): string {
-  return `As a ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+  return `As ${indefiniteArticle(narrative.role)} ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
+}
+
+/**
+ * Choose "a" or "an" for the role so the generated narrative reads
+ * grammatically (e.g. "As an operator", not "As a operator"). A simple
+ * leading-vowel rule — the parser accepts both articles (`^As an?`), so this is
+ * a presentation fix with no round-trip impact. (native:01KV4R2Q.)
+ */
+function indefiniteArticle(noun: string): string {
+  return /^[aeiou]/i.test(noun.trim()) ? "an" : "a";
 }
 
 /**

@@ -11,7 +11,12 @@ import { promises as fs } from "node:fs";
 export interface AcEntry {
   /** AC number as it appears in the spec (e.g. 1 for AC1, 3 for AC3). */
   index: number;
-  /** First non-blank line of the AC body, truncated to 120 chars. */
+  /**
+   * Full first non-blank line of the AC body — the criterion text (e.g. the
+   * whole `**Given** … **When** … **Then** …` sentence). NOT truncated: the
+   * complete assertion is preserved so downstream consumers (e.g. the PR body)
+   * can show the approver the full testable criterion, not a clipped excerpt.
+   */
   firstLine: string;
   /**
    * Parenthetical tag from the AC heading, without parens.
@@ -36,7 +41,8 @@ export interface AcEntry {
  *   `**AC1:**`, `**AC2 (user-surface):**`, `**AC3 — descriptive title:**`
  *
  * The `firstLine` is the first non-blank line of the AC's body (the text
- * that follows the `**ACN...**` heading line), truncated to 120 characters.
+ * that follows the `**ACN...**` heading line), preserved in full (untruncated)
+ * so the complete criterion text is available downstream.
  *
  * Lines that are themselves AC headings are NOT included as firstLine
  * candidates — only the narrative body lines below the heading.
@@ -79,9 +85,12 @@ export async function extractAcsFromSpec(specPath: string): Promise<AcEntry[]> {
       // Stop if we hit any level-2 (or higher) markdown section heading.
       if (/^##+ /.test(candidate)) break;
       body.push(candidate);
-      // Find first non-blank line for firstLine (original logic preserved).
+      // Find first non-blank line for firstLine. The criterion text is kept in
+      // FULL (no length cap): a Given/When/Then assertion routinely exceeds the
+      // old 120-char limit, and clipping it dropped the Then clause — the very
+      // thing the approver needs to see. (native:01KV4R2Q — honest PR bodies.)
       if (firstLine === "" && candidate.trim().length > 0) {
-        firstLine = candidate.trim().slice(0, 120);
+        firstLine = candidate.trim();
       }
     }
 
