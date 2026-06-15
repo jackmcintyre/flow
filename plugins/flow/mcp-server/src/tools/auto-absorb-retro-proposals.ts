@@ -65,14 +65,14 @@ const TOOL_NAME = "autoAbsorbRetroProposals";
 // Result shapes
 // ---------------------------------------------------------------------------
 
-export interface AbsorbedProposalResult {
+interface AbsorbedProposalResult {
   /** The proposal id (ULID). */
   proposalId: string;
   /** The commit sha of the auto-absorbed commit. */
   commitSha: string;
 }
 
-export interface PendingProposalResult {
+interface PendingProposalResult {
   /** The proposal id (ULID). */
   proposalId: string;
   /** Why this proposal was not auto-absorbed. */
