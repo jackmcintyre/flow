@@ -26,7 +26,9 @@ import { listClaimableTodos } from "./list-claimable-todos.js";
 import { claimStory } from "./claim-story.js";
 import {
   areDependenciesMerged,
+  anyOverlapBlockerInFlight,
   type SingleDependencyMergedCheck,
+  type OverlapBlockerInFlightCheck,
 } from "../lib/dep-merge-check.js";
 import {
   loadOverlapUniverse,
@@ -73,6 +75,12 @@ export interface ClaimNextStoryOptions {
    * handler) omit it and the real GitHub-backed check runs.
    */
   isDependencyMerged?: SingleDependencyMergedCheck;
+  /**
+   * Test seam for the cited-source overlap gate — override the "is this overlap
+   * blocker still in flight (open PR)?" check. Production callers omit it and the
+   * real GitHub-backed check runs.
+   */
+  isOverlapBlockerInFlight?: OverlapBlockerInFlightCheck;
 }
 
 export type ClaimNextStoryResult =
@@ -230,14 +238,22 @@ export async function claimNextStory(
       continue;
     }
     if (doneRefs.length > 0) {
-      const overlapMerged = await areDependenciesMerged({
+      // Overlap blockers in done/ hold the candidate ONLY while their change is
+      // still in flight (an OPEN PR not yet on main). A blocker whose PR already
+      // merged — or a historical story with no recorded pr_number, whose work is
+      // already on main — is settled and does NOT block. This replaces the prior
+      // "prove-merged-via-title-slug" check, whose slug reproduction false-blocked
+      // any candidate sharing a cited file with a manually-shipped/retitled story.
+      const overlapInFlight = await anyOverlapBlockerInFlight({
         targetRepoRoot,
-        deps: doneRefs,
-        ...(opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}),
+        blockers: doneRefs,
+        ...(opts.isOverlapBlockerInFlight
+          ? { isInFlight: opts.isOverlapBlockerInFlight }
+          : {}),
       });
-      if (!overlapMerged) {
-        // This candidate is held SOLELY by an unmerged done/ overlap. Track it so
-        // the drain can report WAITING instead of false "queue-drained".
+      if (overlapInFlight) {
+        // Held SOLELY by an in-flight done/ overlap (open PR). Track it so the
+        // drain reports WAITING instead of a false "queue-drained".
         heldOnUnmergedOverlapRefs.push(c.ref);
         continue;
       }

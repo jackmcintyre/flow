@@ -38400,6 +38400,64 @@ async function areDependenciesMerged(opts) {
   }
   return true;
 }
+async function isOverlapBlockerInFlight(opts) {
+  const execaImpl = opts.execaImpl ?? execa;
+  try {
+    const result = await execaImpl(
+      "gh",
+      ["pr", "view", String(opts.prNumber), "--json", "state"],
+      { cwd: opts.targetRepoRoot }
+    );
+    const stdout = (result.stdout ?? "").trim();
+    if (stdout === "") return true;
+    const parsed = JSON.parse(stdout);
+    const state = typeof parsed === "object" && parsed !== null && "state" in parsed ? parsed.state : void 0;
+    return state === "OPEN";
+  } catch {
+    return true;
+  }
+}
+async function anyOverlapBlockerInFlight(opts) {
+  const isInFlight = opts.isInFlight ?? isOverlapBlockerInFlight;
+  const doneDir = path37.join(opts.targetRepoRoot, ".flow", "state", "done");
+  const seen = /* @__PURE__ */ new Map();
+  for (const ref of opts.blockers) {
+    const cached2 = seen.get(ref);
+    if (cached2 !== void 0) {
+      if (cached2) return true;
+      continue;
+    }
+    const depPath = path37.join(doneDir, `${ref}.yaml`);
+    let raw;
+    try {
+      raw = await fs25.readFile(depPath, "utf8");
+    } catch {
+      seen.set(ref, false);
+      continue;
+    }
+    let prNumber;
+    try {
+      const manifest = parseExecutionManifest((0, import_yaml17.parse)(raw), {
+        absPath: depPath
+      });
+      prNumber = manifest.pr_number;
+    } catch {
+      seen.set(ref, false);
+      continue;
+    }
+    if (prNumber === void 0) {
+      seen.set(ref, false);
+      continue;
+    }
+    const inFlight = await isInFlight({
+      targetRepoRoot: opts.targetRepoRoot,
+      prNumber
+    });
+    seen.set(ref, inFlight);
+    if (inFlight) return true;
+  }
+  return false;
+}
 
 // src/lib/cited-source-overlap.ts
 var import_yaml18 = __toESM(require_dist(), 1);
@@ -38582,12 +38640,12 @@ async function claimNextStory(opts) {
       continue;
     }
     if (doneRefs.length > 0) {
-      const overlapMerged = await areDependenciesMerged({
+      const overlapInFlight = await anyOverlapBlockerInFlight({
         targetRepoRoot,
-        deps: doneRefs,
-        ...opts.isDependencyMerged ? { isMerged: opts.isDependencyMerged } : {}
+        blockers: doneRefs,
+        ...opts.isOverlapBlockerInFlight ? { isInFlight: opts.isOverlapBlockerInFlight } : {}
       });
-      if (!overlapMerged) {
+      if (overlapInFlight) {
         heldOnUnmergedOverlapRefs.push(c3.ref);
         continue;
       }

@@ -20,7 +20,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../managed-fs.js";
-import { isDependencyPrMerged, areDependenciesMerged } from "../dep-merge-check.js";
+import {
+  isDependencyPrMerged,
+  areDependenciesMerged,
+  isOverlapBlockerInFlight,
+  anyOverlapBlockerInFlight,
+} from "../dep-merge-check.js";
 
 // A minimal execa stub: returns the configured stdout/exitCode, or throws.
 function fakeExeca(behaviour: { stdout?: string; throws?: boolean }) {
@@ -276,5 +281,143 @@ describe("areDependenciesMerged", () => {
     });
 
     expect(merged).toBe(false);
+  });
+});
+
+describe("isOverlapBlockerInFlight (overlap gate — open-PR probe)", () => {
+  const base = { targetRepoRoot: "/repo", prNumber: 99 };
+
+  it("in flight (true) when the PR is still OPEN", async () => {
+    const { impl, calls } = fakeExeca({ stdout: JSON.stringify({ state: "OPEN" }) });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: impl })).toBe(true);
+    // probes the recorded PR number via `gh pr view <n>`
+    expect(calls[0]?.args).toContain("99");
+  });
+
+  it("settled (false) when the PR is MERGED — its change is already on main", async () => {
+    const { impl } = fakeExeca({ stdout: JSON.stringify({ state: "MERGED" }) });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: impl })).toBe(false);
+  });
+
+  it("settled (false) when the PR is CLOSED — abandoned, will never land", async () => {
+    const { impl } = fakeExeca({ stdout: JSON.stringify({ state: "CLOSED" }) });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: impl })).toBe(false);
+  });
+
+  it("CONSERVATIVE: in flight (true) on a gh error (transient → never a blind build)", async () => {
+    const { impl } = fakeExeca({ throws: true });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: impl })).toBe(true);
+  });
+
+  it("CONSERVATIVE: in flight (true) on empty / unparseable gh output", async () => {
+    const empty = fakeExeca({ stdout: "" });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: empty.impl })).toBe(true);
+    const garbage = fakeExeca({ stdout: "not json" });
+    expect(await isOverlapBlockerInFlight({ ...base, execaImpl: garbage.impl })).toBe(true);
+  });
+});
+
+describe("anyOverlapBlockerInFlight (overlap gate — per-blocker resolution)", () => {
+  let tmpRoot: string;
+  let doneDir: string;
+
+  function makeDoneManifest(ref: string, extra: Record<string, unknown> = {}): string {
+    return yamlStringify(
+      {
+        ref,
+        status: "done",
+        adapter: "native",
+        source_path: `.flow/native-stories/${ref}.yaml`,
+        source_hash: "a".repeat(64),
+        depends_on: [],
+        acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+        title: `Title for ${ref}`,
+        narrative: "As a dev, I want to test.",
+        withdrawn: false,
+        ready: true,
+        ...extra,
+      },
+      { lineWidth: 0 },
+    );
+  }
+  async function seedDone(ref: string, extra: Record<string, unknown> = {}): Promise<void> {
+    await atomicWriteFile(path.join(doneDir, `${ref}.yaml`), makeDoneManifest(ref, extra));
+  }
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "flow-overlap-inflight-"));
+    doneDir = path.join(tmpRoot, ".flow", "state", "done");
+    await fs.mkdir(doneDir, { recursive: true });
+  });
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  const REF = "native:01HZBLOCKER0000000000000001";
+
+  it("returns false for an empty blocker list", async () => {
+    expect(
+      await anyOverlapBlockerInFlight({
+        targetRepoRoot: tmpRoot,
+        blockers: [],
+        isInFlight: async () => true,
+      }),
+    ).toBe(false);
+  });
+
+  it("THE FIX: a blocker with NO pr_number is settled — never probed", async () => {
+    await seedDone(REF); // legacy / manually-shipped: no pr_number
+    let probed = false;
+    const result = await anyOverlapBlockerInFlight({
+      targetRepoRoot: tmpRoot,
+      blockers: [REF],
+      isInFlight: async () => {
+        probed = true;
+        return true;
+      },
+    });
+    expect(result).toBe(false);
+    expect(probed).toBe(false); // no GitHub call for a historical blocker
+  });
+
+  it("a blocker WITH a pr_number is probed and blocks when in flight", async () => {
+    await seedDone(REF, { pr_number: 42 });
+    const result = await anyOverlapBlockerInFlight({
+      targetRepoRoot: tmpRoot,
+      blockers: [REF],
+      isInFlight: async ({ prNumber }) => prNumber === 42, // open
+    });
+    expect(result).toBe(true);
+  });
+
+  it("a blocker WITH a pr_number that is settled does not block", async () => {
+    await seedDone(REF, { pr_number: 42 });
+    const result = await anyOverlapBlockerInFlight({
+      targetRepoRoot: tmpRoot,
+      blockers: [REF],
+      isInFlight: async () => false, // merged / closed
+    });
+    expect(result).toBe(false);
+  });
+
+  it("settled (false) when the blocker manifest is absent / unreadable", async () => {
+    const result = await anyOverlapBlockerInFlight({
+      targetRepoRoot: tmpRoot,
+      blockers: ["native:01HZMISSING000000000000001"],
+      isInFlight: async () => true, // never reached
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns true if ANY blocker is in flight (mixed historical + in-flight set)", async () => {
+    const settled = "native:01HZBLOCKER0000000000000002";
+    await seedDone(settled); // no pr_number → settled
+    await seedDone(REF, { pr_number: 7 }); // in flight
+    const result = await anyOverlapBlockerInFlight({
+      targetRepoRoot: tmpRoot,
+      blockers: [settled, REF],
+      isInFlight: async ({ prNumber }) => prNumber === 7,
+    });
+    expect(result).toBe(true);
   });
 });
