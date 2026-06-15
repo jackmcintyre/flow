@@ -73,6 +73,15 @@ const MAX_REPOLL = Number.isInteger(A.maxRepoll) && A.maxRepoll > 0 ? A.maxRepol
 // when no per-story override is resolved; it continues to work as before so
 // existing launch scripts are unaffected.
 const execModel = (A && A.devReviewerModel) || 'sonnet'
+// AUTO-ABSORB RETRO PROPOSALS (Story native:01KV2Z67850XWWQV0AY2N05JSX — note-tier
+// auto-absorption). When the retro-analyst has written its proposals for this cycle
+// (via writeRetroProposal), the drain can auto-absorb note-tier persona-append
+// proposals unattended. The caller passes the proposal file's ISO timestamp so the
+// drain knows which file to absorb from. Omitted → no auto-absorb step this run
+// (the safe default — the operator calls this manually or via /flow:retro).
+// This optional arg is the seam: setting it wires the autonomous absorption path;
+// omitting it leaves every proposal for the operator's explicit accept-proposal gate.
+const RETRO_PROPOSAL_TIMESTAMP = A.retroProposalTimestamp || null
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
@@ -823,6 +832,44 @@ async function drainWorker(workerId) {
 const workerCount = Math.max(1, Math.min(MAX_CONCURRENCY, MAX === Infinity ? MAX_CONCURRENCY : MAX))
 await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => drainWorker(w)))
 
+// AUTO-ABSORB POST-RETRO (Story native:01KV2Z67850XWWQV0AY2N05JSX): if the
+// caller provided a retroProposalTimestamp, run the note-tier auto-absorb step
+// now — after all stories have settled and the drain loop is done. This is the
+// post-retro path: the retro-analyst has already written its proposals for this
+// cycle, and the drain absorbs the safe subset (note-tier persona-append only)
+// unattended. Higher-stakes proposals (skill, code, or any other type) are left
+// pending for the operator's explicit accept-proposal gate.
+//
+// FAIL-SOFT: the auto-absorb seam is idempotent and best-effort — a garbled
+// relay or a hard rejection is logged and swallowed (retryable+swallow). A
+// failed absorb never blocks the return or corrupts any story's state.
+// Read-only idempotent prelude (reads a proposal file) → retryable=true.
+// The commit step inside autoAbsorbProposalFile is an in-process write (not a
+// seam call), so the outer seam itself is safe to retry on a relay garble.
+let autoAbsorbResult = null
+if (RETRO_PROPOSAL_TIMESTAMP) {
+  const absorb = await seam(
+    `node ${CLI} autoAbsorbProposalFile --json '${J({ targetRepoRoot: REPO, proposalFileTimestamp: RETRO_PROPOSAL_TIMESTAMP })}'`,
+    'auto-absorb',
+    true, // retryable — reading a proposal file is idempotent
+    true, // swallow — absorption is best-effort, never blocks the drain
+  )
+  if (absorb && !absorb._parseError) {
+    autoAbsorbResult = absorb
+    if (absorb.absorbed > 0) {
+      log(`auto-absorb: applied ${absorb.absorbed} note-tier lesson(s) from ${RETRO_PROPOSAL_TIMESTAMP} (${absorb.absorbedIds.join(', ')})`)
+    }
+    if (absorb.errors && absorb.errors.length > 0) {
+      log(`auto-absorb: ${absorb.errors.length} error(s) — proposals left pending (${absorb.errors[0]})`)
+    }
+    if (absorb.absorbed === 0 && absorb.pending === 0) {
+      log(`auto-absorb: no proposals in file ${RETRO_PROPOSAL_TIMESTAMP} (already absorbed or empty)`)
+    }
+  } else {
+    log(`auto-absorb: relay garbled or hard-failed for ${RETRO_PROPOSAL_TIMESTAMP} — proposals left pending (swallowed)`)
+  }
+}
+
 // The return object IS the no-silent-failures surface: every ref lands in exactly
 // one of completed / merged / pausedForHuman / blocked, with a drain reason.
 // `resumed` additionally records which stories were crash-recovered this run.
@@ -837,4 +884,6 @@ return {
   merged,
   pausedForHuman,
   blocked,
+  // Auto-absorb summary (null when no retroProposalTimestamp was provided).
+  autoAbsorbResult,
 }

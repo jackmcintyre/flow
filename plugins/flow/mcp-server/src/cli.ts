@@ -72,6 +72,7 @@ import { discardDraft } from "./tools/discard-draft.js";
 import { blockStory } from "./tools/block-story.js";
 import { extractNativeStoryAcs } from "./tools/extract-native-story-acs.js";
 import { captureSkillInvoke } from "./tools/capture-skill-invoke.js";
+import { autoAbsorbProposalFile } from "./tools/auto-absorb-retro-proposals.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -212,6 +213,15 @@ const TOOLS: Record<string, ToolFn> = {
   // recordSkillInvoke. FAIL-SOFT: never throws — returns { recorded, reason }.
   //   <hook stdin> | node dist/cli.js captureSkillInvoke --json "$PAYLOAD"
   captureSkillInvoke,
+  // Story native:01KV2Z67850XWWQV0AY2N05JSX — auto-absorb note-tier retro proposals.
+  // Called by the drain's post-retro step after the retro-analyst writes its
+  // proposals. Reads the proposal file by timestamp, filters to note-tier
+  // persona-append proposals, and applies them autonomously (up to the per-run
+  // ceiling; higher-stakes proposals stay pending for the operator).
+  // Fail-soft: never throws — returns { absorbed, pending, absorbedIds, errors }.
+  //   node dist/cli.js autoAbsorbProposalFile --json
+  //     '{"targetRepoRoot":"...","proposalFileTimestamp":"2026-06-15T10:00:00.000Z"}'
+  autoAbsorbProposalFile,
 };
 
 function emit(obj: unknown): void {
