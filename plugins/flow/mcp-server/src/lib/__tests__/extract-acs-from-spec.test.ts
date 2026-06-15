@@ -155,13 +155,20 @@ describe("extractAcsFromSpec", () => {
     expect(acs[1]!.firstLine).toBe("Second body.");
   });
 
-  it("truncates firstLine to 120 chars", async () => {
-    const longLine = "A".repeat(200);
+  // native:01KV4R2Q — the criterion text is preserved in FULL. The old 120-char
+  // cap clipped long Given/When/Then assertions mid-sentence and dropped the
+  // Then clause, which is exactly what an approver needs to see.
+  it("preserves the full criterion text — no 120-char truncation", async () => {
+    const longLine =
+      "**Given** a long acceptance criterion that runs well past one hundred and twenty characters, " +
+      "**When** the build loop opens the pull request, **Then** the approver sees the whole assertion.";
+    expect(longLine.length).toBeGreaterThan(120);
     const spec = `## ACs\n\n**AC1:**\n${longLine}\n`;
     const specPath = await writeTmp(spec);
     const acs = await extractAcsFromSpec(specPath);
 
-    expect(acs[0]!.firstLine.length).toBe(120);
+    expect(acs[0]!.firstLine).toBe(longLine);
+    expect(acs[0]!.firstLine).toContain("**Then** the approver sees the whole assertion.");
   });
 
   it("returns empty array for a spec with no ACs", async () => {

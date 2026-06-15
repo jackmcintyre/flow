@@ -334,6 +334,24 @@ describe("writeNativeStory AC1 (Story 10.2) — tasks / cited_sources / narrativ
     expect(reparsed.cited_sources).toEqual(["src/parser.ts", "docs/design.md"]);
   });
 
+  // native:01KV4R2Q — the generated narrative must read grammatically. A
+  // vowel-initial role ("operator") takes "an", not "a" ("As an operator",
+  // never "As a operator"). The parser already accepts both articles.
+  it("(a) renders 'As an' for a vowel-initial role and 'As a' for a consonant role", async () => {
+    const vowel = await writeNativeStory(
+      candidate10_2({ narrative: { role: "operator", want: "a launch command", so_that: "I never guess paths" } }),
+    );
+    const vowelBody = await fs.readFile(vowel.path, "utf8");
+    expect(vowelBody).toContain("As an operator, I want a launch command, so that I never guess paths.");
+    expect(vowelBody).not.toContain("As a operator,");
+
+    const consonant = await writeNativeStory(
+      candidate10_2({ narrative: { role: "developer", want: "a typed parser", so_that: "fields cannot drift" } }),
+    );
+    const consonantBody = await fs.readFile(consonant.path, "utf8");
+    expect(consonantBody).toContain("As a developer, I want a typed parser, so that fields cannot drift.");
+  });
+
   it("(b) refuses a write that omits tasks — before any file is written", async () => {
     const message = String(await rejectionOf(candidate10_2({ tasks: undefined })));
     expect(message).toMatch(/tasks/);
