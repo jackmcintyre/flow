@@ -47,6 +47,11 @@ import { recordStoryRetro } from "../src/tools/record-story-retro.js";
 import { MalformedStoryRetroPayloadError } from "../src/errors.js";
 import type { ReviewerResultFileShape } from "../src/tools/run-reviewer-session.js";
 
+// NOTE: The outer describe name MUST match the vitest: marker used in the story's ACs
+// ("plugins/flow/mcp-server/tests/drain-forward-dev-lesson.test.ts") so that
+// `pnpm vitest --run -t "<that-path>"` finds and executes these tests.
+describe("plugins/flow/mcp-server/tests/drain-forward-dev-lesson.test.ts", () => {
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -420,4 +425,6 @@ describe("builder-lesson AC4 — drain workflow wires the capture+forward seams 
     // must also use the retryable+swallow variant.
     expect(src).toMatch(/recordStoryRetro --json[^\n]*role: 'generalist-dev'[^\n]*`,\s*`lesson-forward:\$\{ref\}`,\s*true,\s*true/);
   });
-});
+}); // end describe: builder-lesson AC4
+
+}); // end outer describe: plugins/flow/mcp-server/tests/drain-forward-dev-lesson.test.ts
