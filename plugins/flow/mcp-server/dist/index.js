@@ -35471,6 +35471,671 @@ function createServer(opts) {
   return server;
 }
 
+// src/schemas/tool-input-schemas.ts
+var LENS_NAMES_TUPLE = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered"
+];
+var acceptProposalInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    proposalId: { type: "string" },
+    confirm: { type: "boolean" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "proposalId"]
+};
+var adjudicateQualityLeadInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    panel: {
+      type: "object",
+      properties: {
+        tier0: { type: "string", enum: ["pass", "fail"] },
+        lenses: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              lens: { type: "string", enum: [...LENS_NAMES_TUPLE] },
+              role: { type: "string" },
+              pass: { type: "boolean" },
+              missed: { type: "string" }
+            },
+            required: ["lens", "role", "pass", "missed"]
+          }
+        }
+      },
+      required: ["tier0", "lenses"]
+    },
+    round: { type: "number" },
+    k: { type: "number" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "panel"]
+};
+var aggregateJudgePanelInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    draft: {
+      type: "object",
+      properties: {
+        ref: { type: "string" },
+        title: { type: "string" },
+        specText: { type: "string" },
+        changedPaths: { type: "array", items: { type: "string" } },
+        commitMessages: { type: "array", items: { type: "string" } },
+        diffSize: { type: "number" }
+      },
+      required: ["ref", "title", "specText"]
+    },
+    lensRoles: { type: "object" },
+    tier0: { type: "string", enum: ["pass", "fail"] }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "draft"]
+};
+var applyReviewerLabelsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    verdictOverride: { type: "string", enum: ["reviewer-failure"] },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref"]
+};
+var blockOrphanNoTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    staleUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "staleUlid"]
+};
+var buildPersonaSpawnPromptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var claimNextStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid"]
+};
+var claimStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "sessionUlid"]
+};
+var classifyRiskTierInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    pluginRoot: { type: "string" },
+    storyId: { type: "string" },
+    changedPaths: { type: "array", items: { type: "string" } },
+    commitMessages: { type: "array", items: { type: "string" } },
+    diffSize: { type: "number" }
+  },
+  required: ["targetRepoRoot", "pluginRoot", "storyId", "changedPaths", "commitMessages", "diffSize"]
+};
+var classifyStoryLaneInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    risk_tier: { type: "string", enum: ["low", "medium", "high"] },
+    cited_sources: { type: "array", items: { type: "string" } },
+    lane_hint: { type: "string", enum: ["fast", "full"] }
+  },
+  required: ["storyId"]
+};
+var completeStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "sessionUlid"]
+};
+var computeAgreementInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    lastNVerdicts: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var computeSkillEffectivenessInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    window: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var createSmokeScratchRepoInputSchema = {
+  type: "object",
+  properties: {
+    label: { type: "string" },
+    parentDir: { type: "string" }
+  },
+  required: ["label"]
+};
+var discardDraftInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref"]
+};
+var gatherRetroInputsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getBacklogDashboardInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getStatusInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getTeamSnapshotInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    knowledgeLimit: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var instantiatePersonaInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var listClaimableTodosInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var lookupRoleByDomainInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    domain: { type: "string" }
+  },
+  required: ["targetRepoRoot", "domain"]
+};
+var markStoryReadyInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    ready: { type: "boolean" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "ready"]
+};
+var markWithdrawnInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref"]
+};
+var mintSessionUlidInputSchema = {
+  type: "object",
+  properties: {}
+};
+var openCycleInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var postReviewerCommentsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref"]
+};
+var processDevTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    devTranscript: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "devTranscript"]
+};
+var processReviewerTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    manifestPath: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"]
+};
+var processReviewerYieldInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    fromRole: { type: "string" },
+    reviewerTranscript: { type: "string" },
+    manifestPath: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "fromRole", "reviewerTranscript", "manifestPath"]
+};
+var readBacklogInventoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    includeSpecText: { type: "boolean" }
+  },
+  required: ["targetRepoRoot"]
+};
+var readCatalogueInputSchema = {
+  type: "object",
+  properties: {
+    role: { type: "string" }
+  },
+  required: ["role"]
+};
+var readCustomRoleInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var readPersonaInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var readRepoSignalsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var reattachOrphanInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    currentSessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "currentSessionUlid"]
+};
+var recallLessonInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" },
+    id: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role", "id"]
+};
+var recordAgentFrictionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    agent: { type: "string" },
+    story_id: { type: "string" },
+    session_id: { type: "string" },
+    kind: { type: "string" },
+    expected: { type: "string" },
+    observed: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"]
+};
+var recordReviewerLessonInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    lesson: { type: "object" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"]
+};
+var recordSkillInvokeInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    agent: { type: "string" },
+    storyId: { type: "string" },
+    data: {
+      type: "object",
+      properties: {
+        skill_name: { type: "string" },
+        skill_path: { type: "string" },
+        skill_version: { type: "string" },
+        skill_scope: { type: "string", enum: ["project", "persona", "plugin"] },
+        invocation_source: {
+          type: "string",
+          enum: ["user-slash-command", "agent-call"]
+        }
+      },
+      required: [
+        "skill_name",
+        "skill_path",
+        "skill_version",
+        "skill_scope",
+        "invocation_source"
+      ]
+    }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "agent", "data"]
+};
+var recordStoryRetroInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    payload: { type: "object" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "payload"]
+};
+var resolveBuildPlanInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    lane: { type: "string", enum: ["fast", "full"] },
+    manifestPath: { type: "string" }
+  },
+  required: ["storyId"]
+};
+var resolveJudgePlanInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    lane: { type: "string", enum: ["fast", "full"] },
+    detector_confirmed_dead: { type: "boolean" }
+  },
+  required: ["storyId"]
+};
+var resolveLensRolesInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var runAutoMergeGateInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    prNumber: { type: "number" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    thresholdOverride: { type: "number" },
+    lastNVerdictsOverride: { type: "number" },
+    dryRun: { type: "boolean" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"]
+};
+var runDevTerminalActionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    title: { type: "string" },
+    type: { type: "string" },
+    body: { type: "string" },
+    summary: { type: "string" },
+    manifestPath: { type: "string" },
+    sessionUlid: { type: "string" },
+    base: { type: "string" },
+    buildTestTimeoutMs: {
+      type: "number",
+      description: "Per-run time budget (milliseconds) for the build/test gates. Defaults to 1 200 000 (20 min). Set to 0 to disable the budget."
+    }
+  },
+  required: [
+    "targetRepoRoot",
+    "ref",
+    "title",
+    "type",
+    "body",
+    "summary",
+    "manifestPath",
+    "sessionUlid"
+  ]
+};
+var runReviewerSessionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    prNumber: { type: "number" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"]
+};
+var scanOrphanedInProgressInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid"]
+};
+var scanSourcesInputSchema = {
+  type: "object",
+  properties: { targetRepoRoot: { type: "string" } },
+  required: ["targetRepoRoot"]
+};
+var summariseRetroProposalInputSchema = {
+  type: "object",
+  properties: {
+    absPath: {
+      type: "string",
+      description: "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md)."
+    }
+  },
+  required: ["absPath"]
+};
+var validatePlannerBacklogInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    pendingStories: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          narrative: { type: "string" },
+          acceptance_criteria: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                text: { type: "string" },
+                kind: { type: "string", enum: ["integration", "unit"] }
+              },
+              required: ["text", "kind"]
+            }
+          },
+          implementation_notes: { type: "string" },
+          depends_on: { type: "array", items: { type: "string" } },
+          ship_gate: { type: "boolean" },
+          state_mutating: { type: ["boolean", "string"] }
+        },
+        required: [
+          "title",
+          "narrative",
+          "acceptance_criteria",
+          "depends_on",
+          "ship_gate",
+          "state_mutating"
+        ]
+      }
+    }
+  },
+  required: ["targetRepoRoot", "pendingStories"]
+};
+var writeLensVerdictInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    lens: { type: "string", enum: [...LENS_NAMES_TUPLE] },
+    role: { type: "string" },
+    pass: { type: "boolean" },
+    missed: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "lens", "role", "pass", "missed"]
+};
+var writeNativeStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    title: { type: "string" },
+    narrative: {
+      type: "object",
+      properties: {
+        role: { type: "string" },
+        want: { type: "string" },
+        so_that: { type: "string" }
+      },
+      required: ["role", "want", "so_that"]
+    },
+    acceptance_criteria: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          kind: { type: "string", enum: ["integration", "unit"] },
+          verification: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["vitest", "artifact"] },
+              target: { type: "string" }
+            },
+            required: ["type", "target"]
+          }
+        },
+        required: ["text", "kind", "verification"]
+      }
+    },
+    tasks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          ac_refs: { type: "array", items: { type: "string" } }
+        },
+        required: ["text", "ac_refs"]
+      }
+    },
+    cited_sources: { type: "array", items: { type: "string" } },
+    implementation_notes: { type: "string" },
+    files_touched: {
+      type: "string",
+      description: "Build-ready '### Files touched' content: the new (NEW) and updated (UPDATE) files this story creates/changes. Omitting it renders a TBD-by-dev placeholder."
+    },
+    definition_of_done: {
+      type: "string",
+      description: "Build-ready '### Definition of Done' content: the checklist of what must be true to ship (ACs met, build/tests green, dist rebuilt and committed, PR green). Omitting it renders a generic default."
+    },
+    risk_reasoning: {
+      type: "string",
+      description: "Build-ready '### Risk' content: the highest-risk failure mode for this story and how it is caught. REQUIRED: omitting it or leaving the default placeholder causes the write tool to refuse with a DisciplineViolationError (placeholder-risk). A terse one-liner is enough \u2014 name the failure mode and the mitigation."
+    },
+    depends_on: { type: "array", items: { type: "string" } },
+    sessionUlid: { type: "string" }
+  },
+  required: [
+    "targetRepoRoot",
+    "title",
+    "narrative",
+    "acceptance_criteria",
+    "tasks",
+    "cited_sources",
+    "depends_on"
+  ]
+};
+var writeRetroProposalInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    isoTimestamp: { type: "string" },
+    proposals: { type: "array" },
+    cycleWindow: {
+      type: ["object", "null"]
+    },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "isoTimestamp", "proposals"]
+};
+
 // src/tools/build-persona-spawn-prompt.ts
 import * as path7 from "node:path";
 import { promises as fs7 } from "node:fs";
@@ -55258,13 +55923,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "getStatus",
     description: "Return a typed status report for the resolved target repo (plugin version, adapter, standards-doc state, cycle).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: getStatusInputSchema,
     handler: async (args) => {
       const root = external_exports.string().min(1).parse(args.targetRepoRoot);
       const report = await getStatus({ targetRepoRoot: root });
@@ -55276,14 +55935,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "openCycle",
     description: "Open a new work cycle (Story native:01KT484NY4HCBPBTT6VEY1Q0CS). Mints a fresh cycle ULID, archives the prior cycle's record (done manifests, retro proposals, telemetry summary) under .flow/cycle-archive/<prior-ulid>-<iso>.yaml BEFORE the window resets when a cycle is active, overwrites .flow/cycle-state.json with the new cycle, and emits exactly one cycle.opened telemetry event. After it returns, getStatus reports the new ULID instead of 'none' and gatherRetroInputs scopes its bundle to work completed at or after the new cycle's opened_at. Returns { cycleUlid, openedAt, priorCycleUlid, archivePath }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: openCycleInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55308,13 +55960,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "readCatalogue",
     description: "Read a catalogue role file from plugins/flow/catalogue/ and return its parsed frontmatter and body sections (FR82, FR83).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        role: { type: "string" }
-      },
-      required: ["role"]
-    },
+    inputSchema: readCatalogueInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({ role: external_exports.string().min(1) }).parse(args);
       const result = await readCatalogue({
@@ -55329,14 +55975,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "instantiatePersona",
     description: "Materialise a persona file at <target-repo>/team/<role>/PERSONA.md by copying the catalogue verbatim and stamping hired_at + catalogue_version; refuses on existing persona (FR89).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "role"]
-    },
+    inputSchema: instantiatePersonaInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55355,14 +55994,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "readPersona",
     description: "Read a persona file at <target-repo>/team/<role>/PERSONA.md and return parsed frontmatter + body sections (FR93).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "role"]
-    },
+    inputSchema: readPersonaInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55377,14 +56009,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "lookupRoleByDomain",
     description: "Exact-match a domain string against hired personas' domain frontmatter; returns { role } or { role: null } (FR99).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        domain: { type: "string" }
-      },
-      required: ["targetRepoRoot", "domain"]
-    },
+    inputSchema: lookupRoleByDomainInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55399,13 +56024,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "readRepoSignals",
     description: "Return a typed RepoSignals payload (languages, layout, README excerpt, recent commit titles, dependency manifests) for the resolved target repo. Used by /hire (FR85).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: readRepoSignalsInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({ targetRepoRoot: external_exports.string().min(1) }).parse(args);
       const result = await readRepoSignals({
@@ -55419,14 +56038,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "readCustomRole",
     description: "Read an operator-authored custom role file from <target-repo>/team/custom/<role>.md and return its parsed CatalogueRole. Used by /hire to support the FR92 manual escape hatch.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "role"]
-    },
+    inputSchema: readCustomRoleInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55444,14 +56056,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "getTeamSnapshot",
     description: "Return a typed snapshot of the hired team \u2014 roles, domains, fire counts from telemetry, recent persona-knowledge entries. Used by /flow:team (FR108, NFR28). Pure file reads; no LLM in the loop.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        knowledgeLimit: { type: "number" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: getTeamSnapshotInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55466,87 +56071,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "writeNativeStory",
     description: "Write a new native-adapter story file under <targetRepoRoot>/.flow/native-stories/<ULID>.md. Refuses with WrongAdapterError if the active adapter is not 'native'. Fail-closed discipline gate (Story 9.2): refuses with DisciplineViolationError and writes nothing if the candidate violates an authoring-time planning-discipline rule (e.g. a state-mutating story with no integration AC). On a successful write, emits exactly one draft.authored telemetry event. Used by the planner subagent (/flow:plan) and the author subagent (/flow:author) (Story 3.4 / 9.2).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        title: { type: "string" },
-        // Story 10.2 — the narrative is a structured { role, want, so_that }.
-        narrative: {
-          type: "object",
-          properties: {
-            role: { type: "string" },
-            want: { type: "string" },
-            so_that: { type: "string" }
-          },
-          required: ["role", "want", "so_that"]
-        },
-        acceptance_criteria: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              text: { type: "string" },
-              kind: { type: "string", enum: ["integration", "unit"] },
-              // Story 10.1 — required per-AC verification directive.
-              verification: {
-                type: "object",
-                properties: {
-                  type: { type: "string", enum: ["vitest", "artifact"] },
-                  target: { type: "string" }
-                },
-                required: ["type", "target"]
-              }
-            },
-            required: ["text", "kind", "verification"]
-          }
-        },
-        // Story 10.2 — ≥1 task, each mapped to ≥1 AC id.
-        tasks: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              text: { type: "string" },
-              ac_refs: { type: "array", items: { type: "string" } }
-            },
-            required: ["text", "ac_refs"]
-          }
-        },
-        // Story 10.2 — ≥1 repo-relative cited source path.
-        cited_sources: { type: "array", items: { type: "string" } },
-        implementation_notes: { type: "string" },
-        // Story 10.8 — three OPTIONAL build-ready fields that fill the
-        // `## Implementation Notes` sub-sections. The zod schema accepts them;
-        // they were previously missing from this advertised schema, so the
-        // author subagent never knew to set them and every draft rendered the
-        // hollow "TBD by dev" defaults — which the gate-1 Considered lens bounces.
-        // Surface + describe them so the author fills them (especially risk).
-        files_touched: {
-          type: "string",
-          description: "Build-ready '### Files touched' content: the new (NEW) and updated (UPDATE) files this story creates/changes. Omitting it renders a TBD-by-dev placeholder."
-        },
-        definition_of_done: {
-          type: "string",
-          description: "Build-ready '### Definition of Done' content: the checklist of what must be true to ship (ACs met, build/tests green, dist rebuilt and committed, PR green). Omitting it renders a generic default."
-        },
-        risk_reasoning: {
-          type: "string",
-          description: "Build-ready '### Risk' content: the highest-risk failure mode for this story and how it is caught. REQUIRED: omitting it or leaving the default placeholder causes the write tool to refuse with a DisciplineViolationError (placeholder-risk). A terse one-liner is enough \u2014 name the failure mode and the mitigation."
-        },
-        depends_on: { type: "array", items: { type: "string" } },
-        sessionUlid: { type: "string" }
-      },
-      required: [
-        "targetRepoRoot",
-        "title",
-        "narrative",
-        "acceptance_criteria",
-        "tasks",
-        "cited_sources",
-        "depends_on"
-      ]
-    },
+    inputSchema: writeNativeStoryInputSchema,
     handler: async (args) => {
       try {
         const result = await writeNativeStory(args);
@@ -55567,46 +56092,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "validatePlannerBacklog",
     description: "Validate a batch of pending native stories against planning-discipline rules before writing. Returns { ok: true } on pass or { ok: false; violations } on any failure. The planner MUST call this before every writeNativeStory and before emitting the handoff phrase. Throws WrongAdapterError if the active adapter is not 'native' (Story 3.5).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        pendingStories: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              narrative: { type: "string" },
-              acceptance_criteria: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    text: { type: "string" },
-                    kind: { type: "string", enum: ["integration", "unit"] }
-                  },
-                  required: ["text", "kind"]
-                }
-              },
-              implementation_notes: { type: "string" },
-              depends_on: { type: "array", items: { type: "string" } },
-              ship_gate: { type: "boolean" },
-              state_mutating: { type: ["boolean", "string"] }
-            },
-            required: [
-              "title",
-              "narrative",
-              "acceptance_criteria",
-              "depends_on",
-              "ship_gate",
-              "state_mutating"
-            ]
-          }
-        }
-      },
-      required: ["targetRepoRoot", "pendingStories"]
-    },
+    inputSchema: validatePlannerBacklogInputSchema,
     handler: async (args) => {
       try {
         const result = await validatePlannerBacklog(args);
@@ -55627,14 +56113,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "markWithdrawn",
     description: "Mark an execution manifest withdrawn (FR78). External-adapter discard path. Native discard uses writeNativeStory with a revert/deprecate story instead.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref"]
-    },
+    inputSchema: markWithdrawnInputSchema,
     handler: async (args) => {
       try {
         const result = await markWithdrawn(args);
@@ -55655,16 +56134,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "markStoryReady",
     description: "Set the operator `ready` flag on an un-claimed backlog item (Story 9.1). The drain claims an item only once it is dependency-ready AND marked ready. Writes the manifest in-place (no state-directory move); no-op if the flag already holds the requested value; raises NotAnEligibleBacklogItemError for anything that is not an un-claimed to-do/ item.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        ready: { type: "boolean" },
-        sessionUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "ready"]
-    },
+    inputSchema: markStoryReadyInputSchema,
     handler: async (args) => {
       try {
         const result = await markStoryReady(args);
@@ -55685,15 +56155,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "readBacklogInventory",
     description: "Build the backlog inventory for the target repo server-side (Story 3.6). Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn, ready, depsReady}] }. Scans all four state directories and (on native) the native-stories dir. Optional `ref` returns only the matching entry; optional `includeSpecText` enriches each returned entry with `specText` + `riskTier` (used by the gate-1 judge workflow). MalformedExecutionManifestError surfaces verbatim. Used by the /flow:plan skill to derive re-open mode and assemble <initial-context>.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        includeSpecText: { type: "boolean" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: readBacklogInventoryInputSchema,
     handler: async (args) => {
       try {
         const result = await readBacklogInventory(args);
@@ -55714,13 +56176,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "getBacklogDashboard",
     description: "Render the outstanding backlog as grouped-by-epic tables generated from live state (Story 9.5). Read-only \u2014 reads the backlog inventory and returns text grouping each item by epic with its state, readiness (the Story 9.1 ready flag), and claimability (dependency-satisfied AND ready, an un-withdrawn to-do item). Never mutates state and never writes a file. MalformedExecutionManifestError surfaces verbatim. Used by the /flow:board skill.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: getBacklogDashboardInputSchema,
     handler: async (args) => {
       const root = external_exports.string().min(1).parse(args.targetRepoRoot);
       try {
@@ -55744,16 +56200,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "claimStory",
     description: "Atomically claim a story for dev work (FR17) \u2014 moves manifest from to-do/ to in-progress/, stamps claimed_by with the caller's session ULID, refuses if any depends_on ref is not in done/ (FR18) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "sessionUlid"]
-    },
+    inputSchema: claimStoryInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({
@@ -55785,16 +56232,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "completeStory",
     description: "Atomically complete a claimed story (FR19) \u2014 moves manifest from in-progress/ to done/, preserves claimed_by, refuses if the caller's session ULID does not match the manifest's claimed_by (WrongClaimantError) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "sessionUlid"]
-    },
+    inputSchema: completeStoryInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({
@@ -55826,16 +56264,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "recordStoryRetro",
     description: "Attach structured retro entries (lessons[], failure_class, duration_seconds) to a done/ manifest after story completion. Reviewer-side tool (Story 6.1, FR11, FR55). Refuses with StoryNotInDoneStateError when the manifest lives in to-do/, blocked/, or in-progress/. Throws ManifestNotFoundError when the ref does not exist anywhere. Throws MalformedStoryRetroPayloadError when the payload fails schema validation (closed kind enum, pitfall requires failure_class, etc.).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        payload: { type: "object" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "payload"]
-    },
+    inputSchema: recordStoryRetroInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({
@@ -55867,16 +56296,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "recordReviewerLesson",
     description: "Merge one reusable retro lesson onto the per-ref reviewer-result.json (Story native:01KT6GSV8KTTKKHPRGEJWJAGZV \u2014 learning-loop producer). Call AFTER runReviewerSession, at most once, ONLY when the review taught a reusable lesson. Validates `lesson` against the existing LessonSchema (closed kind enum: pitfall|pattern|tool-quirk|discipline; pitfall requires failure_class). Merges only the lesson field \u2014 never clobbers recommendedVerdict, acResults, or any other field. Throws MalformedStoryRetroPayloadError on a bad lesson; ReviewerResultFileMissingError when no reviewer-result.json exists (runReviewerSession was not called first). Idempotent: merging the same lesson twice writes a byte-identical file.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        lesson: { type: "object" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"]
-    },
+    inputSchema: recordReviewerLessonInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({
@@ -55908,21 +56328,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "writeRetroProposal",
     description: "Write a single immutable retro-proposal markdown file under <target-repo>/.flow/retro-proposals/<isoTimestamp>.md. The file carries a YAML frontmatter block (validated via RetroProposalFileSchema; source of truth for Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are immutable). Refuses malformed payloads with MalformedRetroProposalError \u2014 closed discriminated union over seven types (rule, rule-retirement, skill-create, skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        isoTimestamp: { type: "string" },
-        proposals: { type: "array" },
-        cycleWindow: {
-          // null or { from, to } — surfaced as plain object so the JSON-schema
-          // hint isn't too tight; Zod inside the handler is the real gate.
-          type: ["object", "null"]
-        },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "isoTimestamp", "proposals"]
-    },
+    inputSchema: writeRetroProposalInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({
@@ -55955,16 +56361,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "acceptProposal",
     description: "The /accept-proposal <id> diff-then-confirm gate (Story 6.4, FR61, NFR10). Two-phase, deterministic: called without confirm it returns { status: 'preview', diff } with NO file write, commit, or telemetry; called with confirm:true it runs the registered per-kind apply handler, commits the handler's changed paths + the proposal-file `applied` stamp in a SINGLE git-wrapper commit, emits one retro.proposal.applied telemetry event, and returns { status: 'applied', appliedSha, idempotencyKey }. Re-running an already-applied id (even with confirm:true) is an idempotent no-op returning { status: 'already-applied', appliedSha, appliedAt } \u2014 no handler call, no write, no commit, no telemetry. Throws ProposalNotFoundError (id matched no proposal across all files), AmbiguousProposalIdError (id matched in two files \u2014 a bug, ids are unique), and ProposalKindNotApplicableYetError (no registered handler for the kind \u2014 fail-closed; in Story 6.4 the production registry is empty so every kind fails closed). Story 6.4.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        proposalId: { type: "string" },
-        confirm: { type: "boolean" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "proposalId"]
-    },
+    inputSchema: acceptProposalInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -55996,13 +56393,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "gatherRetroInputs",
     description: "Assemble the deterministic retro input bundle for the /flow:retro skill (Story 6.2, FR56). Returns { doneManifests, telemetrySummary, priorProposals, ruleRegistry }: every done/ manifest (alphabetical, parseExecutionManifest-validated; MalformedExecutionManifestError propagates), every telemetry event for the current cycle window (malformed lines skipped + counted as telemetrySummary.skipped_count), prior retro-proposal paths { path, iso_timestamp } sorted ascending (contents NOT loaded), and the parsed docs/discipline-rules.yaml registry (or null when absent \u2014 absence is not an error). Pure read; no writes, no network.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: gatherRetroInputsInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({ targetRepoRoot: external_exports.string().min(1) }).parse(args);
@@ -56029,10 +56420,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "mintSessionUlid",
     description: "Mint a fresh session ULID for a /flow:start invocation. Pure \u2014 no IO. Called once per /flow:start invocation; the returned ULID is re-used for every claimStory call in that session. Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {}
-    },
+    inputSchema: mintSessionUlidInputSchema,
     handler: async (_args) => {
       const result = mintSessionUlid();
       return {
@@ -56043,13 +56431,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "listClaimableTodos",
     description: "Enumerate claimable to-do manifests for the /flow:start claim-spawn loop. Returns { todos: ClaimableCandidate[], inProgressCount: number } where todos are filtered by isClaimable, sorted alphabetically by ref, and annotated with depsReady (true iff all depends_on refs are in done/). Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: listClaimableTodosInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({ targetRepoRoot: external_exports.string().min(1) }).parse(args);
       try {
@@ -56071,14 +56453,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "buildPersonaSpawnPrompt",
     description: "Assemble the system-prompt text for a dev-subagent spawn. Reads <targetRepoRoot>/team/<role>/PERSONA.md exactly once per call, concatenates the five required sections (Domain, Mandate, Out of mandate, Prompt, Knowledge) plus a Locked phrases sentinel block. Returns { systemPrompt: string }. Propagates PersonaFileNotFoundError if the team persona is absent. Story 4.2.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "role"]
-    },
+    inputSchema: buildPersonaSpawnPromptInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56103,11 +56478,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "scanSources",
     description: "Project the active adapter's source stories into execution manifests under <target-repo>/.flow/state/to-do/<ref>.yaml. Idempotent on re-scan; refreshes source_hash for manifests still in to-do/. Used by /<plugin>:scan (Story 3.2).",
-    inputSchema: {
-      type: "object",
-      properties: { targetRepoRoot: { type: "string" } },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: scanSourcesInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({ targetRepoRoot: external_exports.string().min(1) }).parse(args);
       try {
@@ -56124,14 +56495,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "claimNextStory",
     description: "Claim the next ready story from the backlog for the current session. Returns { next: 'spawn-dev', ref, title, manifestPath, chatLog } when a story is claimed, { next: 'queue-drained', chatLog } when both to-do/ and in-progress/ are empty, or { next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. Story 4.3b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid"]
-    },
+    inputSchema: claimNextStoryInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56156,16 +56520,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "processDevTranscript",
     description: "Parse the dev subagent's final transcript for the verbatim handoff phrase. Returns { next: 'spawn-reviewer', reviewerPrompt, chatLog } on a valid handoff, or { next: 'done-blocked-handoff-grammar', chatLog } on grammar drift (stamps blocked_by in the manifest). MUST be called with the verbatim full transcript \u2014 no summarisation. Story 4.3b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        devTranscript: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "devTranscript"]
-    },
+    inputSchema: processDevTranscriptInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56192,16 +56547,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "processReviewerTranscript",
     description: "Read the persisted reviewer-result.json (written by runReviewerSession) and route on its recommendedVerdict. Returns { next: 'done-ready-for-merge', completed: true, chatLog } on READY FOR MERGE (calls completeStory internally), { next: 'done-blocked-reviewer-needs-changes', chatLog } on NEEDS CHANGES (stamps blocked_by), { next: 'done-blocked-reviewer-blocked', chatLog } on BLOCKED (stamps blocked_by). Throws ReviewerFirstCallSkippedError (stamps blocked_by: reviewer-no-session-result) when reviewer-result.json is absent \u2014 the reviewer subagent skipped the mandatory runReviewerSession first call (Story 5.21 seam). Story 4.3b / Story 4.6 revision 2 / Story 5.21.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        manifestPath: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"]
-    },
+    inputSchema: processReviewerTranscriptInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56228,34 +56574,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "runDevTerminalAction",
     description: "Dev subagent terminal action: creates a story branch, commits in conventional-commits format, pushes to origin, and opens a PR via gh pr create with a machine-readable body (story link, ACs checklist mirrored from the spec) followed by a free-form summary. Refuses --no-verify, --force, --force-with-lease unconditionally. Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4. buildTestTimeoutMs: optional per-run time budget (ms) for the build/test gates; defaults to 20 min. A hung or crawling build that exceeds the budget is terminated and reported as a build failure with a clear timed-out reason. (Story native:01KTN5E6T75XKDX8A0SGBVPRYS)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        title: { type: "string" },
-        type: { type: "string" },
-        body: { type: "string" },
-        summary: { type: "string" },
-        manifestPath: { type: "string" },
-        sessionUlid: { type: "string" },
-        base: { type: "string" },
-        buildTestTimeoutMs: {
-          type: "number",
-          description: "Per-run time budget (milliseconds) for the build/test gates. Defaults to 1 200 000 (20 min). Set to 0 to disable the budget."
-        }
-      },
-      required: [
-        "targetRepoRoot",
-        "ref",
-        "title",
-        "type",
-        "body",
-        "summary",
-        "manifestPath",
-        "sessionUlid"
-      ]
-    },
+    inputSchema: runDevTerminalActionInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56288,16 +56607,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "postReviewerComments",
     description: "Read the persisted reviewer-result.json (written by runReviewerSession) and post a PR review with a deterministic summary body and zero-or-more inline comments. Returns { next: 'skipped-no-session-result', postedReviewId: null } when the file is absent, or { next: 'posted', postedReviewId, inlineCommentCount, verdictLine } on success. All composition is deterministic (no LLM step). Story 4.6b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref"]
-    },
+    inputSchema: postReviewerCommentsInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56324,17 +56634,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "applyReviewerLabels",
     description: "Apply GitHub labels to the PR after a completed reviewer cycle. Always applies `reviewed-by-agent`; also applies `needs-human` on NEEDS CHANGES, BLOCKED, or reviewer-failure verdicts. Returns { next: 'skipped-no-session-result' } when reviewer-result.json is absent, or { next: 'applied', labelsApplied: string[] } on success. Propagates GhRecoverableError, GhApiResponseShapeError, and ReviewerResultFileMalformedError uncaught. Story 4.8 (FR36, FR37, FR38).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        verdictOverride: { type: "string", enum: ["reviewer-failure"] },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref"]
-    },
+    inputSchema: applyReviewerLabelsInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56362,18 +56662,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "processReviewerYield",
     description: "Parse the reviewer subagent's transcript for the verbatim locked yield phrase `This sits in <domain>'s domain \u2014 handing off.` and route the review to the appropriate hired specialist. Returns { next: 'no-yield', chatLog } (common path \u2014 pass through to existing flow), { next: 'spawn-specialist-reviewer', toRole, specialistPrompt, chatLog } on a successful yield, { next: 'done-blocked-routing-failure', chatLog } when no hired role matches the domain (stamps blocked_by: routing-failure on the manifest), or { next: 'done-blocked-routing-self-yield', chatLog } when the yielder named its own domain (stamps blocked_by: routing-self-yield). Emits a yield.handoff telemetry event on the success branch only (FR103, NFR29). NOT in subagent allowlists \u2014 called by SKILL.md prose only. Story 4.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        fromRole: { type: "string" },
-        reviewerTranscript: { type: "string" },
-        manifestPath: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "fromRole", "reviewerTranscript", "manifestPath"]
-    },
+    inputSchema: processReviewerYieldInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56402,17 +56691,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "runReviewerSession",
     description: "Composite reviewer-session tool. Reads the source story (via active adapter), the PR diff (via gh pr diff), and docs/standards.md in fixed sequential order. Runs every AC against the applicability classifier (artifact-check, vitest, or manual-check-required). Derives a `recommendedVerdict` literal (READY FOR MERGE | NEEDS CHANGES | BLOCKED) from acResults and persists the full ReviewerSessionResult to `<targetRepoRoot>/.flow/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning. Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, acResults, and recommendedVerdict. All read and execution errors propagate uncaught. MUST be the reviewer persona's FIRST action. Story 4.6.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        prNumber: { type: "number" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"]
-    },
+    inputSchema: runReviewerSessionInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56440,18 +56719,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "classifyRiskTier",
     description: "Classify a PR's risk tier from its diff signals (changed paths, commit messages, diff size) using the loaded risk-tiering spec (Story 4.9). Returns the Pattern \xA711 output shape: { story_id, tier: low|medium|high, matched_rule, evidence: { paths, change_types, diff_size } }. Walks rules in high\u2192medium\u2192low order (highest-tier-wins). Falls back to 'medium' with matched_rule='fallback' when no rule matches. Propagates MalformedRiskTieringSpecError and ShippedRiskTieringDefaultMissingError verbatim. In v1, this tool is called internally by runReviewerSession; it is exposed as an MCP tool for future direct callers. Story 4.9b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        pluginRoot: { type: "string" },
-        storyId: { type: "string" },
-        changedPaths: { type: "array", items: { type: "string" } },
-        commitMessages: { type: "array", items: { type: "string" } },
-        diffSize: { type: "number" }
-      },
-      required: ["targetRepoRoot", "pluginRoot", "storyId", "changedPaths", "commitMessages", "diffSize"]
-    },
+    inputSchema: classifyRiskTierInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56480,14 +56748,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "computeAgreement",
     description: "Compute the rolling reviewer-verdict vs human-merge-action agreement ratio (FR67, NFR24). Reads every *.jsonl file under <targetRepoRoot>/.flow/telemetry/, joins reviewer.verdict and reviewer.verdict.merge_action events by (pr_number, session_id), excludes reviewer-failure verdicts and still-open merge actions, sorts newest-first by verdict ts, takes the first lastNVerdicts pairs. Returns { ratio, distribution, window_size, sample_size, skipped_unresolved, skipped_excluded, malformed_lines } or null when resolved-pair count < lastNVerdicts (insufficient data). Throws AgreementWindowInvalidError on invalid lastNVerdicts (0, negative, non-integer). Story 4.10.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        lastNVerdicts: { type: "number" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: computeAgreementInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot,
@@ -56515,36 +56776,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "recordSkillInvoke",
     description: "Single write-path for the skill.invoke telemetry event (Story 6.8). Validates { skill_name, skill_path, skill_version, skill_scope, invocation_source } \u2014 skill_scope (project|persona|plugin) and invocation_source (user-slash-command|agent-call) are CLOSED enums; an unknown value raises MalformedSkillInvokeInputError and writes nothing. Emits exactly one skill.invoke event via the telemetry logger (which stamps ts). Returns { recorded: true } on success. Touches no .flow/state manifest.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        agent: { type: "string" },
-        storyId: { type: "string" },
-        data: {
-          type: "object",
-          properties: {
-            skill_name: { type: "string" },
-            skill_path: { type: "string" },
-            skill_version: { type: "string" },
-            skill_scope: { type: "string", enum: ["project", "persona", "plugin"] },
-            invocation_source: {
-              type: "string",
-              enum: ["user-slash-command", "agent-call"]
-            }
-          },
-          required: [
-            "skill_name",
-            "skill_path",
-            "skill_version",
-            "skill_scope",
-            "invocation_source"
-          ]
-        }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "agent", "data"]
-    },
+    inputSchema: recordSkillInvokeInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56583,14 +56815,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "computeSkillEffectiveness",
     description: "Compute per-skill effectiveness from skill.invoke events joined to downstream READY FOR MERGE reviewer verdicts (Story 6.8). Reads every *.jsonl under <targetRepoRoot>/.flow/telemetry/, sorts skill.invoke events newest-first, takes the first `window` (default 50), and for each skill reports invoke_count, useful_fire_count (invocations followed by a same-session/same-story READY FOR MERGE), and effectiveness_ratio (useful/invoke, 0 not NaN). Returns { per_skill, window_size, sample_size, malformed_lines } \u2014 an empty per_skill map on no data (never null, never an error on empty/malformed input). Malformed JSONL lines are skipped and counted. Throws SkillEffectivenessWindowInvalidError on an invalid window.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        window: { type: "number" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: computeSkillEffectivenessInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot,
@@ -56621,14 +56846,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "createSmokeScratchRepo",
     description: "Create a disposable smoke-harness scratch repo seeded with git init + empty commit + minimal .flow/config.yaml + .flow/standards.md. Used by the /flow:smoke skill as the first checkpoint step.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        label: { type: "string" },
-        parentDir: { type: "string" }
-      },
-      required: ["label"]
-    },
+    inputSchema: createSmokeScratchRepoInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({ label: external_exports.string().min(1), parentDir: external_exports.string().min(1).optional() }).parse(args);
       const result = await createSmokeScratchRepo(parsed);
@@ -56642,20 +56860,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "runAutoMergeGate",
     description: "Auto-merge gate for a PR that has reached done-ready-for-merge (FR40/FR41/FR42). Reads done/<ref>.yaml for risk_tier, computeAgreement for the rolling agreement ratio, and workspace config plugin.agreement_threshold (default 0.8). Decision: low + met-threshold \u2192 gh pr merge --squash --delete-branch; all other branches \u2192 gh api POST /labels with needs-human. dryRun:true skips the gh shell-out. Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. An operational gh failure (merge refused, label API hiccup, missing permission) NEVER throws: it folds into a clean pause-needs-human result (reason merge-failed on the merge path) with the cause in chatLog, so the gate's stdout stays JSON-only and the drain seam cannot break. Story 4.10b.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        prNumber: { type: "number" },
-        ref: { type: "string" },
-        sessionUlid: { type: "string" },
-        thresholdOverride: { type: "number" },
-        lastNVerdictsOverride: { type: "number" },
-        dryRun: { type: "boolean" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"]
-    },
+    inputSchema: runAutoMergeGateInputSchema,
     handler: async (args) => {
       const parsed = {
         targetRepoRoot: args.targetRepoRoot,
@@ -56687,14 +56892,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "scanOrphanedInProgress",
     description: "Scan <targetRepoRoot>/.flow/state/in-progress/ for manifests whose claimed_by ULID is defined and does not match sessionUlid. Returns orphans in alphabetical ref order, each with hasTranscript flag indicating whether the Story 5.10 transcript file exists. Pure read-only \u2014 no write side-effects. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid"]
-    },
+    inputSchema: scanOrphanedInProgressInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56719,15 +56917,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "reattachOrphan",
     description: "Reattach an orphaned in-progress manifest to the current session by rewriting claimed_by from the stale ULID to currentSessionUlid. Used by the transcript-present path of the orphan-recovery branch in /flow:start. Throws NotAnOrphanError when claimed_by already matches currentSessionUlid (race). Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        currentSessionUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "currentSessionUlid"]
-    },
+    inputSchema: reattachOrphanInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56753,15 +56943,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "blockOrphanNoTranscript",
     description: "Handle an orphaned in-progress manifest with no persisted transcript by moving it from in-progress/ to blocked/ and stamping blocked_by: orphan-no-transcript. Used by the no-transcript path of the orphan-recovery branch in /flow:start. Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" },
-        staleUlid: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref", "staleUlid"]
-    },
+    inputSchema: blockOrphanNoTranscriptInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56787,19 +56969,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "writeLensVerdict",
     description: "Write a single judge's per-lens verdict to its deterministic result file (Story 9.3, gate 1 Tier 1). Validates { lens, role, pass, missed } against LensVerdictSchema \u2014 a fail with an empty `missed` is rejected at write time (a malformed verdict never reaches disk). Writes atomically to <targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<ref>/judge-<lens>.json. Returns { resultFilePath }. Each lens judge calls this once; the panel reads the file back (deterministic-seam discipline \u2014 the panel consumes files, never transcripts).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        lens: { type: "string", enum: [...LENS_NAMES] },
-        role: { type: "string" },
-        pass: { type: "boolean" },
-        missed: { type: "string" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "lens", "role", "pass", "missed"]
-    },
+    inputSchema: writeLensVerdictInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56829,28 +56999,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "aggregateJudgePanel",
     description: "Aggregate the five per-lens judge verdict files into a single PanelVerdict (Story 9.3, gate 1 Tier 1). Validates the lens\u2192role binding (one DISTINCT role per lens \u2014 lens diversity is structural), classifies the draft's risk tier via classifyRiskTier to select the Considered-lens bar, reads the five judge-<lens>.json files written by writeLensVerdict (deterministic-seam: files, never transcripts), and assembles { tier0, lenses } validated against PanelVerdictSchema (exactly five entries, one per lens). Emits one panel.graded telemetry event. Returns { riskTier, verdict }. Writes NOTHING to the readiness flag or any manifest \u2014 that decision is Story 9.4's. Throws LensJudgeUnavailableError (a lens has no role), DuplicateLensJudgeError (a role is shared across lenses), and LensVerdictFileMalformedError (a verdict file is absent / unparseable / fails schema / disagrees on lens|role).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        draft: {
-          type: "object",
-          properties: {
-            ref: { type: "string" },
-            title: { type: "string" },
-            specText: { type: "string" },
-            changedPaths: { type: "array", items: { type: "string" } },
-            commitMessages: { type: "array", items: { type: "string" } },
-            diffSize: { type: "number" }
-          },
-          required: ["ref", "title", "specText"]
-        },
-        lensRoles: { type: "object" },
-        tier0: { type: "string", enum: ["pass", "fail"] }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "draft"]
-    },
+    inputSchema: aggregateJudgePanelInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56891,37 +57040,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "adjudicateQualityLead",
     description: "Synthesise a Story 9.3 PanelVerdict into a Quality-Lead decision (Story 9.4, gate 1 adjudication). Applies the rubric \xA75 rule: all five lenses pass \u2192 `ready` (blesses via the Story 9.1 markStoryReady brake \u2014 never a direct manifest write); any lens fails \u2192 `rework` (returns the failed `missed` strings, draft stays not-ready); a split that persists after K rounds (default 2) \u2192 `escalate` (to the operator with a populated escalation_reason, draft stays not-ready \u2014 never auto-pass a close call). Persists the AdjudicationVerdict { ref, decision, rationale, escalation_reason?, round } (validated against AdjudicationVerdictSchema) to <targetRepoRoot>/.flow/state/sessions/<sessionUlid>/<ref>/adjudication-verdict.json \u2014 the canonical record the dashboard (9.5) and the calibration loop (judge-the-judge) read. Emits one quality.adjudicated telemetry event on every decision. Returns { verdict, verdictFilePath, blessed? }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        sessionUlid: { type: "string" },
-        ref: { type: "string" },
-        panel: {
-          type: "object",
-          properties: {
-            tier0: { type: "string", enum: ["pass", "fail"] },
-            lenses: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  lens: { type: "string", enum: [...LENS_NAMES] },
-                  role: { type: "string" },
-                  pass: { type: "boolean" },
-                  missed: { type: "string" }
-                },
-                required: ["lens", "role", "pass", "missed"]
-              }
-            }
-          },
-          required: ["tier0", "lenses"]
-        },
-        round: { type: "number" },
-        k: { type: "number" }
-      },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "panel"]
-    },
+    inputSchema: adjudicateQualityLeadInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -56957,20 +57076,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "recordAgentFriction",
     description: "Persist a structured agent.friction telemetry event when an agent compensates for a surprising or broken input. The event carries a closed-enum kind ('empty-input' | 'missing-cited-source' | 'forced-fallback' | 'repeated-retry'), plus expected and observed strings describing the mismatch. gatherRetroInputs groups these events by kind and surfaces kinds with count >= 2 as recurringFriction in the retro bundle, so the retro-analyst can draft a fix proposal for a seam that agents are silently compensating for. Story native:01KT2RAXBSQ91Y80Z51DD26KPX.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        agent: { type: "string" },
-        story_id: { type: "string" },
-        session_id: { type: "string" },
-        kind: { type: "string" },
-        expected: { type: "string" },
-        observed: { type: "string" },
-        role: { type: "string" }
-      },
-      required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"]
-    },
+    inputSchema: recordAgentFrictionInputSchema,
     handler: async (args) => {
       try {
         const result = await recordAgentFriction(args);
@@ -56996,13 +57102,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "resolveLensRoles",
     description: "Resolve the deterministic lens\u2192role binding from the live hired roster (Story FU2). Reads <targetRepoRoot>/team/ to enumerate hired roles (same source as getTeamSnapshot), then runs maximum bipartite matching (Kuhn's algorithm) with per-lens ordered candidate preference lists to assign all five lenses to five DISTINCT hired roles \u2014 preferring a specialist for a lens when one is on the team. Returns { lensRoles, hiredRoles }. Throws LensJudgeUnavailableError (naming the first uncovered lens) when the roster is too small or too narrow to staff all five distinct judges. Read-only: does NOT mutate state. Used by both the interactive /flow:judge skill and the unattended gate-1.workflow.js (via the CLI seam) so no operator ever hand-picks judge assignments.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" }
-      },
-      required: ["targetRepoRoot"]
-    },
+    inputSchema: resolveLensRolesInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1)
@@ -57026,15 +57126,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "recallLesson",
     description: "Retrieve the full body of one structured lesson from a role's ## Knowledge section by id (Story native:01KT6QEWY794ZY0DH6JHQFWG6V). The agent's briefing contains a compact one-line index (`[id] kind \u2014 applies_when`); call this with the id to get the full lesson detail, kind, failure_class, source_ref, source_pr, and learned_at. Returns { found: true, lesson: {...} } when found, or { found: false, lesson: null } when the id is unknown (soft miss \u2014 never throws on a missing lesson). Throws PersonaFileNotFoundError when team/<role>/PERSONA.md is absent. Read-only: never mutates state.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        role: { type: "string" },
-        id: { type: "string" }
-      },
-      required: ["targetRepoRoot", "role", "id"]
-    },
+    inputSchema: recallLessonInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         targetRepoRoot: external_exports.string().min(1),
@@ -57060,16 +57152,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "classifyStoryLane",
     description: "Classify a story into a cost lane ('fast' or 'full') from its execution-manifest signals (Story native:01KTKJXP6DWN5YHKVG96DH16V0). Pure deterministic function \u2014 no I/O, no LLM. 'fast' requires ALL of: risk_tier='low' AND \u22643 cited_sources AND a safe change intent (docs-only, tests-only, or additive-only). ANY high/medium risk_tier, security-sensitive cited source, absent risk_tier, or ambiguous signals forces 'full' \u2014 an unknown story is never cheapened. The optional lane_hint is downgrade-only: a 'fast' hint is honoured only if the classifier independently returns 'fast'; a 'full' hint always wins. Returns { lane, matched_rule, evidence: { risk_tier, cited_sources_count, security_paths, author_hint } }. The post-build classifyRiskTier on the real diff remains the safety backstop.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        risk_tier: { type: "string", enum: ["low", "medium", "high"] },
-        cited_sources: { type: "array", items: { type: "string" } },
-        lane_hint: { type: "string", enum: ["fast", "full"] }
-      },
-      required: ["storyId"]
-    },
+    inputSchema: classifyStoryLaneInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         storyId: external_exports.string().min(1),
@@ -57086,15 +57169,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "resolveJudgePlan",
     description: "Resolve the judge lens plan from (lane, detector_confirmed_dead) before the judge panel runs (Story native:01KTKK2Y73EDDAXK470EZ3MHQ8). Pure deterministic function \u2014 no I/O, no LLM. full/absent \u2192 { skip: false, lenses: [5-lens array], perLensModel: { Structure+Discipline=sonnet, Verif+Domain+Considered=opus } }. fast \u2192 { skip: false, lenses: ['structure+verifiability'], perLensModel: { 'structure+verifiability': 'sonnet' } }. fast + detector_confirmed_dead=true \u2192 { skip: true, lenses: [], perLensModel: {} } (auto-bless bypass \u2014 merge gate remains the safety net). Returns { skip, lenses, perLensModel }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        lane: { type: "string", enum: ["fast", "full"] },
-        detector_confirmed_dead: { type: "boolean" }
-      },
-      required: ["storyId"]
-    },
+    inputSchema: resolveJudgePlanInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         storyId: external_exports.string().min(1),
@@ -57110,15 +57185,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "resolveBuildPlan",
     description: "Resolve the build plan (dev/reviewer model + review depth) from a story's lane (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F). fast -> { devReviewerModel: 'haiku', reviewDepth: 'light' }. full/absent -> { devReviewerModel: 'sonnet', reviewDepth: 'full' } (no-regression pin). When manifestPath is provided, reads the lane from the persisted execution manifest (written at scan time by classifyStoryLane); pass lane directly for a pure no-I/O call. The dev's pre-PR build+test gate (runDevTerminalAction) and merge gate (runAutoMergeGate) are unchanged -- the cheaper path sits entirely in front of the same hard gates. Returns { devReviewerModel, reviewDepth }.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        storyId: { type: "string" },
-        lane: { type: "string", enum: ["fast", "full"] },
-        manifestPath: { type: "string" }
-      },
-      required: ["storyId"]
-    },
+    inputSchema: resolveBuildPlanInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
         storyId: external_exports.string().min(1),
@@ -57134,16 +57201,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "summariseRetroProposal",
     description: "Read-only summary tool for the /flow:retro skill (Story native:01KTZGEW6TSC6M84P9KJ7FD96S). Accepts the absolute path of a retro-proposal file written by writeRetroProposal, reads its YAML frontmatter, parses it through the canonical parseRetroProposalFile, and returns a structured per-proposal summary for inline rendering. Returns { absPath, totalCount, noProposals, proposals: [{ type, rationale, id }] }. When noProposals is true the skill MUST render a plain 'no recommended changes this cycle' statement. No writes, no mutations \u2014 strictly read-only. Throws MalformedRetroProposalError if the file's frontmatter fails schema validation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        absPath: {
-          type: "string",
-          description: "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md)."
-        }
-      },
-      required: ["absPath"]
-    },
+    inputSchema: summariseRetroProposalInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({ absPath: external_exports.string().min(1) }).parse(args);
@@ -57170,14 +57228,7 @@ function registerAllTools(server) {
   server.registerTool({
     name: "discardDraft",
     description: "Discard an un-claimed native draft parked in the backlog (Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB). Removes BOTH the to-do/ execution manifest AND the underlying .flow/native-stories/<ULID>.md source draft in one guarded action, so a later scanSources pass cannot re-materialise the item. Refuses with NotAnEligibleDraftError when the ref is claimed/in-progress/done/blocked (not-in-to-do), already withdrawn, belongs to a non-native adapter (wrong-adapter), or does not exist AND is not just absent (not-found). When the ref is absent from every state directory the action is a clean no-op (returns { removed:false, noop:true }) \u2014 idempotent on double-call. Used by the /flow:ready skill; the skill never deletes files or runs git itself.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        targetRepoRoot: { type: "string" },
-        ref: { type: "string" }
-      },
-      required: ["targetRepoRoot", "ref"]
-    },
+    inputSchema: discardDraftInputSchema,
     handler: async (args) => {
       try {
         const parsed = external_exports.object({

@@ -10526,6 +10526,727 @@ var NotAnEligibleDraftError = class extends DomainError {
   }
 };
 
+// src/schemas/tool-input-schemas.ts
+var LENS_NAMES_TUPLE = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered"
+];
+var acceptProposalInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    proposalId: { type: "string" },
+    confirm: { type: "boolean" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "proposalId"]
+};
+var adjudicateQualityLeadInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    panel: {
+      type: "object",
+      properties: {
+        tier0: { type: "string", enum: ["pass", "fail"] },
+        lenses: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              lens: { type: "string", enum: [...LENS_NAMES_TUPLE] },
+              role: { type: "string" },
+              pass: { type: "boolean" },
+              missed: { type: "string" }
+            },
+            required: ["lens", "role", "pass", "missed"]
+          }
+        }
+      },
+      required: ["tier0", "lenses"]
+    },
+    round: { type: "number" },
+    k: { type: "number" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "panel"]
+};
+var aggregateJudgePanelInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    draft: {
+      type: "object",
+      properties: {
+        ref: { type: "string" },
+        title: { type: "string" },
+        specText: { type: "string" },
+        changedPaths: { type: "array", items: { type: "string" } },
+        commitMessages: { type: "array", items: { type: "string" } },
+        diffSize: { type: "number" }
+      },
+      required: ["ref", "title", "specText"]
+    },
+    lensRoles: { type: "object" },
+    tier0: { type: "string", enum: ["pass", "fail"] }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "draft"]
+};
+var applyReviewerLabelsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    verdictOverride: { type: "string", enum: ["reviewer-failure"] },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref"]
+};
+var blockOrphanNoTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    staleUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "staleUlid"]
+};
+var buildPersonaSpawnPromptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var claimNextStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid"]
+};
+var claimStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "sessionUlid"]
+};
+var classifyRiskTierInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    pluginRoot: { type: "string" },
+    storyId: { type: "string" },
+    changedPaths: { type: "array", items: { type: "string" } },
+    commitMessages: { type: "array", items: { type: "string" } },
+    diffSize: { type: "number" }
+  },
+  required: ["targetRepoRoot", "pluginRoot", "storyId", "changedPaths", "commitMessages", "diffSize"]
+};
+var classifyStoryLaneInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    risk_tier: { type: "string", enum: ["low", "medium", "high"] },
+    cited_sources: { type: "array", items: { type: "string" } },
+    lane_hint: { type: "string", enum: ["fast", "full"] }
+  },
+  required: ["storyId"]
+};
+var completeStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "sessionUlid"]
+};
+var computeAgreementInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    lastNVerdicts: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var computeSkillEffectivenessInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    window: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var createSmokeScratchRepoInputSchema = {
+  type: "object",
+  properties: {
+    label: { type: "string" },
+    parentDir: { type: "string" }
+  },
+  required: ["label"]
+};
+var discardDraftInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref"]
+};
+var gatherRetroInputsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getBacklogDashboardInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getStatusInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var getTeamSnapshotInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    knowledgeLimit: { type: "number" }
+  },
+  required: ["targetRepoRoot"]
+};
+var instantiatePersonaInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var listClaimableTodosInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var lookupRoleByDomainInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    domain: { type: "string" }
+  },
+  required: ["targetRepoRoot", "domain"]
+};
+var markStoryReadyInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    ready: { type: "boolean" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "ready"]
+};
+var markWithdrawnInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref"]
+};
+var mintSessionUlidInputSchema = {
+  type: "object",
+  properties: {}
+};
+var openCycleInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var postReviewerCommentsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref"]
+};
+var processDevTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    devTranscript: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "devTranscript"]
+};
+var processReviewerTranscriptInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    manifestPath: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"]
+};
+var processReviewerYieldInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    fromRole: { type: "string" },
+    reviewerTranscript: { type: "string" },
+    manifestPath: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "fromRole", "reviewerTranscript", "manifestPath"]
+};
+var readBacklogInventoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    includeSpecText: { type: "boolean" }
+  },
+  required: ["targetRepoRoot"]
+};
+var readCatalogueInputSchema = {
+  type: "object",
+  properties: {
+    role: { type: "string" }
+  },
+  required: ["role"]
+};
+var readCustomRoleInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var readPersonaInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role"]
+};
+var readRepoSignalsInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var reattachOrphanInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    currentSessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "currentSessionUlid"]
+};
+var recallLessonInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" },
+    id: { type: "string" }
+  },
+  required: ["targetRepoRoot", "role", "id"]
+};
+var recordAgentFrictionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    agent: { type: "string" },
+    story_id: { type: "string" },
+    session_id: { type: "string" },
+    kind: { type: "string" },
+    expected: { type: "string" },
+    observed: { type: "string" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"]
+};
+var recordReviewerLessonInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    lesson: { type: "object" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"]
+};
+var recordSkillInvokeInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    agent: { type: "string" },
+    storyId: { type: "string" },
+    data: {
+      type: "object",
+      properties: {
+        skill_name: { type: "string" },
+        skill_path: { type: "string" },
+        skill_version: { type: "string" },
+        skill_scope: { type: "string", enum: ["project", "persona", "plugin"] },
+        invocation_source: {
+          type: "string",
+          enum: ["user-slash-command", "agent-call"]
+        }
+      },
+      required: [
+        "skill_name",
+        "skill_path",
+        "skill_version",
+        "skill_scope",
+        "invocation_source"
+      ]
+    }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "agent", "data"]
+};
+var recordStoryRetroInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    payload: { type: "object" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref", "payload"]
+};
+var resolveBuildPlanInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    lane: { type: "string", enum: ["fast", "full"] },
+    manifestPath: { type: "string" }
+  },
+  required: ["storyId"]
+};
+var resolveJudgePlanInputSchema = {
+  type: "object",
+  properties: {
+    storyId: { type: "string" },
+    lane: { type: "string", enum: ["fast", "full"] },
+    detector_confirmed_dead: { type: "boolean" }
+  },
+  required: ["storyId"]
+};
+var resolveLensRolesInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
+var runAutoMergeGateInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    prNumber: { type: "number" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    thresholdOverride: { type: "number" },
+    lastNVerdictsOverride: { type: "number" },
+    dryRun: { type: "boolean" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"]
+};
+var runDevTerminalActionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    title: { type: "string" },
+    type: { type: "string" },
+    body: { type: "string" },
+    summary: { type: "string" },
+    manifestPath: { type: "string" },
+    sessionUlid: { type: "string" },
+    base: { type: "string" },
+    buildTestTimeoutMs: {
+      type: "number",
+      description: "Per-run time budget (milliseconds) for the build/test gates. Defaults to 1 200 000 (20 min). Set to 0 to disable the budget."
+    }
+  },
+  required: [
+    "targetRepoRoot",
+    "ref",
+    "title",
+    "type",
+    "body",
+    "summary",
+    "manifestPath",
+    "sessionUlid"
+  ]
+};
+var runReviewerSessionInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    prNumber: { type: "number" },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"]
+};
+var scanOrphanedInProgressInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid"]
+};
+var scanSourcesInputSchema = {
+  type: "object",
+  properties: { targetRepoRoot: { type: "string" } },
+  required: ["targetRepoRoot"]
+};
+var summariseRetroProposalInputSchema = {
+  type: "object",
+  properties: {
+    absPath: {
+      type: "string",
+      description: "Absolute path to the retro-proposal markdown file (.flow/retro-proposals/<ISO>.md)."
+    }
+  },
+  required: ["absPath"]
+};
+var validatePlannerBacklogInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    pendingStories: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          narrative: { type: "string" },
+          acceptance_criteria: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                text: { type: "string" },
+                kind: { type: "string", enum: ["integration", "unit"] }
+              },
+              required: ["text", "kind"]
+            }
+          },
+          implementation_notes: { type: "string" },
+          depends_on: { type: "array", items: { type: "string" } },
+          ship_gate: { type: "boolean" },
+          state_mutating: { type: ["boolean", "string"] }
+        },
+        required: [
+          "title",
+          "narrative",
+          "acceptance_criteria",
+          "depends_on",
+          "ship_gate",
+          "state_mutating"
+        ]
+      }
+    }
+  },
+  required: ["targetRepoRoot", "pendingStories"]
+};
+var writeLensVerdictInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    sessionUlid: { type: "string" },
+    ref: { type: "string" },
+    lens: { type: "string", enum: [...LENS_NAMES_TUPLE] },
+    role: { type: "string" },
+    pass: { type: "boolean" },
+    missed: { type: "string" }
+  },
+  required: ["targetRepoRoot", "sessionUlid", "ref", "lens", "role", "pass", "missed"]
+};
+var writeNativeStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    title: { type: "string" },
+    narrative: {
+      type: "object",
+      properties: {
+        role: { type: "string" },
+        want: { type: "string" },
+        so_that: { type: "string" }
+      },
+      required: ["role", "want", "so_that"]
+    },
+    acceptance_criteria: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          kind: { type: "string", enum: ["integration", "unit"] },
+          verification: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["vitest", "artifact"] },
+              target: { type: "string" }
+            },
+            required: ["type", "target"]
+          }
+        },
+        required: ["text", "kind", "verification"]
+      }
+    },
+    tasks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          ac_refs: { type: "array", items: { type: "string" } }
+        },
+        required: ["text", "ac_refs"]
+      }
+    },
+    cited_sources: { type: "array", items: { type: "string" } },
+    implementation_notes: { type: "string" },
+    files_touched: {
+      type: "string",
+      description: "Build-ready '### Files touched' content: the new (NEW) and updated (UPDATE) files this story creates/changes. Omitting it renders a TBD-by-dev placeholder."
+    },
+    definition_of_done: {
+      type: "string",
+      description: "Build-ready '### Definition of Done' content: the checklist of what must be true to ship (ACs met, build/tests green, dist rebuilt and committed, PR green). Omitting it renders a generic default."
+    },
+    risk_reasoning: {
+      type: "string",
+      description: "Build-ready '### Risk' content: the highest-risk failure mode for this story and how it is caught. REQUIRED: omitting it or leaving the default placeholder causes the write tool to refuse with a DisciplineViolationError (placeholder-risk). A terse one-liner is enough \u2014 name the failure mode and the mitigation."
+    },
+    depends_on: { type: "array", items: { type: "string" } },
+    sessionUlid: { type: "string" }
+  },
+  required: [
+    "targetRepoRoot",
+    "title",
+    "narrative",
+    "acceptance_criteria",
+    "tasks",
+    "cited_sources",
+    "depends_on"
+  ]
+};
+var writeRetroProposalInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    isoTimestamp: { type: "string" },
+    proposals: { type: "array" },
+    cycleWindow: {
+      type: ["object", "null"]
+    },
+    role: { type: "string" }
+  },
+  required: ["targetRepoRoot", "isoTimestamp", "proposals"]
+};
+var TOOL_INPUT_SCHEMAS = {
+  acceptProposal: acceptProposalInputSchema,
+  adjudicateQualityLead: adjudicateQualityLeadInputSchema,
+  aggregateJudgePanel: aggregateJudgePanelInputSchema,
+  applyReviewerLabels: applyReviewerLabelsInputSchema,
+  blockOrphanNoTranscript: blockOrphanNoTranscriptInputSchema,
+  buildPersonaSpawnPrompt: buildPersonaSpawnPromptInputSchema,
+  claimNextStory: claimNextStoryInputSchema,
+  claimStory: claimStoryInputSchema,
+  classifyRiskTier: classifyRiskTierInputSchema,
+  classifyStoryLane: classifyStoryLaneInputSchema,
+  completeStory: completeStoryInputSchema,
+  computeAgreement: computeAgreementInputSchema,
+  computeSkillEffectiveness: computeSkillEffectivenessInputSchema,
+  createSmokeScratchRepo: createSmokeScratchRepoInputSchema,
+  discardDraft: discardDraftInputSchema,
+  gatherRetroInputs: gatherRetroInputsInputSchema,
+  getBacklogDashboard: getBacklogDashboardInputSchema,
+  getStatus: getStatusInputSchema,
+  getTeamSnapshot: getTeamSnapshotInputSchema,
+  instantiatePersona: instantiatePersonaInputSchema,
+  listClaimableTodos: listClaimableTodosInputSchema,
+  lookupRoleByDomain: lookupRoleByDomainInputSchema,
+  markStoryReady: markStoryReadyInputSchema,
+  markWithdrawn: markWithdrawnInputSchema,
+  mintSessionUlid: mintSessionUlidInputSchema,
+  openCycle: openCycleInputSchema,
+  postReviewerComments: postReviewerCommentsInputSchema,
+  processDevTranscript: processDevTranscriptInputSchema,
+  processReviewerTranscript: processReviewerTranscriptInputSchema,
+  processReviewerYield: processReviewerYieldInputSchema,
+  readBacklogInventory: readBacklogInventoryInputSchema,
+  readCatalogue: readCatalogueInputSchema,
+  readCustomRole: readCustomRoleInputSchema,
+  readPersona: readPersonaInputSchema,
+  readRepoSignals: readRepoSignalsInputSchema,
+  reattachOrphan: reattachOrphanInputSchema,
+  recallLesson: recallLessonInputSchema,
+  recordAgentFriction: recordAgentFrictionInputSchema,
+  recordReviewerLesson: recordReviewerLessonInputSchema,
+  recordSkillInvoke: recordSkillInvokeInputSchema,
+  recordStoryRetro: recordStoryRetroInputSchema,
+  resolveBuildPlan: resolveBuildPlanInputSchema,
+  resolveJudgePlan: resolveJudgePlanInputSchema,
+  resolveLensRoles: resolveLensRolesInputSchema,
+  runAutoMergeGate: runAutoMergeGateInputSchema,
+  runDevTerminalAction: runDevTerminalActionInputSchema,
+  runReviewerSession: runReviewerSessionInputSchema,
+  scanOrphanedInProgress: scanOrphanedInProgressInputSchema,
+  scanSources: scanSourcesInputSchema,
+  summariseRetroProposal: summariseRetroProposalInputSchema,
+  validatePlannerBacklog: validatePlannerBacklogInputSchema,
+  writeLensVerdict: writeLensVerdictInputSchema,
+  writeNativeStory: writeNativeStoryInputSchema,
+  writeRetroProposal: writeRetroProposalInputSchema
+};
+
 // src/tools/get-status.ts
 import * as path9 from "node:path";
 
@@ -43795,6 +44516,23 @@ async function main() {
   } catch (err) {
     emit({ error: { kind: "bad-json", detail: err.message, received: json2 } });
     process.exit(65);
+  }
+  const schema = TOOL_INPUT_SCHEMAS[tool];
+  if (schema !== void 0 && typeof args === "object" && args !== null) {
+    const missing = (schema.required ?? []).filter(
+      (k) => !Object.prototype.hasOwnProperty.call(args, k)
+    );
+    if (missing.length > 0) {
+      emit({
+        error: {
+          kind: "missing-required-fields",
+          tool,
+          missing,
+          required: schema.required
+        }
+      });
+      process.exit(65);
+    }
   }
   const fn = TOOLS[tool];
   const result = await Promise.resolve(fn(args));
