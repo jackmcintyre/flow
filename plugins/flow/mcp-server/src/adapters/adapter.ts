@@ -104,6 +104,12 @@ export type AC = {
  *   - `unresolvable-verification-target` (T0-6): an `artifact:` target does not
  *     resolve on disk (a disk check; `vitest:` targets are shape-checked only —
  *     the build creates that test file, so it need not pre-exist).
+ *
+ * Story native:01KV6S35N4VF64WZT99SMZSFRJ — runnable-test-kind check:
+ *   - `non-runnable-test-target`: a `vitest:` verification target is an ordinary
+ *     source file rather than a recognised runnable test (conventionally named
+ *     `.test.ts` / `.spec.ts` or living under a `__tests__/` directory). A
+ *     source-file proof is structurally guaranteed to verify nothing.
  */
 export type DisciplineViolationReason = {
   code:
@@ -117,7 +123,8 @@ export type DisciplineViolationReason = {
     | "unresolvable-cited-source"
     | "invalid-verification-target"
     | "unresolvable-verification-target"
-    | "placeholder-risk";
+    | "placeholder-risk"
+    | "non-runnable-test-target";
   field: string;
   detail: string;
 };

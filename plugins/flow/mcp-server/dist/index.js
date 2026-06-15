@@ -49073,6 +49073,12 @@ function isWellFormedTarget(target) {
   if (path36.isAbsolute(t)) return false;
   return true;
 }
+function isRunnableTestTarget(target) {
+  const t = target.trim();
+  if (/(?:^|[\\/])__tests__[\\/]/.test(t)) return true;
+  if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(t)) return true;
+  return false;
+}
 async function statOrNull(absPath) {
   try {
     return await fs28.stat(absPath);
@@ -49112,6 +49118,13 @@ async function resolveDisciplinePaths(story, targetRepoRoot) {
         detail: `AC${i2 + 1} verification target '${v.target}' is not a well-formed repo-relative path. Reject invented flags / non-path strings (e.g. 'vitest --grep \u2026'); the target must name a single path (a test file for 'vitest:', an artifact for 'artifact:').`
       });
       return;
+    }
+    if (v.type === "vitest" && !isRunnableTestTarget(v.target)) {
+      reasons.push({
+        code: "non-runnable-test-target",
+        field: `acceptance_criteria[${i2}].verification.target`,
+        detail: `AC${i2 + 1} verification target '${v.target}' is not a runnable test. A 'vitest:' proof must name a test file (e.g. ending in '.test.ts' / '.spec.ts', or under a '__tests__/' directory). Pointing at an ordinary source file runs zero tests and verifies nothing \u2014 rename the target to the test file that covers this AC.`
+      });
     }
   });
   for (let i2 = 0; i2 < story.acceptance_criteria.length; i2++) {

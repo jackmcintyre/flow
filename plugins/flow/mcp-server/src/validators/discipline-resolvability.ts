@@ -52,6 +52,35 @@ function isWellFormedTarget(target: string): boolean {
   return true;
 }
 
+/**
+ * Determine whether a `vitest:` verification target looks like a runnable test.
+ *
+ * A target is considered a runnable test when its path follows one of the
+ * conventional test-file naming patterns that vitest/Jest recognise:
+ *   - filename ends in `.test.ts`, `.test.js`, `.test.tsx`, `.test.jsx`,
+ *     `.spec.ts`, `.spec.js`, `.spec.tsx`, `.spec.jsx`; or
+ *   - path contains a `__tests__/` directory segment.
+ *
+ * Any path that passes neither check is treated as an ordinary source file
+ * (e.g. `src/tools/write-native-story.ts`) and is rejected: a source-file
+ * proof is structurally guaranteed to run zero tests and verify nothing
+ * (Story native:01KV6S35N4VF64WZT99SMZSFRJ).
+ *
+ * The check is intentionally restrictive: false negatives (accepting a
+ * non-test source file) cause a doomed build-and-review round; false positives
+ * (rejecting an unconventionally named real test) would only block the author
+ * from using that file as a proof target. The risk commentary in the story
+ * flags this as the highest-risk failure mode and accepts the trade-off.
+ */
+export function isRunnableTestTarget(target: string): boolean {
+  const t = target.trim();
+  // Check for __tests__/ directory segment (any OS path separator).
+  if (/(?:^|[\\/])__tests__[\\/]/.test(t)) return true;
+  // Check for conventional test/spec file extensions.
+  if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(t)) return true;
+  return false;
+}
+
 /** Check whether a path exists on disk; returns null if not found. */
 async function statOrNull(absPath: string): Promise<Awaited<ReturnType<typeof fs.stat>> | null> {
   try {
@@ -107,6 +136,10 @@ export async function resolveDisciplinePaths(
   // T0-6 — every verification target is well-formed; `artifact:` targets resolve
   // on disk. `vitest:` targets are shape-checked only (the build creates the
   // test — see module header; this asymmetry is deliberate).
+  //
+  // Story native:01KV6S35N4VF64WZT99SMZSFRJ — additionally, `vitest:` targets
+  // must be runnable tests (recognised by conventional naming). A source-file
+  // target passes the shape check but would verify nothing at run time.
   story.acceptance_criteria.forEach((ac, i) => {
     const v = ac.verification;
     // A missing verification block is T0-2 (the pure validator's job); skip here
@@ -118,9 +151,19 @@ export async function resolveDisciplinePaths(
         field: `acceptance_criteria[${i}].verification.target`,
         detail: `AC${i + 1} verification target '${v.target}' is not a well-formed repo-relative path. Reject invented flags / non-path strings (e.g. 'vitest --grep …'); the target must name a single path (a test file for 'vitest:', an artifact for 'artifact:').`,
       });
-      // Do not also existence-check a malformed target — the shape error is the
-      // actionable signal.
+      // Do not also runnable-test-check or existence-check a malformed target —
+      // the shape error is the actionable signal.
       return;
+    }
+    // Runnable-test-kind check — `vitest:` proofs only. A well-formed path that
+    // points at an ordinary source file rather than a recognised test is refused
+    // here so the doomed build-and-review round never starts.
+    if (v.type === "vitest" && !isRunnableTestTarget(v.target)) {
+      reasons.push({
+        code: "non-runnable-test-target",
+        field: `acceptance_criteria[${i}].verification.target`,
+        detail: `AC${i + 1} verification target '${v.target}' is not a runnable test. A 'vitest:' proof must name a test file (e.g. ending in '.test.ts' / '.spec.ts', or under a '__tests__/' directory). Pointing at an ordinary source file runs zero tests and verifies nothing — rename the target to the test file that covers this AC.`,
+      });
     }
   });
 
