@@ -207,3 +207,60 @@ export async function runProjectTests(opts: {
     timeoutMs,
   };
 }
+
+/**
+ * The dead-code-check command + args. Mirrors CI's `pnpm knip` step verbatim
+ * (the `knip` script in `plugins/flow/package.json` runs the knip binary).
+ * Kept as a named export so the test can assert the gate runs the project's
+ * full dead-code check and not a story-scoped subset.
+ *
+ * (Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT)
+ */
+export const PROJECT_BLOAT_COMMAND = "pnpm" as const;
+export const PROJECT_BLOAT_ARGS: readonly string[] = ["knip"] as const;
+
+export interface ProjectBloatResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  /** The absolute working directory the check ran in (`<devWorkingDir>/plugins/flow`). */
+  cwd: string;
+  /** The human-readable command line, for diagnostics (`pnpm knip`). */
+  commandLine: string;
+}
+
+/**
+ * Run the project's dead-code check in the dev's working directory and return a
+ * structured result (never throws on a non-zero exit — the caller decides how
+ * to surface a failure). The cwd is the same as the build: `<devWorkingDir>/plugins/flow`,
+ * matching CI's `working-directory: plugins/flow`.
+ *
+ * A non-zero exit code signals unused files, unexported items, or unused
+ * dependencies that knip detected. The caller raises `PrePrBloatFailedError`
+ * and blocks the PR, exactly as a failing build or test suite does.
+ *
+ * @param opts.devWorkingDir  The dev's working directory (worktree or targetRepoRoot).
+ * @param opts.execaImpl      Test seam — production callers omit this.
+ *
+ * (Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT)
+ */
+export async function runProjectBloatCheck(opts: {
+  devWorkingDir: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<ProjectBloatResult> {
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+
+  const result = await execaImpl(PROJECT_BLOAT_COMMAND, [...PROJECT_BLOAT_ARGS], {
+    cwd,
+    reject: false,
+  });
+
+  return {
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    cwd,
+    commandLine: `${PROJECT_BLOAT_COMMAND} ${PROJECT_BLOAT_ARGS.join(" ")}`,
+  };
+}

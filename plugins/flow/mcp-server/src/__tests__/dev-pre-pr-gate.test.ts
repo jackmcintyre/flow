@@ -1,25 +1,30 @@
 /**
  * Pre-PR full build-and-test gate — Story native:01KT3ER5E9ACCERHAEJ5NM94TH.
+ * Bloat gate extended — Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT.
  *
- * `runDevTerminalAction` now runs the project's full BUILD AND TESTS
- * (the same whole-project check CI runs) AFTER the commit and BEFORE
- * `gh pr create`. A failing test suite raises `PrePrTestFailedError` and NO
- * pull request is opened; a green build+test run opens the PR.
+ * `runDevTerminalAction` now runs the project's full BUILD, TESTS, and DEAD-CODE
+ * CHECK (the same whole-project checks CI runs) AFTER the commit and BEFORE
+ * `gh pr create`. A failing test suite raises `PrePrTestFailedError`, a failing
+ * dead-code check raises `PrePrBloatFailedError`, and a failing build raises
+ * `PrePrBuildFailedError` — all of which block PR creation.
  *
  * These tests drive the tool with a stubbed command runner (`execaImpl`) so
  * we can assert the ordered command stream without spawning a real build:
  *
- *   AC1 (integration) — on a green build+test run: the PR that is opened is
- *         created after both pnpm build AND pnpm test pass; verified by
- *         asserting both commands appear in the stream before pr-create.
+ *   AC1 (integration) — on a green build+test+knip run: the PR that is opened
+ *         is created after pnpm build, pnpm test, AND pnpm knip all pass;
+ *         verified by asserting all three commands appear in the stream before
+ *         pr-create.
  *
  *   AC2 (unit) — on a failing test suite (non-zero exit from pnpm test):
  *         gh pr create is NOT called and a structured `PrePrTestFailedError`
  *         surfacing the exit code + captured output is raised instead.
  *         Also verified: a failing build (AC2b) still blocks PR creation via
- *         `PrePrBuildFailedError`.
+ *         `PrePrBuildFailedError`. And: a non-clean knip result (AC2c) blocks
+ *         PR creation via `PrePrBloatFailedError`.
  *
  * @see _bmad-output/implementation-artifacts/native:01KT3ER5E9ACCERHAEJ5NM94TH.md
+ * @see _bmad-output/implementation-artifacts/native:01KV7NJ6T3T1H67MZJ3DQBYFZT.md
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,12 +35,14 @@ import { execa as realExeca } from "execa";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { runDevTerminalAction } from "../tools/run-dev-terminal-action.js";
-import { PrePrBuildFailedError, PrePrTestFailedError } from "../errors.js";
+import { PrePrBloatFailedError, PrePrBuildFailedError, PrePrTestFailedError } from "../errors.js";
 import {
-  PROJECT_BUILD_COMMAND,
+  PROJECT_BLOAT_ARGS,
+  PROJECT_BLOAT_COMMAND,
   PROJECT_BUILD_ARGS,
-  PROJECT_TEST_COMMAND,
+  PROJECT_BUILD_COMMAND,
   PROJECT_TEST_ARGS,
+  PROJECT_TEST_COMMAND,
 } from "../lib/run-project-build.js";
 
 // ---------------------------------------------------------------------------
@@ -132,6 +139,7 @@ interface RecordedCall {
 function makeStubExeca(opts: {
   buildShouldFail?: boolean;
   testShouldFail?: boolean;
+  bloatShouldFail?: boolean;
   recorded: RecordedCall[];
 }): ReturnType<typeof vi.fn> {
   return vi.fn(
@@ -166,6 +174,17 @@ function makeStubExeca(opts: {
           };
         }
         return { stdout: "All tests passed.", stderr: "", exitCode: 0 };
+      }
+
+      if (cmd === "pnpm" && args[0] === "knip") {
+        if (opts.bloatShouldFail) {
+          return {
+            stdout: "Unused files (1)\nsrc/dead-module.ts\n\nUnused exports (2)\nsrc/utils.ts: deadHelper, anotherDeadExport",
+            stderr: "",
+            exitCode: 1,
+          };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
       }
 
       if (cmd === "gh") {
@@ -216,6 +235,16 @@ function firstTestIdx(recorded: RecordedCall[]): number {
   );
 }
 
+/** Index of the first recorded bloat-check invocation (`pnpm knip`), or -1. */
+function firstBloatIdx(recorded: RecordedCall[]): number {
+  return recorded.findIndex(
+    (c) =>
+      c.cmd === PROJECT_BLOAT_COMMAND &&
+      c.args[0] === PROJECT_BLOAT_ARGS[0] &&
+      c.args.length === PROJECT_BLOAT_ARGS.length,
+  );
+}
+
 /** Index of the first recorded PR-create invocation (`gh pr create`), or -1. */
 function firstPrCreateIdx(recorded: RecordedCall[]): number {
   return recorded.findIndex((c) => c.cmd === "gh" && c.args.includes("pr"));
@@ -235,10 +264,10 @@ afterEach(async () => {
   await fs.rm(ctx.repoRoot, { recursive: true, force: true });
 });
 
-describe("AC1 — a green build+test run opens the PR (integration)", () => {
-  it("runs build then tests then PR-create in order when both pass", async () => {
+describe("AC1 — a green build+test+knip run opens the PR (integration)", () => {
+  it("runs build then tests then knip then PR-create in order when all pass", async () => {
     const recorded: RecordedCall[] = [];
-    const spy = makeStubExeca({ buildShouldFail: false, testShouldFail: false, recorded });
+    const spy = makeStubExeca({ buildShouldFail: false, testShouldFail: false, bloatShouldFail: false, recorded });
 
     const result = await runDevTerminalAction({
       targetRepoRoot: ctx.repoRoot,
@@ -256,14 +285,16 @@ describe("AC1 — a green build+test run opens the PR (integration)", () => {
     expect(result.ok).toBe(true);
     expect(result.prUrl).toBe(FAKE_PR_URL);
 
-    // Both gates ran.
+    // All three gates ran.
     const buildIdx = firstBuildIdx(recorded);
     const testIdx = firstTestIdx(recorded);
+    const bloatIdx = firstBloatIdx(recorded);
     const prIdx = firstPrCreateIdx(recorded);
 
     expect(buildIdx).toBeGreaterThanOrEqual(0);
-    expect(testIdx).toBeGreaterThan(buildIdx); // test runs AFTER build
-    expect(prIdx).toBeGreaterThan(testIdx);    // PR-create runs AFTER tests
+    expect(testIdx).toBeGreaterThan(buildIdx);  // test runs AFTER build
+    expect(bloatIdx).toBeGreaterThan(testIdx);  // knip runs AFTER test
+    expect(prIdx).toBeGreaterThan(bloatIdx);    // PR-create runs AFTER knip
 
     // PR-create invoked exactly once.
     const ghPrCreateCalls = recorded.filter(
@@ -341,6 +372,48 @@ describe("AC2 — a failing test suite blocks PR creation (unit)", () => {
     // No test gate was invoked (build failed first).
     const testIdx = firstTestIdx(recorded);
     expect(testIdx).toBe(-1);
+
+    // No PR-create step was invoked.
+    const ghCalls = recorded.filter((c) => c.cmd === "gh");
+    expect(ghCalls).toHaveLength(0);
+  });
+
+  it("when pnpm knip exits non-zero, gh pr create is not called and PrePrBloatFailedError is raised", async () => {
+    const recorded: RecordedCall[] = [];
+    const spy = makeStubExeca({ buildShouldFail: false, testShouldFail: false, bloatShouldFail: true, recorded });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    // A structured bloat-failure surfaced.
+    expect(caught).toBeInstanceOf(PrePrBloatFailedError);
+    const e = caught as PrePrBloatFailedError;
+    expect(e.exitCode).toBe(1);
+    expect(e.stdout).toContain("Unused files");
+    expect(e.message).toContain("No pull request was opened");
+
+    // The build AND the test gates ran (knip is after both).
+    const buildIdx = firstBuildIdx(recorded);
+    const testIdx = firstTestIdx(recorded);
+    const bloatIdx = firstBloatIdx(recorded);
+    expect(buildIdx).toBeGreaterThanOrEqual(0);
+    expect(testIdx).toBeGreaterThan(buildIdx);
+    expect(bloatIdx).toBeGreaterThan(testIdx);
 
     // No PR-create step was invoked.
     const ghCalls = recorded.filter((c) => c.cmd === "gh");

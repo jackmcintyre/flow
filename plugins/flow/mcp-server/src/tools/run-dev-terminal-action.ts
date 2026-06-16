@@ -33,7 +33,8 @@
  * - Branch slug MUST be renderable from `ref` + `title`.
  * - Steps execute in strict order: validateType → branchSlug → readManifest →
  *   extractAcs → listDirtyPaths (worktree mode) → createBranch → commit →
- *   fullBuildGate → push → composePrBody → gh pr create.
+ *   fullBuildGate → fullTestGate → bloatGate → leakGate →
+ *   push → composePrBody → gh pr create.
  * - The full-build gate (Story 8.17) runs the project's full build — the same
  *   whole-project type-check CI runs (`pnpm build` at `plugins/flow`) — in the
  *   dev's working directory AFTER the commit and BEFORE `gh pr create`, so a red
@@ -55,6 +56,7 @@ import * as path from "node:path";
 import {
   ConventionalCommitTypeUnknownError,
   GhPrCreateFailedError,
+  PrePrBloatFailedError,
   PrePrBuildFailedError,
   PrePrLeakDetectedError,
   PrePrStagedArtifactLeakError,
@@ -86,7 +88,7 @@ import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { devOutcomeFilePath } from "../lib/read-dev-outcome-file.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
-import { runProjectBuild, runProjectTests, DEFAULT_BUILD_TEST_TIMEOUT_MS } from "../lib/run-project-build.js";
+import { runProjectBuild, runProjectTests, runProjectBloatCheck, DEFAULT_BUILD_TEST_TIMEOUT_MS } from "../lib/run-project-build.js";
 import { execa as defaultExeca } from "execa";
 
 export interface DevTerminalActionResult {
@@ -417,7 +419,36 @@ export async function runDevTerminalAction(opts: {
       });
     }
 
-    // (viii-c) Pre-PR leak gate (Story native:01KT47430Q4C73K5E3ZECBSE5R). In
+    // (viii-c) Bloat gate (Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT). Run the
+    // project's dead-code check — the same `pnpm knip` command CI runs — AFTER
+    // the build/test gates and BEFORE the push. This is the deterministic seam
+    // that catches dead code (unused files, exports, or dependencies) the story
+    // introduced. A non-clean result raises PrePrBloatFailedError and NO PR is
+    // opened — the same gate pattern as PrePrBuildFailedError/PrePrTestFailedError.
+    const bloatResult = await runProjectBloatCheck({
+      devWorkingDir: gitRoot,
+      ...(execaImpl ? { execaImpl } : {}),
+    });
+    if (bloatResult.exitCode !== 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm knip exits 0 (no dead code)",
+        observed: `pre-PR bloat gate failed (exit ${bloatResult.exitCode})`,
+      });
+      throw new PrePrBloatFailedError({
+        exitCode: bloatResult.exitCode,
+        bloatCommand: bloatResult.commandLine,
+        bloatCwd: bloatResult.cwd,
+        stdout: bloatResult.stdout,
+        stderr: bloatResult.stderr,
+      });
+    }
+
+    // (viii-d) Pre-PR leak gate (Story native:01KT47430Q4C73K5E3ZECBSE5R). In
     // worktree-isolated mode the dev's editing surface is its own worktree
     // (`gitRoot`). A builder that writes to an ABSOLUTE shared-copy path escapes
     // the worktree boundary and dirties the orchestrating root checkout instead;

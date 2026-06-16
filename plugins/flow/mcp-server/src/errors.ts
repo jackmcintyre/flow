@@ -2391,6 +2391,53 @@ export class PrePrTestFailedError extends DomainError {
 }
 
 /**
+ * The pre-PR bloat gate (`runDevTerminalAction`) ran the project's dead-code
+ * checker — the same `pnpm knip` command CI runs (`plugins/flow`) — and it
+ * exited non-zero, signalling unused files, unexported items, or unused
+ * dependencies introduced by the story's changes. Thrown AFTER the build and
+ * test gates but BEFORE `gh pr create`, so NO pull request is opened on a
+ * non-clean knip result. Carries the exit code and captured stdout/stderr so
+ * the caller can surface exactly what is dead.
+ *
+ * Structurally identical to `PrePrBuildFailedError` / `PrePrTestFailedError`:
+ * because the throw is before push + pr-create, neither the branch nor a PR
+ * ever reaches origin on a bloated story.
+ *
+ * (Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT)
+ */
+export class PrePrBloatFailedError extends DomainError {
+  readonly exitCode: number;
+  readonly bloatCommand: string;
+  readonly bloatCwd: string;
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(opts: {
+    exitCode: number;
+    bloatCommand: string;
+    bloatCwd: string;
+    stdout: string;
+    stderr: string;
+  }) {
+    super(
+      `pre-PR bloat gate failed: '${opts.bloatCommand}' (cwd: ${opts.bloatCwd}) ` +
+        `exited with code ${opts.exitCode}. No pull request was opened. ` +
+        `The story introduced dead code (unused files, exports, or dependencies) ` +
+        `that knip detected. Remove the unused items and re-run — the gate runs ` +
+        `the same whole-project knip check CI runs. ` +
+        `stdout: ${opts.stdout || "(empty)"}. ` +
+        `stderr: ${opts.stderr || "(empty)"}. ` +
+        `(Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT)`,
+    );
+    this.exitCode = opts.exitCode;
+    this.bloatCommand = opts.bloatCommand;
+    this.bloatCwd = opts.bloatCwd;
+    this.stdout = opts.stdout;
+    this.stderr = opts.stderr;
+  }
+}
+
+/**
  * `discardDraft` refused because the referenced item is not an un-claimed
  * native to-do draft that is eligible for discard.
  *
