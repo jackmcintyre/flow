@@ -121,6 +121,34 @@ interface RetirableLessonsEntry {
 }
 
 /**
+ * A lesson that appears (by content similarity) in two or more roles' Knowledge
+ * sections. Surfaced in the retro input bundle so the retro-analyst can draft a
+ * `shared-skill-promotion` proposal recommending the lesson be extracted into one
+ * shared skill that every sharing role can reference.
+ *
+ * Story native:01KV7FJHK9CAAS860MJAG70QVS.
+ */
+export interface CrossRoleSharedLesson {
+  /**
+   * Verbatim lesson text from the first role that holds it.
+   * The analyst uses this as the basis for the shared skill description.
+   */
+  lesson_text: string;
+  /**
+   * Lesson id from the representative role (the first alphabetically).
+   * Provides provenance for the proposal.
+   */
+  lesson_id: string;
+  /** The roles (kebab ids) that share this lesson, sorted alphabetically. */
+  roles: string[];
+  /**
+   * Jaccard similarity score (0–1) between the lesson token sets of the first
+   * and second role instances. Higher = more confident the lessons are the same point.
+   */
+  similarity: number;
+}
+
+/**
  * A pair of near-duplicate lessons detected in a single role's Knowledge section.
  * Surfaced in the retro input bundle so the retro-analyst can propose consolidating
  * them into a single sharper lesson.
@@ -260,6 +288,24 @@ export interface RetroInputs {
    * Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ.
    */
   retirableLessons: RetirableLessonsEntry[];
+  /**
+   * Cross-role shared lesson signal — lessons that appear (by content
+   * similarity) in two or more roles' Knowledge sections.
+   *
+   * Each entry names the shared lesson text, the representative lesson id,
+   * all sharing roles, and the pairwise Jaccard similarity score. The
+   * retro-analyst MUST draft `shared-skill-promotion` proposals from this
+   * pre-computed signal — it MUST NOT re-scan persona files or re-derive
+   * similarity in prose, mirroring the `nearDuplicateLessonPairs` and
+   * `retirableLessons` disciplines.
+   *
+   * Empty when: (a) no roles are hired, (b) fewer than two roles have
+   * lessons, or (c) no lesson pair across different roles exceeds the
+   * similarity threshold.
+   *
+   * Story native:01KV7FJHK9CAAS860MJAG70QVS.
+   */
+  crossRoleSharedLessons: CrossRoleSharedLesson[];
 }
 
 export interface GatherRetroInputsOptions {
@@ -380,7 +426,11 @@ export async function gatherRetroInputs(
     now: opts.retirableNow,
   });
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons };
+  // Detect cross-role shared lessons
+  // (Story native:01KV7FJHK9CAAS860MJAG70QVS). This is a pure read — no writes.
+  const crossRoleSharedLessons = await gatherCrossRoleSharedLessons(targetRepoRoot);
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons };
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,6 +1098,171 @@ async function gatherRetirableLessons(
   }
 
   return entries;
+}
+
+// ---------------------------------------------------------------------------
+// cross-role shared lesson detection (Story native:01KV7FJHK9CAAS860MJAG70QVS)
+// ---------------------------------------------------------------------------
+
+/**
+ * Similarity threshold above which two lessons (from DIFFERENT roles) are
+ * considered to be expressing the same shared point. Mirrors the near-duplicate
+ * threshold so the operator sees a consistent signal quality bar.
+ */
+const CROSS_ROLE_SIMILARITY_THRESHOLD = 0.35;
+
+/**
+ * Detect lessons that appear (by content similarity) in two or more roles'
+ * Knowledge sections. Each detected shared lesson becomes a
+ * `CrossRoleSharedLesson` entry naming all roles that hold it, so the
+ * retro-analyst can draft a `shared-skill-promotion` proposal.
+ *
+ * Algorithm:
+ *   1. For each hired role read the parsed lessons from its Knowledge section.
+ *   2. Compare every lesson in role A against every lesson in role B (for all
+ *      pairs of distinct roles).
+ *   3. When the Jaccard similarity exceeds `CROSS_ROLE_SIMILARITY_THRESHOLD`,
+ *      record a match and accumulate the matching roles.
+ *   4. Deduplicate: a cluster of roles that all share the same core lesson is
+ *      emitted as a single `CrossRoleSharedLesson` entry (the lesson text and
+ *      id are taken from the alphabetically first role).
+ *   5. Sort by similarity descending (highest-confidence pairs first).
+ *
+ * Returns an empty array on ENOENT (no `team/` directory — no roles hired).
+ * Roles with a malformed persona or zero lessons are skipped silently.
+ */
+async function gatherCrossRoleSharedLessons(
+  targetRepoRoot: string,
+): Promise<CrossRoleSharedLesson[]> {
+  const teamDir = path.join(targetRepoRoot, "team");
+
+  let roleEntries: string[];
+  try {
+    roleEntries = await fs.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent(err)) return [];
+    throw err;
+  }
+
+  const SKIP_DIRS = new Set(["custom", "_archived"]);
+
+  // Collect the lesson set for every valid role.
+  const roleWithLessons: Array<{ role: string; lessons: ParsedLesson[] }> = [];
+
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stat = await fs.stat(path.join(teamDir, entry));
+    } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    const personaPath = path.join(teamDir, entry, "PERSONA.md");
+    let raw: string;
+    try {
+      raw = await fs.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent(err)) continue;
+      throw err;
+    }
+
+    let parsed: ReturnType<typeof parsePersonaFile>;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      // Malformed persona — skip this role gracefully.
+      continue;
+    }
+
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length === 0) continue;
+
+    roleWithLessons.push({ role: entry, lessons });
+  }
+
+  // Need at least two roles with lessons to find cross-role matches.
+  if (roleWithLessons.length < 2) return [];
+
+  // Sort roles alphabetically so the representative role (for lesson_id /
+  // lesson_text) is deterministic across runs.
+  roleWithLessons.sort((a, b) => a.role.localeCompare(b.role));
+
+  // Compare every lesson in role A against every lesson in role B.
+  // We aggregate: for each "representative" lesson (identified by similarity
+  // clusters), collect all roles that have a matching lesson.
+  //
+  // To avoid O(n^4) explosion on large teams, we use a greedy pairwise
+  // approach: accumulate a map from a canonical lesson fingerprint to its
+  // cluster. Two lessons in different roles are added to the same cluster
+  // when their similarity to the cluster's representative exceeds the threshold.
+
+  // Each cluster: { representativeLesson, representativeRole, roles, maxSimilarity }
+  interface Cluster {
+    representativeLesson: ParsedLesson;
+    representativeRole: string;
+    roles: Set<string>;
+    maxSimilarity: number;
+  }
+
+  const clusters: Cluster[] = [];
+
+  // Helper: find the cluster whose representative lesson is most similar to
+  // `candidate` (above threshold). Returns the cluster or null.
+  function findMatchingCluster(candidate: ParsedLesson, _candidateRole: string): Cluster | null {
+    let best: Cluster | null = null;
+    let bestSim = CROSS_ROLE_SIMILARITY_THRESHOLD - 0.001; // exclusive lower bound
+    for (const cluster of clusters) {
+      const sim = lessonSimilarity(cluster.representativeLesson, candidate);
+      if (sim > bestSim) {
+        bestSim = sim;
+        best = cluster;
+      }
+    }
+    return best;
+  }
+
+  for (const { role, lessons } of roleWithLessons) {
+    for (const lesson of lessons) {
+      const matchingCluster = findMatchingCluster(lesson, role);
+      if (matchingCluster) {
+        // Only add a cross-role match — don't double-count the same role.
+        if (!matchingCluster.roles.has(role)) {
+          matchingCluster.roles.add(role);
+          const sim = lessonSimilarity(matchingCluster.representativeLesson, lesson);
+          if (sim > matchingCluster.maxSimilarity) {
+            matchingCluster.maxSimilarity = sim;
+          }
+        }
+      } else {
+        // Start a new cluster with this lesson as the representative.
+        clusters.push({
+          representativeLesson: lesson,
+          representativeRole: role,
+          roles: new Set([role]),
+          maxSimilarity: 1.0, // a lesson is 100% similar to itself
+        });
+      }
+    }
+  }
+
+  // Keep only clusters that span 2+ roles (shared lessons).
+  const shared: CrossRoleSharedLesson[] = [];
+  for (const cluster of clusters) {
+    if (cluster.roles.size < 2) continue;
+
+    const sortedRoles = [...cluster.roles].sort();
+    shared.push({
+      lesson_text: `${cluster.representativeLesson.applies_when}: ${cluster.representativeLesson.detail}`.trim(),
+      lesson_id: cluster.representativeLesson.id,
+      roles: sortedRoles,
+      similarity: cluster.maxSimilarity,
+    });
+  }
+
+  // Sort descending by similarity (highest-confidence first).
+  shared.sort((a, b) => b.similarity - a.similarity);
+  return shared;
 }
 
 // ---------------------------------------------------------------------------

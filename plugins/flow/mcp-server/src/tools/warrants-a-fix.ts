@@ -111,4 +111,5 @@ export const FIX_WORTHY_TYPES = [
   "build-story",
   "lesson-consolidation",
   "lesson-retirement",
+  "shared-skill-promotion",
 ] as const;
