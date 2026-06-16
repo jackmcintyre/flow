@@ -2411,6 +2411,38 @@ export class PrePrTestFailedError extends DomainError {
  * Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB — first-class discard of an
  * un-built parked draft.
  */
+/**
+ * `recordMaintainerFeedback` was called with a feedback item that failed schema
+ * validation: missing `problem`, `tool_area`, or `trigger`; unknown key
+ * (strict-mode rejection); or a field that fails a `.min(1)` guard.
+ *
+ * Every item already in the inbox is self-contained enough for a maintainer to
+ * act on without going back to the originating role — refusing to record an
+ * incomplete item is the mechanism that enforces that invariant.
+ *
+ * Story native:01KV7FHZ41Z6CFPABW1B8J38BV AC2.
+ */
+export class MalformedMaintainerFeedbackError extends DomainError {
+  readonly fieldPath: string;
+  readonly zodMessage: string;
+  readonly schemaModule: string;
+
+  constructor(opts: {
+    fieldPath: string;
+    zodMessage: string;
+    schemaModule: string;
+  }) {
+    super(
+      `Maintainer feedback item is malformed at '${opts.fieldPath}': ${opts.zodMessage}. ` +
+        `See ${opts.schemaModule} for the canonical schema. ` +
+        `(Story native:01KV7FHZ41Z6CFPABW1B8J38BV AC2)`,
+    );
+    this.fieldPath = opts.fieldPath;
+    this.zodMessage = opts.zodMessage;
+    this.schemaModule = opts.schemaModule;
+  }
+}
+
 export class NotAnEligibleDraftError extends DomainError {
   readonly ref: string;
   readonly foundState: string | null;

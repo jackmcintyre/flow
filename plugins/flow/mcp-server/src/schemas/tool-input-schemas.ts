@@ -432,6 +432,24 @@ export const recallLessonInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot", "role", "id"],
 };
 
+export const recordMaintainerFeedbackInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    item: {
+      type: "object",
+      properties: {
+        problem: { type: "string" },
+        tool_area: { type: "string" },
+        trigger: { type: "string" },
+        suggested_direction: { type: "string" },
+      },
+      required: ["problem", "tool_area", "trigger"],
+    },
+  },
+  required: ["targetRepoRoot", "item"],
+};
+
 export const recordAgentFrictionInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -806,6 +824,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   reattachOrphan: reattachOrphanInputSchema,
   recallLesson: recallLessonInputSchema,
   recordAgentFriction: recordAgentFrictionInputSchema,
+  recordMaintainerFeedback: recordMaintainerFeedbackInputSchema,
   recordReviewerLesson: recordReviewerLessonInputSchema,
   recordSkillInvoke: recordSkillInvokeInputSchema,
   recordStoryRetro: recordStoryRetroInputSchema,

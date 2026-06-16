@@ -59,6 +59,7 @@ import { guardCleanRoot } from "./tools/guard-clean-root.js";
 import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./tools/record-agent-friction.js";
+import { recordMaintainerFeedback } from "./tools/record-maintainer-feedback.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
@@ -136,6 +137,14 @@ const TOOLS: Record<string, ToolFn> = {
   // Registered here so run-path agents (seam-agents running node dist/cli.js)
   // can emit friction events without a persistent MCP server in the loop.
   recordAgentFriction,
+  // Story native:01KV7FHZ41Z6CFPABW1B8J38BV — maintainer feedback capture seam.
+  // Any role on the team (or the retrospective) can call this when it hits a
+  // structural limitation of the tool itself. The item lands in a maintainer-only
+  // inbox (.flow/maintainer-inbox/) that the team never reads to drive its own
+  // behaviour. Items accumulate as distinct timestamped JSON files.
+  //   node dist/cli.js recordMaintainerFeedback --json
+  //     '{"targetRepoRoot":"...","item":{"problem":"...","tool_area":"...","trigger":"..."}}'
+  recordMaintainerFeedback,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
   // Callable on the no-MCP run/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
