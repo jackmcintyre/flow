@@ -35401,6 +35401,23 @@ var PrePrTestFailedError = class extends DomainError {
     this.timeoutMs = timeoutMs;
   }
 };
+var PrePrBloatFailedError = class extends DomainError {
+  exitCode;
+  bloatCommand;
+  bloatCwd;
+  stdout;
+  stderr;
+  constructor(opts) {
+    super(
+      `pre-PR bloat gate failed: '${opts.bloatCommand}' (cwd: ${opts.bloatCwd}) exited with code ${opts.exitCode}. No pull request was opened. The story introduced dead code (unused files, exports, or dependencies) that knip detected. Remove the unused items and re-run \u2014 the gate runs the same whole-project knip check CI runs. stdout: ${opts.stdout || "(empty)"}. stderr: ${opts.stderr || "(empty)"}. (Story native:01KV7NJ6T3T1H67MZJ3DQBYFZT)`
+    );
+    this.exitCode = opts.exitCode;
+    this.bloatCommand = opts.bloatCommand;
+    this.bloatCwd = opts.bloatCwd;
+    this.stdout = opts.stdout;
+    this.stderr = opts.stderr;
+  }
+};
 var MalformedMaintainerFeedbackError = class extends DomainError {
   fieldPath;
   zodMessage;
@@ -53844,6 +53861,23 @@ async function runProjectTests(opts) {
     timeoutMs
   };
 }
+var PROJECT_BLOAT_COMMAND = "pnpm";
+var PROJECT_BLOAT_ARGS = ["knip"];
+async function runProjectBloatCheck(opts) {
+  const execaImpl = opts.execaImpl ?? execa;
+  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const result = await execaImpl(PROJECT_BLOAT_COMMAND, [...PROJECT_BLOAT_ARGS], {
+    cwd,
+    reject: false
+  });
+  return {
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    cwd,
+    commandLine: `${PROJECT_BLOAT_COMMAND} ${PROJECT_BLOAT_ARGS.join(" ")}`
+  };
+}
 
 // src/tools/run-dev-terminal-action.ts
 var ROLE = "generalist-dev";
@@ -53991,6 +54025,28 @@ async function runDevTerminalAction(opts) {
         stderr: testResult.stderr,
         timedOut: testResult.timedOut,
         timeoutMs: testResult.timeoutMs
+      });
+    }
+    const bloatResult = await runProjectBloatCheck({
+      devWorkingDir: gitRoot,
+      ...execaImpl ? { execaImpl } : {}
+    });
+    if (bloatResult.exitCode !== 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "pnpm knip exits 0 (no dead code)",
+        observed: `pre-PR bloat gate failed (exit ${bloatResult.exitCode})`
+      });
+      throw new PrePrBloatFailedError({
+        exitCode: bloatResult.exitCode,
+        bloatCommand: bloatResult.commandLine,
+        bloatCwd: bloatResult.cwd,
+        stdout: bloatResult.stdout,
+        stderr: bloatResult.stderr
       });
     }
     if (useWorktree) {
