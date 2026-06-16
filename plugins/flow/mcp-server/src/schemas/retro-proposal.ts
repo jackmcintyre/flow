@@ -435,14 +435,48 @@ const LessonConsolidationProposalSchema = ProposalBase.extend({
   merged_lesson: z.string().min(1),
 }).strict();
 
+/**
+ * `lesson-retirement` — propose retiring a set of never-earned-keep lessons from
+ * a hired role's always-shown Knowledge section.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *  1. Reads the role's `team/<target_role>/PERSONA.md`.
+ *  2. Removes each named lesson block (identified by id in `lesson_retirements`)
+ *     from the live Knowledge section via `demoteLessonsFromBody`.
+ *  3. Archives each removed lesson to `team/<role>/_archived/<id>.json` via
+ *     `archiveLessons` — nothing is deleted, all retired lessons remain
+ *     retrievable on demand via `recallLesson`.
+ *
+ * Fields:
+ *  - `target_role`        — the role whose Knowledge section holds the dead lessons.
+ *  - `lesson_retirements` — the list of lessons to retire; each entry carries the
+ *                           lesson `id` and the `reason` the retro computed.
+ *
+ * (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ — retire dead lessons)
+ */
+const LessonRetirementProposalSchema = ProposalBase.extend({
+  type: z.literal("lesson-retirement"),
+  target_role: RolePathSchema,
+  lesson_retirements: z
+    .array(
+      z
+        .object({
+          id: z.string().min(1),
+          reason: z.string().min(1),
+        })
+        .strict(),
+    )
+    .min(1),
+}).strict();
+
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 
 /**
- * The closed set of eleven proposal-type literals. Exported as a tuple so
+ * The closed set of twelve proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a twelfth variant requires a
+ * grown (the AC2 invariant). Adding a thirteenth variant requires a
  * coordinated schema-change story.
  *
  * `build-story` (added Story native:01KV76P2DW42BPBPT4ZQ0FS63Y) is the
@@ -452,6 +486,10 @@ const LessonConsolidationProposalSchema = ProposalBase.extend({
  *
  * `lesson-consolidation` (added Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T) merges
  * two near-duplicate lessons in a role's Knowledge section into one sharper lesson.
+ *
+ * `lesson-retirement` (added Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ) retires
+ * never-earned-keep lessons from a role's always-shown Knowledge section into the
+ * archived store, where they remain retrievable on demand.
  */
 export const RETRO_PROPOSAL_TYPES = [
   "rule",
@@ -465,10 +503,11 @@ export const RETRO_PROPOSAL_TYPES = [
   "promote-lesson-to-skill",
   "build-story",
   "lesson-consolidation",
+  "lesson-retirement",
 ] as const;
 
 /**
- * The full retro-proposal discriminated union. Eleven variants, closed enum,
+ * The full retro-proposal discriminated union. Twelve variants, closed enum,
  * no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
@@ -483,6 +522,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
   PromoteLessonToSkillProposalSchema,
   BuildStoryProposalSchema,
   LessonConsolidationProposalSchema,
+  LessonRetirementProposalSchema,
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;

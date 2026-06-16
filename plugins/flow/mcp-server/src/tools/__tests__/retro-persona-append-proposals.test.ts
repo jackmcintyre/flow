@@ -307,9 +307,9 @@ describe("AC1 — grounded persona-append proposal from a cycle's per-role lesso
     }
   });
 
-  it("persona-append is one of the eleven typed proposal variants", () => {
+  it("persona-append is one of the twelve typed proposal variants", () => {
     expect(RETRO_PROPOSAL_TYPES).toContain("persona-append");
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(11);
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(12);
   });
 });
 
@@ -925,7 +925,7 @@ describe("AC3 — consolidation proposal preview shows both source lessons and t
 
   it("lesson-consolidation is in RETRO_PROPOSAL_TYPES", () => {
     expect(RETRO_PROPOSAL_TYPES).toContain("lesson-consolidation");
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(11);
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(12);
   });
 
   it("the schema refuses a lesson-consolidation with an empty merged_lesson", async () => {

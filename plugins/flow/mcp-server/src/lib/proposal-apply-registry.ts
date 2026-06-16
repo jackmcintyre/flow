@@ -35,6 +35,7 @@ import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
 import { makePersonaAppendHandler } from "./apply-persona-append.js";
 import { makePromoteLessonToSkillHandler } from "./apply-promote-lesson-to-skill.js";
 import { makeLessonConsolidationHandler } from "./apply-lesson-consolidation.js";
+import { makeLessonRetirementHandler } from "./apply-lesson-retirement.js";
 
 /**
  * Context threaded into a handler's `previewDiff`/`apply` calls. The gate owns
@@ -106,6 +107,7 @@ export type ProposalApplyRegistry = Map<
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *   - `persona-append`                                → Story 6.9
  *   - `lesson-consolidation`                          → Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T
+ *   - `lesson-retirement`                             → Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ
  *
  * Still fail closed (no handler) until their story registers them:
  *   - `team-change`                                   → Story 6.10
@@ -133,6 +135,8 @@ export function createProductionRegistry(): ProposalApplyRegistry {
   registry.set("promote-lesson-to-skill", makePromoteLessonToSkillHandler({ now: () => new Date() }));
   // Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T — lesson-consolidation handler.
   registry.set("lesson-consolidation", makeLessonConsolidationHandler());
+  // Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ — lesson-retirement handler.
+  registry.set("lesson-retirement", makeLessonRetirementHandler());
   return registry;
 }
 
@@ -161,4 +165,5 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   // behaviour — the operator should route it through the normal author/queue path.
   "build-story": "Story native:01KV76P2DW42BPBPT4ZQ0FS63Y (not apply-able — queue a build story instead)",
   "lesson-consolidation": "Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T",
+  "lesson-retirement": "Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ",
 };

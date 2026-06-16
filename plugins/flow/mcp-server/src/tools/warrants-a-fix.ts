@@ -15,12 +15,14 @@
  *   - `persona-append`        — append a durable lesson to a role's Knowledge
  *   - `promote-lesson-to-skill` — promote a role lesson into a shared skill
  *   - `build-story`           — queue a build-and-review story for a core-machinery change
+ *   - `lesson-consolidation`  — merge two near-duplicate lessons into one
+ *   - `lesson-retirement`     — retire never-earned-keep lessons to the archived store
  *
  * **Not fix-worthy (return `false`):**
  *   - An empty `proposals` array in a `RetroProposalFile` (the analyst found
  *     nothing worth changing — a purely informational/no-op retro).
  *
- * The ten concrete proposal types are ALL concrete change proposals: every
+ * The twelve concrete proposal types are ALL concrete change proposals: every
  * type that can appear in the validated `RetroProposalSchema` discriminated
  * union carries real structural change. Therefore `warrantsAFix` for any
  * single validated proposal is always `true` — the "no fix needed" signal
@@ -45,17 +47,17 @@ import type { RetroProposal, RetroProposalFile } from "../schemas/retro-proposal
 
 /**
  * Returns `true` for every concrete proposal type in the closed
- * `RetroProposalSchema` discriminated union — all ten variants carry a real
+ * `RetroProposalSchema` discriminated union — all twelve variants carry a real
  * change, so any single validated proposal is fix-worthy.
  *
  * This function exists as a named, testable unit to prevent the classifier
  * logic from drifting into SKILL.md prose where it cannot be unit-tested.
  *
  * @param proposal  A single validated `RetroProposal`.
- * @returns         `true` — all ten schema variants are fix-worthy.
+ * @returns         `true` — all twelve schema variants are fix-worthy.
  */
 export function warrantsAFix(proposal: RetroProposal): true {
-  // All ten validated proposal variants represent concrete changes.
+  // All twelve validated proposal variants represent concrete changes.
   // The "no fix needed" signal lives in the `RetroProposalFile.proposals`
   // array being empty (handled by `warrantsAnyFix`), not in a special type.
   // TypeScript exhaustiveness is guaranteed by the discriminated union:
@@ -108,4 +110,5 @@ export const FIX_WORTHY_TYPES = [
   "promote-lesson-to-skill",
   "build-story",
   "lesson-consolidation",
+  "lesson-retirement",
 ] as const;
