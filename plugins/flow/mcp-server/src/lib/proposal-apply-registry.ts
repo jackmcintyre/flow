@@ -135,7 +135,7 @@ export function createProductionRegistry(): ProposalApplyRegistry {
 /**
  * Maps each proposal kind to the story that shipped (or will ship) its apply
  * handler. Used to build an actionable `ProposalKindNotApplicableYetError`
- * message. Closed over the nine retro-proposal kinds; a new kind would
+ * message. Closed over the ten retro-proposal kinds; a new kind would
  * require a schema-change story that also extends this map.
  */
 export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
@@ -151,4 +151,9 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   "team-change": "Story 6.10",
   "persona-append": "Story 6.9",
   "promote-lesson-to-skill": "Story native:01KT6RHQ1K4KQMASAXNEK6MY7E",
+  // `build-story` is intentionally not apply-able: it is a queue-a-build-story
+  // recommendation (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y). Trying to accept
+  // it fails closed with ProposalKindNotApplicableYetError, which is correct
+  // behaviour — the operator should route it through the normal author/queue path.
+  "build-story": "Story native:01KV76P2DW42BPBPT4ZQ0FS63Y (not apply-able — queue a build story instead)",
 };

@@ -27398,7 +27398,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "skill-retire",
       "team-change",
       "persona-append",
-      "promote-lesson-to-skill"
+      "promote-lesson-to-skill",
+      "build-story"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -43900,6 +43901,11 @@ var PromoteLessonToSkillProposalSchema = ProposalBase.extend({
   skill_body: external_exports.string().min(1),
   when_to_use: external_exports.string().min(1)
 }).strict();
+var BuildStoryProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("build-story"),
+  suggested_title: external_exports.string().min(1),
+  skill_change_context: external_exports.string().min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -43909,7 +43915,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   SkillRetireProposalSchema,
   TeamChangeProposalSchema,
   PersonaAppendProposalSchema,
-  PromoteLessonToSkillProposalSchema
+  PromoteLessonToSkillProposalSchema,
+  BuildStoryProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,

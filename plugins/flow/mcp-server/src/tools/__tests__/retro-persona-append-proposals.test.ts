@@ -305,9 +305,9 @@ describe("AC1 — grounded persona-append proposal from a cycle's per-role lesso
     }
   });
 
-  it("persona-append is one of the nine typed proposal variants", () => {
+  it("persona-append is one of the ten typed proposal variants", () => {
     expect(RETRO_PROPOSAL_TYPES).toContain("persona-append");
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(9);
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(10);
   });
 });
 

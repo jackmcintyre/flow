@@ -224,8 +224,8 @@ async function seedPersona(root: string, role: string, content: string): Promise
 // ---------------------------------------------------------------------------
 
 describe("persona-append schema and registry (AC4)", () => {
-  it("persona-append is present in RETRO_PROPOSAL_TYPES and the count is 9", () => {
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(9);
+  it("persona-append is present in RETRO_PROPOSAL_TYPES and the count is 10", () => {
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(10);
     expect(RETRO_PROPOSAL_TYPES).toContain("persona-append");
   });
 

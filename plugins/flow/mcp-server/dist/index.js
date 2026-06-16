@@ -38903,6 +38903,11 @@ var PromoteLessonToSkillProposalSchema = ProposalBase.extend({
   skill_body: external_exports.string().min(1),
   when_to_use: external_exports.string().min(1)
 }).strict();
+var BuildStoryProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("build-story"),
+  suggested_title: external_exports.string().min(1),
+  skill_change_context: external_exports.string().min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -38912,7 +38917,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   SkillRetireProposalSchema,
   TeamChangeProposalSchema,
   PersonaAppendProposalSchema,
-  PromoteLessonToSkillProposalSchema
+  PromoteLessonToSkillProposalSchema,
+  BuildStoryProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,
@@ -38931,6 +38937,101 @@ function parseRetroProposalFile(input) {
     });
   }
   return result.data;
+}
+
+// ../node_modules/.pnpm/ulid@3.0.2/node_modules/ulid/dist/node/index.js
+import crypto from "node:crypto";
+var ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+var ENCODING_LEN = 32;
+var RANDOM_LEN = 16;
+var TIME_LEN = 10;
+var TIME_MAX = 281474976710655;
+var ULIDErrorCode;
+(function(ULIDErrorCode2) {
+  ULIDErrorCode2["Base32IncorrectEncoding"] = "B32_ENC_INVALID";
+  ULIDErrorCode2["DecodeTimeInvalidCharacter"] = "DEC_TIME_CHAR";
+  ULIDErrorCode2["DecodeTimeValueMalformed"] = "DEC_TIME_MALFORMED";
+  ULIDErrorCode2["EncodeTimeNegative"] = "ENC_TIME_NEG";
+  ULIDErrorCode2["EncodeTimeSizeExceeded"] = "ENC_TIME_SIZE_EXCEED";
+  ULIDErrorCode2["EncodeTimeValueMalformed"] = "ENC_TIME_MALFORMED";
+  ULIDErrorCode2["PRNGDetectFailure"] = "PRNG_DETECT";
+  ULIDErrorCode2["ULIDInvalid"] = "ULID_INVALID";
+  ULIDErrorCode2["Unexpected"] = "UNEXPECTED";
+  ULIDErrorCode2["UUIDInvalid"] = "UUID_INVALID";
+})(ULIDErrorCode || (ULIDErrorCode = {}));
+var ULIDError = class extends Error {
+  constructor(errorCode, message) {
+    super(`${message} (${errorCode})`);
+    this.name = "ULIDError";
+    this.code = errorCode;
+  }
+};
+function randomChar(prng) {
+  const randomPosition = Math.floor(prng() * ENCODING_LEN) % ENCODING_LEN;
+  return ENCODING.charAt(randomPosition);
+}
+function detectPRNG(root) {
+  const rootLookup = detectRoot();
+  const globalCrypto = rootLookup && (rootLookup.crypto || rootLookup.msCrypto) || (typeof crypto !== "undefined" ? crypto : null);
+  if (typeof globalCrypto?.getRandomValues === "function") {
+    return () => {
+      const buffer = new Uint8Array(1);
+      globalCrypto.getRandomValues(buffer);
+      return buffer[0] / 256;
+    };
+  } else if (typeof globalCrypto?.randomBytes === "function") {
+    return () => globalCrypto.randomBytes(1).readUInt8() / 256;
+  } else if (crypto?.randomBytes) {
+    return () => crypto.randomBytes(1).readUInt8() / 256;
+  }
+  throw new ULIDError(ULIDErrorCode.PRNGDetectFailure, "Failed to find a reliable PRNG");
+}
+function detectRoot() {
+  if (inWebWorker())
+    return self;
+  if (typeof window !== "undefined") {
+    return window;
+  }
+  if (typeof global !== "undefined") {
+    return global;
+  }
+  if (typeof globalThis !== "undefined") {
+    return globalThis;
+  }
+  return null;
+}
+function encodeRandom(len, prng) {
+  let str = "";
+  for (; len > 0; len--) {
+    str = randomChar(prng) + str;
+  }
+  return str;
+}
+function encodeTime(now, len = TIME_LEN) {
+  if (isNaN(now)) {
+    throw new ULIDError(ULIDErrorCode.EncodeTimeValueMalformed, `Time must be a number: ${now}`);
+  } else if (now > TIME_MAX) {
+    throw new ULIDError(ULIDErrorCode.EncodeTimeSizeExceeded, `Cannot encode a time larger than ${TIME_MAX}: ${now}`);
+  } else if (now < 0) {
+    throw new ULIDError(ULIDErrorCode.EncodeTimeNegative, `Time must be positive: ${now}`);
+  } else if (Number.isInteger(now) === false) {
+    throw new ULIDError(ULIDErrorCode.EncodeTimeValueMalformed, `Time must be an integer: ${now}`);
+  }
+  let mod, str = "";
+  for (let currentLen = len; currentLen > 0; currentLen--) {
+    mod = now % ENCODING_LEN;
+    str = ENCODING.charAt(mod) + str;
+    now = (now - mod) / ENCODING_LEN;
+  }
+  return str;
+}
+function inWebWorker() {
+  return typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+}
+function ulid3(seedTime, prng) {
+  const currentPRNG = prng || detectPRNG();
+  const seed = !seedTime || isNaN(seedTime) ? Date.now() : seedTime;
+  return encodeTime(seed, TIME_LEN) + encodeRandom(RANDOM_LEN, currentPRNG);
 }
 
 // src/tools/write-retro-proposal.ts
@@ -38962,6 +39063,26 @@ async function writeRetroProposal(opts) {
   if (exists) {
     throw new RetroProposalAlreadyExistsError({ absPath, isoTimestamp });
   }
+  const classifiedProposals = fileShape.proposals.map(
+    (proposal) => {
+      const targetPath = getSkillTargetPath(proposal);
+      if (targetPath === null) return proposal;
+      if (classifySkillChangeTarget(targetPath) === "team-owned") return proposal;
+      return {
+        type: "build-story",
+        id: ulid3(),
+        created_at: proposal.created_at,
+        rationale: proposal.rationale,
+        suggested_title: suggestBuildStoryTitle(proposal),
+        skill_change_context: describeBlockedSkillChange(proposal)
+      };
+    }
+  );
+  fileShape = parseRetroProposalFile({
+    iso_timestamp: isoTimestamp,
+    cycle_window: cycleWindow,
+    proposals: classifiedProposals
+  });
   const durabilityRecommendations = [];
   const enrichedProposals = fileShape.proposals.map(
     (proposal) => {
@@ -39002,6 +39123,56 @@ async function writeRetroProposal(opts) {
     proposalCount: fileShape.proposals.length,
     durabilityRecommendations
   };
+}
+var TEAM_SKILL_PREFIX = ".flow/skills/";
+function classifySkillChangeTarget(targetPath) {
+  if (!targetPath) return "engine";
+  return targetPath.startsWith(TEAM_SKILL_PREFIX) ? "team-owned" : "engine";
+}
+function getSkillTargetPath(proposal) {
+  switch (proposal.type) {
+    case "skill-revise":
+      return proposal.target_skill_path;
+    case "skill-retire":
+      return proposal.target_skill_path;
+    case "skill-create":
+      return proposal.proposed_path;
+    case "skill-supersede":
+      if (classifySkillChangeTarget(proposal.superseded_skill_path) === "engine") {
+        return proposal.superseded_skill_path;
+      }
+      return proposal.replacement.proposed_path;
+    default:
+      return null;
+  }
+}
+function describeBlockedSkillChange(proposal) {
+  switch (proposal.type) {
+    case "skill-revise":
+      return `${proposal.type} targeting ${proposal.target_skill_path} (${proposal.version_bump} bump)`;
+    case "skill-retire":
+      return `${proposal.type} targeting ${proposal.target_skill_path}`;
+    case "skill-create":
+      return `${proposal.type} at ${proposal.proposed_path}`;
+    case "skill-supersede":
+      return `${proposal.type}: supersede ${proposal.superseded_skill_path} \u2192 ${proposal.replacement.proposed_path}`;
+    default:
+      return `${proposal.type} (unknown skill path)`;
+  }
+}
+function suggestBuildStoryTitle(proposal) {
+  switch (proposal.type) {
+    case "skill-revise":
+      return `Revise core skill at ${proposal.target_skill_path} via build-and-review`;
+    case "skill-retire":
+      return `Retire core skill at ${proposal.target_skill_path} via build-and-review`;
+    case "skill-create":
+      return `Create core skill at ${proposal.proposed_path} via build-and-review`;
+    case "skill-supersede":
+      return `Replace core skill at ${proposal.superseded_skill_path} via build-and-review`;
+    default:
+      return "Implement core machinery skill change via build-and-review";
+  }
 }
 var DURABILITY_REASONS = {
   code: "This failure has a stable mechanical shape and keeps recurring \u2014 a guard makes it impossible",
@@ -39154,6 +39325,15 @@ function renderProposalFields(proposal) {
           `(${proposal.skill_body.split("\n").length} lines \u2014 see frontmatter)`
         ],
         ["when_to_use", proposal.when_to_use]
+      ];
+    case "build-story":
+      return [
+        ["suggested_title", proposal.suggested_title],
+        ["skill_change_context", proposal.skill_change_context],
+        [
+          "action",
+          "Queue a build-and-review story via the normal author/queue path \u2014 do NOT accept this proposal through the apply gate."
+        ]
       ];
   }
 }
@@ -46392,7 +46572,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "skill-retire",
       "team-change",
       "persona-append",
-      "promote-lesson-to-skill"
+      "promote-lesson-to-skill",
+      "build-story"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -46601,101 +46782,6 @@ function isEnoent3(err) {
 // src/lib/apply-rule-proposal.ts
 import { promises as fs19 } from "node:fs";
 import * as path27 from "node:path";
-
-// ../node_modules/.pnpm/ulid@3.0.2/node_modules/ulid/dist/node/index.js
-import crypto from "node:crypto";
-var ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-var ENCODING_LEN = 32;
-var RANDOM_LEN = 16;
-var TIME_LEN = 10;
-var TIME_MAX = 281474976710655;
-var ULIDErrorCode;
-(function(ULIDErrorCode2) {
-  ULIDErrorCode2["Base32IncorrectEncoding"] = "B32_ENC_INVALID";
-  ULIDErrorCode2["DecodeTimeInvalidCharacter"] = "DEC_TIME_CHAR";
-  ULIDErrorCode2["DecodeTimeValueMalformed"] = "DEC_TIME_MALFORMED";
-  ULIDErrorCode2["EncodeTimeNegative"] = "ENC_TIME_NEG";
-  ULIDErrorCode2["EncodeTimeSizeExceeded"] = "ENC_TIME_SIZE_EXCEED";
-  ULIDErrorCode2["EncodeTimeValueMalformed"] = "ENC_TIME_MALFORMED";
-  ULIDErrorCode2["PRNGDetectFailure"] = "PRNG_DETECT";
-  ULIDErrorCode2["ULIDInvalid"] = "ULID_INVALID";
-  ULIDErrorCode2["Unexpected"] = "UNEXPECTED";
-  ULIDErrorCode2["UUIDInvalid"] = "UUID_INVALID";
-})(ULIDErrorCode || (ULIDErrorCode = {}));
-var ULIDError = class extends Error {
-  constructor(errorCode, message) {
-    super(`${message} (${errorCode})`);
-    this.name = "ULIDError";
-    this.code = errorCode;
-  }
-};
-function randomChar(prng) {
-  const randomPosition = Math.floor(prng() * ENCODING_LEN) % ENCODING_LEN;
-  return ENCODING.charAt(randomPosition);
-}
-function detectPRNG(root) {
-  const rootLookup = detectRoot();
-  const globalCrypto = rootLookup && (rootLookup.crypto || rootLookup.msCrypto) || (typeof crypto !== "undefined" ? crypto : null);
-  if (typeof globalCrypto?.getRandomValues === "function") {
-    return () => {
-      const buffer = new Uint8Array(1);
-      globalCrypto.getRandomValues(buffer);
-      return buffer[0] / 256;
-    };
-  } else if (typeof globalCrypto?.randomBytes === "function") {
-    return () => globalCrypto.randomBytes(1).readUInt8() / 256;
-  } else if (crypto?.randomBytes) {
-    return () => crypto.randomBytes(1).readUInt8() / 256;
-  }
-  throw new ULIDError(ULIDErrorCode.PRNGDetectFailure, "Failed to find a reliable PRNG");
-}
-function detectRoot() {
-  if (inWebWorker())
-    return self;
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  return null;
-}
-function encodeRandom(len, prng) {
-  let str = "";
-  for (; len > 0; len--) {
-    str = randomChar(prng) + str;
-  }
-  return str;
-}
-function encodeTime(now, len = TIME_LEN) {
-  if (isNaN(now)) {
-    throw new ULIDError(ULIDErrorCode.EncodeTimeValueMalformed, `Time must be a number: ${now}`);
-  } else if (now > TIME_MAX) {
-    throw new ULIDError(ULIDErrorCode.EncodeTimeSizeExceeded, `Cannot encode a time larger than ${TIME_MAX}: ${now}`);
-  } else if (now < 0) {
-    throw new ULIDError(ULIDErrorCode.EncodeTimeNegative, `Time must be positive: ${now}`);
-  } else if (Number.isInteger(now) === false) {
-    throw new ULIDError(ULIDErrorCode.EncodeTimeValueMalformed, `Time must be an integer: ${now}`);
-  }
-  let mod, str = "";
-  for (let currentLen = len; currentLen > 0; currentLen--) {
-    mod = now % ENCODING_LEN;
-    str = ENCODING.charAt(mod) + str;
-    now = (now - mod) / ENCODING_LEN;
-  }
-  return str;
-}
-function inWebWorker() {
-  return typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
-}
-function ulid3(seedTime, prng) {
-  const currentPRNG = prng || detectPRNG();
-  const seed = !seedTime || isNaN(seedTime) ? Date.now() : seedTime;
-  return encodeTime(seed, TIME_LEN) + encodeRandom(RANDOM_LEN, currentPRNG);
-}
 
 // src/lib/regenerate-standards.ts
 var import_yaml14 = __toESM(require_dist2(), 1);
@@ -47478,7 +47564,12 @@ var KIND_TO_STORY = {
   "skill-retire": "Story 6.7",
   "team-change": "Story 6.10",
   "persona-append": "Story 6.9",
-  "promote-lesson-to-skill": "Story native:01KT6RHQ1K4KQMASAXNEK6MY7E"
+  "promote-lesson-to-skill": "Story native:01KT6RHQ1K4KQMASAXNEK6MY7E",
+  // `build-story` is intentionally not apply-able: it is a queue-a-build-story
+  // recommendation (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y). Trying to accept
+  // it fails closed with ProposalKindNotApplicableYetError, which is correct
+  // behaviour — the operator should route it through the normal author/queue path.
+  "build-story": "Story native:01KV76P2DW42BPBPT4ZQ0FS63Y (not apply-able \u2014 queue a build story instead)"
 };
 
 // src/tools/accept-proposal.ts

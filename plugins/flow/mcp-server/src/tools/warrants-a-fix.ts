@@ -14,12 +14,13 @@
  *   - `team-change`           — hire or unhire a role
  *   - `persona-append`        — append a durable lesson to a role's Knowledge
  *   - `promote-lesson-to-skill` — promote a role lesson into a shared skill
+ *   - `build-story`           — queue a build-and-review story for a core-machinery change
  *
  * **Not fix-worthy (return `false`):**
  *   - An empty `proposals` array in a `RetroProposalFile` (the analyst found
  *     nothing worth changing — a purely informational/no-op retro).
  *
- * The nine concrete proposal types are ALL concrete change proposals: every
+ * The ten concrete proposal types are ALL concrete change proposals: every
  * type that can appear in the validated `RetroProposalSchema` discriminated
  * union carries real structural change. Therefore `warrantsAFix` for any
  * single validated proposal is always `true` — the "no fix needed" signal
@@ -33,6 +34,7 @@
  * tool call result, never on LLM prose alone.
  *
  * Story native:01KTZGJ68HE6Z66A50BV7N6BJZ — AC2.
+ * Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — added `build-story` variant.
  */
 
 import type { RetroProposal, RetroProposalFile } from "../schemas/retro-proposal.js";
@@ -43,17 +45,17 @@ import type { RetroProposal, RetroProposalFile } from "../schemas/retro-proposal
 
 /**
  * Returns `true` for every concrete proposal type in the closed
- * `RetroProposalSchema` discriminated union — all nine variants carry a real
+ * `RetroProposalSchema` discriminated union — all ten variants carry a real
  * change, so any single validated proposal is fix-worthy.
  *
  * This function exists as a named, testable unit to prevent the classifier
  * logic from drifting into SKILL.md prose where it cannot be unit-tested.
  *
  * @param proposal  A single validated `RetroProposal`.
- * @returns         `true` — all nine schema variants are fix-worthy.
+ * @returns         `true` — all ten schema variants are fix-worthy.
  */
 export function warrantsAFix(proposal: RetroProposal): true {
-  // All nine validated proposal variants represent concrete changes.
+  // All ten validated proposal variants represent concrete changes.
   // The "no fix needed" signal lives in the `RetroProposalFile.proposals`
   // array being empty (handled by `warrantsAnyFix`), not in a special type.
   // TypeScript exhaustiveness is guaranteed by the discriminated union:
@@ -104,4 +106,5 @@ export const FIX_WORTHY_TYPES = [
   "team-change",
   "persona-append",
   "promote-lesson-to-skill",
+  "build-story",
 ] as const;

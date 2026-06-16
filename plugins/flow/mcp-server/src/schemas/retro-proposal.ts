@@ -372,15 +372,50 @@ const PromoteLessonToSkillProposalSchema = ProposalBase.extend({
   when_to_use: z.string().min(1),
 }).strict();
 
+/**
+ * `build-story` — a recommendation to queue a new build-and-review story rather
+ * than an approve-and-apply change.
+ *
+ * This variant is the designated output for any skill-change candidate that targets
+ * the product's core machinery (i.e. its `target_skill_path` / `proposed_path` is
+ * NOT under `.flow/skills/`). Such a change cannot be applied through the
+ * diff-then-confirm gate — it requires a real code-review story — so
+ * `writeRetroProposal` classifies it at write time and emits this type instead of
+ * the original `skill-*` variant.
+ *
+ * **No apply handler is registered for this type.** Accepting a `build-story`
+ * proposal via `/accept-proposal` fails closed with
+ * `ProposalKindNotApplicableYetError` by design — the intent is always "queue this
+ * through the normal author/queue/ship path," never "apply via the gate."
+ *
+ * Fields:
+ *  - `suggested_title`       — a one-line story title the operator can hand to the
+ *                              planner verbatim.
+ *  - `skill_change_context`  — the original skill-change intent (what path, what kind
+ *                              of change) captured as a plain string for provenance.
+ *
+ * (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — engine-safety classifier)
+ */
+const BuildStoryProposalSchema = ProposalBase.extend({
+  type: z.literal("build-story"),
+  suggested_title: z.string().min(1),
+  skill_change_context: z.string().min(1),
+}).strict();
+
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 
 /**
- * The closed set of nine proposal-type literals. Exported as a tuple so
+ * The closed set of ten proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a tenth variant requires a
+ * grown (the AC2 invariant). Adding an eleventh variant requires a
  * coordinated schema-change story.
+ *
+ * `build-story` (added Story native:01KV76P2DW42BPBPT4ZQ0FS63Y) is the
+ * engine-safety output: the retro writer emits it in place of a `skill-*`
+ * proposal whose target path is not under `.flow/skills/`. It has no apply
+ * handler (fails closed) so it can never dead-end via the apply gate.
  */
 export const RETRO_PROPOSAL_TYPES = [
   "rule",
@@ -392,10 +427,11 @@ export const RETRO_PROPOSAL_TYPES = [
   "team-change",
   "persona-append",
   "promote-lesson-to-skill",
+  "build-story",
 ] as const;
 
 /**
- * The full retro-proposal discriminated union. AC2: exactly nine
+ * The full retro-proposal discriminated union. AC2: exactly ten
  * variants, closed enum, no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
@@ -408,6 +444,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
   TeamChangeProposalSchema,
   PersonaAppendProposalSchema,
   PromoteLessonToSkillProposalSchema,
+  BuildStoryProposalSchema,
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;
