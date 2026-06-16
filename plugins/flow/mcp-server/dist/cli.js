@@ -28342,6 +28342,12 @@ function isWellFormedTarget(target) {
   if (path12.isAbsolute(t)) return false;
   return true;
 }
+function isRunnableTestTarget(target) {
+  const t = target.trim();
+  if (/(?:^|[\\/])__tests__[\\/]/.test(t)) return true;
+  if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(t)) return true;
+  return false;
+}
 async function statOrNull(absPath) {
   try {
     return await fs10.stat(absPath);
@@ -28381,6 +28387,13 @@ async function resolveDisciplinePaths(story, targetRepoRoot) {
         detail: `AC${i2 + 1} verification target '${v.target}' is not a well-formed repo-relative path. Reject invented flags / non-path strings (e.g. 'vitest --grep \u2026'); the target must name a single path (a test file for 'vitest:', an artifact for 'artifact:').`
       });
       return;
+    }
+    if (v.type === "vitest" && !isRunnableTestTarget(v.target)) {
+      reasons.push({
+        code: "non-runnable-test-target",
+        field: `acceptance_criteria[${i2}].verification.target`,
+        detail: `AC${i2 + 1} verification target '${v.target}' is not a runnable test. A 'vitest:' proof must name a test file (e.g. ending in '.test.ts' / '.spec.ts', or under a '__tests__/' directory). Pointing at an ordinary source file runs zero tests and verifies nothing \u2014 rename the target to the test file that covers this AC.`
+      });
     }
   });
   for (let i2 = 0; i2 < story.acceptance_criteria.length; i2++) {
@@ -40505,6 +40518,26 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
   }
   return { ok: false };
 }
+function findWorkspaceYamlInSubtree(root, maxDepth) {
+  if (maxDepth < 0) return null;
+  let entries;
+  try {
+    entries = readdirSync2(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  if (entries.some((e) => e.isFile() && e.name === "pnpm-workspace.yaml")) {
+    return root;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = entry.name;
+    if (name === "node_modules" || name === ".git") continue;
+    const found = findWorkspaceYamlInSubtree(path48.join(root, name), maxDepth - 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
 function findPackageRoot(opts) {
   const checkRootAbs = path48.resolve(opts.checkRoot);
   let dir = path48.dirname(opts.testFilePathAbs);
@@ -40522,6 +40555,11 @@ function findPackageRoot(opts) {
     const parent = path48.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  const workspaceYamlDir = findWorkspaceYamlInSubtree(checkRootAbs, 4);
+  if (workspaceYamlDir !== null) {
+    const memberResult = findVitestInWorkspaceMembers(workspaceYamlDir);
+    if (memberResult.ok) return memberResult;
   }
   return { ok: false };
 }
@@ -40554,7 +40592,11 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
       exitCode: -1
     };
   }
-  const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
+  const testFilePathAbs2 = path48.resolve(checkRoot, testFilePath);
+  const relativeToPackage = path48.relative(pkgRoot.packageRoot, testFilePathAbs2);
+  const looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
+  const vitestArgs = looksLikeFilePath ? ["vitest", "--run", relativeToPackage] : ["vitest", "--run", "-t", testNameFilter];
+  const result = await execaImpl("pnpm", vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS
