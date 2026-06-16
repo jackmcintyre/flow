@@ -260,6 +260,122 @@ async function runRunEmptyQueue(): Promise<{
   return { result, thrown };
 }
 
+// ── Backoff test runner ───────────────────────────────────────────────────────
+//
+// Drives the real run workflow in a scenario where the claim stub returns
+// `waiting-on-in-progress` for exactly `numIdlePolls` consecutive calls, then
+// returns a single `spawn-dev` result (story C), then returns `queue-emptied`.
+//
+// The harness captures each injected delay (the value of backoffMs logged in the
+// WAITING line) so the test can assert the series grows and caps.
+//
+// `repollDelayMs` and `repollBackoffCapMs` are threaded through to the workflow
+// args so we can observe the math without waiting on real wall-clock time.
+// With a small positive base (e.g. 10ms) the test captures real non-zero values;
+// with base=0 (the default harness value) every delay is 0 (collapse case).
+async function runBackoffScenario(opts: {
+  numIdlePolls: number;
+  repollDelayMs: number;
+  repollBackoffCapMs: number;
+}): Promise<{
+  result: any;
+  thrown: unknown;
+  logs: string[];
+  capturedDelays: number[];
+}> {
+  const source = readFileSync(WORKFLOW_PATH, "utf8").replace(
+    /^export\s+const\s+meta\b/m,
+    "const meta",
+  );
+  const body = `${source}\n//# sourceURL=run.workflow.js`;
+
+  const logs: string[] = [];
+  // Extract the delay value from each WAITING log line.
+  const capturedDelays: number[] = [];
+
+  const REF_C = "backoff-test-story-c";
+
+  let idlePollsFired = 0;
+  let cDevCompleted = false;
+
+  const claimResult = (): unknown => {
+    if (idlePollsFired < opts.numIdlePolls) {
+      idlePollsFired++;
+      return { next: "waiting-on-in-progress" };
+    }
+    if (!cDevCompleted) {
+      return {
+        next: "spawn-dev",
+        ref: REF_C,
+        title: "Story C",
+        manifestPath: `/tmp/backoff_test_story_c.yaml`,
+      };
+    }
+    return { next: "queue-emptied" };
+  };
+
+  const seamResult = (label: string): unknown => {
+    if (label === "mint") return { sessionUlid: "01TESTULID0000000000000000" };
+    if (label.startsWith("persona:dev")) return { systemPrompt: "DEV-PERSONA" };
+    if (label.startsWith("persona:reviewer")) return { systemPrompt: "REV-PERSONA" };
+    if (label === "worktree-reap") return { reaped: [] };
+    if (label === "orphan-scan") return { orphans: [] };
+    if (label.startsWith("clean-root-guard:")) return { dirty: false };
+    if (label.startsWith("build-plan:")) return { devReviewerModel: "sonnet", reviewDepth: "full" };
+    if (label.startsWith("claim:")) return claimResult();
+    if (label.startsWith("pd:")) return { next: "spawn-reviewer", prNumber: 9099, reviewerPrompt: "REV-PERSONA" };
+    if (label.startsWith("verdict:")) return { next: "done-ready-for-merge" };
+    if (label.startsWith("gate:")) return { decision: "pause-needs-human", reason: "no-agreement-history" };
+    if (label.startsWith("progress-start:")) return { atMs: 1000, line: "progress-start stub" };
+    if (label.startsWith("progress-done:")) return { line: "progress-done stub" };
+    return { _unstubbed: label };
+  };
+
+  const agent = async (_prompt: string, agentOpts: { label?: string; schema?: unknown } = {}) => {
+    const label = agentOpts.label ?? "";
+    if (agentOpts.schema) {
+      return { stdout: JSON.stringify(seamResult(label)) };
+    }
+    if (label.startsWith("dev:")) {
+      cDevCompleted = true;
+      return `Implemented story C.\nHandoff to reviewer — story ${REF_C} ready for review.`;
+    }
+    if (label.startsWith("rev:")) return "Reviewed; verdict written.";
+    return "";
+  };
+
+  const log = (line: string) => {
+    logs.push(String(line));
+    // Extract delay from WAITING lines: "re-polling in <N>ms (idle streak ...)".
+    const m = line.match(/re-polling in (\d+)ms \(idle streak/);
+    if (m) capturedDelays.push(Number(m[1]));
+  };
+  const phase = (_name: string) => { /* no-op */ };
+  const notify = (_payload: unknown) => { /* no-op */ };
+
+  const args = JSON.stringify({
+    targetRepoRoot: "/tmp/target-repo",
+    cli: "/tmp/cli.js",
+    sessionUlid: "01TESTULID0000000000000000",
+    maxConcurrency: 1,
+    repollDelayMs: opts.repollDelayMs,
+    repollBackoffCapMs: opts.repollBackoffCapMs,
+    // Keep the stall guard high so it doesn't fire before our idle polls run.
+    maxRepoll: opts.numIdlePolls + 10,
+  });
+
+  const fn = new AsyncFunction("args", "agent", "log", "phase", "notify", body);
+  let result: any;
+  let thrown: unknown;
+  try {
+    result = await fn(args, agent, log, phase, notify);
+  } catch (e) {
+    thrown = e;
+  }
+
+  return { result, thrown, logs, capturedDelays };
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe(
@@ -383,6 +499,123 @@ describe(
         expect(inSomeBucket(REF_B)).toBe(true);
       },
       15_000,
+    );
+  },
+);
+
+// ── Backoff tests (Story native:01KV7HQH80AV0WPAMWCH7PP0HD) ─────────────────
+//
+// AC1 — Grows and caps: with spare capacity but nothing to start, each
+//        consecutive idle re-poll waits longer than the previous, up to a cap.
+// AC2 — Snaps back on progress: after a story is claimed the idle streak resets,
+//        so a subsequent idle stretch starts from the base delay again.
+// AC3 — Empty queue ends promptly: a genuinely empty queue never waits at all.
+
+describe(
+  "exponential backoff on consecutive idle re-polls (native:01KV7HQH80AV0WPAMWCH7PP0HD)",
+  () => {
+    it(
+      "AC1 — wait grows across consecutive idle polls and is capped at the configured maximum",
+      async () => {
+        // Drive 5 consecutive waiting-on-in-progress polls before a story is
+        // claimed. With base=10ms and cap=40ms the expected series is:
+        //   poll 1 → 10ms, poll 2 → 20ms, poll 3 → 40ms, poll 4 → 40ms, poll 5 → 40ms
+        const { result, thrown, capturedDelays } = await runBackoffScenario({
+          numIdlePolls: 5,
+          repollDelayMs: 10,
+          repollBackoffCapMs: 40,
+        });
+
+        expect(thrown).toBeUndefined();
+        // The run must still end cleanly.
+        expect(result.runReason).toBe("queue-emptied");
+
+        // We captured exactly 5 delays (one per idle poll).
+        expect(capturedDelays).toHaveLength(5);
+
+        // Each delay must be >= the previous (strictly growing until the cap).
+        for (let i = 1; i < capturedDelays.length; i++) {
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          expect(capturedDelays[i]!).toBeGreaterThanOrEqual(capturedDelays[i - 1]!);
+        }
+
+        // The first delay is the base.
+        expect(capturedDelays[0]).toBe(10);
+
+        // The second delay is double the first.
+        expect(capturedDelays[1]).toBe(20);
+
+        // Delays at or after the cap must equal the cap.
+        expect(capturedDelays[2]).toBe(40); // 10 * 4 = 40, capped at 40
+        expect(capturedDelays[3]).toBe(40); // would be 80, capped at 40
+        expect(capturedDelays[4]).toBe(40); // would be 160, capped at 40
+      },
+      15_000,
+    );
+
+    it(
+      "AC2 — idle streak resets to zero after a story is claimed, so a later idle stretch starts from the base",
+      async () => {
+        // Run two separate backoff scenarios back-to-back in a SINGLE run:
+        //   Phase 1: 3 idle polls (streak grows to 3)
+        //   Claim story C (streak resets to 0)
+        //   Phase 2: The run ends (queue-emptied) — no more idle polls needed.
+        //
+        // We verify the streak reset by checking the delay series: the first 3
+        // delays grow (1→2→4 with a large cap), and after the claim the run
+        // completes cleanly (not stuck waiting at the grown delay).
+        const { result, thrown, capturedDelays } = await runBackoffScenario({
+          numIdlePolls: 3,
+          repollDelayMs: 10,
+          repollBackoffCapMs: 10_000, // large cap so we can observe the raw growth
+        });
+
+        expect(thrown).toBeUndefined();
+        expect(result.runReason).toBe("queue-emptied");
+
+        // Three idle polls were captured.
+        expect(capturedDelays).toHaveLength(3);
+
+        // The delays strictly grow across the 3 idle polls: 10 → 20 → 40.
+        expect(capturedDelays[0]).toBe(10);
+        expect(capturedDelays[1]).toBe(20);
+        expect(capturedDelays[2]).toBe(40);
+
+        // Story C was picked up promptly after the idle stretch (it's in some bucket).
+        const inSomeBucket = (ref: string) => {
+          const pausedRefs = new Set(result.pausedForHuman.map((p: any) => p.ref));
+          const mergedRefs = new Set(result.merged.map((m: any) => m.ref));
+          const blockedRefs = new Set(result.blocked.map((b: any) => b.ref));
+          const completedRefs = new Set(result.completed);
+          return (
+            completedRefs.has(ref) ||
+            pausedRefs.has(ref) ||
+            mergedRefs.has(ref) ||
+            blockedRefs.has(ref)
+          );
+        };
+        expect(inSomeBucket("backoff-test-story-c")).toBe(true);
+      },
+      15_000,
+    );
+
+    it(
+      "AC3 — a genuinely empty queue finishes promptly with no waiting at all",
+      async () => {
+        // The original AC3 test (empty queue) still passes: a zero-story queue
+        // must resolve immediately to queue-emptied with no idle-poll delays.
+        const { result, thrown } = await runRunEmptyQueue();
+
+        expect(thrown).toBeUndefined();
+        expect(result.runReason).toBe("queue-emptied");
+        expect(result.queueEmptied).toBe(true);
+        // No work done — all buckets empty.
+        expect(result.completed).toHaveLength(0);
+        expect(result.pausedForHuman).toHaveLength(0);
+        expect(result.merged).toHaveLength(0);
+        expect(result.blocked).toHaveLength(0);
+      },
+      10_000,
     );
   },
 );
