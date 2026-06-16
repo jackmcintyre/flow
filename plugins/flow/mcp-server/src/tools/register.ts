@@ -1882,6 +1882,11 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   // call this when it hits a structural limitation of the tool itself. The item lands in a
   // maintainer-only inbox (.flow/maintainer-inbox/) that the team never reads to drive its
   // own behaviour. Items accumulate as distinct files — nothing is overwritten.
+  //
+  // Story native:01KV7XXKZ0TBPYETZP2X81T40S — when gh is available and the repo identity
+  // resolves, the result also includes a pre-filled GitHub new-issue URL so the operator can
+  // open it immediately to review and submit the issue themselves. Nothing is ever filed
+  // automatically; the link works for any user and opens GitHub's own form.
   server.registerTool({
     name: "recordMaintainerFeedback",
     description:
@@ -1892,6 +1897,9 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Items accumulate as distinct timestamped JSON files — nothing is overwritten. " +
       "The write touches ONLY .flow/maintainer-inbox/ and leaves the team's working state " +
       "and backlog byte-unchanged (AC1). Refuses to store incomplete items (AC2). " +
+      "On success, also returns a pre-filled GitHub new-issue URL (issueUrl) when gh is " +
+      "available — the operator can open it immediately to review and submit as themselves; " +
+      "nothing is ever filed automatically (Story native:01KV7XXKZ0TBPYETZP2X81T40S). " +
       "Story native:01KV7FHZ41Z6CFPABW1B8J38BV.",
     inputSchema: recordMaintainerFeedbackInputSchema,
     handler: async (args) => {
@@ -1901,8 +1909,17 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           item: (args as { item: unknown }).item,
         };
         const result = await recordMaintainerFeedback(parsed);
+        // Surface the issueUrl prominently when present so the operator
+        // can see and follow it immediately in their live session.
+        const responseText =
+          result.issueUrl !== undefined
+            ? JSON.stringify({
+                ...result,
+                _message: `Feedback captured. Open this link to review and file the GitHub issue:\n${result.issueUrl}`,
+              })
+            : JSON.stringify(result);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text" as const, text: responseText }],
         };
       } catch (err) {
         if (err instanceof DomainError) {
