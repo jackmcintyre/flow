@@ -128,7 +128,7 @@ interface RetirableLessonsEntry {
  *
  * Story native:01KV7FJHK9CAAS860MJAG70QVS.
  */
-export interface CrossRoleSharedLesson {
+interface CrossRoleSharedLesson {
   /**
    * Verbatim lesson text from the first role that holds it.
    * The analyst uses this as the basis for the shared skill description.
