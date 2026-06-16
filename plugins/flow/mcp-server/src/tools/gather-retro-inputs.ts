@@ -50,7 +50,13 @@
  *     yet; Story 6.5 introduces it). The analyst proceeds with
  *     `ruleRegistry: null`.
  *
- * **No writes. No network. No clock dependency.** Pure parameterised IO.
+ * **Limited writes.** `gatherRetroInputs` has two intentional write side-effects:
+ *   1. Drafting hardening stories for recurring mechanical failures
+ *      (`draftHardeningStories`, Story native:01KT6RHTE3YME1ZAD5VRQAKDSW).
+ *   2. Consolidating recurring friction into maintainer-feedback inbox items
+ *      (`raiseRecurringFrictionFeedback`, Story native:01KV84GRHFV6F6E6M1B32WH6HS).
+ * Both writes are deduped so re-runs over unchanged data are idempotent.
+ * All other reads are side-effect-free. No network. No unguarded clock dependency.
  */
 
 import { promises as fs } from "node:fs";
