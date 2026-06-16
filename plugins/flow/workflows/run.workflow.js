@@ -46,10 +46,15 @@ const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResum
 // so the loop is never spawned with zero workers (which would never run).
 const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency > 0 ? A.maxConcurrency : 2
 // Re-poll delay (ms) when a worker sees waiting-on-in-progress (Story native:01KTSQXBVE4WEJ2PQKVNHVFPS6).
-// A worker waits this long before re-checking the queue, so it does not spin hot
-// while a sibling story is still building. Default: 2000 ms for production runs.
-// Tests pass 0 (or a very small value) so the harness does not slow down.
+// This is the BASE of the exponential backoff: on the first consecutive idle poll
+// the wait is REPOLL_DELAY_MS; it doubles each time up to REPOLL_BACKOFF_CAP_MS.
+// Default: 2000 ms for production runs. Tests pass 0 so the harness stays instant.
 const REPOLL_DELAY_MS = Number.isInteger(A.repollDelayMs) && A.repollDelayMs >= 0 ? A.repollDelayMs : 2000
+// Maximum wait between consecutive idle re-polls (the exponential backoff cap).
+// Regardless of how many consecutive empty polls have accumulated, the worker
+// never waits longer than this. Default: 30 000 ms (30 s). When REPOLL_DELAY_MS
+// is 0 (the test harness), the cap is irrelevant (all waits collapse to 0).
+const REPOLL_BACKOFF_CAP_MS = Number.isInteger(A.repollBackoffCapMs) && A.repollBackoffCapMs > 0 ? A.repollBackoffCapMs : 30_000
 // Re-poll termination guard (fix/run-isolation-coordination-honesty): the
 // belt-and-braces cap on consecutive `waiting-on-in-progress` re-polls during
 // which NO worker is actually processing a story. The non-termination fix moves
@@ -87,6 +92,22 @@ const PLUGIN_ROOT = CLI ? CLI.replace(/\/mcp-server\/dist\/cli\.js$/, '') : ''
 // This optional arg is the seam: setting it wires the autonomous absorption path;
 // omitting it leaves every proposal for the operator's explicit accept-proposal gate.
 const RETRO_PROPOSAL_TIMESTAMP = A.retroProposalTimestamp || null
+
+// EXPONENTIAL BACKOFF HELPER (Story native:01KV7HQH80AV0WPAMWCH7PP0HD):
+// Computes the wait duration for the n-th consecutive idle re-poll.
+//
+//   n=1 → base (the first idle poll waits the base delay)
+//   n=2 → base * 2, n=3 → base * 4, …
+//   result is always capped at `cap`
+//
+// When `base` is 0 (the test harness passes repollDelayMs:0), the result is
+// always 0 regardless of n — the backoff multiplier never inflates a zero base.
+// This keeps the test suite instant: the wait loop runs immediately.
+const computeBackoffDelay = (base, n, cap) => {
+  if (base === 0) return 0
+  const multiplier = Math.pow(2, n - 1)
+  return Math.min(base * multiplier, cap)
+}
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
@@ -699,6 +720,12 @@ const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; runR
 //                rather than spin. Reset whenever real work is in flight.
 let activeProcessing = 0
 let stuckPolls = 0
+// Consecutive idle re-poll counter (Story native:01KV7HQH80AV0WPAMWCH7PP0HD):
+// incremented each time the waiting-on-in-progress branch fires; reset to 0
+// whenever real progress happens (a story is claimed, or the re-poll resolves
+// to something other than waiting-on-in-progress). Used by computeBackoffDelay
+// so the wait grows with each consecutive empty poll and resets on progress.
+let emptyPollStreak = 0
 
 async function runWorker(workerId) {
   for (;;) {
@@ -746,8 +773,16 @@ async function runWorker(workerId) {
         } else {
           stuckPolls = 0 // a sibling is genuinely working — reset the stall counter
         }
-        log(`WAITING — worker ${workerId} found no claimable story (a sibling is still in progress); re-polling in ${REPOLL_DELAY_MS}ms`)
-        if (REPOLL_DELAY_MS > 0) await new Promise(resolve => setTimeout(resolve, REPOLL_DELAY_MS))
+        // EXPONENTIAL BACKOFF (Story native:01KV7HQH80AV0WPAMWCH7PP0HD): instead
+        // of a fixed wait, grow the delay each consecutive idle poll (doubling up to
+        // REPOLL_BACKOFF_CAP_MS). When REPOLL_DELAY_MS is 0 (the test harness), the
+        // delay collapses to 0 — tests stay instant. The streak counter is reset on
+        // any real progress (a successful claim, below), so a later idle stretch
+        // always starts fresh from the base.
+        emptyPollStreak++
+        const backoffMs = computeBackoffDelay(REPOLL_DELAY_MS, emptyPollStreak, REPOLL_BACKOFF_CAP_MS)
+        log(`WAITING — worker ${workerId} found no claimable story (a sibling is still in progress); re-polling in ${backoffMs}ms (idle streak ${emptyPollStreak})`)
+        if (backoffMs > 0) await new Promise(resolve => setTimeout(resolve, backoffMs))
         claimsStarted-- // un-reserve the slot: this loop iteration did not claim a story
         continue
       }
@@ -770,6 +805,7 @@ async function runWorker(workerId) {
     const { ref, title, manifestPath } = claim
     log(`claimed ${ref} — ${title} (worker ${workerId})`)
     stuckPolls = 0 // a claim succeeded — real progress; reset the stall counter
+    emptyPollStreak = 0 // reset backoff: a later idle stretch starts responsive again
     // FAST-LANE ROUTING (Story native:01KTKK3HQYNFS1M1ZR9TG02G1F): resolve the
     // build plan (dev/reviewer model + review depth) from the story's persisted
     // lane. The seam reads the lane from the in-progress manifest and returns
