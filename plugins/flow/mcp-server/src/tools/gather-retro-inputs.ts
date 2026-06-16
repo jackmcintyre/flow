@@ -84,6 +84,11 @@ import {
 } from "./write-native-story.js";
 import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
+import {
+  extractLessonsFromBody,
+  type ParsedLesson,
+} from "../lib/lesson-archive.js";
+import { parsePersonaFile } from "../lib/persona-file.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -97,6 +102,27 @@ interface RecurringFrictionEntry {
   kind: FrictionKind;
   /** How many `agent.friction` events of this kind occurred in the cycle. */
   count: number;
+}
+
+/**
+ * A pair of near-duplicate lessons detected in a single role's Knowledge section.
+ * Surfaced in the retro input bundle so the retro-analyst can propose consolidating
+ * them into a single sharper lesson.
+ *
+ * Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T.
+ */
+export interface NearDuplicateLessonPair {
+  /** The kebab role id whose Knowledge section holds both lessons. */
+  role: string;
+  /** The first duplicate lesson. */
+  lesson_a: ParsedLesson;
+  /** The second duplicate lesson. */
+  lesson_b: ParsedLesson;
+  /**
+   * Jaccard similarity score (0–1) between the combined text fields of both
+   * lessons. Higher = more similar. Used for ordering when multiple pairs exist.
+   */
+  similarity: number;
 }
 
 /**
@@ -187,6 +213,21 @@ export interface RetroInputs {
    * Story native:01KT6RHTE3YME1ZAD5VRQAKDSW.
    */
   mechanicalFailuresDrafted: MechanicalFailureDraft[];
+  /**
+   * Near-duplicate lesson pairs detected in hired roles' Knowledge sections.
+   *
+   * Each entry names the role and the two lessons that express the same point,
+   * ordered by Jaccard similarity score descending (highest confidence first).
+   * The retro-analyst MUST consume this pre-computed signal to draft
+   * `lesson-consolidation` proposals — it MUST NOT re-scan persona files in
+   * prose, mirroring the `fireCountSignal` and `recurringFriction` disciplines.
+   *
+   * Empty when: (a) no roles are hired, (b) all roles have zero or one lesson,
+   * or (c) no pair in any role exceeds the similarity threshold.
+   *
+   * Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T.
+   */
+  nearDuplicateLessonPairs: NearDuplicateLessonPair[];
 }
 
 export interface GatherRetroInputsOptions {
@@ -284,7 +325,11 @@ export async function gatherRetroInputs(
     opts.sessionUlid,
   );
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
+  // Detect near-duplicate lesson pairs across all hired roles
+  // (Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T). This is a pure read — no writes.
+  const nearDuplicateLessonPairs = await gatherNearDuplicateLessonPairs(targetRepoRoot);
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs };
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +783,148 @@ function computeRecurringFriction(events: TelemetryEvent[]): RecurringFrictionEn
   }
   result.sort((a, b) => a.kind.localeCompare(b.kind));
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// near-duplicate lesson detection (Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T)
+// ---------------------------------------------------------------------------
+
+/**
+ * Jaccard similarity between two token sets derived from the combined
+ * `applies_when` + `detail` text of a lesson.
+ *
+ * Tokenises by splitting on whitespace/punctuation and lowercasing.
+ * Returns a score in [0, 1] where 1 = identical token sets.
+ */
+export function lessonSimilarity(a: ParsedLesson, b: ParsedLesson): number {
+  const tokensA = tokenise(`${a.applies_when} ${a.detail}`);
+  const tokensB = tokenise(`${b.applies_when} ${b.detail}`);
+
+  if (tokensA.size === 0 && tokensB.size === 0) return 1;
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  let intersectionSize = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersectionSize++;
+  }
+
+  const unionSize = tokensA.size + tokensB.size - intersectionSize;
+  return unionSize === 0 ? 0 : intersectionSize / unionSize;
+}
+
+/**
+ * Tokenise a string into a lowercase word token set, stripping punctuation.
+ * Very short tokens (< 3 chars) and stop-words are excluded to prevent
+ * common words from inflating similarity scores.
+ */
+function tokenise(text: string): Set<string> {
+  const STOP_WORDS = new Set([
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "is", "it", "its", "as", "be", "was",
+    "are", "not", "do", "if", "so", "no", "we", "you",
+  ]);
+  const tokens = new Set<string>();
+  for (const raw of text.toLowerCase().split(/[\s\p{P}]+/u)) {
+    const tok = raw.trim();
+    if (tok.length >= 3 && !STOP_WORDS.has(tok)) {
+      tokens.add(tok);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Threshold above which two lessons are considered near-duplicates.
+ * Chosen to catch substantively overlapping lessons (40%+ token overlap)
+ * while avoiding false-positives from lessons that merely share domain
+ * vocabulary (< 35% overlap).
+ */
+const NEAR_DUPLICATE_THRESHOLD = 0.35;
+
+/**
+ * Detect near-duplicate lesson pairs across all hired roles.
+ *
+ * For each hired role (any directory under `<targetRepoRoot>/team/` that
+ * contains a valid `PERSONA.md`), extracts the structured lesson blocks from
+ * the Knowledge section and flags any pair whose Jaccard similarity exceeds
+ * `NEAR_DUPLICATE_THRESHOLD`. Returns only the highest-similarity pair per
+ * role (at most one consolidation proposal per role per retro — operators
+ * should approve one at a time rather than be flooded with proposals).
+ *
+ * Returns an empty array on ENOENT (no `team/` directory — no roles hired).
+ * Roles with a malformed persona or fewer than two lessons are skipped silently.
+ */
+async function gatherNearDuplicateLessonPairs(
+  targetRepoRoot: string,
+): Promise<NearDuplicateLessonPair[]> {
+  const teamDir = path.join(targetRepoRoot, "team");
+
+  let roleEntries: string[];
+  try {
+    roleEntries = await fs.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent(err)) return [];
+    throw err;
+  }
+
+  const SKIP_DIRS = new Set(["custom", "_archived"]);
+  const pairs: NearDuplicateLessonPair[] = [];
+
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stat = await fs.stat(path.join(teamDir, entry));
+    } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    const personaPath = path.join(teamDir, entry, "PERSONA.md");
+    let raw: string;
+    try {
+      raw = await fs.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent(err)) continue;
+      throw err;
+    }
+
+    let parsed: ReturnType<typeof parsePersonaFile>;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      // Malformed persona — skip this role gracefully.
+      continue;
+    }
+
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length < 2) continue;
+
+    // Find the highest-similarity pair in this role.
+    let bestPair: NearDuplicateLessonPair | null = null;
+    for (let i = 0; i < lessons.length; i++) {
+      for (let j = i + 1; j < lessons.length; j++) {
+        const sim = lessonSimilarity(lessons[i]!, lessons[j]!);
+        if (sim >= NEAR_DUPLICATE_THRESHOLD) {
+          if (bestPair === null || sim > bestPair.similarity) {
+            bestPair = {
+              role: entry,
+              lesson_a: lessons[i]!,
+              lesson_b: lessons[j]!,
+              similarity: sim,
+            };
+          }
+        }
+      }
+    }
+
+    if (bestPair !== null) {
+      pairs.push(bestPair);
+    }
+  }
+
+  // Sort descending by similarity so the most confident proposals come first.
+  pairs.sort((a, b) => b.similarity - a.similarity);
+  return pairs;
 }
 
 // ---------------------------------------------------------------------------

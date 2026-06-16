@@ -107,4 +107,5 @@ export const FIX_WORTHY_TYPES = [
   "persona-append",
   "promote-lesson-to-skill",
   "build-story",
+  "lesson-consolidation",
 ] as const;
