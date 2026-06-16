@@ -30042,6 +30042,9 @@ function extractLessonsFromBody(body) {
     if (typeof obj["last_used_at"] === "string") {
       lesson.last_used_at = obj["last_used_at"];
     }
+    if (typeof obj["helpful_fire_count"] === "number") {
+      lesson.helpful_fire_count = obj["helpful_fire_count"];
+    }
     if (typeof obj["failure_class"] === "string") {
       lesson.failure_class = obj["failure_class"];
     }
@@ -30055,7 +30058,17 @@ function extractLessonsFromBody(body) {
   }
   return lessons;
 }
+function lessonHelpfulnessRatio(lesson) {
+  const uses = lesson.use_count ?? 0;
+  if (uses === 0) {
+    return 0.5;
+  }
+  return (lesson.helpful_fire_count ?? 0) / uses;
+}
 function compareLessons(a2, b) {
+  const aRatio = lessonHelpfulnessRatio(a2);
+  const bRatio = lessonHelpfulnessRatio(b);
+  if (bRatio !== aRatio) return bRatio - aRatio;
   const aCount = a2.use_count ?? 0;
   const bCount = b.use_count ?? 0;
   if (bCount !== aCount) return bCount - aCount;
@@ -30081,6 +30094,7 @@ function serialiseLessonBlock(lesson) {
   };
   if (lesson.use_count !== void 0) obj["use_count"] = lesson.use_count;
   if (lesson.last_used_at !== void 0) obj["last_used_at"] = lesson.last_used_at;
+  if (lesson.helpful_fire_count !== void 0) obj["helpful_fire_count"] = lesson.helpful_fire_count;
   if (lesson.failure_class !== void 0) obj["failure_class"] = lesson.failure_class;
   if (lesson.source_ref !== void 0) obj["source_ref"] = lesson.source_ref;
   if (lesson.source_pr !== void 0) obj["source_pr"] = lesson.source_pr;
@@ -30201,6 +30215,7 @@ async function findArchivedLessonById(targetRepoRoot, role, id) {
   };
   if (typeof obj["use_count"] === "number") archived.use_count = obj["use_count"];
   if (typeof obj["last_used_at"] === "string") archived.last_used_at = obj["last_used_at"];
+  if (typeof obj["helpful_fire_count"] === "number") archived.helpful_fire_count = obj["helpful_fire_count"];
   if (typeof obj["failure_class"] === "string") archived.failure_class = obj["failure_class"];
   if (typeof obj["source_ref"] === "string") archived.source_ref = obj["source_ref"];
   if (typeof obj["source_pr"] === "string") archived.source_pr = obj["source_pr"];
