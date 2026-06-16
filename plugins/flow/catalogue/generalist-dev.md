@@ -7,6 +7,7 @@ tools_allow:
   - Edit
   - Bash
   - Task
+  - recordMaintainerFeedback
 gh_allow:
   - pr-create
   - pr-view

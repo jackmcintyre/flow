@@ -41,6 +41,7 @@ import {
   reattachOrphanInputSchema,
   recallLessonInputSchema,
   recordAgentFrictionInputSchema,
+  recordMaintainerFeedbackInputSchema,
   recordReviewerLessonInputSchema,
   recordSkillInvokeInputSchema,
   recordStoryRetroInputSchema,
@@ -112,6 +113,7 @@ import { writeLensVerdict, aggregateJudgePanel, DEFAULT_LENS_ROLES } from "./jud
 import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
+import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
@@ -1855,6 +1857,50 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     handler: async (args) => {
       try {
         const result = await recordAgentFriction(args as Parameters<typeof recordAgentFriction>[0]);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KV7FHZ41Z6CFPABW1B8J38BV — recordMaintainerFeedback: capture seam for
+  // structured maintainer-feedback items. Any role on the team (or the retrospective) can
+  // call this when it hits a structural limitation of the tool itself. The item lands in a
+  // maintainer-only inbox (.flow/maintainer-inbox/) that the team never reads to drive its
+  // own behaviour. Items accumulate as distinct files — nothing is overwritten.
+  server.registerTool({
+    name: "recordMaintainerFeedback",
+    description:
+      "Record a structured feedback item about a structural limitation of the tool itself " +
+      "into a maintainer-only inbox (.flow/maintainer-inbox/). " +
+      "Required fields: problem (what is wrong), tool_area (which part of the tool), " +
+      "trigger (which role/phase/story surfaced it). Optional: suggested_direction. " +
+      "Items accumulate as distinct timestamped JSON files — nothing is overwritten. " +
+      "The write touches ONLY .flow/maintainer-inbox/ and leaves the team's working state " +
+      "and backlog byte-unchanged (AC1). Refuses to store incomplete items (AC2). " +
+      "Story native:01KV7FHZ41Z6CFPABW1B8J38BV.",
+    inputSchema: recordMaintainerFeedbackInputSchema,
+    handler: async (args) => {
+      try {
+        const parsed = {
+          targetRepoRoot: (args as { targetRepoRoot: string }).targetRepoRoot,
+          item: (args as { item: unknown }).item,
+        };
+        const result = await recordMaintainerFeedback(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

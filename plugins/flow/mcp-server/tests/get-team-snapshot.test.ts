@@ -649,7 +649,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
     // Story native:01KTZGEW6TSC6C84P9KJ7FD96S added summariseRetroProposal (retro inline summary) = 54 total.
     // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft) = 55 total.
     // Story native:01KT7S0E2 removed bmadToNativeIngest (auditor-confirmed orphan) = 54 total.
-    expect(result.tools.length).toBe(54);
+    // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture) = 55 total.
+    expect(result.tools.length).toBe(55);
 
     await client.close();
     await server.close();

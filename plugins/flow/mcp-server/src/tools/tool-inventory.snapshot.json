@@ -37,6 +37,7 @@
   "reattachOrphan",
   "recallLesson",
   "recordAgentFriction",
+  "recordMaintainerFeedback",
   "recordReviewerLesson",
   "recordSkillInvoke",
   "recordStoryRetro",

@@ -7,6 +7,7 @@ tools_allow:
   - Bash
   - Task
   - runReviewerSession
+  - recordMaintainerFeedback
 gh_allow:
   - pr-view
   - pr-diff

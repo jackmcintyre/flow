@@ -552,7 +552,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // ---------------------------------------------------------------------------
 
 describe("AC4(g): tool count and required tools present", () => {
-  it("registered tool list has exactly 54 entries and contains the required tools but NOT runDevSession", async () => {
+  it("registered tool list has exactly 55 entries and contains the required tools but NOT runDevSession", async () => {
     const server = createServer();
     registerAllTools(server);
 
@@ -625,7 +625,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("summariseRetroProposal");
       // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft). 53 → 54.
       expect(toolNames).toContain("discardDraft");
-      expect(toolNames.length).toBe(54);
+      // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture). 54 → 55.
+      expect(toolNames).toContain("recordMaintainerFeedback");
+      expect(toolNames.length).toBe(55);
     } finally {
       await client.close();
       await server.close();
