@@ -152,7 +152,7 @@ export const YieldHandoffEventSchema = TelemetryEventBase.extend({
  * no-op, or on a fail-closed unregistered kind.
  *
  * - `id`              — the proposal's ULID.
- * - `proposal_type`   — the proposal's kind (one of the eleven retro-proposal
+ * - `proposal_type`   — the proposal's kind (one of the twelve retro-proposal
  *                       discriminator literals). Note: `build-story` proposals
  *                       have no apply handler and can never reach this event by
  *                       construction, but the enum is kept in sync with the
@@ -179,6 +179,7 @@ const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
         "promote-lesson-to-skill",
         "build-story",
         "lesson-consolidation",
+        "lesson-retirement",
       ]),
       applied_sha: z.string().min(1),
       idempotency_key: z.string().min(1),

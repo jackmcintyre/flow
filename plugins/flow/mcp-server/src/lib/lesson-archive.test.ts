@@ -26,7 +26,9 @@ import {
   demoteLessonsFromBody,
   archiveLessons,
   findArchivedLessonById,
+  selectRetirableLessons,
   serialiseLessonBlock,
+  DEFAULT_AGE_FLOOR_MS,
   type ParsedLesson,
 } from "./lesson-archive.js";
 
@@ -344,5 +346,160 @@ describe("archiveLessons + findArchivedLessonById (integration)", () => {
     expect(paths).toHaveLength(2);
     expect(paths[0]).toBe(`team/generalist-dev/_archived/${L1.id}.json`);
     expect(paths[1]).toBe(`team/generalist-dev/_archived/${L2.id}.json`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectRetirableLessons — Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ
+// AC1: retro recommends retiring dead lessons (selector returns them)
+// AC3: all-still-useful roles → selector returns empty
+// AC4: mixed input → only dead lessons selected
+// ---------------------------------------------------------------------------
+
+describe("selectRetirableLessons", () => {
+  // Fixed clock: 30 days after the reference date so age-floor checks pass.
+  const REFERENCE_DATE = "2026-01-01T00:00:00.000Z";
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const NOW_DATE = new Date(new Date(REFERENCE_DATE).getTime() + THIRTY_DAYS_MS);
+  const fixedNowFn = () => NOW_DATE;
+
+  // A lesson old enough (30 days) and never recalled.
+  const deadLesson = makeLesson({
+    id: "01KV7FG00000000000000DEAD1",
+    learned_at: REFERENCE_DATE,
+    // use_count absent (never recalled)
+  });
+
+  // A lesson that HAS been recalled — still earning its keep.
+  const recalledLesson = makeLesson({
+    id: "01KV7FG00000000000000LIVE1",
+    learned_at: REFERENCE_DATE,
+    use_count: 3,
+    last_used_at: "2026-01-15T00:00:00.000Z",
+  });
+
+  // A lesson with use_count=0 BUT a last_used_at stamp (double guard).
+  const recentlyUsedLesson = makeLesson({
+    id: "01KV7FG00000000000000LIVE2",
+    learned_at: REFERENCE_DATE,
+    use_count: 0,
+    last_used_at: "2026-01-10T00:00:00.000Z",
+  });
+
+  // A dead lesson that is too NEW (within the age floor).
+  const tooNewLesson = makeLesson({
+    id: "01KV7FG00000000000000NEW01",
+    // learned 1 day before NOW_DATE — within default 14-day floor
+    learned_at: new Date(NOW_DATE.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    // use_count absent
+  });
+
+  it("(AC1) selects lessons that have never been recalled and are past the age floor", () => {
+    const result = selectRetirableLessons(
+      [deadLesson],
+      { now: fixedNowFn },
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.lesson.id).toBe(deadLesson.id);
+    expect(result[0]!.reason).toContain("Never recalled");
+    expect(result[0]!.reason).toContain("use_count=0");
+  });
+
+  it("(AC3) returns empty when all lessons have been recalled", () => {
+    // All lessons are still earning their keep.
+    const result = selectRetirableLessons(
+      [recalledLesson, recentlyUsedLesson],
+      { now: fixedNowFn },
+    );
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("(AC3) returns empty when the role has no lessons at all", () => {
+    const result = selectRetirableLessons([], { now: fixedNowFn });
+    expect(result).toHaveLength(0);
+  });
+
+  it("(AC4) selects only dead lessons when inputs mix recalled, recently-useful, and dead", () => {
+    // deadLesson → retirable
+    // recalledLesson → NOT retirable (use_count > 0)
+    // recentlyUsedLesson → NOT retirable (last_used_at present)
+    // tooNewLesson → NOT retirable (within age floor)
+    const result = selectRetirableLessons(
+      [deadLesson, recalledLesson, recentlyUsedLesson, tooNewLesson],
+      { now: fixedNowFn },
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.lesson.id).toBe(deadLesson.id);
+  });
+
+  it("(AC4) does not select a lesson with use_count=0 but last_used_at set", () => {
+    const result = selectRetirableLessons(
+      [recentlyUsedLesson],
+      { now: fixedNowFn },
+    );
+    expect(result).toHaveLength(0);
+  });
+
+  it("(AC4) does not select a lesson within the age floor even if never recalled", () => {
+    const result = selectRetirableLessons(
+      [tooNewLesson],
+      { now: fixedNowFn },
+    );
+    expect(result).toHaveLength(0);
+  });
+
+  it("(AC4) selects multiple dead lessons from the same role", () => {
+    const dead2 = makeLesson({
+      id: "01KV7FG00000000000000DEAD2",
+      learned_at: REFERENCE_DATE,
+    });
+
+    const result = selectRetirableLessons(
+      [deadLesson, dead2],
+      { now: fixedNowFn },
+    );
+
+    expect(result).toHaveLength(2);
+    const ids = result.map((c) => c.lesson.id);
+    expect(ids).toContain(deadLesson.id);
+    expect(ids).toContain(dead2.id);
+  });
+
+  it("respects a custom ageFloorMs", () => {
+    // tooNewLesson is 1 day old; with a 0-day floor it SHOULD be selected.
+    const result = selectRetirableLessons(
+      [tooNewLesson],
+      { now: fixedNowFn, ageFloorMs: 0 },
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]!.lesson.id).toBe(tooNewLesson.id);
+  });
+
+  it("reason string mentions the lesson age in days", () => {
+    const result = selectRetirableLessons(
+      [deadLesson],
+      { now: fixedNowFn },
+    );
+    // Approximately 30 days — the reason should contain a number of days.
+    expect(result[0]!.reason).toMatch(/\d+ days ago/);
+  });
+
+  it("uses DEFAULT_AGE_FLOOR_MS (14 days) when ageFloorMs is not specified", () => {
+    // A lesson exactly 15 days old should be selected (past the 14-day default floor).
+    const FIFTEEN_DAYS_MS = 15 * 24 * 60 * 60 * 1000;
+    const fifteenDayOld = makeLesson({
+      id: "01KV7FG0000000000000015DAY",
+      learned_at: new Date(NOW_DATE.getTime() - FIFTEEN_DAYS_MS).toISOString(),
+    });
+
+    const result = selectRetirableLessons(
+      [fifteenDayOld],
+      { now: fixedNowFn },
+    );
+    expect(result).toHaveLength(1);
+    expect(DEFAULT_AGE_FLOOR_MS).toBe(14 * 24 * 60 * 60 * 1000);
   });
 });

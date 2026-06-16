@@ -437,6 +437,134 @@ export function rebuildBodyWithTopLessons(
 }
 
 // ---------------------------------------------------------------------------
+// Retirement selector (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ)
+// ---------------------------------------------------------------------------
+
+/**
+ * A lesson flagged by `selectRetirableLessons` as a candidate for retirement.
+ * Carries the lesson itself plus a human-readable reason string so the retro
+ * analyst can emit it verbatim in the proposal rationale.
+ */
+export interface RetirableLessonCandidate {
+  lesson: ParsedLesson;
+  /** One-sentence explanation of why this lesson earned no keep. */
+  reason: string;
+}
+
+/**
+ * Options for `selectRetirableLessons`.
+ *
+ * @param now            - Injectable clock seam (default: real Date).
+ * @param ageFloorMs     - Minimum age in milliseconds a lesson must be before it
+ *                         can be retired. Prevents brand-new lessons from being
+ *                         flagged prematurely (default: 14 days).
+ * @param cycleCount     - How many cycles (for the "never tied to a good outcome
+ *                         over several cycles" wording in the rationale).
+ *                         Informational only — does not affect the selection
+ *                         logic beyond what `ageFloorMs` already encodes.
+ */
+export interface SelectRetirableLessonsOptions {
+  /** Injectable clock seam. Default: `() => new Date()`. */
+  now?: () => Date;
+  /**
+   * Minimum lesson age in milliseconds before it is eligible for retirement.
+   * Default: 14 days (1_209_600_000 ms).
+   */
+  ageFloorMs?: number;
+  /**
+   * How many cycles the age floor roughly represents (for rationale wording).
+   * Default: 3.
+   */
+  cycleCount?: number;
+}
+
+/** Default age floor: 14 days. */
+export const DEFAULT_AGE_FLOOR_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Default cycle count used in rationale wording. */
+const DEFAULT_CYCLE_COUNT = 3;
+
+/**
+ * Select lessons that have never earned their keep and are old enough to have
+ * had a fair chance to do so.
+ *
+ * A lesson is retirable when ALL of the following are true:
+ *   1. `use_count` is 0 or absent — never recalled by any agent.
+ *   2. `last_used_at` is absent — never recalled (double-check guard).
+ *   3. `learned_at` predates `now - ageFloorMs` — old enough to have been used.
+ *
+ * "Tied to a good outcome" is encoded via the existing provenance fields:
+ * `source_ref` and `source_pr` record where the lesson was authored but do NOT
+ * constitute a "good outcome" signal by themselves (every lesson has provenance;
+ * the learning loop does not yet write a `good_outcome` boolean onto lesson
+ * blocks). The functional signal for "earned keep" is **recall** — if a lesson
+ * was recalled (`use_count > 0` or `last_used_at` present), it earned its keep.
+ * This matches the story's definition ("never recalled and never tied to a good
+ * outcome"), since recall IS the proxy for "tied to a good outcome" in this
+ * version of the signal.
+ *
+ * Lessons with a `use_count` of 0 AND no `last_used_at` AND old enough are
+ * selected. Brand-new lessons (within `ageFloorMs`) are excluded so a newly
+ * recorded lesson is not immediately flagged.
+ *
+ * This function is **pure** and **clock-injectable** for deterministic testing.
+ * It does NOT read the filesystem.
+ *
+ * Exported for unit testing.
+ */
+export function selectRetirableLessons(
+  lessons: ParsedLesson[],
+  opts: SelectRetirableLessonsOptions = {},
+): RetirableLessonCandidate[] {
+  const {
+    now = () => new Date(),
+    ageFloorMs = DEFAULT_AGE_FLOOR_MS,
+    cycleCount = DEFAULT_CYCLE_COUNT,
+  } = opts;
+
+  const currentMs = now().getTime();
+  const candidates: RetirableLessonCandidate[] = [];
+
+  for (const lesson of lessons) {
+    // 1. Has it ever been recalled?
+    const useCount = lesson.use_count ?? 0;
+    if (useCount > 0) {
+      continue; // Earned its keep via recall.
+    }
+
+    // 2. Does it have a last_used_at? (belt-and-suspenders guard)
+    if (lesson.last_used_at !== undefined) {
+      continue; // Earned its keep via recall.
+    }
+
+    // 3. Is it old enough to have had a fair chance?
+    let learnedAtMs: number;
+    try {
+      learnedAtMs = Date.parse(lesson.learned_at);
+    } catch {
+      // Unparseable learned_at — skip (don't retire something we can't date).
+      continue;
+    }
+    if (isNaN(learnedAtMs)) {
+      continue; // Unparseable date — skip.
+    }
+    if (currentMs - learnedAtMs < ageFloorMs) {
+      continue; // Too new — give it more time.
+    }
+
+    const ageMs = currentMs - learnedAtMs;
+    const ageDays = Math.round(ageMs / (24 * 60 * 60 * 1000));
+    const reason =
+      `Never recalled and never tied to a good outcome over ${cycleCount} cycles ` +
+      `(learned ${ageDays} days ago, use_count=0, last_used_at absent).`;
+
+    candidates.push({ lesson, reason });
+  }
+
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
 // Archived-store lookup (used by recallLesson fallback path)
 // ---------------------------------------------------------------------------
 

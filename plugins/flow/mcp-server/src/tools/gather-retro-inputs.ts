@@ -86,7 +86,9 @@ import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import {
   extractLessonsFromBody,
+  selectRetirableLessons,
   type ParsedLesson,
+  type RetirableLessonCandidate,
 } from "../lib/lesson-archive.js";
 import { parsePersonaFile } from "../lib/persona-file.js";
 
@@ -102,6 +104,20 @@ interface RecurringFrictionEntry {
   kind: FrictionKind;
   /** How many `agent.friction` events of this kind occurred in the cycle. */
   count: number;
+}
+
+/**
+ * Per-role retirable lesson signal surfaced in the retro input bundle so the
+ * retro-analyst can draft a `lesson-retirement` proposal without re-scanning
+ * persona files in prose.
+ *
+ * Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ.
+ */
+interface RetirableLessonsEntry {
+  /** The kebab role id whose Knowledge section carries the dead lessons. */
+  role: string;
+  /** Lessons that have never been recalled and are old enough to be retired. */
+  candidates: RetirableLessonCandidate[];
 }
 
 /**
@@ -228,6 +244,22 @@ export interface RetroInputs {
    * Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T.
    */
   nearDuplicateLessonPairs: NearDuplicateLessonPair[];
+  /**
+   * Per-role retirable lesson signal — lessons that have never been recalled
+   * and have never been tied to a good outcome (proxy: use_count=0 +
+   * last_used_at absent) over an age floor (default: 14 days / ~3 cycles).
+   *
+   * The retro-analyst MUST draft `lesson-retirement` proposals from this
+   * pre-computed signal — it MUST NOT re-scan persona files or re-derive
+   * usefulness in prose, mirroring the `fireCountSignal` and
+   * `nearDuplicateLessonPairs` disciplines.
+   *
+   * Empty when: (a) no roles are hired, or (b) all lessons in all roles have
+   * been recalled at least once (or are too new).
+   *
+   * Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ.
+   */
+  retirableLessons: RetirableLessonsEntry[];
 }
 
 export interface GatherRetroInputsOptions {
@@ -258,6 +290,18 @@ export interface GatherRetroInputsOptions {
    * Defaults to `MECHANICAL_FAILURE_THRESHOLD` (2). Test seam.
    */
   mechanicalFailureThreshold?: number;
+  /**
+   * Optional age floor override for the retirable lesson selector (in ms).
+   * Defaults to `DEFAULT_AGE_FLOOR_MS` (14 days). Test seam.
+   * (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ)
+   */
+  retirableAgeFloorMs?: number;
+  /**
+   * Optional injectable clock for the retirable lesson selector.
+   * Defaults to `() => new Date()`. Test seam.
+   * (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ)
+   */
+  retirableNow?: () => Date;
 }
 
 /**
@@ -329,7 +373,14 @@ export async function gatherRetroInputs(
   // (Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T). This is a pure read — no writes.
   const nearDuplicateLessonPairs = await gatherNearDuplicateLessonPairs(targetRepoRoot);
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs };
+  // Compute per-role retirable lesson signal
+  // (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ). This is a pure read — no writes.
+  const retirableLessons = await gatherRetirableLessons(targetRepoRoot, {
+    ageFloorMs: opts.retirableAgeFloorMs,
+    now: opts.retirableNow,
+  });
+
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons };
 }
 
 // ---------------------------------------------------------------------------
@@ -925,6 +976,78 @@ async function gatherNearDuplicateLessonPairs(
   // Sort descending by similarity so the most confident proposals come first.
   pairs.sort((a, b) => b.similarity - a.similarity);
   return pairs;
+}
+
+// ---------------------------------------------------------------------------
+// retirable lesson detection (Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the per-role retirable lesson signal.
+ *
+ * For each hired role (any directory under `<targetRepoRoot>/team/` that
+ * contains a valid `PERSONA.md`), extracts the structured lesson blocks from
+ * the Knowledge section and applies `selectRetirableLessons` with the given
+ * age floor to find lessons that have never been recalled.
+ *
+ * Returns only roles with at least one retirable lesson (so the analyst
+ * never sees an empty entry). Returns an empty array on ENOENT (no `team/`
+ * directory — no roles hired). Roles with a malformed persona are skipped
+ * silently.
+ */
+async function gatherRetirableLessons(
+  targetRepoRoot: string,
+  opts: { ageFloorMs?: number; now?: () => Date } = {},
+): Promise<RetirableLessonsEntry[]> {
+  const teamDir = path.join(targetRepoRoot, "team");
+
+  let roleEntries: string[];
+  try {
+    roleEntries = await fs.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent(err)) return [];
+    throw err;
+  }
+
+  const SKIP_DIRS = new Set(["custom", "_archived"]);
+  const entries: RetirableLessonsEntry[] = [];
+
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stat = await fs.stat(path.join(teamDir, entry));
+    } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    const personaPath = path.join(teamDir, entry, "PERSONA.md");
+    let raw: string;
+    try {
+      raw = await fs.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent(err)) continue;
+      throw err;
+    }
+
+    let parsed: ReturnType<typeof parsePersonaFile>;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      // Malformed persona — skip this role gracefully.
+      continue;
+    }
+
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length === 0) continue;
+
+    const candidates = selectRetirableLessons(lessons, opts);
+    if (candidates.length === 0) continue;
+
+    entries.push({ role: entry, candidates });
+  }
+
+  return entries;
 }
 
 // ---------------------------------------------------------------------------

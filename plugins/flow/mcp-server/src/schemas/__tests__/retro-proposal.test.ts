@@ -95,8 +95,8 @@ function fileWith(proposal: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
-  it("exposes exactly eleven proposal types", () => {
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(11);
+  it("exposes exactly twelve proposal types", () => {
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(12);
     expect(new Set(RETRO_PROPOSAL_TYPES)).toEqual(
       new Set([
         "rule",
@@ -110,6 +110,7 @@ describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
         "promote-lesson-to-skill",
         "build-story",
         "lesson-consolidation",
+        "lesson-retirement",
       ]),
     );
   });

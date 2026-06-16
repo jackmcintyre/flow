@@ -27400,7 +27400,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "persona-append",
       "promote-lesson-to-skill",
       "build-story",
-      "lesson-consolidation"
+      "lesson-consolidation",
+      "lesson-retirement"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -30129,6 +30130,43 @@ function rebuildBodyWithTopLessons(originalBody, topLessons) {
   }
   return parts.join("\n");
 }
+var DEFAULT_AGE_FLOOR_MS = 14 * 24 * 60 * 60 * 1e3;
+var DEFAULT_CYCLE_COUNT = 3;
+function selectRetirableLessons(lessons, opts = {}) {
+  const {
+    now = () => /* @__PURE__ */ new Date(),
+    ageFloorMs = DEFAULT_AGE_FLOOR_MS,
+    cycleCount = DEFAULT_CYCLE_COUNT
+  } = opts;
+  const currentMs = now().getTime();
+  const candidates = [];
+  for (const lesson of lessons) {
+    const useCount = lesson.use_count ?? 0;
+    if (useCount > 0) {
+      continue;
+    }
+    if (lesson.last_used_at !== void 0) {
+      continue;
+    }
+    let learnedAtMs;
+    try {
+      learnedAtMs = Date.parse(lesson.learned_at);
+    } catch {
+      continue;
+    }
+    if (isNaN(learnedAtMs)) {
+      continue;
+    }
+    if (currentMs - learnedAtMs < ageFloorMs) {
+      continue;
+    }
+    const ageMs = currentMs - learnedAtMs;
+    const ageDays = Math.round(ageMs / (24 * 60 * 60 * 1e3));
+    const reason = `Never recalled and never tied to a good outcome over ${cycleCount} cycles (learned ${ageDays} days ago, use_count=0, last_used_at absent).`;
+    candidates.push({ lesson, reason });
+  }
+  return candidates;
+}
 async function findArchivedLessonById(targetRepoRoot, role, id) {
   const absPath = path19.join(targetRepoRoot, "team", role, "_archived", `${id}.json`);
   let raw;
@@ -30538,7 +30576,11 @@ async function gatherRetroInputs(opts) {
     opts.sessionUlid
   );
   const nearDuplicateLessonPairs = await gatherNearDuplicateLessonPairs(targetRepoRoot);
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs };
+  const retirableLessons = await gatherRetirableLessons(targetRepoRoot, {
+    ageFloorMs: opts.retirableAgeFloorMs,
+    now: opts.retirableNow
+  });
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons };
 }
 async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
   const doneDir = path20.join(targetRepoRoot, ".flow", "state", "done");
@@ -30898,6 +30940,48 @@ async function gatherNearDuplicateLessonPairs(targetRepoRoot) {
   }
   pairs.sort((a2, b) => b.similarity - a2.similarity);
   return pairs;
+}
+async function gatherRetirableLessons(targetRepoRoot, opts = {}) {
+  const teamDir = path20.join(targetRepoRoot, "team");
+  let roleEntries;
+  try {
+    roleEntries = await fs15.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent(err)) return [];
+    throw err;
+  }
+  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
+  const entries = [];
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    let stat2;
+    try {
+      stat2 = await fs15.stat(path20.join(teamDir, entry));
+    } catch {
+      continue;
+    }
+    if (!stat2.isDirectory()) continue;
+    const personaPath = path20.join(teamDir, entry, "PERSONA.md");
+    let raw;
+    try {
+      raw = await fs15.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent(err)) continue;
+      throw err;
+    }
+    let parsed;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      continue;
+    }
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length === 0) continue;
+    const candidates = selectRetirableLessons(lessons, opts);
+    if (candidates.length === 0) continue;
+    entries.push({ role: entry, candidates });
+  }
+  return entries;
 }
 function isEnoent(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
@@ -44030,6 +44114,16 @@ var LessonConsolidationProposalSchema = ProposalBase.extend({
   lesson_b_text: external_exports.string().min(1),
   merged_lesson: external_exports.string().min(1)
 }).strict();
+var LessonRetirementProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("lesson-retirement"),
+  target_role: RolePathSchema,
+  lesson_retirements: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().min(1),
+      reason: external_exports.string().min(1)
+    }).strict()
+  ).min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -44041,7 +44135,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   PersonaAppendProposalSchema,
   PromoteLessonToSkillProposalSchema,
   BuildStoryProposalSchema,
-  LessonConsolidationProposalSchema
+  LessonConsolidationProposalSchema,
+  LessonRetirementProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,

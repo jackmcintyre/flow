@@ -651,6 +651,16 @@ function renderProposalFields(
         ["lesson_b_text", proposal.lesson_b_text],
         ["merged_lesson", proposal.merged_lesson],
       ];
+    case "lesson-retirement":
+      return [
+        ["target_role", proposal.target_role],
+        [
+          "lesson_retirements",
+          proposal.lesson_retirements
+            .map((r) => `${r.id}: ${r.reason}`)
+            .join("; "),
+        ],
+      ];
   }
 }
 
