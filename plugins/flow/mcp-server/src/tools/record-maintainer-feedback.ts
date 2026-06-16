@@ -157,6 +157,9 @@ export async function recordMaintainerFeedback(
     ...(validated.suggested_direction !== undefined
       ? { suggested_direction: validated.suggested_direction }
       : {}),
+    ...(validated.dedup_key !== undefined
+      ? { dedup_key: validated.dedup_key }
+      : {}),
   };
 
   // Step 4: Write to the maintainer inbox as a distinct, accumulated entry.

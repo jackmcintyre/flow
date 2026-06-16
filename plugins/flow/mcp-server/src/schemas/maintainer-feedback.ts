@@ -33,8 +33,14 @@ import { MalformedMaintainerFeedbackError } from "../errors.js";
  *   - `tool_area`  — Which part of the tool the problem concerns.
  *   - `trigger`    — What surfaced this: which role / phase / story triggered it.
  *
- * Optional field:
+ * Optional fields:
  *   - `suggested_direction` — A concrete suggestion for how to fix or improve.
+ *   - `dedup_key`           — Stable identity for deduplication. When set, a
+ *                             re-run over the same source data that produced
+ *                             this item will skip raising a second item with
+ *                             the same `dedup_key`. Convention:
+ *                             `recurring-friction:<kind>` for retro-raised
+ *                             friction items (Story native:01KV84GRHFV6F6E6M1B32WH6HS).
  *
  * Provenance fields (stamped by the tool, not supplied by the caller):
  *   - `id`         — Unique identifier (ULID) for this item.
@@ -60,6 +66,7 @@ export const MaintainerFeedbackItemSchema = z
     tool_area: z.string().min(1, "tool_area must be a non-empty string"),
     trigger: z.string().min(1, "trigger must be a non-empty string"),
     suggested_direction: z.string().min(1).optional(),
+    dedup_key: z.string().min(1).optional(),
   })
   .strict();
 
@@ -76,6 +83,7 @@ const MaintainerFeedbackInputSchema = z
     tool_area: z.string().min(1, "tool_area must be a non-empty string"),
     trigger: z.string().min(1, "trigger must be a non-empty string"),
     suggested_direction: z.string().min(1).optional(),
+    dedup_key: z.string().min(1).optional(),
   })
   .strict();
 

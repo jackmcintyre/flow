@@ -15,6 +15,21 @@
  *
  * All tests use real tool implementations against a temp filesystem — no mocks
  * of the things under test.
+ *
+ * --- Story native:01KV84GRHFV6F6E6M1B32WH6HS ACs ---
+ *
+ * AC1-new (integration): Given a cycle in which a kind of friction recurred,
+ *   when the retrospective runs, the operator sees exactly ONE consolidated
+ *   maintainer-feedback item in the inbox describing the recurring problem,
+ *   how many times it recurred, and a suggested direction.
+ *
+ * AC2-new (integration): Given a cycle with no recurring friction, when the
+ *   retrospective runs, nothing is raised and the maintainer inbox is left
+ *   untouched.
+ *
+ * AC3-new (integration): Given a recurring pattern already consolidated into
+ *   a maintainer-feedback item on an earlier retro run, when the retrospective
+ *   re-runs over the same unchanged recurring pattern, no duplicate is raised.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +39,7 @@ import * as path from "node:path";
 import { gatherRetroInputs } from "../gather-retro-inputs.js";
 import { recordAgentFriction } from "../record-agent-friction.js";
 import { TelemetryEventSchema } from "../../schemas/telemetry-events.js";
+import { MaintainerFeedbackItemSchema } from "../../schemas/maintainer-feedback.js";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -432,5 +448,261 @@ describe("AC3 — gatherRetroInputs excludes one-off friction (count < 2)", () =
     expect(bundle.recurringFriction[0]).toMatchObject({ kind: "forced-fallback", count: 2 });
     const kinds = bundle.recurringFriction.map((e) => e.kind);
     expect(kinds).not.toContain("empty-input");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KV84GRHFV6F6E6M1B32WH6HS
+// AC1-new: Recurring friction → exactly ONE consolidated maintainer-feedback item
+// ---------------------------------------------------------------------------
+
+describe("AC1-new (01KV84GRHFV6F6E6M1B32WH6HS) — recurring friction raises one consolidated maintainer-feedback item", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "retro-friction-inbox-ac1-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  async function readInboxItems(root: string): Promise<unknown[]> {
+    const inboxDir = path.join(root, ".flow", "maintainer-inbox");
+    let entries: string[];
+    try {
+      entries = await fs.readdir(inboxDir);
+    } catch {
+      return [];
+    }
+    const items: unknown[] = [];
+    for (const file of entries.filter((f) => f.endsWith(".json")).sort()) {
+      const raw = await fs.readFile(path.join(inboxDir, file), "utf8");
+      items.push(JSON.parse(raw));
+    }
+    return items;
+  }
+
+  it("raises exactly ONE item in the inbox for a single recurring friction kind", async () => {
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    await fs.mkdir(telemetryDir, { recursive: true });
+
+    // 3 events of kind 'empty-input' — above the recurring threshold.
+    const lines = [
+      makeAgentFrictionLine({ kind: "empty-input", expected: "non-empty AC list", observed: "empty array" }),
+      makeAgentFrictionLine({ kind: "empty-input", expected: "non-empty AC list", observed: "null" }),
+      makeAgentFrictionLine({ kind: "empty-input", expected: "non-empty AC list", observed: "undefined field" }),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines.join("\n") + "\n",
+      "utf8",
+    );
+
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const items = await readInboxItems(tmpRoot);
+    expect(items).toHaveLength(1);
+
+    // Parse through the schema — must be valid.
+    const parsed = MaintainerFeedbackItemSchema.safeParse(items[0]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const item = parsed.data;
+    // Must describe the recurring problem, include the count, and suggest a direction.
+    expect(item.problem).toContain("empty-input");
+    expect(item.problem).toContain("3"); // recurrence count
+    expect(item.suggested_direction).toBeDefined();
+    // dedup_key must be set to the stable identity for this kind.
+    expect(item.dedup_key).toBe("recurring-friction:empty-input");
+  });
+
+  it("raises one item per recurring kind when multiple kinds recur", async () => {
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    await fs.mkdir(telemetryDir, { recursive: true });
+
+    // 2x 'empty-input' + 2x 'forced-fallback' — both above threshold.
+    const lines = [
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story body", observed: "empty string" }),
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story body", observed: "whitespace only" }),
+      makeAgentFrictionLine({ kind: "forced-fallback", expected: "architect role", observed: "planner role" }),
+      makeAgentFrictionLine({ kind: "forced-fallback", expected: "architect role", observed: "orchestrator role" }),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines.join("\n") + "\n",
+      "utf8",
+    );
+
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const items = await readInboxItems(tmpRoot);
+    // Exactly two items — one per recurring kind.
+    expect(items).toHaveLength(2);
+
+    for (const raw of items) {
+      const parsed = MaintainerFeedbackItemSchema.safeParse(raw);
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) continue;
+      // Each item must have a distinct dedup_key for its kind.
+      expect(parsed.data.dedup_key).toMatch(/^recurring-friction:(empty-input|forced-fallback)$/);
+      // Each item must carry the recurrence count (2).
+      expect(parsed.data.problem).toContain("2");
+    }
+
+    // Confirm the two dedup_keys are distinct.
+    const dedupKeys = (items as { dedup_key?: string }[]).map((i) => i.dedup_key);
+    expect(new Set(dedupKeys).size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KV84GRHFV6F6E6M1B32WH6HS
+// AC2-new: No recurring friction → inbox is left untouched
+// ---------------------------------------------------------------------------
+
+describe("AC2-new (01KV84GRHFV6F6E6M1B32WH6HS) — no recurring friction leaves inbox untouched", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "retro-friction-inbox-ac2-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("does not create the inbox directory when no friction recurred", async () => {
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    await fs.mkdir(telemetryDir, { recursive: true });
+
+    // Only 1 friction event — below threshold — plus a non-friction event.
+    const lines = [
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story", observed: "empty" }),
+      makeAgentInvokeLine(),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines.join("\n") + "\n",
+      "utf8",
+    );
+
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    // The inbox directory must not exist (or if it does, must be empty).
+    const inboxDir = path.join(tmpRoot, ".flow", "maintainer-inbox");
+    let entries: string[] = [];
+    try {
+      entries = await fs.readdir(inboxDir);
+    } catch {
+      // ENOENT — directory was never created, which is fine.
+      entries = [];
+    }
+    const jsonFiles = entries.filter((e) => e.endsWith(".json"));
+    expect(jsonFiles).toHaveLength(0);
+  });
+
+  it("does not create any inbox files when telemetry dir is absent", async () => {
+    // No .flow/telemetry directory at all — no friction signal.
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    const inboxDir = path.join(tmpRoot, ".flow", "maintainer-inbox");
+    let entries: string[] = [];
+    try {
+      entries = await fs.readdir(inboxDir);
+    } catch {
+      entries = [];
+    }
+    expect(entries.filter((e) => e.endsWith(".json"))).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KV84GRHFV6F6E6M1B32WH6HS
+// AC3-new: Re-run over same recurring pattern raises no duplicate
+// ---------------------------------------------------------------------------
+
+describe("AC3-new (01KV84GRHFV6F6E6M1B32WH6HS) — re-run over same recurring pattern raises no duplicate", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "retro-friction-inbox-ac3-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  async function countInboxItems(root: string): Promise<number> {
+    const inboxDir = path.join(root, ".flow", "maintainer-inbox");
+    try {
+      const entries = await fs.readdir(inboxDir);
+      return entries.filter((e) => e.endsWith(".json")).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  it("does not raise a duplicate when the retro re-runs over the same unchanged recurring pattern", async () => {
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    await fs.mkdir(telemetryDir, { recursive: true });
+
+    // 2x 'empty-input' — above threshold.
+    const lines = [
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story body", observed: "empty" }),
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story body", observed: "null" }),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines.join("\n") + "\n",
+      "utf8",
+    );
+
+    // First retro run — should raise exactly 1 item.
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(await countInboxItems(tmpRoot)).toBe(1);
+
+    // Second retro run over the same unchanged telemetry — must NOT raise a duplicate.
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(await countInboxItems(tmpRoot)).toBe(1);
+
+    // Third run — still no duplicate.
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(await countInboxItems(tmpRoot)).toBe(1);
+  });
+
+  it("raises a new item for a NEW kind even when a prior item exists for a different kind", async () => {
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    await fs.mkdir(telemetryDir, { recursive: true });
+
+    // First run: 2x 'empty-input' only.
+    const lines1 = [
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story", observed: "empty" }),
+      makeAgentFrictionLine({ kind: "empty-input", expected: "story", observed: "null" }),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines1.join("\n") + "\n",
+      "utf8",
+    );
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(await countInboxItems(tmpRoot)).toBe(1);
+
+    // Second run: same 'empty-input' + 2x 'forced-fallback' (new kind, now recurring).
+    const lines2 = [
+      ...lines1,
+      makeAgentFrictionLine({ kind: "forced-fallback", expected: "architect", observed: "planner" }),
+      makeAgentFrictionLine({ kind: "forced-fallback", expected: "architect", observed: "orchestrator" }),
+    ];
+    await fs.writeFile(
+      path.join(telemetryDir, "2026-06.jsonl"),
+      lines2.join("\n") + "\n",
+      "utf8",
+    );
+    await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    // Must have exactly 2 items: original 'empty-input' + new 'forced-fallback'.
+    expect(await countInboxItems(tmpRoot)).toBe(2);
   });
 });

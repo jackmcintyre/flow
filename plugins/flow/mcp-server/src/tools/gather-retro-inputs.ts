@@ -50,7 +50,13 @@
  *     yet; Story 6.5 introduces it). The analyst proceeds with
  *     `ruleRegistry: null`.
  *
- * **No writes. No network. No clock dependency.** Pure parameterised IO.
+ * **Limited writes.** `gatherRetroInputs` has two intentional write side-effects:
+ *   1. Drafting hardening stories for recurring mechanical failures
+ *      (`draftHardeningStories`, Story native:01KT6RHTE3YME1ZAD5VRQAKDSW).
+ *   2. Consolidating recurring friction into maintainer-feedback inbox items
+ *      (`raiseRecurringFrictionFeedback`, Story native:01KV84GRHFV6F6E6M1B32WH6HS).
+ * Both writes are deduped so re-runs over unchanged data are idempotent.
+ * All other reads are side-effect-free. No network. No unguarded clock dependency.
  */
 
 import { promises as fs } from "node:fs";
@@ -91,6 +97,8 @@ import {
   type RetirableLessonCandidate,
 } from "../lib/lesson-archive.js";
 import { parsePersonaFile } from "../lib/persona-file.js";
+import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
+import { MaintainerFeedbackItemSchema } from "../schemas/maintainer-feedback.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -429,6 +437,11 @@ export async function gatherRetroInputs(
   // Detect cross-role shared lessons
   // (Story native:01KV7FJHK9CAAS860MJAG70QVS). This is a pure read — no writes.
   const crossRoleSharedLessons = await gatherCrossRoleSharedLessons(targetRepoRoot);
+
+  // Consolidate recurring friction into maintainer-feedback items
+  // (Story native:01KV84GRHFV6F6E6M1B32WH6HS). One item per recurring kind,
+  // deduped so re-runs over unchanged data raise no duplicates.
+  await raiseRecurringFrictionFeedback(targetRepoRoot, recurringFriction);
 
   return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons };
 }
@@ -884,6 +897,133 @@ function computeRecurringFriction(events: TelemetryEvent[]): RecurringFrictionEn
   }
   result.sort((a, b) => a.kind.localeCompare(b.kind));
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// recurring friction → maintainer-feedback consolidation
+// (Story native:01KV84GRHFV6F6E6M1B32WH6HS)
+// ---------------------------------------------------------------------------
+
+/**
+ * The stable dedup key prefix used for retro-raised recurring-friction items.
+ * A re-run that finds a `dedup_key` of `recurring-friction:<kind>` in any
+ * existing inbox file will skip raising a second item for that kind.
+ */
+const RECURRING_FRICTION_DEDUP_PREFIX = "recurring-friction:";
+
+/**
+ * Derive the dedup key for a given friction kind.
+ * The key is stored in the inbox item's `dedup_key` field and scanned on
+ * re-run to avoid raising a duplicate.
+ */
+function recurringFrictionDedupKey(kind: FrictionKind): string {
+  return `${RECURRING_FRICTION_DEDUP_PREFIX}${kind}`;
+}
+
+/**
+ * Scan the maintainer inbox for existing dedup keys.
+ *
+ * Reads every `.json` file under `<targetRepoRoot>/.flow/maintainer-inbox/`
+ * and parses each through `MaintainerFeedbackItemSchema`. Returns the set of
+ * `dedup_key` values found in the inbox so the caller can skip kinds that
+ * were already consolidated.
+ *
+ * Malformed inbox files are silently skipped (best-effort dedup — a corrupt
+ * inbox file should not crash the retro).
+ *
+ * Returns an empty set when the inbox directory is absent.
+ */
+async function readExistingDedupKeys(
+  targetRepoRoot: string,
+): Promise<Set<string>> {
+  const inboxDir = path.join(targetRepoRoot, ".flow", "maintainer-inbox");
+
+  let entries: string[];
+  try {
+    entries = await fs.readdir(inboxDir);
+  } catch (err) {
+    if (isEnoent(err)) return new Set();
+    throw err;
+  }
+
+  const keys = new Set<string>();
+  for (const file of entries) {
+    if (!file.endsWith(".json")) continue;
+    const absPath = path.join(inboxDir, file);
+    let raw: string;
+    try {
+      raw = await fs.readFile(absPath, "utf8");
+    } catch {
+      // File disappeared or unreadable — skip.
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Bad JSON — skip.
+      continue;
+    }
+    const result = MaintainerFeedbackItemSchema.safeParse(parsed);
+    if (result.success && result.data.dedup_key !== undefined) {
+      keys.add(result.data.dedup_key);
+    }
+  }
+
+  return keys;
+}
+
+/**
+ * For each recurring-friction kind, raise exactly ONE consolidated
+ * maintainer-feedback item in the inbox — unless an item with the same
+ * `dedup_key` already exists from an earlier retro run.
+ *
+ * This is a WRITE side-effect of the retro loop (like `draftHardeningStories`).
+ * It never reads the inbox back to drive team behaviour; the inbox is a
+ * write-once-per-kind accumulator for the maintainer.
+ *
+ * When `recurringFriction` is empty, this is a no-op and the inbox is left
+ * untouched (AC2).
+ *
+ * Errors from individual `recordMaintainerFeedback` calls are swallowed
+ * (like `draftHardeningStories`) so a single failed raise does not crash
+ * the retro.
+ */
+async function raiseRecurringFrictionFeedback(
+  targetRepoRoot: string,
+  recurringFriction: RecurringFrictionEntry[],
+): Promise<void> {
+  // AC2: empty signal → nothing to raise.
+  if (recurringFriction.length === 0) {
+    return;
+  }
+
+  // AC3: scan inbox for dedup keys to avoid raising duplicates on re-run.
+  const existingDedupKeys = await readExistingDedupKeys(targetRepoRoot);
+
+  for (const entry of recurringFriction) {
+    const dedupKey = recurringFrictionDedupKey(entry.kind);
+    if (existingDedupKeys.has(dedupKey)) {
+      // Already raised for this kind on an earlier retro run — skip.
+      continue;
+    }
+
+    try {
+      await recordMaintainerFeedback({
+        targetRepoRoot,
+        item: {
+          problem: `The "${entry.kind}" friction kind recurred ${entry.count} time${entry.count === 1 ? "" : "s"} this cycle — a structural wall the team kept hitting that it cannot resolve itself.`,
+          tool_area: entry.kind,
+          trigger: "retro-analyst / cycle-end retrospective (recurring-friction signal)",
+          suggested_direction: `Investigate the "${entry.kind}" friction seam and add a structural fix or guard to prevent the team from repeatedly hitting this wall.`,
+          dedup_key: dedupKey,
+        },
+      });
+    } catch {
+      // A write failure should not crash the retro — skip this kind.
+      continue;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
