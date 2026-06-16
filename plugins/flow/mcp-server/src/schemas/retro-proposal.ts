@@ -402,20 +402,56 @@ const BuildStoryProposalSchema = ProposalBase.extend({
   skill_change_context: z.string().min(1),
 }).strict();
 
+/**
+ * `lesson-consolidation` — propose merging two near-duplicate lessons in a role's
+ * Knowledge section into a single sharper lesson.
+ *
+ * When applied via the `/accept-proposal` gate, the handler:
+ *  1. Reads the role's `team/<target_role>/PERSONA.md`.
+ *  2. Removes both source lesson blocks (identified by `lesson_a_id` and
+ *     `lesson_b_id`) from the Knowledge section.
+ *  3. Appends a new structured lesson block carrying `merged_lesson` as the
+ *     `detail` field (and `applies_when` derived from the merged text).
+ *
+ * Fields:
+ *  - `target_role`    — the role whose Knowledge section holds both duplicates.
+ *  - `lesson_a_id`    — the id of the first lesson to consolidate.
+ *  - `lesson_b_id`    — the id of the second lesson to consolidate.
+ *  - `lesson_a_text`  — verbatim text of the first lesson (for preview rendering).
+ *  - `lesson_b_text`  — verbatim text of the second lesson (for preview rendering).
+ *  - `merged_lesson`  — the single proposed combined lesson text; what the operator
+ *                       approves or rejects. Shown before approval so the operator
+ *                       is never asked to approve a merge blind (AC3).
+ *
+ * (Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T — retro consolidation)
+ */
+const LessonConsolidationProposalSchema = ProposalBase.extend({
+  type: z.literal("lesson-consolidation"),
+  target_role: RolePathSchema,
+  lesson_a_id: z.string().min(1),
+  lesson_b_id: z.string().min(1),
+  lesson_a_text: z.string().min(1),
+  lesson_b_text: z.string().min(1),
+  merged_lesson: z.string().min(1),
+}).strict();
+
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
 
 /**
- * The closed set of ten proposal-type literals. Exported as a tuple so
+ * The closed set of eleven proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding an eleventh variant requires a
+ * grown (the AC2 invariant). Adding a twelfth variant requires a
  * coordinated schema-change story.
  *
  * `build-story` (added Story native:01KV76P2DW42BPBPT4ZQ0FS63Y) is the
  * engine-safety output: the retro writer emits it in place of a `skill-*`
  * proposal whose target path is not under `.flow/skills/`. It has no apply
  * handler (fails closed) so it can never dead-end via the apply gate.
+ *
+ * `lesson-consolidation` (added Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T) merges
+ * two near-duplicate lessons in a role's Knowledge section into one sharper lesson.
  */
 export const RETRO_PROPOSAL_TYPES = [
   "rule",
@@ -428,11 +464,12 @@ export const RETRO_PROPOSAL_TYPES = [
   "persona-append",
   "promote-lesson-to-skill",
   "build-story",
+  "lesson-consolidation",
 ] as const;
 
 /**
- * The full retro-proposal discriminated union. AC2: exactly ten
- * variants, closed enum, no `z.string()` fallback.
+ * The full retro-proposal discriminated union. Eleven variants, closed enum,
+ * no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
   RuleProposalSchema,
@@ -445,6 +482,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
   PersonaAppendProposalSchema,
   PromoteLessonToSkillProposalSchema,
   BuildStoryProposalSchema,
+  LessonConsolidationProposalSchema,
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;

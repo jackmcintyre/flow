@@ -642,6 +642,15 @@ function renderProposalFields(
           "Queue a build-and-review story via the normal author/queue path — do NOT accept this proposal through the apply gate.",
         ],
       ];
+    case "lesson-consolidation":
+      return [
+        ["target_role", proposal.target_role],
+        ["lesson_a_id", proposal.lesson_a_id],
+        ["lesson_a_text", proposal.lesson_a_text],
+        ["lesson_b_id", proposal.lesson_b_id],
+        ["lesson_b_text", proposal.lesson_b_text],
+        ["merged_lesson", proposal.merged_lesson],
+      ];
   }
 }
 

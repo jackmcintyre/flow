@@ -27226,8 +27226,8 @@ async function getStatus(opts) {
 }
 
 // src/tools/open-cycle.ts
-var import_yaml9 = __toESM(require_dist(), 1);
-import * as path20 from "node:path";
+var import_yaml11 = __toESM(require_dist(), 1);
+import * as path21 from "node:path";
 
 // ../node_modules/.pnpm/ulid@3.0.2/node_modules/ulid/dist/node/index.js
 import crypto from "node:crypto";
@@ -27399,7 +27399,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "team-change",
       "persona-append",
       "promote-lesson-to-skill",
-      "build-story"
+      "build-story",
+      "lesson-consolidation"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -27547,9 +27548,9 @@ async function logTelemetryEvent(opts) {
 }
 
 // src/tools/gather-retro-inputs.ts
-var import_yaml8 = __toESM(require_dist(), 1);
-import { promises as fs14 } from "node:fs";
-import * as path19 from "node:path";
+var import_yaml10 = __toESM(require_dist(), 1);
+import { promises as fs15 } from "node:fs";
+import * as path20 from "node:path";
 
 // src/schemas/risk-tiering-spec.ts
 var ChangeTypeSchema = external_exports.enum(["revert", "migration", "schema", "dep-bump"]);
@@ -30000,6 +30001,510 @@ async function readBacklogInventory(rawInput) {
   return { mode, backlog_inventory };
 }
 
+// src/lib/lesson-archive.ts
+import * as path19 from "node:path";
+import { promises as fs14 } from "node:fs";
+var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
+var LESSON_BLOCK_SUFFIX = " -->";
+var DEFAULT_BRIEFING_BUDGET = 10;
+function extractLessonsFromBody(body) {
+  const lessons = [];
+  for (const line of body.split("\n")) {
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith(LESSON_BLOCK_PREFIX) || !trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+      continue;
+    }
+    const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+    let raw;
+    try {
+      raw = JSON.parse(jsonStr);
+    } catch {
+      continue;
+    }
+    if (raw === null || typeof raw !== "object" || !("id" in raw) || !("kind" in raw) || !("applies_when" in raw) || !("detail" in raw) || !("learned_at" in raw)) {
+      continue;
+    }
+    const obj = raw;
+    if (typeof obj["id"] !== "string" || typeof obj["kind"] !== "string" || typeof obj["applies_when"] !== "string" || typeof obj["detail"] !== "string" || typeof obj["learned_at"] !== "string") {
+      continue;
+    }
+    const lesson = {
+      id: obj["id"],
+      kind: obj["kind"],
+      applies_when: obj["applies_when"],
+      detail: obj["detail"],
+      learned_at: obj["learned_at"]
+    };
+    if (typeof obj["use_count"] === "number") {
+      lesson.use_count = obj["use_count"];
+    }
+    if (typeof obj["last_used_at"] === "string") {
+      lesson.last_used_at = obj["last_used_at"];
+    }
+    if (typeof obj["failure_class"] === "string") {
+      lesson.failure_class = obj["failure_class"];
+    }
+    if (typeof obj["source_ref"] === "string") {
+      lesson.source_ref = obj["source_ref"];
+    }
+    if (typeof obj["source_pr"] === "string") {
+      lesson.source_pr = obj["source_pr"];
+    }
+    lessons.push(lesson);
+  }
+  return lessons;
+}
+function compareLessons(a2, b) {
+  const aCount = a2.use_count ?? 0;
+  const bCount = b.use_count ?? 0;
+  if (bCount !== aCount) return bCount - aCount;
+  const aUsed = a2.last_used_at ?? "1970-01-01T00:00:00.000Z";
+  const bUsed = b.last_used_at ?? "1970-01-01T00:00:00.000Z";
+  if (bUsed !== aUsed) return bUsed > aUsed ? 1 : -1;
+  return b.learned_at > a2.learned_at ? 1 : -1;
+}
+function rankLessons(body, budget = DEFAULT_BRIEFING_BUDGET) {
+  const all = extractLessonsFromBody(body);
+  const sorted = [...all].sort(compareLessons);
+  const topLessons = sorted.slice(0, budget);
+  const overflow = sorted.slice(budget);
+  return { topLessons, overflow };
+}
+function serialiseLessonBlock(lesson) {
+  const obj = {
+    id: lesson.id,
+    kind: lesson.kind,
+    applies_when: lesson.applies_when,
+    detail: lesson.detail,
+    learned_at: lesson.learned_at
+  };
+  if (lesson.use_count !== void 0) obj["use_count"] = lesson.use_count;
+  if (lesson.last_used_at !== void 0) obj["last_used_at"] = lesson.last_used_at;
+  if (lesson.failure_class !== void 0) obj["failure_class"] = lesson.failure_class;
+  if (lesson.source_ref !== void 0) obj["source_ref"] = lesson.source_ref;
+  if (lesson.source_pr !== void 0) obj["source_pr"] = lesson.source_pr;
+  return `${LESSON_BLOCK_PREFIX}${JSON.stringify(obj)}${LESSON_BLOCK_SUFFIX}`;
+}
+var ARCHIVE_TOOL_NAME = "buildPersonaSpawnPrompt";
+async function archiveLessons(targetRepoRoot, role, lessons, now = () => /* @__PURE__ */ new Date()) {
+  const changedPaths = [];
+  const archivedAt = now().toISOString();
+  for (const lesson of lessons) {
+    const archived = { ...lesson, archived_at: archivedAt };
+    const relPath = `team/${role}/_archived/${lesson.id}.json`;
+    const absPath = path19.join(targetRepoRoot, relPath);
+    await writeManagedFile({
+      absPath,
+      contents: JSON.stringify(archived, null, 2) + "\n",
+      targetRepoRoot,
+      mcpToolContext: { toolName: ARCHIVE_TOOL_NAME, role }
+    });
+    changedPaths.push(relPath);
+  }
+  return changedPaths;
+}
+function rebuildBodyWithTopLessons(originalBody, topLessons) {
+  const nonLessonLines = [];
+  for (const line of originalBody.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
+      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
+      try {
+        const raw = JSON.parse(jsonStr);
+        if (raw !== null && typeof raw === "object" && "id" in raw && typeof raw["id"] === "string") {
+          continue;
+        }
+      } catch {
+      }
+    }
+    nonLessonLines.push(line);
+  }
+  const rankedBlocks = topLessons.map(serialiseLessonBlock);
+  while (nonLessonLines.length > 0 && nonLessonLines[nonLessonLines.length - 1].trim() === "") {
+    nonLessonLines.pop();
+  }
+  const parts = [...rankedBlocks];
+  if (nonLessonLines.length > 0) {
+    parts.push(...nonLessonLines);
+  }
+  return parts.join("\n");
+}
+async function findArchivedLessonById(targetRepoRoot, role, id) {
+  const absPath = path19.join(targetRepoRoot, "team", role, "_archived", `${id}.json`);
+  let raw;
+  try {
+    raw = await fs14.readFile(absPath, "utf8");
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || !("id" in parsed) || !("kind" in parsed) || !("applies_when" in parsed) || !("detail" in parsed) || !("learned_at" in parsed) || !("archived_at" in parsed)) {
+    return null;
+  }
+  const obj = parsed;
+  if (typeof obj["id"] !== "string" || typeof obj["kind"] !== "string" || typeof obj["applies_when"] !== "string" || typeof obj["detail"] !== "string" || typeof obj["learned_at"] !== "string" || typeof obj["archived_at"] !== "string") {
+    return null;
+  }
+  const archived = {
+    id: obj["id"],
+    kind: obj["kind"],
+    applies_when: obj["applies_when"],
+    detail: obj["detail"],
+    learned_at: obj["learned_at"],
+    archived_at: obj["archived_at"]
+  };
+  if (typeof obj["use_count"] === "number") archived.use_count = obj["use_count"];
+  if (typeof obj["last_used_at"] === "string") archived.last_used_at = obj["last_used_at"];
+  if (typeof obj["failure_class"] === "string") archived.failure_class = obj["failure_class"];
+  if (typeof obj["source_ref"] === "string") archived.source_ref = obj["source_ref"];
+  if (typeof obj["source_pr"] === "string") archived.source_pr = obj["source_pr"];
+  return archived;
+}
+
+// src/lib/persona-file.ts
+var import_yaml9 = __toESM(require_dist(), 1);
+
+// src/schemas/catalogue.ts
+var ModelTierSchema = external_exports.enum(["opus", "sonnet", "haiku"]);
+var LockedPhrasesSchema = external_exports.object({
+  handoff: external_exports.string().min(1),
+  yield: external_exports.string().min(1),
+  verdict: external_exports.string().min(1)
+}).strict();
+var CatalogueRoleSchema = external_exports.object({
+  role: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  domain: external_exports.string().min(1),
+  model_tier: ModelTierSchema,
+  tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
+  gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
+  locked_phrases: LockedPhrasesSchema
+}).strict();
+var REQUIRED_CATALOGUE_SECTIONS = [
+  "Domain",
+  "Mandate",
+  "Out of mandate",
+  "Prompt"
+];
+function assertCatalogueBodySections(body, sourcePath = "<body>") {
+  const headers = [];
+  for (const line of body.split("\n")) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      headers.push(match[1].trim());
+    }
+  }
+  let cursor = 0;
+  for (const required2 of REQUIRED_CATALOGUE_SECTIONS) {
+    const idx = headers.indexOf(required2, cursor);
+    if (idx === -1) {
+      const seenEarlier = headers.indexOf(required2);
+      if (seenEarlier === -1) {
+        throw new CatalogueShapeError({
+          sourcePath,
+          zodMessage: `missing required '##' section: '${required2}'`
+        });
+      }
+      throw new CatalogueShapeError({
+        sourcePath,
+        zodMessage: `required '##' sections are out of order \u2014 expected [${REQUIRED_CATALOGUE_SECTIONS.join(", ")}] but saw '${required2}' before earlier required sections`
+      });
+    }
+    cursor = idx + 1;
+  }
+}
+
+// src/schemas/persona.ts
+var PersonaFrontmatterSchema = external_exports.object({
+  // Catalogue frontmatter fields, in canonical order. Constraints are
+  // copied verbatim from CatalogueRoleSchema; do NOT loosen them.
+  role: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
+  domain: external_exports.string().min(1),
+  model_tier: ModelTierSchema,
+  tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
+  gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
+  locked_phrases: LockedPhrasesSchema,
+  // Persona-only fields.
+  hired_at: external_exports.string().regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
+    "hired_at must be ISO-8601 UTC (Z-suffixed)"
+  ),
+  catalogue_version: external_exports.string().regex(
+    /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/,
+    "catalogue_version must be semver"
+  )
+}).strict();
+var REQUIRED_PERSONA_SECTIONS = [
+  "Domain",
+  "Mandate",
+  "Out of mandate",
+  "Prompt",
+  "Knowledge"
+];
+
+// src/lib/markdown-frontmatter.ts
+var import_yaml8 = __toESM(require_dist(), 1);
+function splitFrontmatter(raw, sourcePath) {
+  const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!text.startsWith("---\n") && !text.startsWith("---\r")) {
+    throw new CatalogueShapeError({
+      sourcePath,
+      zodMessage: "file must start with '---' YAML frontmatter opener"
+    });
+  }
+  const closeIdx = text.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    throw new CatalogueShapeError({
+      sourcePath,
+      zodMessage: "missing closing '---' YAML frontmatter delimiter"
+    });
+  }
+  const frontmatterRaw = text.slice(4, closeIdx);
+  const afterFence = text.slice(closeIdx + 4);
+  const body = afterFence.replace(/^\s*\n/, "");
+  return { frontmatterRaw, body };
+}
+function parseCatalogueRole(raw, sourcePath) {
+  const { frontmatterRaw, body } = splitFrontmatter(raw, sourcePath);
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml8.parse)(frontmatterRaw);
+  } catch (err) {
+    throw new CatalogueShapeError({
+      sourcePath,
+      zodMessage: `frontmatter YAML parse error: ${err instanceof Error ? err.message : String(err)}`
+    });
+  }
+  const result = CatalogueRoleSchema.safeParse(parsedYaml);
+  if (!result.success) {
+    throw new CatalogueShapeError({
+      sourcePath,
+      zodMessage: formatZodIssues3(result.error.issues)
+    });
+  }
+  assertCatalogueBodySections(body, sourcePath);
+  const sections = extractSections(body);
+  return {
+    ...result.data,
+    sections,
+    sourcePath
+  };
+}
+function extractSections(body) {
+  const lines = body.split("\n");
+  const out = {};
+  let currentHeading = null;
+  let currentBody = [];
+  const flush = () => {
+    if (currentHeading !== null) {
+      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+    }
+  };
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      flush();
+      currentHeading = match[1].trim();
+      currentBody = [];
+    } else if (currentHeading !== null) {
+      currentBody.push(line);
+    }
+  }
+  flush();
+  const filtered = {};
+  for (const required2 of REQUIRED_CATALOGUE_SECTIONS) {
+    if (required2 in out) filtered[required2] = out[required2] ?? "";
+  }
+  return filtered;
+}
+function formatZodIssues3(issues) {
+  const first = issues[0];
+  if (!first) return "(no issue details)";
+  const dottedPath = first.path.length > 0 ? first.path.join(".") : "<root>";
+  return `${dottedPath}: ${first.message}`;
+}
+
+// src/lib/persona-file.ts
+function parsePersonaFile(raw, sourcePath) {
+  let frontmatterRaw;
+  let body;
+  try {
+    const split = splitFrontmatter(raw, sourcePath);
+    frontmatterRaw = split.frontmatterRaw;
+    body = split.body;
+  } catch (err) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: err instanceof Error ? err.message : String(err)
+    });
+  }
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml9.parse)(frontmatterRaw);
+  } catch (err) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: `frontmatter YAML parse error: ${err instanceof Error ? err.message : String(err)}`
+    });
+  }
+  const result = PersonaFrontmatterSchema.safeParse(parsedYaml);
+  if (!result.success) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: formatZodIssues4(result.error.issues)
+    });
+  }
+  try {
+    assertCatalogueBodySections(body, sourcePath);
+  } catch (err) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: err instanceof Error ? err.message : String(err)
+    });
+  }
+  const headings = collectHeadings(body);
+  const promptIdx = headings.indexOf("Prompt");
+  const knowledgeIdx = headings.indexOf("Knowledge");
+  if (knowledgeIdx === -1) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: "missing required '##' section: 'Knowledge'"
+    });
+  }
+  if (knowledgeIdx <= promptIdx) {
+    throw new PersonaFileMalformedError({
+      personaPath: sourcePath,
+      zodMessage: "required '##' sections are out of order \u2014 'Knowledge' must appear after 'Prompt'"
+    });
+  }
+  const sections = extractSections2(body);
+  const skillsBody = extractOptionalSkillsSection(body);
+  return {
+    ...result.data,
+    sections,
+    skillsBody,
+    sourcePath
+  };
+}
+function renderPersonaFile(opts) {
+  const { catalogue, hiredAt, catalogueVersion } = opts;
+  const frontmatter = {
+    role: catalogue.role,
+    domain: catalogue.domain,
+    model_tier: catalogue.model_tier,
+    tools_allow: [...catalogue.tools_allow],
+    gh_allow: [...catalogue.gh_allow],
+    locked_phrases: { ...catalogue.locked_phrases },
+    hired_at: hiredAt,
+    catalogue_version: catalogueVersion
+  };
+  const yamlBlock = (0, import_yaml9.stringify)(frontmatter).replace(/\n$/, "");
+  const h1 = toDisplayName(catalogue.role);
+  const sections = [
+    `# ${h1}`,
+    ``,
+    `## Domain`,
+    ``,
+    catalogue.sections.Domain,
+    ``,
+    `## Mandate`,
+    ``,
+    catalogue.sections.Mandate,
+    ``,
+    `## Out of mandate`,
+    ``,
+    catalogue.sections["Out of mandate"],
+    ``,
+    `## Prompt`,
+    ``,
+    catalogue.sections.Prompt,
+    ``,
+    `## Knowledge`,
+    ``
+  ];
+  return `---
+${yamlBlock}
+---
+
+${sections.join("\n")}`;
+}
+function toDisplayName(role) {
+  return role.split("-").map(
+    (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
+  ).join(" ");
+}
+function collectHeadings(body) {
+  const headings = [];
+  for (const line of body.split("\n")) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      headings.push(match[1].trim());
+    }
+  }
+  return headings;
+}
+function extractSections2(body) {
+  const lines = body.split("\n");
+  const out = {};
+  let currentHeading = null;
+  let currentBody = [];
+  const flush = () => {
+    if (currentHeading !== null) {
+      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+    }
+  };
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("###")) {
+      flush();
+      currentHeading = match[1].trim();
+      currentBody = [];
+    } else if (currentHeading !== null) {
+      currentBody.push(line);
+    }
+  }
+  flush();
+  const filtered = {};
+  for (const required2 of REQUIRED_PERSONA_SECTIONS) {
+    filtered[required2] = out[required2] ?? "";
+  }
+  return filtered;
+}
+function extractOptionalSkillsSection(body) {
+  const lines = body.split("\n");
+  let inSkills = false;
+  const bodyLines = [];
+  for (const line of lines) {
+    if (/^##\s+Skills\s*$/.test(line) && !line.startsWith("###")) {
+      inSkills = true;
+      continue;
+    }
+    if (inSkills) {
+      if (/^##\s+/.test(line) && !line.startsWith("###")) {
+        break;
+      }
+      bodyLines.push(line);
+    }
+  }
+  if (!inSkills) {
+    return "";
+  }
+  return bodyLines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+}
+function formatZodIssues4(issues) {
+  const first = issues[0];
+  if (!first) return "(no issue details)";
+  const dottedPath = first.path.length > 0 ? first.path.join(".") : "<root>";
+  return `${dottedPath}: ${first.message}`;
+}
+
 // src/tools/gather-retro-inputs.ts
 var TELEMETRY_FILE_REGEX = /\.jsonl$/;
 var MECHANICAL_FAILURE_THRESHOLD = 2;
@@ -30032,13 +30537,14 @@ async function gatherRetroInputs(opts) {
     threshold,
     opts.sessionUlid
   );
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted };
+  const nearDuplicateLessonPairs = await gatherNearDuplicateLessonPairs(targetRepoRoot);
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs };
 }
 async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
-  const doneDir = path19.join(targetRepoRoot, ".flow", "state", "done");
+  const doneDir = path20.join(targetRepoRoot, ".flow", "state", "done");
   let entries;
   try {
-    entries = await fs14.readdir(doneDir);
+    entries = await fs15.readdir(doneDir);
   } catch (err) {
     if (isEnoent(err)) {
       return [];
@@ -30048,24 +30554,24 @@ async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
   const manifestFiles = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
   const manifests = [];
   for (const file2 of manifestFiles) {
-    const absPath = path19.join(doneDir, file2);
+    const absPath = path20.join(doneDir, file2);
     if (windowStartMs !== null) {
-      const stat2 = await fs14.stat(absPath);
+      const stat2 = await fs15.stat(absPath);
       if (stat2.mtimeMs < windowStartMs) {
         continue;
       }
     }
-    const raw = await fs14.readFile(absPath, "utf8");
-    const parsed = (0, import_yaml8.parse)(raw);
+    const raw = await fs15.readFile(absPath, "utf8");
+    const parsed = (0, import_yaml10.parse)(raw);
     manifests.push(parseExecutionManifest(parsed, { absPath }));
   }
   return manifests;
 }
 async function gatherTelemetry(targetRepoRoot, windowStartMs) {
-  const telemetryDir = path19.join(targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path20.join(targetRepoRoot, ".flow", "telemetry");
   let entries;
   try {
-    entries = await fs14.readdir(telemetryDir);
+    entries = await fs15.readdir(telemetryDir);
   } catch (err) {
     if (isEnoent(err)) {
       return { events: [], skipped_count: 0 };
@@ -30076,8 +30582,8 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   const events = [];
   let skipped_count = 0;
   for (const file2 of files) {
-    const absPath = path19.join(telemetryDir, file2);
-    const raw = await fs14.readFile(absPath, "utf8");
+    const absPath = path20.join(telemetryDir, file2);
+    const raw = await fs15.readFile(absPath, "utf8");
     const lines = raw.split("\n");
     for (const line of lines) {
       if (line.trim() === "") {
@@ -30104,10 +30610,10 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   return { events, skipped_count };
 }
 async function gatherPriorProposals(targetRepoRoot) {
-  const proposalsDir = path19.join(targetRepoRoot, ".flow", "retro-proposals");
+  const proposalsDir = path20.join(targetRepoRoot, ".flow", "retro-proposals");
   let entries;
   try {
-    entries = await fs14.readdir(proposalsDir);
+    entries = await fs15.readdir(proposalsDir);
   } catch (err) {
     if (isEnoent(err)) {
       return [];
@@ -30115,7 +30621,7 @@ async function gatherPriorProposals(targetRepoRoot) {
     throw err;
   }
   const proposals = entries.filter((f) => f.endsWith(".md")).map((f) => ({
-    path: path19.join(proposalsDir, f),
+    path: path20.join(proposalsDir, f),
     // The writer keys the filename by ISO timestamp (Story 6.3):
     // `<isoTimestamp>.md`. Strip the `.md` suffix to recover it.
     iso_timestamp: f.slice(0, -".md".length)
@@ -30124,14 +30630,14 @@ async function gatherPriorProposals(targetRepoRoot) {
   return proposals;
 }
 async function gatherRuleRegistry(targetRepoRoot) {
-  const registryPath = path19.join(
+  const registryPath = path20.join(
     targetRepoRoot,
     "docs",
     "discipline-rules.yaml"
   );
   let raw;
   try {
-    raw = await fs14.readFile(registryPath, "utf8");
+    raw = await fs15.readFile(registryPath, "utf8");
   } catch (err) {
     if (isEnoent(err)) {
       return null;
@@ -30280,6 +30786,119 @@ function computeRecurringFriction(events) {
   result.sort((a2, b) => a2.kind.localeCompare(b.kind));
   return result;
 }
+function lessonSimilarity(a2, b) {
+  const tokensA = tokenise(`${a2.applies_when} ${a2.detail}`);
+  const tokensB = tokenise(`${b.applies_when} ${b.detail}`);
+  if (tokensA.size === 0 && tokensB.size === 0) return 1;
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersectionSize = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersectionSize++;
+  }
+  const unionSize = tokensA.size + tokensB.size - intersectionSize;
+  return unionSize === 0 ? 0 : intersectionSize / unionSize;
+}
+function tokenise(text) {
+  const STOP_WORDS = /* @__PURE__ */ new Set([
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "from",
+    "is",
+    "it",
+    "its",
+    "as",
+    "be",
+    "was",
+    "are",
+    "not",
+    "do",
+    "if",
+    "so",
+    "no",
+    "we",
+    "you"
+  ]);
+  const tokens = /* @__PURE__ */ new Set();
+  for (const raw of text.toLowerCase().split(/[\s\p{P}]+/u)) {
+    const tok = raw.trim();
+    if (tok.length >= 3 && !STOP_WORDS.has(tok)) {
+      tokens.add(tok);
+    }
+  }
+  return tokens;
+}
+var NEAR_DUPLICATE_THRESHOLD = 0.35;
+async function gatherNearDuplicateLessonPairs(targetRepoRoot) {
+  const teamDir = path20.join(targetRepoRoot, "team");
+  let roleEntries;
+  try {
+    roleEntries = await fs15.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent(err)) return [];
+    throw err;
+  }
+  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
+  const pairs = [];
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    let stat2;
+    try {
+      stat2 = await fs15.stat(path20.join(teamDir, entry));
+    } catch {
+      continue;
+    }
+    if (!stat2.isDirectory()) continue;
+    const personaPath = path20.join(teamDir, entry, "PERSONA.md");
+    let raw;
+    try {
+      raw = await fs15.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent(err)) continue;
+      throw err;
+    }
+    let parsed;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      continue;
+    }
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length < 2) continue;
+    let bestPair = null;
+    for (let i2 = 0; i2 < lessons.length; i2++) {
+      for (let j = i2 + 1; j < lessons.length; j++) {
+        const sim = lessonSimilarity(lessons[i2], lessons[j]);
+        if (sim >= NEAR_DUPLICATE_THRESHOLD) {
+          if (bestPair === null || sim > bestPair.similarity) {
+            bestPair = {
+              role: entry,
+              lesson_a: lessons[i2],
+              lesson_b: lessons[j],
+              similarity: sim
+            };
+          }
+        }
+      }
+    }
+    if (bestPair !== null) {
+      pairs.push(bestPair);
+    }
+  }
+  pairs.sort((a2, b) => b.similarity - a2.similarity);
+  return pairs;
+}
 function isEnoent(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
@@ -30336,7 +30955,7 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     done_manifests: inputs.doneManifests,
     retro_proposals: inputs.priorProposals.map((p) => ({
       // Store repo-relative paths so the archive is portable.
-      path: path20.relative(targetRepoRoot, p.path),
+      path: path21.relative(targetRepoRoot, p.path),
       iso_timestamp: p.iso_timestamp
     })),
     telemetry_summary: {
@@ -30345,8 +30964,8 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     }
   };
   const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
-  const absPath = path20.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
-  await atomicWriteFile(absPath, (0, import_yaml9.stringify)(archiveRecord, { lineWidth: 0 }));
+  const absPath = path21.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
+  await atomicWriteFile(absPath, (0, import_yaml11.stringify)(archiveRecord, { lineWidth: 0 }));
   return absPath;
 }
 
@@ -30419,12 +31038,12 @@ function runPhaseDone(args) {
 }
 
 // src/tools/create-smoke-scratch-repo.ts
-import { promises as fs15 } from "node:fs";
+import { promises as fs16 } from "node:fs";
 import * as os from "node:os";
-import * as path27 from "node:path";
+import * as path28 from "node:path";
 
 // src/lib/git.ts
-import * as path26 from "node:path";
+import * as path27 from "node:path";
 import { promises as fsPromises } from "node:fs";
 
 // ../node_modules/.pnpm/is-plain-obj@4.1.0/node_modules/is-plain-obj/index.js
@@ -31272,12 +31891,12 @@ var handleCommand = (filePath, rawArguments, rawOptions) => {
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/arguments/options.js
 var import_cross_spawn = __toESM(require_cross_spawn(), 1);
-import path25 from "node:path";
+import path26 from "node:path";
 import process7 from "node:process";
 
 // ../node_modules/.pnpm/npm-run-path@6.0.0/node_modules/npm-run-path/index.js
 import process5 from "node:process";
-import path22 from "node:path";
+import path23 from "node:path";
 
 // ../node_modules/.pnpm/path-key@4.0.0/node_modules/path-key/index.js
 function pathKey(options = {}) {
@@ -31294,7 +31913,7 @@ function pathKey(options = {}) {
 // ../node_modules/.pnpm/unicorn-magic@0.3.0/node_modules/unicorn-magic/node.js
 import { promisify } from "node:util";
 import { execFile as execFileCallback, execFileSync as execFileSyncOriginal } from "node:child_process";
-import path21 from "node:path";
+import path22 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var execFileOriginal = promisify(execFileCallback);
 function toPath(urlOrPath) {
@@ -31303,12 +31922,12 @@ function toPath(urlOrPath) {
 function traversePathUp(startPath) {
   return {
     *[Symbol.iterator]() {
-      let currentPath = path21.resolve(toPath(startPath));
+      let currentPath = path22.resolve(toPath(startPath));
       let previousPath;
       while (previousPath !== currentPath) {
         yield currentPath;
         previousPath = currentPath;
-        currentPath = path21.resolve(currentPath, "..");
+        currentPath = path22.resolve(currentPath, "..");
       }
     }
   };
@@ -31323,27 +31942,27 @@ var npmRunPath = ({
   execPath: execPath2 = process5.execPath,
   addExecPath = true
 } = {}) => {
-  const cwdPath = path22.resolve(toPath(cwd));
+  const cwdPath = path23.resolve(toPath(cwd));
   const result = [];
-  const pathParts = pathOption.split(path22.delimiter);
+  const pathParts = pathOption.split(path23.delimiter);
   if (preferLocal) {
     applyPreferLocal(result, pathParts, cwdPath);
   }
   if (addExecPath) {
     applyExecPath(result, pathParts, execPath2, cwdPath);
   }
-  return pathOption === "" || pathOption === path22.delimiter ? `${result.join(path22.delimiter)}${pathOption}` : [...result, pathOption].join(path22.delimiter);
+  return pathOption === "" || pathOption === path23.delimiter ? `${result.join(path23.delimiter)}${pathOption}` : [...result, pathOption].join(path23.delimiter);
 };
 var applyPreferLocal = (result, pathParts, cwdPath) => {
   for (const directory of traversePathUp(cwdPath)) {
-    const pathPart = path22.join(directory, "node_modules/.bin");
+    const pathPart = path23.join(directory, "node_modules/.bin");
     if (!pathParts.includes(pathPart)) {
       result.push(pathPart);
     }
   }
 };
 var applyExecPath = (result, pathParts, execPath2, cwdPath) => {
-  const pathPart = path22.resolve(cwdPath, toPath(execPath2), "..");
+  const pathPart = path23.resolve(cwdPath, toPath(execPath2), "..");
   if (!pathParts.includes(pathPart)) {
     result.push(pathPart);
   }
@@ -32498,7 +33117,7 @@ var killAfterTimeout = async (subprocess, timeout, context, { signal }) => {
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/methods/node.js
 import { execPath, execArgv } from "node:process";
-import path23 from "node:path";
+import path24 from "node:path";
 var mapNode = ({ options }) => {
   if (options.node === false) {
     throw new TypeError('The "node" option cannot be false with `execaNode()`.');
@@ -32517,7 +33136,7 @@ var handleNodeOption = (file2, commandArguments, {
     throw new TypeError('The "execPath" option has been removed. Please use the "nodePath" option instead.');
   }
   const normalizedNodePath = safeNormalizeFileUrl(nodePath, 'The "nodePath" option');
-  const resolvedNodePath = path23.resolve(cwd, normalizedNodePath);
+  const resolvedNodePath = path24.resolve(cwd, normalizedNodePath);
   const newOptions = {
     ...options,
     nodePath: resolvedNodePath,
@@ -32527,7 +33146,7 @@ var handleNodeOption = (file2, commandArguments, {
   if (!shouldHandleNode) {
     return [file2, commandArguments, newOptions];
   }
-  if (path23.basename(file2, ".exe") === "node") {
+  if (path24.basename(file2, ".exe") === "node") {
     throw new TypeError('When the "node" option is true, the first argument does not need to be "node".');
   }
   return [
@@ -32617,11 +33236,11 @@ var serializeEncoding = (encoding) => typeof encoding === "string" ? `"${encodin
 
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/arguments/cwd.js
 import { statSync as statSync2 } from "node:fs";
-import path24 from "node:path";
+import path25 from "node:path";
 import process6 from "node:process";
 var normalizeCwd = (cwd = getDefaultCwd()) => {
   const cwdString = safeNormalizeFileUrl(cwd, 'The "cwd" option');
-  return path24.resolve(cwdString);
+  return path25.resolve(cwdString);
 };
 var getDefaultCwd = () => {
   try {
@@ -32668,7 +33287,7 @@ var normalizeOptions = (filePath, rawArguments, rawOptions) => {
   options.killSignal = normalizeKillSignal(options.killSignal);
   options.forceKillAfterDelay = normalizeForceKillAfterDelay(options.forceKillAfterDelay);
   options.lines = options.lines.map((lines, fdNumber) => lines && !BINARY_ENCODINGS.has(options.encoding) && options.buffer[fdNumber]);
-  if (process7.platform === "win32" && path25.basename(file2, ".exe") === "cmd") {
+  if (process7.platform === "win32" && path26.basename(file2, ".exe") === "cmd") {
     commandArguments.unshift("/q");
   }
   return { file: file2, commandArguments, options };
@@ -37447,7 +38066,7 @@ async function resolveSessionLedgerRoot(opts) {
   if ((result.exitCode ?? 1) !== 0) return opts.cwd;
   const commonDir = (typeof result.stdout === "string" ? result.stdout : "").trim();
   if (!commonDir) return opts.cwd;
-  return path26.dirname(commonDir);
+  return path27.dirname(commonDir);
 }
 async function listDirtyPaths(opts) {
   const execaImpl = opts.execaImpl ?? execa;
@@ -37528,7 +38147,7 @@ async function checkSharedRootLeak(opts) {
     cwd: worktreeCwd,
     ...execaImpl ? { execaImpl } : {}
   });
-  if (path26.resolve(sharedRoot) === path26.resolve(worktreeCwd)) {
+  if (path27.resolve(sharedRoot) === path27.resolve(worktreeCwd)) {
     return { leaked: false, paths: [], sharedRootPath: sharedRoot };
   }
   if (committedPaths.length === 0) {
@@ -37589,7 +38208,7 @@ async function checkStagedArtifactLeakGate(opts) {
         reason: `staged path "${relPath}" is inside a dependency folder (node_modules). Dependency folders must never be committed \u2014 add "node_modules" (bare, no trailing slash) to .gitignore so both directory and symlink forms are excluded`
       };
     }
-    const absPath = path26.isAbsolute(relPath) ? relPath : path26.join(targetRepoRoot, relPath);
+    const absPath = path27.isAbsolute(relPath) ? relPath : path27.join(targetRepoRoot, relPath);
     try {
       const stat2 = await lstat(absPath);
       if (stat2.isSymbolicLink()) {
@@ -37628,380 +38247,44 @@ var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
 async function createSmokeScratchRepo(opts) {
   const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
   const { label, parentDir } = parsed;
-  const standardsTemplatePath = path27.resolve(
+  const standardsTemplatePath = path28.resolve(
     getPluginRoot(),
     "docs",
     "standards-example.md"
   );
-  const scratchRoot = await fs15.mkdtemp(
-    path27.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
+  const scratchRoot = await fs16.mkdtemp(
+    path28.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
   );
   await gitInitWithEmptyCommit({ cwd: scratchRoot });
   await writeManagedFile({
-    absPath: path27.join(scratchRoot, ".flow", "config.yaml"),
+    absPath: path28.join(scratchRoot, ".flow", "config.yaml"),
     contents: "adapter: native\nstandards: {}\n",
     targetRepoRoot: scratchRoot
   });
-  const standardsContents = await fs15.readFile(standardsTemplatePath, "utf8");
+  const standardsContents = await fs16.readFile(standardsTemplatePath, "utf8");
   await writeManagedFile({
-    absPath: path27.join(scratchRoot, ".flow", "standards.md"),
+    absPath: path28.join(scratchRoot, ".flow", "standards.md"),
     contents: standardsContents,
     targetRepoRoot: scratchRoot
   });
   const cleanup = async () => {
-    await fs15.rm(scratchRoot, { recursive: true, force: true });
+    await fs16.rm(scratchRoot, { recursive: true, force: true });
   };
   return { scratchRoot, cleanup };
 }
 
 // src/tools/instantiate-persona.ts
-import { promises as fs18 } from "node:fs";
-import * as path30 from "node:path";
-
-// src/lib/persona-file.ts
-var import_yaml11 = __toESM(require_dist(), 1);
-
-// src/schemas/catalogue.ts
-var ModelTierSchema = external_exports.enum(["opus", "sonnet", "haiku"]);
-var LockedPhrasesSchema = external_exports.object({
-  handoff: external_exports.string().min(1),
-  yield: external_exports.string().min(1),
-  verdict: external_exports.string().min(1)
-}).strict();
-var CatalogueRoleSchema = external_exports.object({
-  role: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
-  domain: external_exports.string().min(1),
-  model_tier: ModelTierSchema,
-  tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
-  gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
-  locked_phrases: LockedPhrasesSchema
-}).strict();
-var REQUIRED_CATALOGUE_SECTIONS = [
-  "Domain",
-  "Mandate",
-  "Out of mandate",
-  "Prompt"
-];
-function assertCatalogueBodySections(body, sourcePath = "<body>") {
-  const headers = [];
-  for (const line of body.split("\n")) {
-    const match = /^##\s+(.+?)\s*$/.exec(line);
-    if (match && !line.startsWith("###")) {
-      headers.push(match[1].trim());
-    }
-  }
-  let cursor = 0;
-  for (const required2 of REQUIRED_CATALOGUE_SECTIONS) {
-    const idx = headers.indexOf(required2, cursor);
-    if (idx === -1) {
-      const seenEarlier = headers.indexOf(required2);
-      if (seenEarlier === -1) {
-        throw new CatalogueShapeError({
-          sourcePath,
-          zodMessage: `missing required '##' section: '${required2}'`
-        });
-      }
-      throw new CatalogueShapeError({
-        sourcePath,
-        zodMessage: `required '##' sections are out of order \u2014 expected [${REQUIRED_CATALOGUE_SECTIONS.join(", ")}] but saw '${required2}' before earlier required sections`
-      });
-    }
-    cursor = idx + 1;
-  }
-}
-
-// src/schemas/persona.ts
-var PersonaFrontmatterSchema = external_exports.object({
-  // Catalogue frontmatter fields, in canonical order. Constraints are
-  // copied verbatim from CatalogueRoleSchema; do NOT loosen them.
-  role: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
-  domain: external_exports.string().min(1),
-  model_tier: ModelTierSchema,
-  tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
-  gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
-  locked_phrases: LockedPhrasesSchema,
-  // Persona-only fields.
-  hired_at: external_exports.string().regex(
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
-    "hired_at must be ISO-8601 UTC (Z-suffixed)"
-  ),
-  catalogue_version: external_exports.string().regex(
-    /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/,
-    "catalogue_version must be semver"
-  )
-}).strict();
-var REQUIRED_PERSONA_SECTIONS = [
-  "Domain",
-  "Mandate",
-  "Out of mandate",
-  "Prompt",
-  "Knowledge"
-];
-
-// src/lib/markdown-frontmatter.ts
-var import_yaml10 = __toESM(require_dist(), 1);
-function splitFrontmatter(raw, sourcePath) {
-  const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
-  if (!text.startsWith("---\n") && !text.startsWith("---\r")) {
-    throw new CatalogueShapeError({
-      sourcePath,
-      zodMessage: "file must start with '---' YAML frontmatter opener"
-    });
-  }
-  const closeIdx = text.indexOf("\n---", 4);
-  if (closeIdx === -1) {
-    throw new CatalogueShapeError({
-      sourcePath,
-      zodMessage: "missing closing '---' YAML frontmatter delimiter"
-    });
-  }
-  const frontmatterRaw = text.slice(4, closeIdx);
-  const afterFence = text.slice(closeIdx + 4);
-  const body = afterFence.replace(/^\s*\n/, "");
-  return { frontmatterRaw, body };
-}
-function parseCatalogueRole(raw, sourcePath) {
-  const { frontmatterRaw, body } = splitFrontmatter(raw, sourcePath);
-  let parsedYaml;
-  try {
-    parsedYaml = (0, import_yaml10.parse)(frontmatterRaw);
-  } catch (err) {
-    throw new CatalogueShapeError({
-      sourcePath,
-      zodMessage: `frontmatter YAML parse error: ${err instanceof Error ? err.message : String(err)}`
-    });
-  }
-  const result = CatalogueRoleSchema.safeParse(parsedYaml);
-  if (!result.success) {
-    throw new CatalogueShapeError({
-      sourcePath,
-      zodMessage: formatZodIssues3(result.error.issues)
-    });
-  }
-  assertCatalogueBodySections(body, sourcePath);
-  const sections = extractSections(body);
-  return {
-    ...result.data,
-    sections,
-    sourcePath
-  };
-}
-function extractSections(body) {
-  const lines = body.split("\n");
-  const out = {};
-  let currentHeading = null;
-  let currentBody = [];
-  const flush = () => {
-    if (currentHeading !== null) {
-      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
-    }
-  };
-  for (const line of lines) {
-    const match = /^##\s+(.+?)\s*$/.exec(line);
-    if (match && !line.startsWith("###")) {
-      flush();
-      currentHeading = match[1].trim();
-      currentBody = [];
-    } else if (currentHeading !== null) {
-      currentBody.push(line);
-    }
-  }
-  flush();
-  const filtered = {};
-  for (const required2 of REQUIRED_CATALOGUE_SECTIONS) {
-    if (required2 in out) filtered[required2] = out[required2] ?? "";
-  }
-  return filtered;
-}
-function formatZodIssues3(issues) {
-  const first = issues[0];
-  if (!first) return "(no issue details)";
-  const dottedPath = first.path.length > 0 ? first.path.join(".") : "<root>";
-  return `${dottedPath}: ${first.message}`;
-}
-
-// src/lib/persona-file.ts
-function parsePersonaFile(raw, sourcePath) {
-  let frontmatterRaw;
-  let body;
-  try {
-    const split = splitFrontmatter(raw, sourcePath);
-    frontmatterRaw = split.frontmatterRaw;
-    body = split.body;
-  } catch (err) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: err instanceof Error ? err.message : String(err)
-    });
-  }
-  let parsedYaml;
-  try {
-    parsedYaml = (0, import_yaml11.parse)(frontmatterRaw);
-  } catch (err) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: `frontmatter YAML parse error: ${err instanceof Error ? err.message : String(err)}`
-    });
-  }
-  const result = PersonaFrontmatterSchema.safeParse(parsedYaml);
-  if (!result.success) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: formatZodIssues4(result.error.issues)
-    });
-  }
-  try {
-    assertCatalogueBodySections(body, sourcePath);
-  } catch (err) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: err instanceof Error ? err.message : String(err)
-    });
-  }
-  const headings = collectHeadings(body);
-  const promptIdx = headings.indexOf("Prompt");
-  const knowledgeIdx = headings.indexOf("Knowledge");
-  if (knowledgeIdx === -1) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: "missing required '##' section: 'Knowledge'"
-    });
-  }
-  if (knowledgeIdx <= promptIdx) {
-    throw new PersonaFileMalformedError({
-      personaPath: sourcePath,
-      zodMessage: "required '##' sections are out of order \u2014 'Knowledge' must appear after 'Prompt'"
-    });
-  }
-  const sections = extractSections2(body);
-  const skillsBody = extractOptionalSkillsSection(body);
-  return {
-    ...result.data,
-    sections,
-    skillsBody,
-    sourcePath
-  };
-}
-function renderPersonaFile(opts) {
-  const { catalogue, hiredAt, catalogueVersion } = opts;
-  const frontmatter = {
-    role: catalogue.role,
-    domain: catalogue.domain,
-    model_tier: catalogue.model_tier,
-    tools_allow: [...catalogue.tools_allow],
-    gh_allow: [...catalogue.gh_allow],
-    locked_phrases: { ...catalogue.locked_phrases },
-    hired_at: hiredAt,
-    catalogue_version: catalogueVersion
-  };
-  const yamlBlock = (0, import_yaml11.stringify)(frontmatter).replace(/\n$/, "");
-  const h1 = toDisplayName(catalogue.role);
-  const sections = [
-    `# ${h1}`,
-    ``,
-    `## Domain`,
-    ``,
-    catalogue.sections.Domain,
-    ``,
-    `## Mandate`,
-    ``,
-    catalogue.sections.Mandate,
-    ``,
-    `## Out of mandate`,
-    ``,
-    catalogue.sections["Out of mandate"],
-    ``,
-    `## Prompt`,
-    ``,
-    catalogue.sections.Prompt,
-    ``,
-    `## Knowledge`,
-    ``
-  ];
-  return `---
-${yamlBlock}
----
-
-${sections.join("\n")}`;
-}
-function toDisplayName(role) {
-  return role.split("-").map(
-    (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
-  ).join(" ");
-}
-function collectHeadings(body) {
-  const headings = [];
-  for (const line of body.split("\n")) {
-    const match = /^##\s+(.+?)\s*$/.exec(line);
-    if (match && !line.startsWith("###")) {
-      headings.push(match[1].trim());
-    }
-  }
-  return headings;
-}
-function extractSections2(body) {
-  const lines = body.split("\n");
-  const out = {};
-  let currentHeading = null;
-  let currentBody = [];
-  const flush = () => {
-    if (currentHeading !== null) {
-      out[currentHeading] = currentBody.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
-    }
-  };
-  for (const line of lines) {
-    const match = /^##\s+(.+?)\s*$/.exec(line);
-    if (match && !line.startsWith("###")) {
-      flush();
-      currentHeading = match[1].trim();
-      currentBody = [];
-    } else if (currentHeading !== null) {
-      currentBody.push(line);
-    }
-  }
-  flush();
-  const filtered = {};
-  for (const required2 of REQUIRED_PERSONA_SECTIONS) {
-    filtered[required2] = out[required2] ?? "";
-  }
-  return filtered;
-}
-function extractOptionalSkillsSection(body) {
-  const lines = body.split("\n");
-  let inSkills = false;
-  const bodyLines = [];
-  for (const line of lines) {
-    if (/^##\s+Skills\s*$/.test(line) && !line.startsWith("###")) {
-      inSkills = true;
-      continue;
-    }
-    if (inSkills) {
-      if (/^##\s+/.test(line) && !line.startsWith("###")) {
-        break;
-      }
-      bodyLines.push(line);
-    }
-  }
-  if (!inSkills) {
-    return "";
-  }
-  return bodyLines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
-}
-function formatZodIssues4(issues) {
-  const first = issues[0];
-  if (!first) return "(no issue details)";
-  const dottedPath = first.path.length > 0 ? first.path.join(".") : "<root>";
-  return `${dottedPath}: ${first.message}`;
-}
+import { promises as fs19 } from "node:fs";
+import * as path31 from "node:path";
 
 // src/tools/read-catalogue.ts
-import { promises as fs16 } from "node:fs";
-import * as path28 from "node:path";
+import { promises as fs17 } from "node:fs";
+import * as path29 from "node:path";
 async function readCatalogue(opts) {
-  const cataloguePath = path28.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
+  const cataloguePath = path29.join(opts.pluginRoot, "catalogue", `${opts.role}.md`);
   let raw;
   try {
-    raw = await fs16.readFile(cataloguePath, "utf8");
+    raw = await fs17.readFile(cataloguePath, "utf8");
   } catch (err) {
     if (isEnoent2(err)) {
       throw new CatalogueRoleNotFoundError({
@@ -38018,8 +38301,8 @@ function isEnoent2(err) {
 }
 
 // src/tools/read-custom-role.ts
-import { promises as fs17 } from "node:fs";
-import * as path29 from "node:path";
+import { promises as fs18 } from "node:fs";
+import * as path30 from "node:path";
 var KEBAB_CASE = /^[a-z0-9-]+$/;
 async function readCustomRole(opts) {
   if (!KEBAB_CASE.test(opts.role)) {
@@ -38028,7 +38311,7 @@ async function readCustomRole(opts) {
       zodMessage: `role id '${opts.role}' does not match the required kebab-case shape /^[a-z0-9-]+$/`
     });
   }
-  const customPath = path29.join(
+  const customPath = path30.join(
     opts.targetRepoRoot,
     "team",
     "custom",
@@ -38036,7 +38319,7 @@ async function readCustomRole(opts) {
   );
   let raw;
   try {
-    raw = await fs17.readFile(customPath, "utf8");
+    raw = await fs18.readFile(customPath, "utf8");
   } catch (err) {
     if (isEnoent3(err)) {
       throw new CatalogueRoleNotFoundError({
@@ -38063,13 +38346,13 @@ function isEnoent3(err) {
 async function instantiatePersona(opts) {
   const clock = opts.clock ?? (() => /* @__PURE__ */ new Date());
   const pluginVersion = opts.pluginVersion ?? getPluginVersion();
-  const customPath = path30.join(
+  const customPath = path31.join(
     opts.targetRepoRoot,
     "team",
     "custom",
     `${opts.role}.md`
   );
-  const cataloguePath = path30.join(
+  const cataloguePath = path31.join(
     opts.pluginRoot,
     "catalogue",
     `${opts.role}.md`
@@ -38101,7 +38384,7 @@ async function instantiatePersona(opts) {
       throw err;
     }
   }
-  const personaPath = path30.join(
+  const personaPath = path31.join(
     opts.targetRepoRoot,
     "team",
     opts.role,
@@ -38109,7 +38392,7 @@ async function instantiatePersona(opts) {
   );
   let exists = false;
   try {
-    await fs18.stat(personaPath);
+    await fs19.stat(personaPath);
     exists = true;
   } catch (err) {
     if (!isEnoent4(err)) {
@@ -38145,13 +38428,13 @@ import * as path33 from "node:path";
 import { promises as fs21 } from "node:fs";
 
 // src/tools/read-persona.ts
-import { promises as fs19 } from "node:fs";
-import * as path31 from "node:path";
+import { promises as fs20 } from "node:fs";
+import * as path32 from "node:path";
 async function readPersona(opts) {
-  const personaPath = path31.join(opts.targetRepoRoot, "team", opts.role, "PERSONA.md");
+  const personaPath = path32.join(opts.targetRepoRoot, "team", opts.role, "PERSONA.md");
   let raw;
   try {
-    raw = await fs19.readFile(personaPath, "utf8");
+    raw = await fs20.readFile(personaPath, "utf8");
   } catch (err) {
     if (isEnoent5(err)) {
       throw new PersonaFileNotFoundError({
@@ -38214,174 +38497,6 @@ function extractSkillRefs(skillsBody) {
     });
   }
   return refs;
-}
-
-// src/lib/lesson-archive.ts
-import * as path32 from "node:path";
-import { promises as fs20 } from "node:fs";
-var LESSON_BLOCK_PREFIX = "<!-- lesson:json ";
-var LESSON_BLOCK_SUFFIX = " -->";
-var DEFAULT_BRIEFING_BUDGET = 10;
-function extractLessonsFromBody(body) {
-  const lessons = [];
-  for (const line of body.split("\n")) {
-    const trimmed = line.trimStart();
-    if (!trimmed.startsWith(LESSON_BLOCK_PREFIX) || !trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
-      continue;
-    }
-    const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
-    let raw;
-    try {
-      raw = JSON.parse(jsonStr);
-    } catch {
-      continue;
-    }
-    if (raw === null || typeof raw !== "object" || !("id" in raw) || !("kind" in raw) || !("applies_when" in raw) || !("detail" in raw) || !("learned_at" in raw)) {
-      continue;
-    }
-    const obj = raw;
-    if (typeof obj["id"] !== "string" || typeof obj["kind"] !== "string" || typeof obj["applies_when"] !== "string" || typeof obj["detail"] !== "string" || typeof obj["learned_at"] !== "string") {
-      continue;
-    }
-    const lesson = {
-      id: obj["id"],
-      kind: obj["kind"],
-      applies_when: obj["applies_when"],
-      detail: obj["detail"],
-      learned_at: obj["learned_at"]
-    };
-    if (typeof obj["use_count"] === "number") {
-      lesson.use_count = obj["use_count"];
-    }
-    if (typeof obj["last_used_at"] === "string") {
-      lesson.last_used_at = obj["last_used_at"];
-    }
-    if (typeof obj["failure_class"] === "string") {
-      lesson.failure_class = obj["failure_class"];
-    }
-    if (typeof obj["source_ref"] === "string") {
-      lesson.source_ref = obj["source_ref"];
-    }
-    if (typeof obj["source_pr"] === "string") {
-      lesson.source_pr = obj["source_pr"];
-    }
-    lessons.push(lesson);
-  }
-  return lessons;
-}
-function compareLessons(a2, b) {
-  const aCount = a2.use_count ?? 0;
-  const bCount = b.use_count ?? 0;
-  if (bCount !== aCount) return bCount - aCount;
-  const aUsed = a2.last_used_at ?? "1970-01-01T00:00:00.000Z";
-  const bUsed = b.last_used_at ?? "1970-01-01T00:00:00.000Z";
-  if (bUsed !== aUsed) return bUsed > aUsed ? 1 : -1;
-  return b.learned_at > a2.learned_at ? 1 : -1;
-}
-function rankLessons(body, budget = DEFAULT_BRIEFING_BUDGET) {
-  const all = extractLessonsFromBody(body);
-  const sorted = [...all].sort(compareLessons);
-  const topLessons = sorted.slice(0, budget);
-  const overflow = sorted.slice(budget);
-  return { topLessons, overflow };
-}
-function serialiseLessonBlock(lesson) {
-  const obj = {
-    id: lesson.id,
-    kind: lesson.kind,
-    applies_when: lesson.applies_when,
-    detail: lesson.detail,
-    learned_at: lesson.learned_at
-  };
-  if (lesson.use_count !== void 0) obj["use_count"] = lesson.use_count;
-  if (lesson.last_used_at !== void 0) obj["last_used_at"] = lesson.last_used_at;
-  if (lesson.failure_class !== void 0) obj["failure_class"] = lesson.failure_class;
-  if (lesson.source_ref !== void 0) obj["source_ref"] = lesson.source_ref;
-  if (lesson.source_pr !== void 0) obj["source_pr"] = lesson.source_pr;
-  return `${LESSON_BLOCK_PREFIX}${JSON.stringify(obj)}${LESSON_BLOCK_SUFFIX}`;
-}
-var ARCHIVE_TOOL_NAME = "buildPersonaSpawnPrompt";
-async function archiveLessons(targetRepoRoot, role, lessons, now = () => /* @__PURE__ */ new Date()) {
-  const changedPaths = [];
-  const archivedAt = now().toISOString();
-  for (const lesson of lessons) {
-    const archived = { ...lesson, archived_at: archivedAt };
-    const relPath = `team/${role}/_archived/${lesson.id}.json`;
-    const absPath = path32.join(targetRepoRoot, relPath);
-    await writeManagedFile({
-      absPath,
-      contents: JSON.stringify(archived, null, 2) + "\n",
-      targetRepoRoot,
-      mcpToolContext: { toolName: ARCHIVE_TOOL_NAME, role }
-    });
-    changedPaths.push(relPath);
-  }
-  return changedPaths;
-}
-function rebuildBodyWithTopLessons(originalBody, topLessons) {
-  const nonLessonLines = [];
-  for (const line of originalBody.split("\n")) {
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith(LESSON_BLOCK_PREFIX) && trimmed.endsWith(LESSON_BLOCK_SUFFIX)) {
-      const jsonStr = trimmed.slice(LESSON_BLOCK_PREFIX.length, trimmed.length - LESSON_BLOCK_SUFFIX.length).trim();
-      try {
-        const raw = JSON.parse(jsonStr);
-        if (raw !== null && typeof raw === "object" && "id" in raw && typeof raw["id"] === "string") {
-          continue;
-        }
-      } catch {
-      }
-    }
-    nonLessonLines.push(line);
-  }
-  const rankedBlocks = topLessons.map(serialiseLessonBlock);
-  while (nonLessonLines.length > 0 && nonLessonLines[nonLessonLines.length - 1].trim() === "") {
-    nonLessonLines.pop();
-  }
-  const parts = [...rankedBlocks];
-  if (nonLessonLines.length > 0) {
-    parts.push(...nonLessonLines);
-  }
-  return parts.join("\n");
-}
-async function findArchivedLessonById(targetRepoRoot, role, id) {
-  const absPath = path32.join(targetRepoRoot, "team", role, "_archived", `${id}.json`);
-  let raw;
-  try {
-    raw = await fs20.readFile(absPath, "utf8");
-  } catch (err) {
-    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    throw err;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (parsed === null || typeof parsed !== "object" || !("id" in parsed) || !("kind" in parsed) || !("applies_when" in parsed) || !("detail" in parsed) || !("learned_at" in parsed) || !("archived_at" in parsed)) {
-    return null;
-  }
-  const obj = parsed;
-  if (typeof obj["id"] !== "string" || typeof obj["kind"] !== "string" || typeof obj["applies_when"] !== "string" || typeof obj["detail"] !== "string" || typeof obj["learned_at"] !== "string" || typeof obj["archived_at"] !== "string") {
-    return null;
-  }
-  const archived = {
-    id: obj["id"],
-    kind: obj["kind"],
-    applies_when: obj["applies_when"],
-    detail: obj["detail"],
-    learned_at: obj["learned_at"],
-    archived_at: obj["archived_at"]
-  };
-  if (typeof obj["use_count"] === "number") archived.use_count = obj["use_count"];
-  if (typeof obj["last_used_at"] === "string") archived.last_used_at = obj["last_used_at"];
-  if (typeof obj["failure_class"] === "string") archived.failure_class = obj["failure_class"];
-  if (typeof obj["source_ref"] === "string") archived.source_ref = obj["source_ref"];
-  if (typeof obj["source_pr"] === "string") archived.source_pr = obj["source_pr"];
-  return archived;
 }
 
 // src/tools/build-persona-spawn-prompt.ts
@@ -43906,6 +44021,15 @@ var BuildStoryProposalSchema = ProposalBase.extend({
   suggested_title: external_exports.string().min(1),
   skill_change_context: external_exports.string().min(1)
 }).strict();
+var LessonConsolidationProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("lesson-consolidation"),
+  target_role: RolePathSchema,
+  lesson_a_id: external_exports.string().min(1),
+  lesson_b_id: external_exports.string().min(1),
+  lesson_a_text: external_exports.string().min(1),
+  lesson_b_text: external_exports.string().min(1),
+  merged_lesson: external_exports.string().min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -43916,7 +44040,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   TeamChangeProposalSchema,
   PersonaAppendProposalSchema,
   PromoteLessonToSkillProposalSchema,
-  BuildStoryProposalSchema
+  BuildStoryProposalSchema,
+  LessonConsolidationProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,
