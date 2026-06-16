@@ -482,7 +482,7 @@ export interface SelectRetirableLessonsOptions {
 export const DEFAULT_AGE_FLOOR_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** Default cycle count used in rationale wording. */
-export const DEFAULT_CYCLE_COUNT = 3;
+const DEFAULT_CYCLE_COUNT = 3;
 
 /**
  * Select lessons that have never earned their keep and are old enough to have
