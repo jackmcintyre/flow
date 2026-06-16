@@ -70,7 +70,7 @@ export type MaintainerFeedbackItem = z.infer<typeof MaintainerFeedbackItemSchema
  * `raised_at`). This is what `recordMaintainerFeedback` validates against
  * the caller's input — the tool adds provenance before writing.
  */
-export const MaintainerFeedbackInputSchema = z
+const MaintainerFeedbackInputSchema = z
   .object({
     problem: z.string().min(1, "problem must be a non-empty string"),
     tool_area: z.string().min(1, "tool_area must be a non-empty string"),
