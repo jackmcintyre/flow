@@ -1,13 +1,19 @@
 /**
- * Lesson ranking, budget cap, and archive helpers — Story native:01KT6QSW4W7SMAHAT4EAKCCC65.
+ * Lesson ranking, budget cap, and archive helpers.
+ *
+ * Stories:
+ *  - native:01KT6QSW4W7SMAHAT4EAKCCC65 — original ranking + archive.
+ *  - native:01KV7FHAER7497SWZVWMW8D53B — helpfulness-first ranking.
  *
  * This module provides three concerns:
  *
  *   1. **Ranking** — `rankLessons(body, budget)` parses structured lesson
- *      blocks from a Knowledge section, orders them by `use_count` descending
- *      then `last_used_at` descending (most-recently-used as tiebreaker), and
- *      returns the top-budgeted "always-shown" set plus the overflow that
- *      should be demoted.
+ *      blocks from a Knowledge section, orders them by proven helpfulness
+ *      (`helpful_fire_count / use_count`) descending first, then by `use_count`
+ *      descending then `last_used_at` descending as tiebreakers, and returns
+ *      the top-budgeted "always-shown" set plus the overflow that should be
+ *      demoted. Lessons with no track record (`use_count` absent or 0) are
+ *      treated as neutral (ratio = 0.5) — neither auto-promoted nor buried.
  *
  *   2. **Demotion** — `demoteLessonsFromBody(body, overflowIds)` removes the
  *      overflow lessons from the live Knowledge body. The caller is responsible
@@ -64,9 +70,16 @@ export const DEFAULT_BRIEFING_BUDGET = 10;
 
 /**
  * A structured lesson parsed from the Knowledge section, with optional
- * usage tracking fields (`use_count`, `last_used_at`) added by this story.
- * The fields are optional so old lessons without them rank at the bottom
- * (treated as use_count=0, last_used_at=epoch).
+ * usage tracking fields (`use_count`, `last_used_at`, `helpful_fire_count`)
+ * added progressively.
+ *
+ * `helpful_fire_count` tracks how many times this lesson's use went
+ * hand-in-hand with work landing cleanly (a READY FOR MERGE verdict in the
+ * same story flow). It is the numerator in the per-lesson helpfulness ratio;
+ * `use_count` is the denominator.
+ *
+ * Lessons with no track record (use_count absent or 0) are treated as
+ * neutral — neither auto-promoted nor auto-buried (see `lessonHelpfulnessRatio`).
  */
 export interface ParsedLesson {
   id: string;
@@ -78,6 +91,13 @@ export interface ParsedLesson {
   use_count?: number;
   /** ISO-8601 timestamp of the most recent `recallLesson` call for this lesson. */
   last_used_at?: string;
+  /**
+   * How many of those recalls were followed by a READY FOR MERGE verdict in
+   * the same story flow — the "proven helpful" counter.
+   *
+   * Story native:01KV7FHAER7497SWZVWMW8D53B.
+   */
+  helpful_fire_count?: number;
   /** Optional pitfall failure class. */
   failure_class?: string;
   /** Optional source story ref. */
@@ -173,6 +193,9 @@ export function extractLessonsFromBody(body: string): ParsedLesson[] {
     if (typeof obj["last_used_at"] === "string") {
       lesson.last_used_at = obj["last_used_at"] as string;
     }
+    if (typeof obj["helpful_fire_count"] === "number") {
+      lesson.helpful_fire_count = obj["helpful_fire_count"] as number;
+    }
     if (typeof obj["failure_class"] === "string") {
       lesson.failure_class = obj["failure_class"] as string;
     }
@@ -194,18 +217,56 @@ export function extractLessonsFromBody(body: string): ParsedLesson[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Compare two lessons for ranking: use_count descending, then last_used_at
- * descending (most recently used first), then learned_at descending (newest
- * lesson first as final tiebreaker).
+ * Derive the per-lesson helpfulness ratio for ranking purposes.
  *
- * Lessons without `use_count` are treated as use_count=0.
- * Lessons without `last_used_at` are treated as epoch ("1970-01-01T00:00:00.000Z").
+ * The ratio measures how often a lesson's recall went hand-in-hand with work
+ * landing cleanly (READY FOR MERGE), using `helpful_fire_count / use_count`.
+ *
+ * Deliberate default for lessons with no track record yet (AC3):
+ *   - If `use_count` is 0 or absent, we cannot compute a meaningful ratio.
+ *     We return 0.5 (neutral) so new lessons are neither auto-promoted above
+ *     proven helpers nor auto-buried beneath them purely for lack of history.
+ *     The existing frequency/recency tiebreaker then decides their relative
+ *     position among equally-neutral lessons.
+ *
+ * Exported for unit testing.
+ *
+ * Story native:01KV7FHAER7497SWZVWMW8D53B.
+ */
+export function lessonHelpfulnessRatio(lesson: ParsedLesson): number {
+  const uses = lesson.use_count ?? 0;
+  if (uses === 0) {
+    // No track record — neutral, not worst-case (AC3).
+    return 0.5;
+  }
+  return (lesson.helpful_fire_count ?? 0) / uses;
+}
+
+/**
+ * Compare two lessons for ranking:
+ *
+ *   1. Proven helpfulness descending (`helpful_fire_count / use_count`).
+ *      Lessons with no track record are treated as neutral (ratio = 0.5),
+ *      so they are neither auto-promoted nor auto-buried (AC3).
+ *   2. use_count descending (frequency — existing tiebreaker, AC2).
+ *   3. last_used_at descending (recency — existing tiebreaker, AC2).
+ *   4. learned_at descending (newest lesson first — final tiebreaker, AC2).
+ *
+ * Story native:01KV7FHAER7497SWZVWMW8D53B — primary order changed from
+ * use_count to proven helpfulness; frequency/recency retained as tiebreaker.
  */
 function compareLessons(a: ParsedLesson, b: ParsedLesson): number {
+  // Primary: proven helpfulness descending.
+  const aRatio = lessonHelpfulnessRatio(a);
+  const bRatio = lessonHelpfulnessRatio(b);
+  if (bRatio !== aRatio) return bRatio - aRatio;
+
+  // Tiebreaker 1: use_count descending.
   const aCount = a.use_count ?? 0;
   const bCount = b.use_count ?? 0;
   if (bCount !== aCount) return bCount - aCount;
 
+  // Tiebreaker 2: last_used_at descending (most recently used first).
   const aUsed = a.last_used_at ?? "1970-01-01T00:00:00.000Z";
   const bUsed = b.last_used_at ?? "1970-01-01T00:00:00.000Z";
   if (bUsed !== aUsed) return bUsed > aUsed ? 1 : -1;
@@ -218,6 +279,10 @@ function compareLessons(a: ParsedLesson, b: ParsedLesson): number {
  * Rank the structured lessons from a Knowledge section body and apply the
  * budget cap. Returns the top-budgeted lessons (always-shown) and the
  * overflow to demote.
+ *
+ * Primary order: proven helpfulness (`helpful_fire_count / use_count`) descending.
+ * Tiebreaker: use_count descending, then last_used_at descending, then learned_at descending.
+ * Lessons with no track record are treated as neutral (ratio = 0.5).
  *
  * When `body` has fewer lessons than `budget`, all lessons are in `topLessons`
  * and `overflow` is empty.
@@ -259,6 +324,7 @@ export function serialiseLessonBlock(lesson: ParsedLesson): string {
   };
   if (lesson.use_count !== undefined) obj["use_count"] = lesson.use_count;
   if (lesson.last_used_at !== undefined) obj["last_used_at"] = lesson.last_used_at;
+  if (lesson.helpful_fire_count !== undefined) obj["helpful_fire_count"] = lesson.helpful_fire_count;
   if (lesson.failure_class !== undefined) obj["failure_class"] = lesson.failure_class;
   if (lesson.source_ref !== undefined) obj["source_ref"] = lesson.source_ref;
   if (lesson.source_pr !== undefined) obj["source_pr"] = lesson.source_pr;
@@ -376,8 +442,8 @@ export async function archiveLessons(
  *  2. Non-lesson lines (flat bullets, blank lines, other text) from the
  *     original body are preserved and appended AFTER the ranked blocks.
  *
- * This ensures the always-shown index is ordered by use_count desc / last_used_at
- * desc as required by AC1.
+ * This ensures the always-shown index is ordered by proven helpfulness desc /
+ * use_count desc / last_used_at desc as required by AC1.
  *
  * Exported for unit testing.
  */
@@ -642,6 +708,7 @@ export async function findArchivedLessonById(
 
   if (typeof obj["use_count"] === "number") archived.use_count = obj["use_count"] as number;
   if (typeof obj["last_used_at"] === "string") archived.last_used_at = obj["last_used_at"] as string;
+  if (typeof obj["helpful_fire_count"] === "number") archived.helpful_fire_count = obj["helpful_fire_count"] as number;
   if (typeof obj["failure_class"] === "string") archived.failure_class = obj["failure_class"] as string;
   if (typeof obj["source_ref"] === "string") archived.source_ref = obj["source_ref"] as string;
   if (typeof obj["source_pr"] === "string") archived.source_pr = obj["source_pr"] as string;

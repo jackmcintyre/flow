@@ -1,10 +1,15 @@
 /**
- * Unit tests for `lesson-archive.ts` — Story native:01KT6QSW4W7SMAHAT4EAKCCC65 (AC3).
+ * Unit tests for `lesson-archive.ts`.
+ *
+ * Stories:
+ *  - native:01KT6QSW4W7SMAHAT4EAKCCC65 (AC3) — original ranking + archive.
+ *  - native:01KV7FHAER7497SWZVWMW8D53B (AC1–AC3) — helpfulness-first ranking.
  *
  * Covers:
  *  (a) `extractLessonsFromBody` returns all structured lessons from a body.
  *  (b) `extractLessonsFromBody` skips malformed JSON blocks silently.
- *  (c) `rankLessons` orders by use_count descending then last_used_at descending.
+ *  (c) `rankLessons` orders by proven helpfulness descending, with
+ *      frequency then recency as tiebreaker.
  *  (d) `rankLessons` splits at the budget boundary.
  *  (e) `rankLessons` with fewer lessons than budget puts all in topLessons.
  *  (f) `demoteLessonsFromBody` removes overflow lessons from the body.
@@ -14,6 +19,9 @@
  *  (j) `archiveLessons` writes JSON files to team/<role>/_archived/<id>.json.
  *  (k) `findArchivedLessonById` returns the archived lesson when present.
  *  (l) `findArchivedLessonById` returns null when the archived file is absent.
+ *  AC1 briefing-assembly: proven-helpful lesson stays in view; frequent-but-unhelpful pushed out.
+ *  AC2 tiebreaker: equally-helpful lessons retain frequency/recency order.
+ *  AC3 fairness: brand-new lesson with no track record is treated as neutral.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -29,6 +37,7 @@ import {
   selectRetirableLessons,
   serialiseLessonBlock,
   DEFAULT_AGE_FLOOR_MS,
+  lessonHelpfulnessRatio,
   type ParsedLesson,
 } from "./lesson-archive.js";
 
@@ -45,6 +54,7 @@ function makeLesson(overrides: Partial<ParsedLesson> & { id: string }): ParsedLe
     learned_at: overrides.learned_at ?? "2026-01-01T00:00:00.000Z",
     use_count: overrides.use_count,
     last_used_at: overrides.last_used_at,
+    helpful_fire_count: overrides.helpful_fire_count,
     failure_class: overrides.failure_class,
     source_ref: overrides.source_ref,
     source_pr: overrides.source_pr,
@@ -58,16 +68,28 @@ function makeBody(lessons: ParsedLesson[]): string {
 // ---------------------------------------------------------------------------
 // Fixture lessons
 // ---------------------------------------------------------------------------
+//
+// Helpfulness ratios (helpful_fire_count / use_count):
+//   L5: 9/10 = 0.90 — highest, ranks first
+//   L2: 4/5  = 0.80 — second (same ratio as L1, tiebreaker: more recent last_used_at)
+//   L1: 4/5  = 0.80 — third (same ratio, older last_used_at)
+//   L3: 2/5  = 0.40 — fourth (use_count=5 so it can be a tiebreaker reference)
+//   L4: 1/5  = 0.20 — fifth (lowest, ranks last in the sorted set)
+//
+// This preserves the descending order L5 > L2 > L1 > L3 > L4 used by the
+// existing budget-split tests, now driven by proven helpfulness rather than
+// raw use_count.
 
-const L1 = makeLesson({ id: "01KT0000000000000000000001", use_count: 5, last_used_at: "2026-06-01T12:00:00.000Z" });
-const L2 = makeLesson({ id: "01KT0000000000000000000002", use_count: 5, last_used_at: "2026-06-02T12:00:00.000Z" });
-const L3 = makeLesson({ id: "01KT0000000000000000000003", use_count: 3 });
-const L4 = makeLesson({ id: "01KT0000000000000000000004", use_count: 0 });
+const L1 = makeLesson({ id: "01KT0000000000000000000001", use_count: 5, helpful_fire_count: 4, last_used_at: "2026-06-01T12:00:00.000Z" });
+const L2 = makeLesson({ id: "01KT0000000000000000000002", use_count: 5, helpful_fire_count: 4, last_used_at: "2026-06-02T12:00:00.000Z" });
+const L3 = makeLesson({ id: "01KT0000000000000000000003", use_count: 5, helpful_fire_count: 2 });
+const L4 = makeLesson({ id: "01KT0000000000000000000004", use_count: 5, helpful_fire_count: 1 });
 const L5 = makeLesson({
   id: "01KT0000000000000000000005",
   kind: "pitfall",
   failure_class: "deploy-skip-test",
   use_count: 10,
+  helpful_fire_count: 9,
 });
 
 // ---------------------------------------------------------------------------
@@ -143,32 +165,37 @@ describe("extractLessonsFromBody", () => {
 // ---------------------------------------------------------------------------
 
 describe("rankLessons", () => {
-  it("(c) orders by use_count descending", () => {
-    const body = makeBody([L3, L4, L1, L5]); // shuffled: counts 3, 0, 5, 10
+  it("(c) orders by proven helpfulness descending (helpful_fire_count / use_count)", () => {
+    // Ratios: L5=0.90, L2=0.80 (newer), L1=0.80 (older), L3=0.40, L4=0.20
+    const body = makeBody([L3, L4, L1, L5]); // shuffled input
     const { topLessons } = rankLessons(body, 10);
 
-    expect(topLessons[0]!.id).toBe(L5.id); // use_count=10
-    expect(topLessons[1]!.id).toBe(L1.id); // use_count=5
-    expect(topLessons[2]!.id).toBe(L3.id); // use_count=3
-    expect(topLessons[3]!.id).toBe(L4.id); // use_count=0
+    expect(topLessons[0]!.id).toBe(L5.id); // ratio=0.90
+    expect(topLessons[1]!.id).toBe(L1.id); // ratio=0.80 (L2 absent, L1 is next)
+    expect(topLessons[2]!.id).toBe(L3.id); // ratio=0.40
+    expect(topLessons[3]!.id).toBe(L4.id); // ratio=0.20
   });
 
-  it("(c) breaks use_count ties by last_used_at descending (most recent first)", () => {
-    // L1 and L2 both have use_count=5; L2 has a later last_used_at.
+  it("(c) breaks helpfulness ties by use_count then last_used_at descending (most recent first)", () => {
+    // L1 and L2 have equal helpfulness ratio (4/5 = 0.80); L2 has a later last_used_at.
     const body = makeBody([L1, L2]);
     const { topLessons } = rankLessons(body, 10);
 
-    expect(topLessons[0]!.id).toBe(L2.id); // last_used_at=2026-06-02 (more recent)
-    expect(topLessons[1]!.id).toBe(L1.id); // last_used_at=2026-06-01
+    expect(topLessons[0]!.id).toBe(L2.id); // same ratio, last_used_at=2026-06-02 (more recent)
+    expect(topLessons[1]!.id).toBe(L1.id); // same ratio, last_used_at=2026-06-01
   });
 
-  it("(c) treats missing use_count as 0", () => {
+  it("(c) treats missing use_count as neutral (no track record = 0.5 ratio)", () => {
+    // A brand-new lesson with no use_count is treated as neutral (0.5), which
+    // ranks ABOVE a proven-unhelpful lesson (ratio 0.20) but BELOW a proven-helpful one.
     const noCount = makeLesson({ id: "01KT0000000000000000000010" });
-    const body = makeBody([noCount, L3]); // L3 has use_count=3
+    // noCount: ratio=0.5 (neutral). L4: ratio=0.20. L5: ratio=0.90.
+    const body = makeBody([noCount, L4, L5]);
     const { topLessons } = rankLessons(body, 10);
 
-    expect(topLessons[0]!.id).toBe(L3.id);   // use_count=3 wins
-    expect(topLessons[1]!.id).toBe(noCount.id); // use_count=0 (absent)
+    expect(topLessons[0]!.id).toBe(L5.id);     // 0.90 — proven helpful
+    expect(topLessons[1]!.id).toBe(noCount.id); // 0.50 — neutral (no track record)
+    expect(topLessons[2]!.id).toBe(L4.id);      // 0.20 — proven unhelpful
   });
 
   it("(d) splits at the budget boundary", () => {
@@ -183,7 +210,7 @@ describe("rankLessons", () => {
     const body = makeBody([L1, L2, L3, L4, L5]);
     const { topLessons, overflow } = rankLessons(body, 3);
 
-    // Sorted order: L5(10) > L2(5, 2026-06-02) > L1(5, 2026-06-01) > L3(3) > L4(0)
+    // Sorted order: L5(0.90) > L2(0.80,newer) > L1(0.80,older) > L3(0.40) > L4(0.20)
     expect(topLessons.map((l) => l.id)).toEqual([L5.id, L2.id, L1.id]);
     expect(overflow.map((l) => l.id)).toEqual([L3.id, L4.id]);
   });
@@ -501,5 +528,148 @@ describe("selectRetirableLessons", () => {
     );
     expect(result).toHaveLength(1);
     expect(DEFAULT_AGE_FLOOR_MS).toBe(14 * 24 * 60 * 60 * 1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 — Briefing-assembly: proven-helpful lesson kept in view; frequent-but-
+//         unhelpful lesson pushed out of the always-shown set.
+// Story native:01KV7FHAER7497SWZVWMW8D53B
+// ---------------------------------------------------------------------------
+
+describe("AC1 — briefing-assembly: helpful vs frequent-but-unhelpful", () => {
+  it("keeps the proven-helpful lesson in view and pushes out the frequent-but-unhelpful one", () => {
+    // A role has 3 lessons; the briefing budget is 2.
+    //
+    // FREQUENT-BUT-UNHELPFUL:
+    //   recalled 10 times (high use_count) but never followed by a clean
+    //   finish (helpful_fire_count=0) → ratio = 0/10 = 0.00
+    //
+    // PROVEN-HELPFUL:
+    //   recalled only 3 times but always preceded a clean finish
+    //   (helpful_fire_count=3) → ratio = 3/3 = 1.00
+    //
+    // THIRD:
+    //   recalled 5 times, helped 2 times → ratio = 2/5 = 0.40
+    //
+    // Expected always-shown set (budget=2): PROVEN-HELPFUL + THIRD.
+    // FREQUENT-BUT-UNHELPFUL must be in overflow (pushed out).
+    const frequentUnhelpful = makeLesson({
+      id: "01KV0000000000000000000001",
+      use_count: 10,
+      helpful_fire_count: 0,
+      last_used_at: "2026-06-10T00:00:00.000Z",
+    });
+    const provenHelpful = makeLesson({
+      id: "01KV0000000000000000000002",
+      use_count: 3,
+      helpful_fire_count: 3,
+      last_used_at: "2026-06-05T00:00:00.000Z",
+    });
+    const third = makeLesson({
+      id: "01KV0000000000000000000003",
+      use_count: 5,
+      helpful_fire_count: 2,
+    });
+
+    const body = makeBody([frequentUnhelpful, provenHelpful, third]);
+    const { topLessons, overflow } = rankLessons(body, 2);
+
+    const topIds = topLessons.map((l) => l.id);
+    const overflowIds = overflow.map((l) => l.id);
+
+    // Proven-helpful lesson must be in the always-shown set.
+    expect(topIds).toContain(provenHelpful.id);
+    // Frequent-but-unhelpful lesson must be pushed out.
+    expect(overflowIds).toContain(frequentUnhelpful.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC2 — Tiebreaker: equally-helpful lessons keep their frequency/recency order.
+// Story native:01KV7FHAER7497SWZVWMW8D53B
+// ---------------------------------------------------------------------------
+
+describe("AC2 — equally-helpful lessons retain frequency/recency order as tiebreaker", () => {
+  it("when two lessons share the same helpfulness ratio, the more frequently and recently consulted one stays ahead", () => {
+    // Both lessons have ratio 3/6 = 0.50.
+    // RECENT has more use_count AND a more recent last_used_at → ranks first.
+    // OLDER has the same ratio but less use_count → ranks second.
+    const recent = makeLesson({
+      id: "01KV0000000000000000000010",
+      use_count: 6,
+      helpful_fire_count: 3,
+      last_used_at: "2026-06-15T00:00:00.000Z",
+    });
+    const older = makeLesson({
+      id: "01KV0000000000000000000011",
+      use_count: 4,
+      helpful_fire_count: 2, // 2/4 = 0.50 — same ratio
+      last_used_at: "2026-06-10T00:00:00.000Z",
+    });
+
+    // Mix in a third lesson with a DIFFERENT ratio so we are only testing
+    // the tiebreaker between RECENT and OLDER, not the primary sort.
+    const high = makeLesson({
+      id: "01KV0000000000000000000012",
+      use_count: 5,
+      helpful_fire_count: 5, // ratio=1.0 — will rank first regardless
+    });
+
+    const body = makeBody([older, high, recent]); // shuffled
+    const { topLessons } = rankLessons(body, 10);
+
+    // high ranks first (ratio=1.0).
+    expect(topLessons[0]!.id).toBe(high.id);
+    // Among tied lessons (both ratio=0.50), RECENT beats OLDER on use_count/last_used_at.
+    expect(topLessons[1]!.id).toBe(recent.id);
+    expect(topLessons[2]!.id).toBe(older.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3 — Fairness: brand-new lesson with no track record is neutral, not buried.
+// Story native:01KV7FHAER7497SWZVWMW8D53B
+// ---------------------------------------------------------------------------
+
+describe("AC3 — brand-new lesson with no track record is treated as neutral", () => {
+  it("lessonHelpfulnessRatio returns 0.5 (neutral) when use_count is absent", () => {
+    const brandNew = makeLesson({ id: "01KV0000000000000000000020" });
+    expect(lessonHelpfulnessRatio(brandNew)).toBe(0.5);
+  });
+
+  it("lessonHelpfulnessRatio returns 0.5 (neutral) when use_count is 0", () => {
+    const neverUsed = makeLesson({ id: "01KV0000000000000000000021", use_count: 0 });
+    expect(lessonHelpfulnessRatio(neverUsed)).toBe(0.5);
+  });
+
+  it("does not bury a brand-new lesson beneath older lessons that have proven unhelpful", () => {
+    // PROVEN-UNHELPFUL: recalled 5 times, helped 0 times → ratio = 0/5 = 0.00
+    // BRAND-NEW: no track record → neutral 0.50
+    // PROVEN-HELPFUL: recalled 2 times, helped 2 times → ratio = 2/2 = 1.00
+    const provenUnhelpful = makeLesson({
+      id: "01KV0000000000000000000030",
+      use_count: 5,
+      helpful_fire_count: 0,
+    });
+    const brandNew = makeLesson({
+      id: "01KV0000000000000000000031",
+      // No use_count — no track record.
+    });
+    const provenHelpful = makeLesson({
+      id: "01KV0000000000000000000032",
+      use_count: 2,
+      helpful_fire_count: 2,
+    });
+
+    const body = makeBody([provenUnhelpful, brandNew, provenHelpful]);
+    const { topLessons } = rankLessons(body, 10);
+
+    // provenHelpful (1.00) should lead.
+    expect(topLessons[0]!.id).toBe(provenHelpful.id);
+    // brandNew (0.50 neutral) should rank ABOVE provenUnhelpful (0.00).
+    const brandNewIdx = topLessons.findIndex((l) => l.id === brandNew.id);
+    const unhelpfulIdx = topLessons.findIndex((l) => l.id === provenUnhelpful.id);
+    expect(brandNewIdx).toBeLessThan(unhelpfulIdx);
   });
 });

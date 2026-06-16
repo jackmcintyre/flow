@@ -74,7 +74,12 @@ ${knowledgeLines}
 `;
 }
 
-function makeLesson(id: string, useCount: number, lastUsedAt?: string): ParsedLesson {
+function makeLesson(
+  id: string,
+  useCount: number,
+  lastUsedAt?: string,
+  helpfulFireCount?: number,
+): ParsedLesson {
   return {
     id,
     kind: "pattern",
@@ -83,6 +88,10 @@ function makeLesson(id: string, useCount: number, lastUsedAt?: string): ParsedLe
     learned_at: "2026-01-01T00:00:00.000Z",
     use_count: useCount,
     ...(lastUsedAt ? { last_used_at: lastUsedAt } : {}),
+    // Default: helpful_fire_count mirrors use_count so ratio is 1.0 for all
+    // lessons with a track record. Tests that need to distinguish by
+    // helpfulness pass an explicit helpfulFireCount.
+    ...(useCount > 0 ? { helpful_fire_count: helpfulFireCount ?? useCount } : {}),
   };
 }
 
