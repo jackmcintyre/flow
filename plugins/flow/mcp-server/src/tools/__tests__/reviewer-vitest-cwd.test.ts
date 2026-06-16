@@ -468,13 +468,20 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
       if (ac1!.applicability !== "runnable-vitest") return;
       expect(ac1!.status).toBe("pass");
 
-      // AC3-A(b): pnpm was called with cwd === innerPkgDir (not the worktree root)
+      // AC3-A(b): pnpm was called with cwd === innerPkgDir (not the worktree root).
+      // The file-path marker is passed as a positional vitest file specifier
+      // (relative to pkgRoot) rather than a -t name filter — see runVitestCheck
+      // fix in Story native:01KV6S35N4VF64WZT99SMZSFRJ.
       expect(pnpmCalls).toHaveLength(1);
       const pnpmCall = pnpmCalls[0]!;
       expect(pnpmCall.cwd).toBe(capturedInnerPkgDir);
+      // The marker "plugins/flow/mcp-server/tests/my-test.test.ts" resolves to
+      // "tests/my-test.test.ts" relative to the innerPkgDir package root.
       expect(pnpmCall.args).toEqual(
-        expect.arrayContaining(["vitest", "--run", "-t", TEST_FILE_REL]),
+        expect.arrayContaining(["vitest", "--run", "tests/my-test.test.ts"]),
       );
+      // Confirm -t is NOT used (file specifier replaces the name-filter mode).
+      expect(pnpmCall.args).not.toContain("-t");
     });
   });
 
@@ -873,5 +880,141 @@ describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegat
     const pnpmCall = pnpmCalls[0]!;
     expect(pnpmCall.cwd).toBe(capturedMemberPkgDir);
     expect(pnpmCall.args).toContain("vitest");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC6 (Story native:01KV6S35N4VF64WZT99SMZSFRJ): findPackageRoot fallback —
+// test-name-pattern markers that have no directory component.
+//
+// When a `vitest:` AC marker is a test-name pattern (e.g. "AC1 — valid check")
+// rather than a repo-relative file path, `testFilePathAbs` resolves to
+// `<checkRoot>/<pattern>` so `dirname` = `checkRoot`. The upward walk finds
+// no `package.json` at `checkRoot`, so the old code returned `ok:false`.
+// The fallback added by this story scans the `checkRoot` subtree for a
+// `pnpm-workspace.yaml` and delegates to `findVitestInWorkspaceMembers`,
+// recovering the correct member package so the vitest run can proceed.
+// ---------------------------------------------------------------------------
+
+describe("AC6 (Story native:01KV6S35N4VF64WZT99SMZSFRJ): findPackageRoot fallback for test-name-pattern markers", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "flow-01kv6s35-ac6-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /**
+   * Build a fixture that mirrors the real repo layout:
+   *   <root>/plugins/flow/pnpm-workspace.yaml       (lists "mcp-server")
+   *   <root>/plugins/flow/package.json              (workspace root, no vitest)
+   *   <root>/plugins/flow/mcp-server/package.json   (member package)
+   *   <root>/plugins/flow/mcp-server/node_modules/.bin/vitest  (present)
+   *
+   * No package.json at <root> itself.
+   */
+  function buildWorkspaceFixtureAtRoot(root: string): { memberPkgDir: string } {
+    const workspaceRoot = path.join(root, "plugins", "flow");
+
+    writeFile(
+      path.join(workspaceRoot, "package.json"),
+      JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+    );
+    writeFile(
+      path.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "packages:\n  - \"mcp-server\"\n",
+    );
+
+    const memberPkgDir = path.join(workspaceRoot, "mcp-server");
+    writeFile(
+      path.join(memberPkgDir, "package.json"),
+      JSON.stringify({ name: "@flow/mcp-server", version: "0.1.0", private: true }, null, 2),
+    );
+    writeFile(
+      path.join(memberPkgDir, "node_modules", ".bin", "vitest"),
+      "#!/usr/bin/env node\n// vitest stub\n",
+    );
+
+    return { memberPkgDir };
+  }
+
+  it("resolves to workspace member when marker is a test-name pattern (no directory component)", () => {
+    const root = path.join(tmp, "repo-root");
+    mkdir(root);
+    const { memberPkgDir } = buildWorkspaceFixtureAtRoot(root);
+
+    // Simulate what findPackageRoot receives when the vitest: marker is a test name:
+    // testFilePathAbs = path.resolve(checkRoot, "AC1 — valid check")
+    const testNameMarker = "AC1 — valid vitest target: zero non-runnable violations";
+    const testFilePathAbs = path.resolve(root, testNameMarker);
+
+    const result = findPackageRoot({
+      testFilePathAbs,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(memberPkgDir);
+  });
+
+  it("resolves to workspace member when marker is a multi-word test-name with spaces and dashes", () => {
+    const root = path.join(tmp, "repo-root-2");
+    mkdir(root);
+    const { memberPkgDir } = buildWorkspaceFixtureAtRoot(root);
+
+    const testNameMarker = "AC2 — vitest: target pointing at an ordinary source file: non-runnable-test-target violation";
+    const testFilePathAbs = path.resolve(root, testNameMarker);
+
+    const result = findPackageRoot({
+      testFilePathAbs,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(memberPkgDir);
+  });
+
+  it("returns ok:false when the subtree has no pnpm-workspace.yaml (no fallback available)", () => {
+    const root = path.join(tmp, "bare-root");
+    mkdir(root);
+    // No workspace yaml, no member packages — pure upward-walk miss.
+    const testNameMarker = "some test name without a file path";
+    const testFilePathAbs = path.resolve(root, testNameMarker);
+
+    const result = findPackageRoot({
+      testFilePathAbs,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("does not regress on file-path markers that still find their package via upward walk", () => {
+    // When the marker IS a file path (the original behaviour), the upward walk
+    // should still be the primary resolution path — the fallback must not interfere.
+    const root = path.join(tmp, "file-path-marker");
+    mkdir(root);
+
+    const pkgDir = path.join(root, "packages", "core");
+    writeFile(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "core", version: "0.0.0", private: true }, null, 2),
+    );
+    const testFilePath = path.join(pkgDir, "src", "__tests__", "core.test.ts");
+    writeFile(testFilePath, "// test");
+
+    const result = findPackageRoot({
+      testFilePathAbs: testFilePath,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(pkgDir);
   });
 });

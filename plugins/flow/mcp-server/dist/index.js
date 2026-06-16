@@ -3652,49 +3652,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative9, options, skipNormalization) {
+    function resolveComponent(base, relative10, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative9 = parse4(serialize2(relative9, options), options);
+        relative10 = parse4(serialize2(relative10, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative9.scheme) {
-        target.scheme = relative9.scheme;
-        target.userinfo = relative9.userinfo;
-        target.host = relative9.host;
-        target.port = relative9.port;
-        target.path = removeDotSegments(relative9.path || "");
-        target.query = relative9.query;
+      if (!options.tolerant && relative10.scheme) {
+        target.scheme = relative10.scheme;
+        target.userinfo = relative10.userinfo;
+        target.host = relative10.host;
+        target.port = relative10.port;
+        target.path = removeDotSegments(relative10.path || "");
+        target.query = relative10.query;
       } else {
-        if (relative9.userinfo !== void 0 || relative9.host !== void 0 || relative9.port !== void 0) {
-          target.userinfo = relative9.userinfo;
-          target.host = relative9.host;
-          target.port = relative9.port;
-          target.path = removeDotSegments(relative9.path || "");
-          target.query = relative9.query;
+        if (relative10.userinfo !== void 0 || relative10.host !== void 0 || relative10.port !== void 0) {
+          target.userinfo = relative10.userinfo;
+          target.host = relative10.host;
+          target.port = relative10.port;
+          target.path = removeDotSegments(relative10.path || "");
+          target.query = relative10.query;
         } else {
-          if (!relative9.path) {
+          if (!relative10.path) {
             target.path = base.path;
-            if (relative9.query !== void 0) {
-              target.query = relative9.query;
+            if (relative10.query !== void 0) {
+              target.query = relative10.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative9.path[0] === "/") {
-              target.path = removeDotSegments(relative9.path);
+            if (relative10.path[0] === "/") {
+              target.path = removeDotSegments(relative10.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative9.path;
+                target.path = "/" + relative10.path;
               } else if (!base.path) {
-                target.path = relative9.path;
+                target.path = relative10.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative9.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative10.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative9.query;
+            target.query = relative10.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3702,7 +3702,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative9.fragment;
+      target.fragment = relative10.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -53537,6 +53537,26 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
   }
   return { ok: false };
 }
+function findWorkspaceYamlInSubtree(root, maxDepth) {
+  if (maxDepth < 0) return null;
+  let entries;
+  try {
+    entries = readdirSync2(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  if (entries.some((e) => e.isFile() && e.name === "pnpm-workspace.yaml")) {
+    return root;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = entry.name;
+    if (name === "node_modules" || name === ".git") continue;
+    const found = findWorkspaceYamlInSubtree(path65.join(root, name), maxDepth - 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
 function findPackageRoot(opts) {
   const checkRootAbs = path65.resolve(opts.checkRoot);
   let dir = path65.dirname(opts.testFilePathAbs);
@@ -53554,6 +53574,11 @@ function findPackageRoot(opts) {
     const parent = path65.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  const workspaceYamlDir = findWorkspaceYamlInSubtree(checkRootAbs, 4);
+  if (workspaceYamlDir !== null) {
+    const memberResult = findVitestInWorkspaceMembers(workspaceYamlDir);
+    if (memberResult.ok) return memberResult;
   }
   return { ok: false };
 }
@@ -53586,7 +53611,11 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
       exitCode: -1
     };
   }
-  const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
+  const testFilePathAbs2 = path65.resolve(checkRoot, testFilePath);
+  const relativeToPackage = path65.relative(pkgRoot.packageRoot, testFilePathAbs2);
+  const looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
+  const vitestArgs = looksLikeFilePath ? ["vitest", "--run", relativeToPackage] : ["vitest", "--run", "-t", testNameFilter];
+  const result = await execaImpl("pnpm", vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS

@@ -322,6 +322,41 @@ function findVitestInWorkspaceMembers(
 }
 
 /**
+ * Scan the subtree rooted at `root` (bounded by `maxDepth`) for the first
+ * `pnpm-workspace.yaml` found. Returns the directory path if found, null
+ * otherwise. Skips `node_modules` and `.git` to avoid unbounded traversal.
+ *
+ * Used as a fallback by `findPackageRoot` when the upward walk from the test
+ * file path finds no `package.json` within `checkRoot`. This happens when the
+ * `vitest:` AC marker is a test-name pattern (e.g. `"AC1 — valid vitest target"`)
+ * rather than a repo-relative file path — the dirname walk resolves to
+ * `checkRoot` itself and finds no `package.json` there. A downward scan for
+ * `pnpm-workspace.yaml` recovers the correct member package in that case.
+ *
+ * Story native:01KV6S35N4VF64WZT99SMZSFRJ — test-name-pattern vitest markers.
+ */
+function findWorkspaceYamlInSubtree(root: string, maxDepth: number): string | null {
+  if (maxDepth < 0) return null;
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true }) as import("node:fs").Dirent[];
+  } catch {
+    return null; // not readable — skip
+  }
+  if (entries.some((e) => e.isFile() && e.name === "pnpm-workspace.yaml")) {
+    return root;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = entry.name as string;
+    if (name === "node_modules" || name === ".git") continue;
+    const found = findWorkspaceYamlInSubtree(path.join(root, name), maxDepth - 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
  * Walk up from `testFilePathAbs` to find the nearest enclosing `package.json`.
  *
  * Starts at `path.dirname(testFilePathAbs)` and walks toward the filesystem
@@ -336,6 +371,15 @@ function findVitestInWorkspaceMembers(
  * targets a source file in a sub-directory of a pnpm workspace root whose root
  * package delegates vitest to a member package (e.g. `plugins/flow/workflows/
  * run.workflow.js` → `plugins/flow/` workspace root → member `mcp-server`).
+ *
+ * Fallback for test-name-pattern markers: when the upward walk finds no
+ * `package.json` within `checkRoot` (which happens when the `vitest:` marker is
+ * a test-name string like `"AC1 — valid vitest target"` rather than a file path,
+ * so `testFilePathAbs` = `checkRoot/<marker>` and dirname = `checkRoot`), this
+ * function scans the `checkRoot` subtree (bounded to depth 4) for a
+ * `pnpm-workspace.yaml` and delegates to `findVitestInWorkspaceMembers`. This
+ * lets test-name-pattern markers resolve the correct package root in pnpm
+ * workspace repos. See Story native:01KV6S35N4VF64WZT99SMZSFRJ.
  *
  * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
  * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
@@ -376,6 +420,18 @@ export function findPackageRoot(opts: {
     if (parent === dir) break; // filesystem root reached
     dir = parent;
   }
+
+  // Fallback: the upward walk found no package.json within checkRoot.
+  // This happens when the vitest: marker is a test-name pattern (no directory
+  // component), so testFilePathAbs resolves to checkRoot/<pattern> and dirname
+  // is checkRoot itself, which has no package.json. Scan downward from checkRoot
+  // for a pnpm-workspace.yaml and try its workspace members.
+  const workspaceYamlDir = findWorkspaceYamlInSubtree(checkRootAbs, 4);
+  if (workspaceYamlDir !== null) {
+    const memberResult = findVitestInWorkspaceMembers(workspaceYamlDir);
+    if (memberResult.ok) return memberResult;
+  }
+
   return { ok: false };
 }
 
@@ -435,7 +491,36 @@ export async function runVitestCheck(
     };
   }
 
-  const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
+  // When `testFilePath` looks like a repo-relative file path (contains a path
+  // separator and resolves within the package root), pass it as a vitest
+  // file specifier (positional arg) rather than a -t name filter.
+  //
+  // Background: vitest -t <marker> filters by TEST NAME. A file path like
+  // "src/validators/__tests__/foo.test.ts" matches no test name — vitest
+  // skips every test and exits 0, which the zero-executed guard (fix 01KV43ET)
+  // catches and rejects as a vacuous pass. Using the file path as a positional
+  // arg instead runs ALL tests in that file, which is the correct semantic for a
+  // `vitest: path/to/test.ts` marker (Story native:01KV6S35N4VF64WZT99SMZSFRJ).
+  //
+  // The relative path is computed from pkgRoot.packageRoot so that vitest, which
+  // runs with cwd=pkgRoot.packageRoot, can locate the file (an absolute or
+  // checkRoot-relative path would escape the package boundary).
+  //
+  // If the marker is not a file path (e.g. a test-name pattern with no `/`),
+  // fall back to -t filter so the existing named-test-filter behaviour is
+  // preserved for markers that are genuinely test-name patterns.
+  const testFilePathAbs2 = path.resolve(checkRoot, testFilePath);
+  const relativeToPackage = path.relative(pkgRoot.packageRoot, testFilePathAbs2);
+  const looksLikeFilePath =
+    (testFilePath.includes("/") || testFilePath.includes("\\")) &&
+    !relativeToPackage.startsWith("..") &&
+    relativeToPackage !== testFilePath; // ensure it resolved relative to pkgRoot
+
+  const vitestArgs = looksLikeFilePath
+    ? ["vitest", "--run", relativeToPackage]
+    : ["vitest", "--run", "-t", testNameFilter];
+
+  const result = await execaImpl("pnpm", vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,
