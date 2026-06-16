@@ -645,7 +645,7 @@ describe("writeRetroProposal — durability recommendation integration (AC1)", (
 // (Story native:01KTZGEW6TSC6M84P9KJ7FD96S)
 // ---------------------------------------------------------------------------
 
-import { summariseRetroProposal } from "../summarise-retro-proposal.js";
+import { summariseRetroProposal, renderRetroRecommendationsBlock } from "../summarise-retro-proposal.js";
 
 const ISO3 = "2026-06-13T09:00:00.000Z";
 
@@ -1085,5 +1085,203 @@ describe("writeRetroProposal — AC3 (integration): engine skill change surfaces
     expect(body).toContain("## Proposal 2 — build-story");
     expect(body).toContain("## Proposal 3 — build-story");
     expect(body).toContain("Queue a build-and-review story");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderRetroRecommendationsBlock — run closing summary
+// (Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG — AC1 integration + AC2 unit)
+// ---------------------------------------------------------------------------
+
+describe("renderRetroRecommendationsBlock — AC1 (integration): pending recommendations surface correctly", () => {
+  it("renders a header line naming N change(s), lists each proposal, and points to accept-proposal", () => {
+    const pending = [
+      { type: "rule", rationale: "Handoff grammar must be verbatim.", id: ULID_A },
+      { type: "team-change", rationale: "Security patterns keep surfacing.", id: ULID_B },
+    ];
+
+    const block = renderRetroRecommendationsBlock(pending);
+
+    // AC1: operator learns the team reflected and N changes are pending
+    expect(block).toContain("the team reflected and is recommending 2 change");
+    // Each proposal listed with its kind and one-line rationale
+    expect(block).toContain("[rule]");
+    expect(block).toContain("Handoff grammar must be verbatim.");
+    expect(block).toContain("[team-change]");
+    expect(block).toContain("Security patterns keep surfacing.");
+    // Pointer to the review step
+    expect(block).toContain("/flow:accept-proposal");
+  });
+
+  it("uses singular 'change' when exactly 1 proposal is pending", () => {
+    const pending = [
+      { type: "persona-append", rationale: "One lesson to absorb.", id: ULID_A },
+    ];
+
+    const block = renderRetroRecommendationsBlock(pending);
+
+    expect(block).toContain("recommending 1 change for your review");
+    expect(block).not.toContain("changes");
+    expect(block).toContain("[persona-append]");
+    expect(block).toContain("One lesson to absorb.");
+    expect(block).toContain("/flow:accept-proposal");
+  });
+
+  it("preserves ordering: proposals appear in the same order they are passed in", () => {
+    const pending = [
+      { type: "rule", rationale: "First.", id: ULID_A },
+      { type: "team-change", rationale: "Second.", id: ULID_B },
+      { type: "persona-append", rationale: "Third.", id: ULID_C },
+    ];
+
+    const block = renderRetroRecommendationsBlock(pending);
+
+    const firstIdx = block.indexOf("First.");
+    const secondIdx = block.indexOf("Second.");
+    const thirdIdx = block.indexOf("Third.");
+    expect(firstIdx).toBeLessThan(secondIdx);
+    expect(secondIdx).toBeLessThan(thirdIdx);
+  });
+});
+
+describe("renderRetroRecommendationsBlock — AC2 (unit): zero-pending case emits nothing-to-review", () => {
+  it("returns a single clean line when passed an empty array", () => {
+    const block = renderRetroRecommendationsBlock([]);
+
+    // AC2: a single clean 'nothing to review' line
+    expect(block).toContain("nothing to review");
+    // No list items — no numbering, no bracket notation
+    expect(block).not.toMatch(/\d+\.\s+\[/);
+    // No pointer to accept-proposal (nothing to act on)
+    expect(block).not.toContain("/flow:accept-proposal");
+  });
+
+  it("mentions automatic application in the nothing-to-review line", () => {
+    const block = renderRetroRecommendationsBlock([]);
+
+    // Operator understands WHY there's nothing to review (auto-applied or none produced)
+    expect(block).toContain("applied automatically");
+  });
+});
+
+describe("renderRetroRecommendationsBlock — reconciliation: absorbed IDs must not appear as pending", () => {
+  it("does not include proposals that were auto-absorbed (caller-side filtering contract)", async () => {
+    // The workflow filters absorbed IDs before passing to renderRetroRecommendationsBlock.
+    // This test asserts the rendering function only shows what it is given — it never
+    // re-filters (filtering is the caller's responsibility, keeping the function pure).
+    const pending = [
+      // Only the non-absorbed one is passed in — the absorbed one is already filtered out
+      { type: "rule", rationale: "Pending rule.", id: ULID_A },
+    ];
+
+    const block = renderRetroRecommendationsBlock(pending);
+
+    // Only the one pending proposal appears
+    expect(block).toContain("[rule]");
+    expect(block).toContain("Pending rule.");
+    expect(block).not.toContain(ULID_B); // the absorbed ID never leaked in
+  });
+});
+
+describe("renderRetroRecommendationsBlock — integration with summariseRetroProposal (AC1 end-to-end)", () => {
+  const ISO_RUN = "2026-06-17T08:00:00.000Z";
+  const ULID_R1 = "01KVRTR000000000000000RR01";
+  const ULID_R2 = "01KVRTR000000000000000RR02";
+  const ULID_R3 = "01KVRTR000000000000000RR03";
+
+  it("summariseRetroProposal → filter absorbed → renderRetroRecommendationsBlock surfaces only pending entries", async () => {
+    // Write a 3-proposal file; simulate auto-absorb taking one of them.
+    const proposals = [
+      {
+        type: "rule" as const,
+        id: ULID_R1,
+        created_at: ISO_RUN,
+        rationale: "Pending rule — was not auto-absorbed.",
+        text: "Rule body.",
+        target_failure_class: "handoff-grammar",
+        recommended_promotion_level: "must" as const,
+      },
+      {
+        type: "team-change" as const,
+        id: ULID_R2,
+        created_at: ISO_RUN,
+        rationale: "Pending team change.",
+        action: "hire" as const,
+        target_role: "security-reviewer",
+        justification: "Three fires.",
+        predicted_impact: { affected_failure_classes: ["security"] },
+      },
+      {
+        type: "rule" as const,
+        id: ULID_R3,
+        created_at: ISO_RUN,
+        rationale: "This one was auto-absorbed.",
+        text: "Auto-absorbed rule.",
+        target_failure_class: "some-class",
+        recommended_promotion_level: "should" as const,
+      },
+    ];
+
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO_RUN,
+      proposals,
+    });
+
+    // Simulate the workflow: summarise then filter absorbed IDs
+    const summary = await summariseRetroProposal({ absPath });
+    const absorbedIds = new Set([ULID_R3]); // the third was auto-absorbed
+    const pendingProposals = summary.proposals.filter((p) => !absorbedIds.has(p.id));
+
+    expect(pendingProposals).toHaveLength(2);
+
+    const block = renderRetroRecommendationsBlock(pendingProposals);
+
+    // AC1: operator sees the header naming 2 pending changes
+    expect(block).toContain("recommending 2 change");
+    // Both non-absorbed proposals appear
+    expect(block).toContain("[rule]");
+    expect(block).toContain("Pending rule — was not auto-absorbed.");
+    expect(block).toContain("[team-change]");
+    expect(block).toContain("Pending team change.");
+    // The auto-absorbed proposal must NOT appear in the output
+    expect(block).not.toContain("This one was auto-absorbed.");
+    // Pointer to accept-proposal
+    expect(block).toContain("/flow:accept-proposal");
+  });
+
+  it("when all proposals are auto-absorbed, the block is the nothing-to-review line", async () => {
+    const proposals = [
+      {
+        type: "rule" as const,
+        id: ULID_R1,
+        created_at: ISO_RUN,
+        rationale: "A note-tier lesson that was fully auto-absorbed.",
+        text: "Auto-absorbed rule.",
+        target_failure_class: "some-class",
+        recommended_promotion_level: "should" as const,
+      },
+    ];
+
+    const { absPath } = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      // Use a fresh timestamp to avoid collision with the previous test
+      isoTimestamp: "2026-06-17T09:00:00.000Z",
+      proposals,
+    });
+
+    const summary = await summariseRetroProposal({ absPath });
+    // Simulate: all proposals were absorbed
+    const absorbedIds = new Set([ULID_R1]);
+    const pendingProposals = summary.proposals.filter((p) => !absorbedIds.has(p.id));
+
+    expect(pendingProposals).toHaveLength(0);
+
+    const block = renderRetroRecommendationsBlock(pendingProposals);
+
+    // AC2: single clean nothing-to-review line, no list, no accept-proposal pointer
+    expect(block).toContain("nothing to review");
+    expect(block).not.toContain("/flow:accept-proposal");
+    expect(block).not.toMatch(/\d+\.\s+\[/);
   });
 });
