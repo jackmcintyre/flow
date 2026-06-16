@@ -96,6 +96,33 @@ When the workflow returns, print the run summary to the operator. Key fields to 
 
 Remind the operator that `pausedForHuman` PRs require a manual merge before the story can be marked `done`.
 
+### Retro recommendations (surfaced when the queue fully empties)
+
+When `autoRetroOutcome` is present in the result, surface the team's retrospective outcome as a closing block **after** the story counts.
+
+- **`autoRetroOutcome.status === 'ran'` and `pendingProposals` is non-empty:**
+  Tell the operator the team also reflected, list each pending recommendation's kind and one-line reason, and point to `/flow:accept-proposal` to review and act on them. Example:
+
+  ```
+  Retro: the team reflected and is recommending N change(s) for your review:
+    1. [<type>] <rationale>
+    2. [<type>] <rationale>
+  Run `/flow:accept-proposal` to review and apply each recommendation.
+  ```
+
+  The `pendingProposals` array on `autoRetroOutcome` carries `{ type, rationale, id }` for each non-auto-absorbed recommendation. Use it directly — do not re-derive the list.
+
+- **`autoRetroOutcome.status === 'ran'` and `pendingProposals` is empty (all absorbed automatically or none produced):**
+  Emit a single clean line — no list, no extra noise:
+
+  ```
+  Retro: nothing to review — all recommendations were applied automatically or no recommendations were produced.
+  ```
+
+- **`autoRetroOutcome.status === 'skipped'`:** state that the retro was skipped (no stories completed this run).
+- **`autoRetroOutcome.status === 'failed'`:** state that the retro did not complete and the cycle was not advanced.
+- **`autoRetroOutcome` is `null`** (queue was not fully emptied): omit the retro block entirely.
+
 # Failure modes
 
 - **`CLAUDE_PLUGIN_ROOT` unset or empty:** this variable is set by Claude Code when loading a plugin skill. If it is missing, the plugin is not loaded correctly — run `echo $CLAUDE_PLUGIN_ROOT` to confirm and restart Claude Code with `--plugin-dir <path-to-plugins/flow>` or reinstall via `/plugin install flow@flow`.

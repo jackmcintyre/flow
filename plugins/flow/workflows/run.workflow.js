@@ -1011,6 +1011,31 @@ if (runReason === 'queue-emptied' && !retroFiredThisRun) {
         log(`auto-retro: openCycle relay garbled — cycle may not have advanced (seam error: ${openCycleResult?._parseError || 'unknown'})`)
       }
 
+      // ── SURFACE PENDING PROPOSALS (Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG) ──
+      // Read the proposal summary so the closing summary can list each pending
+      // (non-auto-absorbed) recommendation's kind + rationale. This is the
+      // deterministic-seam path: the proposal file IS the source of truth,
+      // and this read-only call gives the run the structured per-entry data it
+      // needs to render the operator-facing list. Fail-soft: retryable+swallow;
+      // a garble or ENOENT leaves pendingProposals as an empty array (the run
+      // closing summary degrades gracefully to "nothing pending").
+      let pendingProposals = []
+      if (absorbResult.pending > 0) {
+        const retroSummary = await seam(
+          `node ${CLI} summariseRetroProposal --json '${J({ absPath: proposalAbsPath })}'`,
+          'auto-retro:summary',
+          true, // retryable — reading a proposal file is idempotent
+          true, // swallow — best-effort; a garble never breaks the run
+        )
+        if (retroSummary && !retroSummary._parseError && Array.isArray(retroSummary.proposals)) {
+          // Filter to proposals NOT in the auto-absorbed set. The absorbedIds set
+          // is the authoritative list of what was already applied; anything outside
+          // it is genuinely pending for the operator.
+          const absorbedSet = new Set(absorbResult.absorbedIds || [])
+          pendingProposals = retroSummary.proposals.filter((p) => !absorbedSet.has(p.id))
+        }
+      }
+
       autoRetroOutcome = {
         status: 'ran',
         proposalPath: proposalAbsPath,
@@ -1018,6 +1043,7 @@ if (runReason === 'queue-emptied' && !retroFiredThisRun) {
         absorbedCount: absorbResult.absorbed,
         absorbedIds: absorbResult.absorbedIds,
         pendingCount: absorbResult.pending,
+        pendingProposals, // per-entry list for the closing summary (kind + rationale + id)
         absorbErrors: absorbResult.errors || [],
         cycleAdvanced,
         cycleUlid: cycleAdvanced ? openCycleResult.cycleUlid : null,
@@ -1093,6 +1119,9 @@ return {
   // null when the queue was not fully emptied (retro only fires on a clean run).
   // { status: 'skipped', reason } when nothing was completed.
   // { status: 'ran', ... } on the happy path (proposal written, absorbed, cycle advanced).
+  //   pendingProposals: [{type, rationale, id}] — non-auto-absorbed entries for the
+  //     closing summary (Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG). Empty array when
+  //     all proposals were auto-absorbed or the summary seam degraded.
   // { status: 'failed', error } when the retro threw (cycle not advanced).
   autoRetroOutcome,
 }

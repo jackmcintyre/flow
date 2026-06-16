@@ -76,6 +76,7 @@ import { extractNativeStoryAcs } from "./tools/extract-native-story-acs.js";
 import { captureSkillInvoke } from "./tools/capture-skill-invoke.js";
 import { autoAbsorbProposalFile } from "./tools/auto-absorb-retro-proposals.js";
 import { readCatalogue } from "./tools/read-catalogue.js";
+import { summariseRetroProposal } from "./tools/summarise-retro-proposal.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -239,6 +240,13 @@ const TOOLS: Record<string, ToolFn> = {
   // pluginRoot is the root of the flow plugin directory (NOT the target repo root).
   //   node dist/cli.js readCatalogue --json '{"pluginRoot":"...","role":"retro-analyst"}'
   readCatalogue,
+  // Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG — run closing summary retro block.
+  // Called by the run after the unattended auto-retro fires, on the 'ran' path when
+  // pendingCount > 0. Reads the proposal file and returns a structured summary of
+  // pending (non-auto-absorbed) recommendations for the operator to act on.
+  // Read-only / idempotent → safe to call from a read-only seam.
+  //   node dist/cli.js summariseRetroProposal --json '{"absPath":"..."}'
+  summariseRetroProposal,
 };
 
 function emit(obj: unknown): void {

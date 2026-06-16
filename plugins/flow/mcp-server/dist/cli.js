@@ -6915,14 +6915,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs57 = this.flowScalar(this.type);
+              const fs58 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map2.items.push({ start, key: fs57, sep: [] });
+                map2.items.push({ start, key: fs58, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs57);
+                this.stack.push(fs58);
               } else {
-                Object.assign(it, { key: fs57, sep: [] });
+                Object.assign(it, { key: fs58, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7050,13 +7050,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs57 = this.flowScalar(this.type);
+              const fs58 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs57, sep: [] });
+                fc.items.push({ start: [], key: fs58, sep: [] });
               else if (it.sep)
-                this.stack.push(fs57);
+                this.stack.push(fs58);
               else
-                Object.assign(it, { key: fs57, sep: [] });
+                Object.assign(it, { key: fs58, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -9119,7 +9119,7 @@ var require_windows = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/windows.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs57 = __require("fs");
+    var fs58 = __require("fs");
     function checkPathExt(path77, options) {
       var pathext = options.pathExt !== void 0 ? options.pathExt : process.env.PATHEXT;
       if (!pathext) {
@@ -9144,12 +9144,12 @@ var require_windows = __commonJS({
       return checkPathExt(path77, options);
     }
     function isexe(path77, options, cb) {
-      fs57.stat(path77, function(er, stat2) {
+      fs58.stat(path77, function(er, stat2) {
         cb(er, er ? false : checkStat(stat2, path77, options));
       });
     }
     function sync(path77, options) {
-      return checkStat(fs57.statSync(path77), path77, options);
+      return checkStat(fs58.statSync(path77), path77, options);
     }
   }
 });
@@ -9159,14 +9159,14 @@ var require_mode = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/mode.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs57 = __require("fs");
+    var fs58 = __require("fs");
     function isexe(path77, options, cb) {
-      fs57.stat(path77, function(er, stat2) {
+      fs58.stat(path77, function(er, stat2) {
         cb(er, er ? false : checkStat(stat2, options));
       });
     }
     function sync(path77, options) {
-      return checkStat(fs57.statSync(path77), options);
+      return checkStat(fs58.statSync(path77), options);
     }
     function checkStat(stat2, options) {
       return stat2.isFile() && checkMode(stat2, options);
@@ -9190,7 +9190,7 @@ var require_mode = __commonJS({
 // ../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/index.js
 var require_isexe = __commonJS({
   "../node_modules/.pnpm/isexe@2.0.0/node_modules/isexe/index.js"(exports, module) {
-    var fs57 = __require("fs");
+    var fs58 = __require("fs");
     var core;
     if (process.platform === "win32" || global.TESTING_WINDOWS) {
       core = require_windows();
@@ -9454,16 +9454,16 @@ var require_shebang_command = __commonJS({
 var require_readShebang = __commonJS({
   "../node_modules/.pnpm/cross-spawn@7.0.6/node_modules/cross-spawn/lib/util/readShebang.js"(exports, module) {
     "use strict";
-    var fs57 = __require("fs");
+    var fs58 = __require("fs");
     var shebangCommand = require_shebang_command();
     function readShebang(command) {
       const size = 150;
       const buffer = Buffer.alloc(size);
       let fd;
       try {
-        fd = fs57.openSync(command, "r");
-        fs57.readSync(fd, buffer, 0, size, 0);
-        fs57.closeSync(fd);
+        fd = fs58.openSync(command, "r");
+        fs58.readSync(fd, buffer, 0, size, 0);
+        fs58.closeSync(fd);
       } catch (e) {
       }
       return shebangCommand(buffer.toString());
@@ -45017,6 +45017,28 @@ async function autoAbsorbProposalFile(opts) {
   };
 }
 
+// src/tools/summarise-retro-proposal.ts
+var import_yaml36 = __toESM(require_dist(), 1);
+import { promises as fs57 } from "node:fs";
+async function summariseRetroProposal(opts) {
+  const { absPath } = opts;
+  const raw = await fs57.readFile(absPath, "utf8");
+  const { frontmatterRaw } = splitFrontmatter(raw, absPath);
+  const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
+  const file2 = parseRetroProposalFile(parsedYaml);
+  const proposals = file2.proposals.map((p) => ({
+    type: p.type,
+    rationale: p.rationale,
+    id: p.id
+  }));
+  return {
+    absPath,
+    totalCount: proposals.length,
+    noProposals: proposals.length === 0,
+    proposals
+  };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -45174,7 +45196,14 @@ var TOOLS = {
   // the catalogue file in-workflow (the Workflow runtime does not have fs access).
   // pluginRoot is the root of the flow plugin directory (NOT the target repo root).
   //   node dist/cli.js readCatalogue --json '{"pluginRoot":"...","role":"retro-analyst"}'
-  readCatalogue
+  readCatalogue,
+  // Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG — run closing summary retro block.
+  // Called by the run after the unattended auto-retro fires, on the 'ran' path when
+  // pendingCount > 0. Reads the proposal file and returns a structured summary of
+  // pending (non-auto-absorbed) recommendations for the operator to act on.
+  // Read-only / idempotent → safe to call from a read-only seam.
+  //   node dist/cli.js summariseRetroProposal --json '{"absPath":"..."}'
+  summariseRetroProposal
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

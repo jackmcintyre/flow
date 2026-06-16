@@ -24,6 +24,12 @@
  *
  * **No writes, no network.** This tool is strictly read-only. It never
  * writes, never mutates state, and never calls any external service.
+ *
+ * **Run closing summary (Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG).**
+ * `renderRetroRecommendationsBlock` is a pure formatting function exported for
+ * use in the run's closing summary. It takes the pending proposals (already
+ * filtered to non-absorbed entries) and returns a human-readable block that
+ * the run skill surfaces inline. Pure and deterministic — no I/O.
  */
 
 import { promises as fs } from "node:fs";
@@ -109,4 +115,55 @@ export async function summariseRetroProposal(opts: {
     noProposals: proposals.length === 0,
     proposals,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Run closing summary helpers (Story native:01KV7DH3KM2Q2F5ZQ5WX558KHG)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single pending proposal entry as surfaced in the run closing summary.
+ * Carries only the operator-facing fields: type (kind) and one-line rationale.
+ */
+export interface PendingProposalEntry {
+  /** Proposal discriminator, e.g. "rule", "team-change", "persona-append". */
+  type: string;
+  /** One-line rationale from the proposal frontmatter. */
+  rationale: string;
+  /** Proposal ULID for traceability. */
+  id: string;
+}
+
+/**
+ * Render the retro-recommendations block for the run's closing summary.
+ *
+ * **AC1 path (pending > 0):** returns a multi-line block naming N pending
+ * recommendation(s) — each with its kind and rationale — plus a pointer to
+ * the `/flow:accept-proposal` review step.
+ *
+ * **AC2 path (pending === 0):** returns a single clean "nothing to review"
+ * line with no list and no extra noise.
+ *
+ * Pure and deterministic — no I/O, no mutation of the input.
+ *
+ * @param pendingProposals - The non-auto-absorbed proposals (summary proposals
+ *   minus absorbedIds). Pass an empty array for the AC2 path.
+ * @returns A human-readable string block ready for inline rendering.
+ */
+export function renderRetroRecommendationsBlock(
+  pendingProposals: PendingProposalEntry[],
+): string {
+  if (pendingProposals.length === 0) {
+    return "Retro: nothing to review — all recommendations were applied automatically or no recommendations were produced.";
+  }
+
+  const count = pendingProposals.length;
+  const header = `Retro: the team reflected and is recommending ${count} change${count === 1 ? "" : "s"} for your review:`;
+  const items = pendingProposals
+    .map((p, i) => `  ${i + 1}. [${p.type}] ${p.rationale}`)
+    .join("\n");
+  const footer =
+    "Run `/flow:accept-proposal` to review and apply each recommendation.";
+
+  return `${header}\n${items}\n${footer}`;
 }
