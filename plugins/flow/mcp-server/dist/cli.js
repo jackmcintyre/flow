@@ -43451,6 +43451,73 @@ function parseMaintainerFeedbackInput(input) {
   return result.data;
 }
 
+// src/tools/build-feedback-issue-url.ts
+var MAX_URL_BYTES = 8192;
+var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
+function composeFeedbackIssueBody(item) {
+  const lines = [
+    `**Problem**`,
+    item.problem,
+    ``,
+    `**Tool area**`,
+    item.tool_area
+  ];
+  if (item.suggested_direction) {
+    lines.push(``, `**Suggested direction**`, item.suggested_direction);
+  }
+  lines.push(``, `**Trigger**`, item.trigger);
+  return lines.join("\n");
+}
+function buildFeedbackIssueUrl(opts) {
+  const { owner, repo, item } = opts;
+  const title = `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+  const body = composeFeedbackIssueBody(item);
+  const base = `https://github.com/${owner}/${repo}/issues/new`;
+  const encodedTitle = encodeURIComponent(title);
+  const fullUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(body)}`;
+  if (Buffer.byteLength(fullUrl, "utf8") <= MAX_URL_BYTES) {
+    return { url: fullUrl, bodyShortened: false };
+  }
+  const encodedNote = encodeURIComponent(SHORTENED_NOTE);
+  const fixedPartLength = Buffer.byteLength(
+    `${base}?title=${encodedTitle}&body=${encodedNote}`,
+    "utf8"
+  );
+  const bodyBudget = MAX_URL_BYTES - fixedPartLength;
+  let lo = 0;
+  let hi = body.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = encodeURIComponent(body.slice(0, mid));
+    if (Buffer.byteLength(candidate, "utf8") <= bodyBudget) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const shortenedBody = body.slice(0, lo) + SHORTENED_NOTE;
+  const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
+  return { url: shortenedUrl, bodyShortened: true };
+}
+function resolveGhRepoIdentity(execSyncImpl) {
+  try {
+    const impl = execSyncImpl ?? ((cmd, opts) => {
+      const { execSync } = __require("node:child_process");
+      return execSync(cmd, opts);
+    });
+    const stdout = impl("gh repo view --json owner,name", {
+      encoding: "utf-8"
+    });
+    const parsed = JSON.parse(stdout);
+    const owner = parsed.owner?.login ?? "";
+    const repo = parsed.name ?? "";
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
+
 // src/tools/record-maintainer-feedback.ts
 var INBOX_SUBDIR = path64.join(".flow", "maintainer-inbox");
 function maintainerInboxItemPath(targetRepoRoot, id, raisedAt) {
@@ -43473,7 +43540,17 @@ async function recordMaintainerFeedback(opts) {
   };
   const absPath = maintainerInboxItemPath(targetRepoRoot, id, raisedAt);
   await atomicWriteFile(absPath, JSON.stringify(fullItem, null, 2));
-  return { ok: true, id, absPath };
+  let issueUrl;
+  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  if (repoIdentity !== null) {
+    const urlResult = buildFeedbackIssueUrl({
+      owner: repoIdentity.owner,
+      repo: repoIdentity.repo,
+      item: validated
+    });
+    issueUrl = urlResult.url;
+  }
+  return { ok: true, id, absPath, ...issueUrl !== void 0 ? { issueUrl } : {} };
 }
 
 // src/tools/resolve-lens-roles.ts

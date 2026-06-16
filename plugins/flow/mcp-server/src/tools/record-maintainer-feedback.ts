@@ -16,7 +16,14 @@
  *   3. Write the complete item as a single JSON file under
  *      `.flow/maintainer-inbox/<raised_at_ts>-<id>.json` via `atomicWriteFile` so
  *      items ACCUMULATE as distinct entries rather than overwriting one another (AC3).
- *   4. Return `{ ok: true, id, absPath }`.
+ *   4. Attempt to resolve the GitHub repo identity via `gh repo view --json owner,name`
+ *      and build a pre-filled new-issue URL from the item details. On success the URL
+ *      is included in the result as `issueUrl` so the operator can open it immediately
+ *      in their browser to review and submit the issue themselves (Story native:01KV7XXKZ0TBPYETZP2X81T40S).
+ *      Nothing is ever filed automatically — the link is always a review-and-submit page.
+ *      When `gh` is unavailable or the repo identity cannot be resolved, `issueUrl` is
+ *      omitted from the result (fail-soft: the inbox write is the primary side-effect).
+ *   5. Return `{ ok: true, id, absPath, issueUrl? }`.
  *
  * **Isolation guarantee (AC1):** the write touches ONLY `.flow/maintainer-inbox/`.
  * That path is NOT in `CANONICAL_PATH_GLOBS` (`.flow/state/**`, `.flow/telemetry/**`,
@@ -31,8 +38,11 @@
  * Items are never merged or overwritten; the inbox grows monotonically until
  * a maintainer reviews and acts on it.
  *
- * **Out of scope:** surfacing the inbox to the maintainer, and turning an item
- * into a pre-filled GitHub issue, are follow-on stories (deliberately NOT here).
+ * **Pre-filled issue URL (Story native:01KV7XXKZ0TBPYETZP2X81T40S):** on a
+ * successful write, this tool also attempts to build a pre-filled GitHub
+ * new-issue URL (owner/name resolved once via `gh repo view`). The URL is
+ * fail-soft — absence is not an error. The full item is in the inbox regardless.
+ * Surfacing/reviewing stored inbox items is a separate follow-up story.
  */
 
 import * as path from "node:path";
@@ -42,6 +52,10 @@ import {
   parseMaintainerFeedbackInput,
 } from "../schemas/maintainer-feedback.js";
 import type { MaintainerFeedbackItem } from "../schemas/maintainer-feedback.js";
+import {
+  buildFeedbackIssueUrl,
+  resolveGhRepoIdentity,
+} from "./build-feedback-issue-url.js";
 
 export interface RecordMaintainerFeedbackOptions {
   /** Absolute path to the target repository root. */
@@ -52,6 +66,12 @@ export interface RecordMaintainerFeedbackOptions {
    * and `trigger`; `suggested_direction` is optional.
    */
   item: unknown;
+  /**
+   * Test seam: inject a stub for `execSync("gh repo view ...")` so tests
+   * can control the owner/name without spawning a real `gh` process.
+   * Production callers omit this; the real `execSync` is used.
+   */
+  execSyncImpl?: (cmd: string, opts: { encoding: "utf-8" }) => string;
 }
 
 export interface RecordMaintainerFeedbackResult {
@@ -60,6 +80,18 @@ export interface RecordMaintainerFeedbackResult {
   id: string;
   /** Absolute path of the written inbox entry. */
   absPath: string;
+  /**
+   * Pre-filled GitHub new-issue URL for this item.
+   *
+   * Present when `gh repo view` succeeded and the URL could be assembled.
+   * Absent when `gh` is unavailable, not authenticated, or owner/name
+   * could not be resolved — the inbox write succeeds either way.
+   *
+   * The link opens GitHub's own new-issue form so the operator can review
+   * and submit as themselves. NOTHING is ever filed automatically.
+   * (Story native:01KV7XXKZ0TBPYETZP2X81T40S AC1/AC2)
+   */
+  issueUrl?: string;
 }
 
 /**
@@ -94,8 +126,9 @@ export function maintainerInboxItemPath(
 /**
  * Record a structured maintainer-feedback item into the maintainer-only inbox.
  *
- * @returns `{ ok: true, id, absPath }` — the minted ULID and absolute path of
- *   the written inbox entry.
+ * @returns `{ ok: true, id, absPath, issueUrl? }` — the minted ULID, absolute
+ *   path of the written inbox entry, and (when `gh` is available and the repo
+ *   identity resolves) a pre-filled GitHub new-issue URL for this item.
  *
  * @throws {MalformedMaintainerFeedbackError} When `item` fails schema
  *   validation (missing `problem`, `tool_area`, or `trigger`; non-empty-string
@@ -132,5 +165,21 @@ export async function recordMaintainerFeedback(
   const absPath = maintainerInboxItemPath(targetRepoRoot, id, raisedAt);
   await atomicWriteFile(absPath, JSON.stringify(fullItem, null, 2));
 
-  return { ok: true, id, absPath };
+  // Step 5: Build a pre-filled GitHub new-issue URL for the operator to open
+  // immediately in their browser (Story native:01KV7XXKZ0TBPYETZP2X81T40S).
+  // This is fail-soft: when gh is unavailable or the repo identity cannot be
+  // resolved, the inbox write above is the primary result; issueUrl is simply
+  // omitted. Nothing is ever filed automatically.
+  let issueUrl: string | undefined;
+  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  if (repoIdentity !== null) {
+    const urlResult = buildFeedbackIssueUrl({
+      owner: repoIdentity.owner,
+      repo: repoIdentity.repo,
+      item: validated,
+    });
+    issueUrl = urlResult.url;
+  }
+
+  return { ok: true, id, absPath, ...(issueUrl !== undefined ? { issueUrl } : {}) };
 }

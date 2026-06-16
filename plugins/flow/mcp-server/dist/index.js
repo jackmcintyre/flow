@@ -56456,6 +56456,73 @@ function parseMaintainerFeedbackInput(input) {
   return result.data;
 }
 
+// src/tools/build-feedback-issue-url.ts
+var MAX_URL_BYTES = 8192;
+var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
+function composeFeedbackIssueBody(item) {
+  const lines = [
+    `**Problem**`,
+    item.problem,
+    ``,
+    `**Tool area**`,
+    item.tool_area
+  ];
+  if (item.suggested_direction) {
+    lines.push(``, `**Suggested direction**`, item.suggested_direction);
+  }
+  lines.push(``, `**Trigger**`, item.trigger);
+  return lines.join("\n");
+}
+function buildFeedbackIssueUrl(opts) {
+  const { owner, repo, item } = opts;
+  const title = `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+  const body = composeFeedbackIssueBody(item);
+  const base = `https://github.com/${owner}/${repo}/issues/new`;
+  const encodedTitle = encodeURIComponent(title);
+  const fullUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(body)}`;
+  if (Buffer.byteLength(fullUrl, "utf8") <= MAX_URL_BYTES) {
+    return { url: fullUrl, bodyShortened: false };
+  }
+  const encodedNote = encodeURIComponent(SHORTENED_NOTE);
+  const fixedPartLength = Buffer.byteLength(
+    `${base}?title=${encodedTitle}&body=${encodedNote}`,
+    "utf8"
+  );
+  const bodyBudget = MAX_URL_BYTES - fixedPartLength;
+  let lo = 0;
+  let hi = body.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = encodeURIComponent(body.slice(0, mid));
+    if (Buffer.byteLength(candidate, "utf8") <= bodyBudget) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const shortenedBody = body.slice(0, lo) + SHORTENED_NOTE;
+  const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
+  return { url: shortenedUrl, bodyShortened: true };
+}
+function resolveGhRepoIdentity(execSyncImpl) {
+  try {
+    const impl = execSyncImpl ?? ((cmd, opts) => {
+      const { execSync: execSync2 } = __require("node:child_process");
+      return execSync2(cmd, opts);
+    });
+    const stdout = impl("gh repo view --json owner,name", {
+      encoding: "utf-8"
+    });
+    const parsed = JSON.parse(stdout);
+    const owner = parsed.owner?.login ?? "";
+    const repo = parsed.name ?? "";
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
+
 // src/tools/record-maintainer-feedback.ts
 var INBOX_SUBDIR = path77.join(".flow", "maintainer-inbox");
 function maintainerInboxItemPath(targetRepoRoot, id, raisedAt) {
@@ -56478,7 +56545,17 @@ async function recordMaintainerFeedback(opts) {
   };
   const absPath = maintainerInboxItemPath(targetRepoRoot, id, raisedAt);
   await atomicWriteFile(absPath, JSON.stringify(fullItem, null, 2));
-  return { ok: true, id, absPath };
+  let issueUrl;
+  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  if (repoIdentity !== null) {
+    const urlResult = buildFeedbackIssueUrl({
+      owner: repoIdentity.owner,
+      repo: repoIdentity.repo,
+      item: validated
+    });
+    issueUrl = urlResult.url;
+  }
+  return { ok: true, id, absPath, ...issueUrl !== void 0 ? { issueUrl } : {} };
 }
 
 // src/tools/resolve-lens-roles.ts
@@ -58105,7 +58182,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "recordMaintainerFeedback",
-    description: "Record a structured feedback item about a structural limitation of the tool itself into a maintainer-only inbox (.flow/maintainer-inbox/). Required fields: problem (what is wrong), tool_area (which part of the tool), trigger (which role/phase/story surfaced it). Optional: suggested_direction. Items accumulate as distinct timestamped JSON files \u2014 nothing is overwritten. The write touches ONLY .flow/maintainer-inbox/ and leaves the team's working state and backlog byte-unchanged (AC1). Refuses to store incomplete items (AC2). Story native:01KV7FHZ41Z6CFPABW1B8J38BV.",
+    description: "Record a structured feedback item about a structural limitation of the tool itself into a maintainer-only inbox (.flow/maintainer-inbox/). Required fields: problem (what is wrong), tool_area (which part of the tool), trigger (which role/phase/story surfaced it). Optional: suggested_direction. Items accumulate as distinct timestamped JSON files \u2014 nothing is overwritten. The write touches ONLY .flow/maintainer-inbox/ and leaves the team's working state and backlog byte-unchanged (AC1). Refuses to store incomplete items (AC2). On success, also returns a pre-filled GitHub new-issue URL (issueUrl) when gh is available \u2014 the operator can open it immediately to review and submit as themselves; nothing is ever filed automatically (Story native:01KV7XXKZ0TBPYETZP2X81T40S). Story native:01KV7FHZ41Z6CFPABW1B8J38BV.",
     inputSchema: recordMaintainerFeedbackInputSchema,
     handler: async (args) => {
       try {
@@ -58114,8 +58191,13 @@ function registerAllTools(server) {
           item: args.item
         };
         const result = await recordMaintainerFeedback(parsed);
+        const responseText = result.issueUrl !== void 0 ? JSON.stringify({
+          ...result,
+          _message: `Feedback captured. Open this link to review and file the GitHub issue:
+${result.issueUrl}`
+        }) : JSON.stringify(result);
         return {
-          content: [{ type: "text", text: JSON.stringify(result) }]
+          content: [{ type: "text", text: responseText }]
         };
       } catch (err) {
         if (err instanceof DomainError) {
