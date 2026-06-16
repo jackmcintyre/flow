@@ -95,8 +95,8 @@ function fileWith(proposal: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
-  it("exposes exactly nine proposal types", () => {
-    expect(RETRO_PROPOSAL_TYPES).toHaveLength(9);
+  it("exposes exactly ten proposal types", () => {
+    expect(RETRO_PROPOSAL_TYPES).toHaveLength(10);
     expect(new Set(RETRO_PROPOSAL_TYPES)).toEqual(
       new Set([
         "rule",
@@ -108,6 +108,7 @@ describe("RetroProposalSchema (AC2 — discriminated union surface)", () => {
         "team-change",
         "persona-append",
         "promote-lesson-to-skill",
+        "build-story",
       ]),
     );
   });
@@ -441,6 +442,50 @@ describe("SkillRetireProposalSchema (AC6)", () => {
     expectFileRejected(
       fileWith({ ...VALID_WITH_DATE, last_invoked_at: "yesterday" }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `build-story` variant (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y)
+// ---------------------------------------------------------------------------
+
+describe("BuildStoryProposalSchema (engine-safety output)", () => {
+  const VALID = {
+    type: "build-story" as const,
+    id: ULID,
+    created_at: ISO,
+    rationale: "Retro wanted to revise a core skill in the engine.",
+    suggested_title: "Revise core skill at plugins/flow/.flow/skills/x.md via build-and-review",
+    skill_change_context: "skill-revise targeting plugins/flow/skills/x.md (minor bump)",
+  };
+
+  it("happy path — parses a valid build-story proposal", () => {
+    const p = parseProposal(VALID);
+    expect(p.type).toBe("build-story");
+    if (p.type === "build-story") {
+      expect(p.suggested_title).toBe(VALID.suggested_title);
+      expect(p.skill_change_context).toBe(VALID.skill_change_context);
+    }
+  });
+
+  it("rejects a missing suggested_title", () => {
+    const { suggested_title: _omit, ...rest } = VALID;
+    void _omit;
+    expectFileRejected(fileWith(rest));
+  });
+
+  it("rejects a missing skill_change_context", () => {
+    const { skill_change_context: _omit, ...rest } = VALID;
+    void _omit;
+    expectFileRejected(fileWith(rest));
+  });
+
+  it("rejects an empty suggested_title", () => {
+    expectFileRejected(fileWith({ ...VALID, suggested_title: "" }));
+  });
+
+  it("rejects an unknown extra key (.strict)", () => {
+    expectFileRejected(fileWith({ ...VALID, extra_key: "sneaky" }));
   });
 });
 

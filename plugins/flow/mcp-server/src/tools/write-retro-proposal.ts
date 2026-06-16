@@ -62,6 +62,7 @@ import {
   type RetroProposal,
   type RetroProposalFile,
 } from "../schemas/retro-proposal.js";
+import { ulid } from "ulid";
 
 /**
  * Options accepted by `writeRetroProposal`.
@@ -176,6 +177,38 @@ export async function writeRetroProposal(
     throw new RetroProposalAlreadyExistsError({ absPath, isoTimestamp });
   }
 
+  // Step 4b: Engine-safety classification (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y).
+  // For any skill-change proposal (`skill-create`, `skill-revise`, `skill-supersede`,
+  // `skill-retire`) whose target path is NOT under `.flow/skills/`, replace the
+  // proposal with a `build-story` recommendation. This guarantees the operator
+  // never sees an approve-and-apply proposal for a core-machinery change that would
+  // dead-end when accepted.
+  //
+  // Unknown/ambiguous paths default to "engine" (the safe side).
+  const classifiedProposals: RetroProposal[] = fileShape.proposals.map(
+    (proposal): RetroProposal => {
+      const targetPath = getSkillTargetPath(proposal);
+      if (targetPath === null) return proposal; // not a skill-change proposal
+      if (classifySkillChangeTarget(targetPath) === "team-owned") return proposal;
+      // Engine-targeted skill change — emit a build-story recommendation instead.
+      return {
+        type: "build-story",
+        id: ulid(),
+        created_at: proposal.created_at,
+        rationale: proposal.rationale,
+        suggested_title: suggestBuildStoryTitle(proposal),
+        skill_change_context: describeBlockedSkillChange(proposal),
+      };
+    },
+  );
+
+  // Re-validate with the classified proposals.
+  fileShape = parseRetroProposalFile({
+    iso_timestamp: isoTimestamp,
+    cycle_window: cycleWindow,
+    proposals: classifiedProposals,
+  });
+
   // Step 5: Apply the durability routing heuristic to any persona-append
   // proposal that has routing_context but no durability_recommendation yet.
   // The heuristic is deterministic given the inputs, so it is owned by the
@@ -233,6 +266,103 @@ export async function writeRetroProposal(
     proposalCount: fileShape.proposals.length,
     durabilityRecommendations,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Engine-safety classifier (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y)
+// ---------------------------------------------------------------------------
+
+/**
+ * The path prefix that marks a team-owned skill — one that lives under the
+ * target repo's `.flow/skills/` directory and may be revised through the
+ * approval gate. Anything else is core machinery (the engine) and must go
+ * through a build-and-review story instead.
+ */
+const TEAM_SKILL_PREFIX = ".flow/skills/";
+
+/**
+ * Classify a skill-change target path as either `"team-owned"` or `"engine"`.
+ *
+ * - `"team-owned"` — the path is under `.flow/skills/`; the diff-then-confirm
+ *   gate can apply this change safely.
+ * - `"engine"` — the path points into the product's shipped source tree (e.g.
+ *   `plugins/flow/...`) or is otherwise outside `.flow/skills/`. The change
+ *   requires a full build-and-review story; the gate must NOT handle it.
+ *
+ * Unknown / empty / null paths default to `"engine"` (the safe side: forces
+ * human-reviewed build work rather than risking a dead-end apply).
+ *
+ * (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — AC1/AC2)
+ */
+export function classifySkillChangeTarget(
+  targetPath: string | null | undefined,
+): "team-owned" | "engine" {
+  if (!targetPath) return "engine";
+  return targetPath.startsWith(TEAM_SKILL_PREFIX) ? "team-owned" : "engine";
+}
+
+/**
+ * Extract the skill target path(s) from a `skill-*` proposal for classification.
+ * Returns `null` for non-skill-change proposal types.
+ *
+ * For `skill-supersede` both the superseded path and the replacement path are
+ * checked — if EITHER is in the engine, the whole proposal is treated as engine.
+ */
+function getSkillTargetPath(proposal: RetroProposal): string | null {
+  switch (proposal.type) {
+    case "skill-revise":
+      return proposal.target_skill_path;
+    case "skill-retire":
+      return proposal.target_skill_path;
+    case "skill-create":
+      return proposal.proposed_path;
+    case "skill-supersede":
+      // If either half touches the engine, treat the whole proposal as engine.
+      if (classifySkillChangeTarget(proposal.superseded_skill_path) === "engine") {
+        return proposal.superseded_skill_path;
+      }
+      return proposal.replacement.proposed_path;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Describe the blocked skill-change intent for the `build-story` context field.
+ * Provides provenance so the operator knows what the retro originally wanted.
+ */
+function describeBlockedSkillChange(proposal: RetroProposal): string {
+  switch (proposal.type) {
+    case "skill-revise":
+      return `${proposal.type} targeting ${proposal.target_skill_path} (${proposal.version_bump} bump)`;
+    case "skill-retire":
+      return `${proposal.type} targeting ${proposal.target_skill_path}`;
+    case "skill-create":
+      return `${proposal.type} at ${proposal.proposed_path}`;
+    case "skill-supersede":
+      return `${proposal.type}: supersede ${proposal.superseded_skill_path} → ${proposal.replacement.proposed_path}`;
+    default:
+      return `${proposal.type} (unknown skill path)`;
+  }
+}
+
+/**
+ * Describe the suggested story title for a blocked engine skill change.
+ * Gives the planner a usable starting point.
+ */
+function suggestBuildStoryTitle(proposal: RetroProposal): string {
+  switch (proposal.type) {
+    case "skill-revise":
+      return `Revise core skill at ${proposal.target_skill_path} via build-and-review`;
+    case "skill-retire":
+      return `Retire core skill at ${proposal.target_skill_path} via build-and-review`;
+    case "skill-create":
+      return `Create core skill at ${proposal.proposed_path} via build-and-review`;
+    case "skill-supersede":
+      return `Replace core skill at ${proposal.superseded_skill_path} via build-and-review`;
+    default:
+      return "Implement core machinery skill change via build-and-review";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +632,15 @@ function renderProposalFields(
           `(${proposal.skill_body.split("\n").length} lines — see frontmatter)`,
         ],
         ["when_to_use", proposal.when_to_use],
+      ];
+    case "build-story":
+      return [
+        ["suggested_title", proposal.suggested_title],
+        ["skill_change_context", proposal.skill_change_context],
+        [
+          "action",
+          "Queue a build-and-review story via the normal author/queue path — do NOT accept this proposal through the apply gate.",
+        ],
       ];
   }
 }

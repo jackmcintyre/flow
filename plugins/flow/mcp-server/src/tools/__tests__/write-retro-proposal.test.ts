@@ -31,6 +31,7 @@ import {
   writeRetroProposal,
   routeDurability,
   DURABILITY_REASONS,
+  classifySkillChangeTarget,
 } from "../write-retro-proposal.js";
 
 // ---------------------------------------------------------------------------
@@ -769,5 +770,320 @@ describe("summariseRetroProposal — AC3: parity with frontmatter proposal set",
         absPath: path.join(tmpRoot, ".flow", "retro-proposals", "nonexistent.md"),
       }),
     ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Engine-safety classifier unit tests
+// (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — classifySkillChangeTarget)
+// ---------------------------------------------------------------------------
+
+describe("classifySkillChangeTarget — classifier unit", () => {
+  it("paths under .flow/skills/ are team-owned", () => {
+    expect(classifySkillChangeTarget(".flow/skills/foo.md")).toBe("team-owned");
+    expect(classifySkillChangeTarget(".flow/skills/nested/bar.md")).toBe("team-owned");
+    expect(classifySkillChangeTarget(".flow/skills/abc")).toBe("team-owned");
+  });
+
+  it("paths outside .flow/skills/ are engine", () => {
+    expect(classifySkillChangeTarget("plugins/flow/catalogue/retro-analyst.md")).toBe("engine");
+    expect(classifySkillChangeTarget("plugins/flow/mcp-server/src/tools/foo.ts")).toBe("engine");
+    expect(classifySkillChangeTarget(".flow/skills-other/foo.md")).toBe("engine");
+    expect(classifySkillChangeTarget(".flow/team/generalist-dev/PERSONA.md")).toBe("engine");
+  });
+
+  it("null, undefined, and empty string default to engine (safe side)", () => {
+    expect(classifySkillChangeTarget(null)).toBe("engine");
+    expect(classifySkillChangeTarget(undefined)).toBe("engine");
+    expect(classifySkillChangeTarget("")).toBe("engine");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Engine-safety: writeRetroProposal intercepts engine-targeted skill proposals
+// (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — AC1/AC2)
+// ---------------------------------------------------------------------------
+
+const ISO5 = "2026-06-16T08:00:00.000Z";
+const ULID_F = "01HZRETR0000000000000000F6";
+const ULID_G = "01HZRETR0000000000000000G7";
+const ULID_H = "01HZRETR0000000000000000H8";
+
+describe("writeRetroProposal — AC1: team-owned skill proposals pass through unchanged", () => {
+  it("skill-revise targeting .flow/skills/ passes through as skill-revise", async () => {
+    const proposal = {
+      type: "skill-revise" as const,
+      id: ULID_F,
+      created_at: ISO5,
+      rationale: "Tighten the pre-flight checklist skill.",
+      target_skill_path: ".flow/skills/pre-flight-checklist.md",
+      revised_body: "# Pre-flight checklist (revised)\n\nShorter version.\n",
+      version_bump: "patch" as const,
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [proposal],
+    });
+
+    // The proposal must survive as skill-revise — not converted to build-story.
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals).toHaveLength(1);
+    expect(fileShape.proposals[0]!.type).toBe("skill-revise");
+    if (fileShape.proposals[0]!.type === "skill-revise") {
+      expect(fileShape.proposals[0]!.target_skill_path).toBe(
+        ".flow/skills/pre-flight-checklist.md",
+      );
+    }
+  });
+
+  it("skill-create targeting .flow/skills/ passes through as skill-create", async () => {
+    const proposal = {
+      type: "skill-create" as const,
+      id: ULID_F,
+      created_at: ISO5,
+      rationale: "New skill for operators.",
+      proposed_path: ".flow/skills/new-skill.md",
+      frontmatter_description: "A new team-owned skill.",
+      body: "# New skill\n\nDetails.\n",
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [proposal],
+    });
+
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals[0]!.type).toBe("skill-create");
+  });
+});
+
+describe("writeRetroProposal — AC2: engine-targeted skill proposals become build-story", () => {
+  it("skill-revise targeting plugins/flow/... is emitted as build-story", async () => {
+    const engineSkillRevise = {
+      type: "skill-revise" as const,
+      id: ULID_G,
+      created_at: ISO5,
+      rationale: "The retro wants to change a core plugin skill.",
+      target_skill_path: "plugins/flow/catalogue/retro-analyst.md",
+      revised_body: "# Revised analyst\n\nNew content.\n",
+      version_bump: "minor" as const,
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [engineSkillRevise],
+    });
+
+    // Must be converted to build-story — never skill-revise.
+    const { frontmatter, body } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals).toHaveLength(1);
+    const emitted = fileShape.proposals[0]!;
+    expect(emitted.type).toBe("build-story");
+    if (emitted.type === "build-story") {
+      // Must NOT be one of the approve-and-apply skill types.
+      expect(emitted.suggested_title).toContain("build-and-review");
+      expect(emitted.skill_change_context).toContain(
+        "plugins/flow/catalogue/retro-analyst.md",
+      );
+    }
+
+    // Body must show it as a build-story, never as an approve-and-apply skill section.
+    expect(body).toContain("build-story");
+    // The H2 heading must name build-story, not skill-revise — so the type in the
+    // proposal heading is build-story, even though skill_change_context prose mentions
+    // the original type for provenance (that's fine and expected).
+    expect(body).toContain("## Proposal 1 — build-story —");
+    expect(body).not.toContain("## Proposal 1 — skill-revise —");
+    expect(body).toContain("Queue a build-and-review story");
+  });
+
+  it("skill-create targeting an engine path becomes build-story", async () => {
+    const engineSkillCreate = {
+      type: "skill-create" as const,
+      id: ULID_G,
+      created_at: ISO5,
+      rationale: "Retro wants a new core catalogue entry.",
+      proposed_path: "plugins/flow/catalogue/new-role.md",
+      frontmatter_description: "New core role",
+      body: "# New core role\n\nDetails.\n",
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [engineSkillCreate],
+    });
+
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals[0]!.type).toBe("build-story");
+  });
+
+  it("skill-retire targeting an engine path becomes build-story", async () => {
+    const engineSkillRetire = {
+      type: "skill-retire" as const,
+      id: ULID_G,
+      created_at: ISO5,
+      rationale: "Retro wants to retire a core catalogue entry.",
+      target_skill_path: "plugins/flow/catalogue/old-role.md",
+      last_invoked_at: null,
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [engineSkillRetire],
+    });
+
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals[0]!.type).toBe("build-story");
+  });
+
+  it("mixed batch: team-owned passes through, engine becomes build-story", async () => {
+    const teamSkill = {
+      type: "skill-revise" as const,
+      id: ULID_F,
+      created_at: ISO5,
+      rationale: "Tighten a team skill.",
+      target_skill_path: ".flow/skills/checklist.md",
+      revised_body: "# Checklist\n\nRevised.\n",
+      version_bump: "patch" as const,
+    };
+    const engineSkill = {
+      type: "skill-revise" as const,
+      id: ULID_G,
+      created_at: ISO5,
+      rationale: "Change a plugin catalogue file.",
+      target_skill_path: "plugins/flow/catalogue/retro-analyst.md",
+      revised_body: "# Analyst (revised)\n\nNew.\n",
+      version_bump: "minor" as const,
+    };
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [teamSkill, engineSkill],
+    });
+
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals).toHaveLength(2);
+    expect(fileShape.proposals[0]!.type).toBe("skill-revise");
+    expect(fileShape.proposals[1]!.type).toBe("build-story");
+  });
+
+  it("non-skill proposals (rule, team-change) are not affected by the classifier", async () => {
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO5,
+      proposals: [RULE_PROPOSAL, TEAM_CHANGE_PROPOSAL],
+    });
+
+    const { frontmatter } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+    expect(fileShape.proposals.map((p) => p.type)).toEqual([
+      "rule",
+      "team-change",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Engine-safety: integration test
+// (Story native:01KV76P2DW42BPBPT4ZQ0FS63Y — AC3)
+// Integration: a full retro cycle that surfaces a core-machinery skill change
+// must surface it ONLY as a build-story recommendation, never approve-and-apply.
+// ---------------------------------------------------------------------------
+
+describe("writeRetroProposal — AC3 (integration): engine skill change surfaces as build-story only", () => {
+  const ISO6 = "2026-06-16T09:00:00.000Z";
+
+  it("a retro cycle with a core-machinery skill-revise candidate produces only a build-story in the output file", async () => {
+    // Simulate what the retro-analyst would produce after seeing a pattern
+    // that calls for a change to the shipped plugin catalogue.
+    const coreChangeCandidates = [
+      {
+        type: "rule" as const,
+        id: ULID_F,
+        created_at: ISO6,
+        rationale: "Handoff phrase fires regularly.",
+        text: "Always emit the handoff phrase verbatim.",
+        target_failure_class: "handoff-grammar",
+        recommended_promotion_level: "must" as const,
+      },
+      {
+        // This targets the product's core machinery — must become build-story.
+        type: "skill-revise" as const,
+        id: ULID_G,
+        created_at: ISO6,
+        rationale: "The retro-analyst persona needs tightening based on cycle output.",
+        target_skill_path: "plugins/flow/catalogue/retro-analyst.md",
+        revised_body: "# Retro Analyst (revised)\n\n...\n",
+        version_bump: "minor" as const,
+      },
+      {
+        // This also targets core machinery (mcp-server source).
+        type: "skill-create" as const,
+        id: ULID_H,
+        created_at: ISO6,
+        rationale: "New core utility skill needed.",
+        proposed_path: "plugins/flow/mcp-server/src/tools/new-tool.ts",
+        frontmatter_description: "Core utility",
+        body: "// Core utility\n",
+      },
+    ];
+
+    const result = await writeRetroProposal({
+      targetRepoRoot: tmpRoot,
+      isoTimestamp: ISO6,
+      proposals: coreChangeCandidates,
+    });
+
+    const { frontmatter, body } = await readWrittenFile(result.absPath);
+    const fileShape = parseRetroProposalFile(yamlParse(frontmatter));
+
+    // AC3: the two engine-targeted proposals must surface as build-story,
+    // never as skill-revise or skill-create (which would dead-end on apply).
+    expect(fileShape.proposals).toHaveLength(3);
+
+    const [ruleProposal, engineRevise, engineCreate] = fileShape.proposals;
+
+    // The rule passes through unchanged.
+    expect(ruleProposal!.type).toBe("rule");
+
+    // Both engine-targeted skill changes become build-story.
+    expect(engineRevise!.type).toBe("build-story");
+    expect(engineCreate!.type).toBe("build-story");
+
+    if (engineRevise!.type === "build-story") {
+      expect(engineRevise!.skill_change_context).toContain(
+        "plugins/flow/catalogue/retro-analyst.md",
+      );
+      // Suggested title must guide the operator toward the build path.
+      expect(engineRevise!.suggested_title).toContain("build-and-review");
+    }
+
+    if (engineCreate!.type === "build-story") {
+      expect(engineCreate!.skill_change_context).toContain(
+        "plugins/flow/mcp-server/src/tools/new-tool.ts",
+      );
+    }
+
+    // The body must show build-story headings, not approve-and-apply skill headings.
+    // (skill_change_context in the body text may reference the original type for
+    // provenance — that's expected. The H2 heading is what determines the proposal type.)
+    expect(body).not.toContain("## Proposal 2 — skill-revise");
+    expect(body).not.toContain("## Proposal 3 — skill-create");
+    expect(body).toContain("## Proposal 2 — build-story");
+    expect(body).toContain("## Proposal 3 — build-story");
+    expect(body).toContain("Queue a build-and-review story");
   });
 });
