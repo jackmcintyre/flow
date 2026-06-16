@@ -166,4 +166,9 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   "build-story": "Story native:01KV76P2DW42BPBPT4ZQ0FS63Y (not apply-able — queue a build story instead)",
   "lesson-consolidation": "Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T",
   "lesson-retirement": "Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ",
+  // `shared-skill-promotion` is recommendation-only: the operator must approve
+  // and act manually (multi-role choreography). Accepting via the gate fails
+  // closed with ProposalKindNotApplicableYetError — the operator creates the
+  // shared skill and updates each role's PERSONA.md manually.
+  "shared-skill-promotion": "Story native:01KV7FJHK9CAAS860MJAG70QVS (not auto-apply-able — create the shared skill and update each role's PERSONA.md manually after approval)",
 };

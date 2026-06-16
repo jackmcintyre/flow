@@ -469,6 +469,51 @@ const LessonRetirementProposalSchema = ProposalBase.extend({
     .min(1),
 }).strict();
 
+/**
+ * `shared-skill-promotion` — recommend promoting a lesson that has been
+ * independently recorded by two or more hired roles into a single shared skill
+ * so that common know-how lives in one place rather than being copied into
+ * each role.
+ *
+ * This proposal is **recommendation-only** (no auto-apply handler is registered):
+ * the operator must explicitly approve via the review-and-confirm step before
+ * anything is promoted. The retro analyst identifies the overlap; the operator
+ * decides whether and how to implement the shared skill.
+ *
+ * The expected apply-time workflow (when the operator chooses to act on this):
+ *  1. The operator creates a new shared skill file at `proposed_skill_path`.
+ *  2. The operator adds a skill reference entry to each sharing role's
+ *     `## Skills` section in PERSONA.md.
+ *  3. The operator removes (or annotates as superseded) the per-role lesson
+ *     copies from each role's `## Knowledge` section.
+ *
+ * Because this involves multiple personas and a new skill file, it is intentionally
+ * NOT auto-applied via the single-step gate — the operator choreographs the
+ * multi-role change with full visibility.
+ *
+ * Fields:
+ *  - `sharing_roles`         — the roles (kebab ids) whose Knowledge sections
+ *                              both carry the shared lesson. At least two entries.
+ *  - `shared_lesson_text`    — the verbatim or representative lesson text from the
+ *                              detection; shown to the operator for confirmation.
+ *  - `representative_lesson_id` — the lesson id from the first (alphabetically)
+ *                              sharing role; provides provenance.
+ *  - `proposed_skill_path`   — suggested repo-relative path for the new shared skill
+ *                              file (under `.flow/skills/`). The operator may change
+ *                              this before acting.
+ *  - `skill_description`     — a one-line description for the skill's frontmatter.
+ *
+ * (Story native:01KV7FJHK9CAAS860MJAG70QVS — cross-role shared lesson promotion)
+ */
+const SharedSkillPromotionProposalSchema = ProposalBase.extend({
+  type: z.literal("shared-skill-promotion"),
+  sharing_roles: z.array(RolePathSchema).min(2),
+  shared_lesson_text: z.string().min(1),
+  representative_lesson_id: z.string().min(1),
+  proposed_skill_path: PathInsideRepoSchema,
+  skill_description: z.string().min(1),
+}).strict();
+
 // ---------------------------------------------------------------------------
 // Discriminated union + file-level wrapper
 // ---------------------------------------------------------------------------
@@ -490,6 +535,11 @@ const LessonRetirementProposalSchema = ProposalBase.extend({
  * `lesson-retirement` (added Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ) retires
  * never-earned-keep lessons from a role's always-shown Knowledge section into the
  * archived store, where they remain retrievable on demand.
+ *
+ * `shared-skill-promotion` (added Story native:01KV7FJHK9CAAS860MJAG70QVS)
+ * recommends promoting a lesson shared by two or more roles into a single shared
+ * skill. This variant has no auto-apply handler — the operator must approve and
+ * act explicitly. Never promotes on its own.
  */
 export const RETRO_PROPOSAL_TYPES = [
   "rule",
@@ -504,10 +554,11 @@ export const RETRO_PROPOSAL_TYPES = [
   "build-story",
   "lesson-consolidation",
   "lesson-retirement",
+  "shared-skill-promotion",
 ] as const;
 
 /**
- * The full retro-proposal discriminated union. Twelve variants, closed enum,
+ * The full retro-proposal discriminated union. Thirteen variants, closed enum,
  * no `z.string()` fallback.
  */
 export const RetroProposalSchema = z.discriminatedUnion("type", [
@@ -523,6 +574,7 @@ export const RetroProposalSchema = z.discriminatedUnion("type", [
   BuildStoryProposalSchema,
   LessonConsolidationProposalSchema,
   LessonRetirementProposalSchema,
+  SharedSkillPromotionProposalSchema,
 ]);
 
 export type RetroProposal = z.infer<typeof RetroProposalSchema>;

@@ -661,6 +661,18 @@ function renderProposalFields(
             .join("; "),
         ],
       ];
+    case "shared-skill-promotion":
+      return [
+        ["sharing_roles", proposal.sharing_roles.join(", ")],
+        ["shared_lesson_text", proposal.shared_lesson_text],
+        ["representative_lesson_id", proposal.representative_lesson_id],
+        ["proposed_skill_path", proposal.proposed_skill_path],
+        ["skill_description", proposal.skill_description],
+        [
+          "action",
+          "Review and confirm before acting — this proposal is never auto-applied. Create the skill file and update each role's ## Skills section manually via the review-and-confirm step.",
+        ],
+      ];
   }
 }
 

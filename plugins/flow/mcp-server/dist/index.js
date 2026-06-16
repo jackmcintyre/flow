@@ -39029,6 +39029,14 @@ var LessonRetirementProposalSchema = ProposalBase.extend({
     }).strict()
   ).min(1)
 }).strict();
+var SharedSkillPromotionProposalSchema = ProposalBase.extend({
+  type: external_exports.literal("shared-skill-promotion"),
+  sharing_roles: external_exports.array(RolePathSchema).min(2),
+  shared_lesson_text: external_exports.string().min(1),
+  representative_lesson_id: external_exports.string().min(1),
+  proposed_skill_path: PathInsideRepoSchema,
+  skill_description: external_exports.string().min(1)
+}).strict();
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -39041,7 +39049,8 @@ var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   PromoteLessonToSkillProposalSchema,
   BuildStoryProposalSchema,
   LessonConsolidationProposalSchema,
-  LessonRetirementProposalSchema
+  LessonRetirementProposalSchema,
+  SharedSkillPromotionProposalSchema
 ]);
 var RetroProposalFileSchema = external_exports.object({
   iso_timestamp: IsoTimestampSchema,
@@ -39473,6 +39482,18 @@ function renderProposalFields(proposal) {
         [
           "lesson_retirements",
           proposal.lesson_retirements.map((r) => `${r.id}: ${r.reason}`).join("; ")
+        ]
+      ];
+    case "shared-skill-promotion":
+      return [
+        ["sharing_roles", proposal.sharing_roles.join(", ")],
+        ["shared_lesson_text", proposal.shared_lesson_text],
+        ["representative_lesson_id", proposal.representative_lesson_id],
+        ["proposed_skill_path", proposal.proposed_skill_path],
+        ["skill_description", proposal.skill_description],
+        [
+          "action",
+          "Review and confirm before acting \u2014 this proposal is never auto-applied. Create the skill file and update each role's ## Skills section manually via the review-and-confirm step."
         ]
       ];
   }
@@ -46715,7 +46736,8 @@ var RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
       "promote-lesson-to-skill",
       "build-story",
       "lesson-consolidation",
-      "lesson-retirement"
+      "lesson-retirement",
+      "shared-skill-promotion"
     ]),
     applied_sha: external_exports.string().min(1),
     idempotency_key: external_exports.string().min(1)
@@ -48043,7 +48065,12 @@ var KIND_TO_STORY = {
   // behaviour — the operator should route it through the normal author/queue path.
   "build-story": "Story native:01KV76P2DW42BPBPT4ZQ0FS63Y (not apply-able \u2014 queue a build story instead)",
   "lesson-consolidation": "Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T",
-  "lesson-retirement": "Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ"
+  "lesson-retirement": "Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ",
+  // `shared-skill-promotion` is recommendation-only: the operator must approve
+  // and act manually (multi-role choreography). Accepting via the gate fails
+  // closed with ProposalKindNotApplicableYetError — the operator creates the
+  // shared skill and updates each role's PERSONA.md manually.
+  "shared-skill-promotion": "Story native:01KV7FJHK9CAAS860MJAG70QVS (not auto-apply-able \u2014 create the shared skill and update each role's PERSONA.md manually after approval)"
 };
 
 // src/tools/accept-proposal.ts
@@ -50880,7 +50907,8 @@ async function gatherRetroInputs(opts) {
     ageFloorMs: opts.retirableAgeFloorMs,
     now: opts.retirableNow
   });
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons };
+  const crossRoleSharedLessons = await gatherCrossRoleSharedLessons(targetRepoRoot);
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons };
 }
 async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
   const doneDir = path42.join(targetRepoRoot, ".flow", "state", "done");
@@ -51282,6 +51310,96 @@ async function gatherRetirableLessons(targetRepoRoot, opts = {}) {
     entries.push({ role: entry, candidates });
   }
   return entries;
+}
+var CROSS_ROLE_SIMILARITY_THRESHOLD = 0.35;
+async function gatherCrossRoleSharedLessons(targetRepoRoot) {
+  const teamDir = path42.join(targetRepoRoot, "team");
+  let roleEntries;
+  try {
+    roleEntries = await fs33.readdir(teamDir);
+  } catch (err) {
+    if (isEnoent5(err)) return [];
+    throw err;
+  }
+  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
+  const roleWithLessons = [];
+  for (const entry of roleEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    let stat2;
+    try {
+      stat2 = await fs33.stat(path42.join(teamDir, entry));
+    } catch {
+      continue;
+    }
+    if (!stat2.isDirectory()) continue;
+    const personaPath = path42.join(teamDir, entry, "PERSONA.md");
+    let raw;
+    try {
+      raw = await fs33.readFile(personaPath, "utf8");
+    } catch (err) {
+      if (isEnoent5(err)) continue;
+      throw err;
+    }
+    let parsed;
+    try {
+      parsed = parsePersonaFile(raw, personaPath);
+    } catch {
+      continue;
+    }
+    const lessons = extractLessonsFromBody(parsed.sections.Knowledge);
+    if (lessons.length === 0) continue;
+    roleWithLessons.push({ role: entry, lessons });
+  }
+  if (roleWithLessons.length < 2) return [];
+  roleWithLessons.sort((a2, b) => a2.role.localeCompare(b.role));
+  const clusters = [];
+  function findMatchingCluster(candidate, _candidateRole) {
+    let best = null;
+    let bestSim = CROSS_ROLE_SIMILARITY_THRESHOLD - 1e-3;
+    for (const cluster of clusters) {
+      const sim = lessonSimilarity(cluster.representativeLesson, candidate);
+      if (sim > bestSim) {
+        bestSim = sim;
+        best = cluster;
+      }
+    }
+    return best;
+  }
+  for (const { role, lessons } of roleWithLessons) {
+    for (const lesson of lessons) {
+      const matchingCluster = findMatchingCluster(lesson, role);
+      if (matchingCluster) {
+        if (!matchingCluster.roles.has(role)) {
+          matchingCluster.roles.add(role);
+          const sim = lessonSimilarity(matchingCluster.representativeLesson, lesson);
+          if (sim > matchingCluster.maxSimilarity) {
+            matchingCluster.maxSimilarity = sim;
+          }
+        }
+      } else {
+        clusters.push({
+          representativeLesson: lesson,
+          representativeRole: role,
+          roles: /* @__PURE__ */ new Set([role]),
+          maxSimilarity: 1
+          // a lesson is 100% similar to itself
+        });
+      }
+    }
+  }
+  const shared = [];
+  for (const cluster of clusters) {
+    if (cluster.roles.size < 2) continue;
+    const sortedRoles = [...cluster.roles].sort();
+    shared.push({
+      lesson_text: `${cluster.representativeLesson.applies_when}: ${cluster.representativeLesson.detail}`.trim(),
+      lesson_id: cluster.representativeLesson.id,
+      roles: sortedRoles,
+      similarity: cluster.maxSimilarity
+    });
+  }
+  shared.sort((a2, b) => b.similarity - a2.similarity);
+  return shared;
 }
 function isEnoent5(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";

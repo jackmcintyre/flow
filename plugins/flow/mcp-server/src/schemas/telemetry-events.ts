@@ -180,6 +180,7 @@ const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
         "build-story",
         "lesson-consolidation",
         "lesson-retirement",
+        "shared-skill-promotion",
       ]),
       applied_sha: z.string().min(1),
       idempotency_key: z.string().min(1),
