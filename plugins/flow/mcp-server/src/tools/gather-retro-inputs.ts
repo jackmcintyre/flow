@@ -111,7 +111,7 @@ interface RecurringFrictionEntry {
  *
  * Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T.
  */
-export interface NearDuplicateLessonPair {
+interface NearDuplicateLessonPair {
   /** The kebab role id whose Knowledge section holds both lessons. */
   role: string;
   /** The first duplicate lesson. */
