@@ -162,7 +162,8 @@ export function composeCommitSubject(opts: {
  * developer holds at PR-open time:
  *   1. What changed — story title + AC summaries
  *   2. Why — story narrative / user pain
- *   3. How to check it yourself — AC text
+ *   3. How to check it yourself — developer's by-hand walk-through (or honest
+ *      no-walk-through line when none was supplied)
  *   4. Risk and blast radius — caller-supplied risk tier
  *   5. Evidence — per-AC covering check + pre-PR gate result
  *
@@ -194,6 +195,12 @@ export function composeCommitSubject(opts: {
  *   runnable test, `"artifact"` is a state location. A "Run X" instruction is
  *   shown ONLY for runnable (`vitest`) targets; a non-runnable target shows the
  *   criterion text alone with no false automated-check claim.
+ * - `howToTestWalkthrough` — the developer's ordered, by-hand walk-through of
+ *   exercising the actual feature in the running product, ending with the
+ *   reviewer performing the real end-user action. Written by the developer at
+ *   PR-open time. When absent or empty, the how-to-test section renders an
+ *   honest "no walk-through was provided" line — it NEVER fabricates steps or
+ *   repeats the per-AC criteria/automated-test list.
  * - `riskTier` — the story's classified risk tier, passed in by the caller
  *   (`run-dev-terminal-action.ts`). `composePrBody` does NOT compute risk.
  * - The pre-PR build-and-test gate result: always stated as "passed" here
@@ -216,6 +223,14 @@ export function composePrBody(opts: {
   narrative?: string;
   /** Caller-supplied risk tier — assembled into the "Risk and blast radius" section. */
   riskTier?: string;
+  /**
+   * Developer-authored ordered walk-through of exercising the actual feature
+   * by hand in the running product, ending with the reviewer performing the
+   * real end-user action. When absent or empty, the how-to-test section
+   * renders an honest fallback line — it never repeats the AC criteria or the
+   * automated-test list, and never fabricates steps.
+   */
+  howToTestWalkthrough?: string;
 }): string {
   // ---------------------------------------------------------------------------
   // Section 1: Approver summary (five plain-language sections)
@@ -225,6 +240,7 @@ export function composePrBody(opts: {
     narrative: opts.narrative,
     acs: opts.acs,
     riskTier: opts.riskTier,
+    howToTestWalkthrough: opts.howToTestWalkthrough,
   });
 
   // ---------------------------------------------------------------------------
@@ -283,8 +299,9 @@ function buildApproverSummary(opts: {
     verificationType?: "vitest" | "artifact";
   }>;
   riskTier?: string;
+  howToTestWalkthrough?: string;
 }): string {
-  const { title, narrative, acs, riskTier } = opts;
+  const { title, narrative, acs, riskTier, howToTestWalkthrough } = opts;
 
   // --- Section 1: What changed ---
   const whatChangedLines: string[] = [];
@@ -308,27 +325,16 @@ function buildApproverSummary(opts: {
     : "No narrative was provided for this story.";
 
   // --- Section 3: How to check it yourself ---
-  const howLines: string[] = [];
-  if (acs.length > 0) {
-    howLines.push("To verify each acceptance criterion:");
-    for (const ac of acs) {
-      if (isRunnableCheck(ac)) {
-        howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
-      } else {
-        // Non-runnable target (a state location / artifact) or no recorded
-        // check: show the criterion text alone. Never print "Run X" for
-        // something the approver cannot run, and make no automated-check claim.
-        howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
-      }
-    }
-    howLines.push("");
-    howLines.push(
-      "You can also read the change in the diff below and compare it against each criterion above.",
-    );
-  } else {
-    howLines.push("No acceptance criteria were listed for this change.");
-  }
-  const howToCheck = howLines.join("\n");
+  // This section renders the developer-authored by-hand walk-through — NOT the
+  // per-AC criteria/check list (which lives in the Evidence section). The
+  // composer is the backstop: when no walk-through is supplied or it is blank,
+  // an honest fallback line is emitted instead. Steps are NEVER fabricated, and
+  // the per-AC automated-test list is NEVER echoed here (that keeps how-to-test
+  // content-disjoint from Evidence by construction).
+  const trimmedWalkthrough = howToTestWalkthrough?.trim() ?? "";
+  const howToCheck = trimmedWalkthrough.length > 0
+    ? trimmedWalkthrough
+    : "No walk-through was provided by the developer. Verify against the acceptance criteria and the diff.";
 
   // --- Section 4: Risk and blast radius ---
   const riskLines: string[] = [];

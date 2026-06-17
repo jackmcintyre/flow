@@ -36005,6 +36005,10 @@ var runDevTerminalActionInputSchema = {
     buildTestTimeoutMs: {
       type: "number",
       description: "Per-run time budget (milliseconds) for the build/test gates. Defaults to 1 200 000 (20 min). Set to 0 to disable the budget."
+    },
+    howToTestWalkthrough: {
+      type: "string",
+      description: "Developer-authored ordered by-hand walk-through of exercising the actual feature in the running product, ending with the reviewer performing the real end-user action. Rendered verbatim in the PR's 'How to check it yourself' section. When absent or empty, an honest 'no walk-through was provided' fallback is emitted instead \u2014 never the per-AC criteria/test list, never fabricated steps."
     }
   },
   required: [
@@ -52948,7 +52952,8 @@ function composePrBody(opts) {
     title: opts.title,
     narrative: opts.narrative,
     acs: opts.acs,
-    riskTier: opts.riskTier
+    riskTier: opts.riskTier,
+    howToTestWalkthrough: opts.howToTestWalkthrough
   });
   const acLines = opts.acs.map((ac) => `- [ ] AC${ac.index}: ${ac.firstLine}`).join("\n");
   const machineBlock = [
@@ -52969,7 +52974,7 @@ function isRunnableCheck(ac) {
   return ac.verificationType === "vitest" && Boolean(ac.coveringCheck);
 }
 function buildApproverSummary(opts) {
-  const { title, narrative, acs, riskTier } = opts;
+  const { title, narrative, acs, riskTier, howToTestWalkthrough } = opts;
   const whatChangedLines = [];
   if (title) {
     whatChangedLines.push(title);
@@ -52985,24 +52990,8 @@ function buildApproverSummary(opts) {
   }
   const whatChanged = whatChangedLines.join("\n");
   const why = narrative ? narrative : "No narrative was provided for this story.";
-  const howLines = [];
-  if (acs.length > 0) {
-    howLines.push("To verify each acceptance criterion:");
-    for (const ac of acs) {
-      if (isRunnableCheck(ac)) {
-        howLines.push(`- AC${ac.index}: Run \`${ac.coveringCheck}\``);
-      } else {
-        howLines.push(`- AC${ac.index}: ${ac.firstLine}`);
-      }
-    }
-    howLines.push("");
-    howLines.push(
-      "You can also read the change in the diff below and compare it against each criterion above."
-    );
-  } else {
-    howLines.push("No acceptance criteria were listed for this change.");
-  }
-  const howToCheck = howLines.join("\n");
+  const trimmedWalkthrough = howToTestWalkthrough?.trim() ?? "";
+  const howToCheck = trimmedWalkthrough.length > 0 ? trimmedWalkthrough : "No walk-through was provided by the developer. Verify against the acceptance criteria and the diff.";
   const riskLines = [];
   if (riskTier) {
     riskLines.push(`**Risk tier:** ${riskTier}`);
@@ -54312,7 +54301,8 @@ async function runDevTerminalAction(opts) {
       summary,
       title: manifest.title,
       narrative: manifest.narrative,
-      riskTier: manifest.risk_tier
+      riskTier: manifest.risk_tier,
+      howToTestWalkthrough: opts.howToTestWalkthrough
     });
     const pluginRoot = getPluginRoot();
     const permissions = await loadRolePermissions({ role: ROLE, pluginRoot });

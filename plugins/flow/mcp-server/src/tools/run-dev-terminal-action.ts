@@ -171,6 +171,16 @@ export async function runDevTerminalAction(opts: {
    * therefore present in the worktree), the existing file-read path applies.
    */
   inlineAcs?: Array<{ index: number; firstLine: string; tag: string | null; body: string[] }>;
+  /**
+   * Developer-authored ordered by-hand walk-through of exercising the actual
+   * feature in the running product, ending with the reviewer performing the
+   * real end-user action. Rendered verbatim in the PR's "How to check it
+   * yourself" section. When absent or empty, the section emits an honest
+   * "no walk-through was provided" fallback — it never echoes the per-AC
+   * criteria/test list and never fabricates steps.
+   * (Story native:01KVAE4PF633TWP3895ZRAR4B8)
+   */
+  howToTestWalkthrough?: string;
   execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult> {
   const {
@@ -527,6 +537,7 @@ export async function runDevTerminalAction(opts: {
       title: manifest.title,
       narrative: manifest.narrative,
       riskTier: manifest.risk_tier,
+      howToTestWalkthrough: opts.howToTestWalkthrough,
     });
 
     // (xi) gh pr create — cwd pinned to gitRoot so `gh` resolves the intended
