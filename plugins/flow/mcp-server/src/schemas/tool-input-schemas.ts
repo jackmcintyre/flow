@@ -593,9 +593,11 @@ export const runDevTerminalActionInputSchema: ToolInputSchema = {
         "Developer-authored ordered by-hand walk-through of exercising the " +
         "actual feature in the running product, ending with the reviewer " +
         "performing the real end-user action. Rendered verbatim in the PR's " +
-        "'How to check it yourself' section. When absent or empty, an honest " +
-        "'no walk-through was provided' fallback is emitted instead — never " +
-        "the per-AC criteria/test list, never fabricated steps.",
+        "'How to check it yourself' section. REQUIRED — an absent or blank " +
+        "walk-through is caught at the seam (MissingWalkthroughError) and NO " +
+        "pull request is opened. Write the ordered steps that exercise the " +
+        "just-built feature, ending in the reviewer performing the real " +
+        "end-user action, then supply the result here.",
     },
   },
   required: [
@@ -607,6 +609,7 @@ export const runDevTerminalActionInputSchema: ToolInputSchema = {
     "summary",
     "manifestPath",
     "sessionUlid",
+    "howToTestWalkthrough",
   ],
 };
 

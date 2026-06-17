@@ -232,6 +232,7 @@ describe("AC1 — builder uses inline ACs and does not fail on missing .flow spe
       sessionUlid: SESSION_ULID,
       worktree: false,
       inlineAcs: INLINE_ACS,
+      howToTestWalkthrough: "1. Run the app. 2. Observe inline ACs appear in the PR body.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 

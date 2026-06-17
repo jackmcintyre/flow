@@ -56,6 +56,7 @@ import * as path from "node:path";
 import {
   ConventionalCommitTypeUnknownError,
   GhPrCreateFailedError,
+  MissingWalkthroughError,
   PrePrBloatFailedError,
   PrePrBuildFailedError,
   PrePrLeakDetectedError,
@@ -494,6 +495,29 @@ export async function runDevTerminalAction(opts: {
           sharedRootPath: leakResult.sharedRootPath,
         });
       }
+    }
+
+    // (viii-e) Walk-through gate (Story native:01KVAEEF3V59H7P4V3R1HBXNC0).
+    // The developer must supply a real, feature-specific by-hand walk-through
+    // (howToTestWalkthrough) before the PR is opened. An absent or blank
+    // walk-through would cause the "How to check it yourself" section to emit the
+    // honest "no walk-through was provided" fallback line, which defeats the
+    // purpose of that section. We catch the absence HERE — after the build/test/
+    // bloat/leak gates but BEFORE push and gh pr create — so no PR can be opened
+    // with the fallback line. The developer must author the walk-through and
+    // re-run with it supplied.
+    const trimmedWalkthrough = (opts.howToTestWalkthrough ?? "").trim();
+    if (trimmedWalkthrough.length === 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "developer-authored by-hand walk-through supplied in howToTestWalkthrough",
+        observed: "howToTestWalkthrough was absent or blank — no PR opened",
+      });
+      throw new MissingWalkthroughError({ ref });
     }
 
     // (ix) Push.
