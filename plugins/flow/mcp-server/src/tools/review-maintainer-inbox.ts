@@ -165,7 +165,7 @@ export function buildStoredItemIssueUrl(
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface ReviewedInboxItem {
+interface ReviewedInboxItem {
   /** The item's ULID identifier. */
   id: string;
   /** ISO-8601 UTC timestamp when the item was recorded. */
