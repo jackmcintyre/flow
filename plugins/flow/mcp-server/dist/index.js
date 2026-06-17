@@ -35445,6 +35445,15 @@ var NotAnEligibleDraftError = class extends DomainError {
     this.reason = opts.reason;
   }
 };
+var MissingWalkthroughError = class extends DomainError {
+  ref;
+  constructor(opts) {
+    super(
+      `runDevTerminalAction refused to open a pull request for story '${opts.ref}' because no by-hand walk-through was supplied (howToTestWalkthrough was absent or blank). The how-to-test section must contain a real, feature-specific walk-through written by the developer \u2014 ordered steps that exercise the just-built feature in the running product, ending in the reviewer performing the real end-user action. NO pull request was opened. Supply the walk-through via the howToTestWalkthrough parameter and re-run. (Story native:01KVAEEF3V59H7P4V3R1HBXNC0)`
+    );
+    this.ref = opts.ref;
+  }
+};
 
 // src/server.ts
 function createServer(opts) {
@@ -36008,7 +36017,7 @@ var runDevTerminalActionInputSchema = {
     },
     howToTestWalkthrough: {
       type: "string",
-      description: "Developer-authored ordered by-hand walk-through of exercising the actual feature in the running product, ending with the reviewer performing the real end-user action. Rendered verbatim in the PR's 'How to check it yourself' section. When absent or empty, an honest 'no walk-through was provided' fallback is emitted instead \u2014 never the per-AC criteria/test list, never fabricated steps."
+      description: "Developer-authored ordered by-hand walk-through of exercising the actual feature in the running product, ending with the reviewer performing the real end-user action. Rendered verbatim in the PR's 'How to check it yourself' section. REQUIRED \u2014 an absent or blank walk-through is caught at the seam (MissingWalkthroughError) and NO pull request is opened. Write the ordered steps that exercise the just-built feature, ending in the reviewer performing the real end-user action, then supply the result here."
     }
   },
   required: [
@@ -36019,7 +36028,8 @@ var runDevTerminalActionInputSchema = {
     "body",
     "summary",
     "manifestPath",
-    "sessionUlid"
+    "sessionUlid",
+    "howToTestWalkthrough"
   ]
 };
 var runReviewerSessionInputSchema = {
@@ -54272,6 +54282,19 @@ async function runDevTerminalAction(opts) {
           sharedRootPath: leakResult.sharedRootPath
         });
       }
+    }
+    const trimmedWalkthrough = (opts.howToTestWalkthrough ?? "").trim();
+    if (trimmedWalkthrough.length === 0) {
+      await emitFriction({
+        targetRepoRoot,
+        kind: "forced-fallback",
+        role: ROLE,
+        session_id: sessionUlid,
+        story_id: ref,
+        expected: "developer-authored by-hand walk-through supplied in howToTestWalkthrough",
+        observed: "howToTestWalkthrough was absent or blank \u2014 no PR opened"
+      });
+      throw new MissingWalkthroughError({ ref });
     }
     await gitPush({
       targetRepoRoot: gitRoot,

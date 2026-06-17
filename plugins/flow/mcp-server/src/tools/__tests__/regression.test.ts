@@ -224,7 +224,7 @@ const BASELINE: Record<string, Baseline> = {
   runDevTerminalAction: {
     required: [
       "targetRepoRoot", "ref", "title", "type", "body", "summary",
-      "manifestPath", "sessionUlid",
+      "manifestPath", "sessionUlid", "howToTestWalkthrough",
     ],
     properties: [
       "targetRepoRoot", "ref", "title", "type", "body", "summary",

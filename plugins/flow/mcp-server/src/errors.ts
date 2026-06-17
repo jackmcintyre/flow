@@ -2521,3 +2521,34 @@ export class NotAnEligibleDraftError extends DomainError {
     this.reason = opts.reason;
   }
 }
+
+/**
+ * The developer reached the PR-open step of `runDevTerminalAction` without
+ * supplying a by-hand walk-through for the "How to check it yourself" section.
+ * The absence is caught at the tool seam (after the build/test/bloat/leak gates,
+ * before `git push` and `gh pr create`) so no PR is ever opened with the honest
+ * "no walk-through was provided" fallback line.
+ *
+ * The developer must author an ordered, feature-specific walk-through ending in
+ * the reviewer performing the real end-user action, then supply it via the
+ * `howToTestWalkthrough` parameter of `runDevTerminalAction`.
+ *
+ * (Story native:01KVAEEF3V59H7P4V3R1HBXNC0)
+ */
+export class MissingWalkthroughError extends DomainError {
+  readonly ref: string;
+
+  constructor(opts: { ref: string }) {
+    super(
+      `runDevTerminalAction refused to open a pull request for story '${opts.ref}' ` +
+        `because no by-hand walk-through was supplied (howToTestWalkthrough was absent ` +
+        `or blank). The how-to-test section must contain a real, feature-specific ` +
+        `walk-through written by the developer — ordered steps that exercise the ` +
+        `just-built feature in the running product, ending in the reviewer performing ` +
+        `the real end-user action. NO pull request was opened. Supply the walk-through ` +
+        `via the howToTestWalkthrough parameter and re-run. ` +
+        `(Story native:01KVAEEF3V59H7P4V3R1HBXNC0)`,
+    );
+    this.ref = opts.ref;
+  }
+}

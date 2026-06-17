@@ -242,6 +242,7 @@ async function runDevFlow(
       // branch was cut from `origin/dev` and touches only its own file, so the
       // rebase is a clean fast-forward for both concurrent flows.
       base: "dev",
+      howToTestWalkthrough: `1. Run the app. 2. Verify ${story.ref} changes are isolated.`,
       execaImpl: execaImpl as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     return { worktreePath: wt.worktreePath, cleanup: wt.cleanup, result };
@@ -355,6 +356,7 @@ describe("concurrent runs — AC3 (two concurrent devs produce two non-cross-con
           manifestPath: ctx.manifestPaths[story.ref]!,
           sessionUlid: SESSION_ULID,
           base: "dev",
+          howToTestWalkthrough: `1. Run the app. 2. Verify shared file has ${story.ref} content only.`,
           execaImpl: execaImpl as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
         });
         return { worktreePath: wt.worktreePath, cleanup: wt.cleanup, result };

@@ -25,6 +25,7 @@ import {
   ConventionalCommitTypeUnknownError,
   GitPushFailedError,
   GhPrCreateFailedError,
+  MissingWalkthroughError,
   NegativeCapabilityDeniedError,
   PrePrLeakDetectedError,
   RebaseConflictError,
@@ -46,6 +47,19 @@ const SUMMARY = "Implements the dev subagent terminal action.";
 const FAKE_PR_URL = "https://github.com/owner/repo/pull/42";
 const SESSION_ULID = "01HZSESSION00000000000001";
 const SOURCE_HASH = "a".repeat(64);
+
+/**
+ * Fixture by-hand walk-through used in tests that need to pass the
+ * walk-through gate (Story native:01KVAEEF3V59H7P4V3R1HBXNC0).
+ * Tests that intentionally omit or blank it are in the AC2 describe block.
+ */
+const FIXTURE_WALKTHROUGH =
+  "1. Run `pnpm flow:run`\n" +
+  "2. Observe the walk-through rendered under 'How to check it yourself' in the PR.\n" +
+  "3. Confirm the fallback line does NOT appear.";
+
+/** The honest fallback text the PR body emits when no walk-through is supplied. */
+const FALLBACK_LINE = "No walk-through was provided by the developer";
 
 /** Fixture spec with three ACs: one (user-surface), one untagged, one (integration). */
 const FIXTURE_SPEC = `
@@ -280,6 +294,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -341,6 +356,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -373,6 +389,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -405,6 +422,7 @@ describe("runDevTerminalAction — PR base branch", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -425,6 +443,7 @@ describe("runDevTerminalAction — PR base branch", () => {
       sessionUlid: SESSION_ULID,
       worktree: false,
       base: "release",
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -445,6 +464,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -465,6 +485,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     const afterRef = result.branch.slice("story/1-1-x-".length);
@@ -483,6 +504,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -527,6 +549,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -557,6 +580,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -688,6 +712,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GitPushFailedError);
@@ -707,6 +732,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       });
     } catch {
@@ -746,6 +772,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
@@ -765,6 +792,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
@@ -788,6 +816,7 @@ describe("runDevTerminalAction — manifest PR identifier recorded (AC3h / nativ
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -812,6 +841,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -844,6 +874,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -879,6 +910,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -917,6 +949,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -942,6 +975,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
@@ -976,6 +1010,7 @@ describe("runDevTerminalAction — pre-PR sync gate (AC1: origin/main advanced)"
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -1335,6 +1370,7 @@ describe("runDevTerminalAction — friction telemetry AC3: forced-fallback on ga
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
         worktree: false,
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       });
 
@@ -1497,6 +1533,7 @@ describe("runDevTerminalAction — pre-PR leak gate (Story native:01KT47430Q4C73
         manifestPath: wtCtx.manifestPath,
         sessionUlid: SESSION_ULID,
         base: "main",
+        howToTestWalkthrough: FIXTURE_WALKTHROUGH,
         // worktree: true (default)
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       });
@@ -1552,6 +1589,7 @@ describe("runDevTerminalAction — branch reuse on crash retry (Story native:01K
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -1598,6 +1636,7 @@ describe("runDevTerminalAction — branch reuse on crash retry (Story native:01K
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -1690,6 +1729,194 @@ describe("runDevTerminalAction — time budget (Story native:01KTN5E6T75XKDX8A0S
       sessionUlid: SESSION_ULID,
       worktree: false,
       buildTestTimeoutMs: 60_000,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(FAKE_PR_URL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVAEEF3V59H7P4V3R1HBXNC0 — developer-authored walk-through
+//
+// AC1: A normally-opened PR's how-to-test section contains a real,
+//      feature-specific walk-through (not the fallback line).
+// AC2: An absent walk-through is caught at the seam (MissingWalkthroughError).
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — developer walk-through in PR body (Story native:01KVAEEF3V59H7P4V3R1HBXNC0 AC1)", () => {
+  it("AC1: PR body 'How to check it yourself' section contains the developer-supplied walk-through, not the fallback", async () => {
+    // A normally-opened PR: developer supplies howToTestWalkthrough.
+    // The how-to-test section must contain the supplied text; the fallback line
+    // must NOT appear.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      howToTestWalkthrough: FIXTURE_WALKTHROUGH,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(result.ok).toBe(true);
+
+    // Extract the PR body from the stubbed gh call.
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(
+      ([cmd]) => cmd === "gh",
+    );
+    expect(ghCall).toBeDefined();
+    const ghArgs = ghCall![1];
+    const bodyIdx = ghArgs.indexOf("--body");
+    const bodyArg = ghArgs[bodyIdx + 1]!;
+
+    // The how-to-test section must contain the developer-supplied walk-through text.
+    expect(bodyArg).toContain("How to check it yourself");
+    expect(bodyArg).toContain(FIXTURE_WALKTHROUGH);
+
+    // The honest fallback line must NOT appear.
+    expect(bodyArg).not.toContain(FALLBACK_LINE);
+  });
+
+  it("AC1: PR body walk-through is feature-specific — a distinct walk-through is preserved verbatim", async () => {
+    // Different walks for different features must each appear verbatim.
+    const distinctWalkthrough =
+      "1. Open the app\n2. Navigate to Settings\n3. Click 'Save'\n4. Observe the confirmation toast.";
+
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      howToTestWalkthrough: distinctWalkthrough,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(
+      ([cmd]) => cmd === "gh",
+    );
+    const ghArgs = ghCall![1];
+    const bodyIdx = ghArgs.indexOf("--body");
+    const bodyArg = ghArgs[bodyIdx + 1]!;
+
+    // Walk-through is rendered verbatim.
+    expect(bodyArg).toContain(distinctWalkthrough);
+    expect(bodyArg).not.toContain(FALLBACK_LINE);
+  });
+});
+
+describe("runDevTerminalAction — absent walk-through caught at seam (Story native:01KVAEEF3V59H7P4V3R1HBXNC0 AC2)", () => {
+  it("AC2: absent howToTestWalkthrough throws MissingWalkthroughError BEFORE push and gh pr create", async () => {
+    // No walk-through supplied — the seam must catch the absence.
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    let caught: unknown;
+    try {
+      await runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        // howToTestWalkthrough intentionally absent
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      });
+      expect.fail("should have thrown MissingWalkthroughError");
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MissingWalkthroughError);
+    const e = caught as MissingWalkthroughError;
+    expect(e.ref).toBe(REF);
+    expect(e.message).toContain("NO pull request was opened");
+
+    // gh pr create must NEVER be called — no PR opened.
+    expect(
+      (spy.mock.calls as [string, string[]][]).some(([cmd]) => cmd === "gh"),
+      "gh pr create must not be called when walk-through is absent",
+    ).toBe(false);
+
+    // push must NEVER be called — the branch never reaches origin.
+    const gitPushCalled = (spy.mock.calls as [string, string[]][]).some(
+      ([cmd, args]) => cmd === "git" && Array.isArray(args) && args[2] === "push",
+    );
+    expect(gitPushCalled, "git push must not be called when walk-through is absent").toBe(false);
+  });
+
+  it("AC2: blank (whitespace-only) howToTestWalkthrough throws MissingWalkthroughError", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    await expect(
+      runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        howToTestWalkthrough: "   \n  ",
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      }),
+    ).rejects.toBeInstanceOf(MissingWalkthroughError);
+  });
+
+  it("AC2: empty-string howToTestWalkthrough throws MissingWalkthroughError", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    await expect(
+      runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        worktree: false,
+        howToTestWalkthrough: "",
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      }),
+    ).rejects.toBeInstanceOf(MissingWalkthroughError);
+  });
+
+  it("AC2: a non-empty walk-through (even one word) passes the gate and opens the PR normally", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      worktree: false,
+      howToTestWalkthrough: "Run the app and observe the feature works.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 

@@ -281,6 +281,7 @@ describe("AC2 — a green build opens the PR exactly as before (integration)", (
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: "1. Run the app. 2. Observe the PR opens after a green build.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -323,6 +324,7 @@ describe("AC3 — the gate runs the project's full build in the dev's working di
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: "1. Run the app. 2. Observe the build is `pnpm build`.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -352,6 +354,7 @@ describe("AC3 — the gate runs the project's full build in the dev's working di
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: "1. Run the app. 2. Observe the build cwd is plugins/flow.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -474,6 +477,7 @@ describe("AC2 (timeout) — a within-budget build is completely unaffected (unit
       // A tight budget is set, but since the (stubbed) build returns immediately,
       // it is never hit — the within-budget path is entirely unaffected.
       buildTestTimeoutMs: 500,
+      howToTestWalkthrough: "1. Run the app. 2. Observe the PR opens normally within budget.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 

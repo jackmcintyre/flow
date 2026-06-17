@@ -256,6 +256,7 @@ describe("dev edits in worktree — AC1 (orchestrating checkout never holds the 
       // is `dev`, so pin the base to it — the branch was cut from `origin/dev`, so
       // the rebase is a clean no-op fast-forward (no conflict).
       base: "dev",
+      howToTestWalkthrough: "1. Run the app. 2. Verify edits stay in the worktree.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -339,6 +340,7 @@ describe("dev edits in worktree — AC2 (a stray pre-existing change never rides
       // is `dev`, so pin the base to it — the branch was cut from `origin/dev`, so
       // the rebase is a clean no-op fast-forward (no conflict).
       base: "dev",
+      howToTestWalkthrough: "1. Run the app. 2. Verify stray edits do not appear in the commit.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 

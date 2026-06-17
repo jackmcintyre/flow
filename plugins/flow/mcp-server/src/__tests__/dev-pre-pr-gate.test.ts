@@ -279,6 +279,7 @@ describe("AC1 — a green build+test+knip run opens the PR (integration)", () =>
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
+      howToTestWalkthrough: "1. Run the app. 2. Observe the feature works.",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
