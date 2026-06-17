@@ -465,7 +465,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KTZKHJ1KDYKGXR20FZ15Y4WB added discardDraft (discard un-built parked draft) = 55 total.
       // Story native:01KT7S0E2 removed bmadToNativeIngest (auditor-confirmed orphan) = 54 total.
       // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture) = 55 total.
-      expect(result.tools.length, "expected exactly 55 tools").toBe(55);
+      // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review) = 56 total.
+      expect(result.tools.length, "expected exactly 56 tools").toBe(56);
     } finally {
       await client.close();
       await server.close();

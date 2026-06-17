@@ -60,6 +60,7 @@ import { writeLensVerdict, aggregateJudgePanel } from "./tools/judge-panel.js";
 import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./tools/record-agent-friction.js";
 import { recordMaintainerFeedback } from "./tools/record-maintainer-feedback.js";
+import { reviewMaintainerInbox } from "./tools/review-maintainer-inbox.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
@@ -146,6 +147,13 @@ const TOOLS: Record<string, ToolFn> = {
   //   node dist/cli.js recordMaintainerFeedback --json
   //     '{"targetRepoRoot":"...","item":{"problem":"...","tool_area":"...","trigger":"..."}}'
   recordMaintainerFeedback,
+  // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA — reviewMaintainerInbox: on-demand review
+  // of stored maintainer-feedback items. Reads .flow/maintainer-inbox/ and returns each
+  // item with a pre-filled GitHub new-issue URL. Empty inbox returns emptyInbox:true.
+  // Read-only; accessible via the CLI seam so skills can surface it without a persistent
+  // MCP session.
+  //   node dist/cli.js reviewMaintainerInbox --json '{"targetRepoRoot":"..."}'
+  reviewMaintainerInbox,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
   // Callable on the no-MCP run/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
