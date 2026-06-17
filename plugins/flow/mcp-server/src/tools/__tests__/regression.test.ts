@@ -186,6 +186,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot", "item"],
     properties: ["targetRepoRoot", "item"],
   },
+  reviewMaintainerInbox: {
+    required: ["targetRepoRoot"],
+    properties: ["targetRepoRoot"],
+  },
   recordReviewerLesson: {
     required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],
     properties: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],

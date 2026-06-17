@@ -42,6 +42,7 @@ import {
   recallLessonInputSchema,
   recordAgentFrictionInputSchema,
   recordMaintainerFeedbackInputSchema,
+  reviewMaintainerInboxInputSchema,
   recordReviewerLessonInputSchema,
   recordSkillInvokeInputSchema,
   recordStoryRetroInputSchema,
@@ -114,6 +115,7 @@ import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
+import { reviewMaintainerInbox } from "./review-maintainer-inbox.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
@@ -1935,6 +1937,75 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         }
         throw err;
       }
+    },
+  });
+
+  // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA — reviewMaintainerInbox: on-demand review of
+  // stored maintainer-feedback items. Reads all files from .flow/maintainer-inbox/ and
+  // returns each valid item with a pre-filled GitHub new-issue URL the operator can open
+  // to review and submit as themselves — nothing is ever filed automatically. Empty inbox
+  // returns { emptyInbox: true, items: [] } (no blank or malformed URL). Read-only.
+  server.registerTool({
+    name: "reviewMaintainerInbox",
+    description:
+      "On-demand review of the maintainer-only inbox " +
+      "(Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA). Reads all files from " +
+      ".flow/maintainer-inbox/ (written by recordMaintainerFeedback) and returns each " +
+      "stored item with a pre-filled GitHub new-issue URL (title: '[<tool_area>] <problem>', " +
+      "body: labelled sections with problem, suggested direction, and trigger). The link " +
+      "opens GitHub's own new-issue form so the operator can review and submit as themselves — " +
+      "nothing is ever filed automatically, and the link is a plain web URL with no gh CLI " +
+      "dependency. When the inbox is empty, returns { emptyInbox: true, items: [] }. " +
+      "When gh is unavailable, items are still listed without issueUrl (fail-soft). " +
+      "Malformed inbox files are skipped and counted in malformedCount. Read-only.",
+    inputSchema: reviewMaintainerInboxInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({ targetRepoRoot: z.string().min(1) })
+        .parse(args);
+      const result = await reviewMaintainerInbox({
+        targetRepoRoot: parsed.targetRepoRoot,
+      });
+
+      if (result.emptyInbox) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ...result,
+                _message:
+                  "The maintainer inbox is empty — no feedback items are waiting.",
+              }),
+            },
+          ],
+        };
+      }
+
+      // Build a human-readable summary alongside the structured payload.
+      const summaryLines: string[] = [
+        `Maintainer inbox — ${result.items.length} item${result.items.length === 1 ? "" : "s"}:`,
+      ];
+      for (const [i, item] of result.items.entries()) {
+        summaryLines.push(
+          `\n[${i + 1}] ${item.tool_area}: ${item.problem.slice(0, 120)}`,
+        );
+        if (item.issueUrl) {
+          summaryLines.push(`    → ${item.issueUrl}`);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              ...result,
+              _message: summaryLines.join("\n"),
+            }),
+          },
+        ],
+      };
     },
   });
 
