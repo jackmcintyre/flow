@@ -229,6 +229,7 @@ const BASELINE: Record<string, Baseline> = {
     properties: [
       "targetRepoRoot", "ref", "title", "type", "body", "summary",
       "manifestPath", "sessionUlid", "base", "buildTestTimeoutMs",
+      "howToTestWalkthrough",
     ],
   },
   runReviewerSession: {

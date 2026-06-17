@@ -478,7 +478,8 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
     expect(body.slice(machineIdx)).toContain(`- [ ] AC1: ${LONG_AC}`);
   });
 
-  it("AC2: a runnable (vitest) target gets a real Run instruction; a state-location (artifact) target shows criterion text alone with no automated-check claim", () => {
+  it("AC2: how-to-test renders the developer walk-through when supplied, not the per-AC check loop", () => {
+    const walkthrough = "1. Run pnpm test\n2. Open the PR and observe the section\n3. Confirm the feature works";
     const body = composePrBody({
       ref: "native:01KV4R2Q",
       specPath: "spec.md",
@@ -500,15 +501,16 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
       title: "Title",
       narrative: "Narrative",
       riskTier: "low",
+      howToTestWalkthrough: walkthrough,
     });
     const how = body.slice(
       body.indexOf("## How to check it yourself"),
       body.indexOf("## Risk and blast radius"),
     );
-    // Runnable AC1 keeps a real Run instruction.
-    expect(how).toContain("AC1: Run `src/lib/__tests__/foo.test.ts`");
-    // Non-runnable AC2 shows the criterion text alone — never "Run `.flow/state/done/`".
-    expect(how).toContain("AC2: Given a state-location check");
+    // How-to-test renders the developer's walk-through verbatim.
+    expect(how).toContain(walkthrough);
+    // How-to-test does NOT emit per-AC "Run X" instructions (those live in Evidence).
+    expect(how).not.toContain("AC1: Run `src/lib/__tests__/foo.test.ts`");
     expect(how).not.toContain("Run `.flow/state/done/`");
     // The old false blanket "covered by an automated check" claim is gone.
     expect(body).not.toContain("covered by an automated check");
@@ -532,7 +534,7 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
     expect(evidence).toContain("AC2 → verify at `.flow/state/done/` (not an automated test)");
   });
 
-  it("AC2: an absent verification type defaults to non-runnable (no Run instruction)", () => {
+  it("AC2: how-to-test emits the honest fallback when no walk-through is supplied (no Run instruction, no AC list)", () => {
     const body = composePrBody({
       ref: "native:01KV4R2Q",
       specPath: "spec.md",
@@ -543,8 +545,11 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
       body.indexOf("## How to check it yourself"),
       body.indexOf("## Risk and blast radius"),
     );
-    expect(how).toContain("AC1: Given no recorded type");
+    // Honest fallback line is present.
+    expect(how.toLowerCase()).toContain("no walk-through was provided");
+    // No Run instruction and no per-AC list echoed.
     expect(how).not.toContain("Run `some/path`");
+    expect(how).not.toContain("AC1:");
   });
 
   it("AC3: the Risk section makes no fixed blanket safety claim", () => {
@@ -577,5 +582,344 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
       summary: handWritten,
     });
     expect(body).toContain(handWritten);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// composePrBody — developer walk-through in how-to-test (native:01KVAE4PF6)
+// ---------------------------------------------------------------------------
+
+describe("composePrBody — developer walk-through (native:01KVAE4PF6)", () => {
+  const WALK_THROUGH = [
+    "1. Start the plugin: pnpm build && pnpm dev",
+    "2. Open a story that is in-progress",
+    "3. Run the runDevTerminalAction tool with a howToTestWalkthrough string",
+    "4. Open the resulting PR and confirm the feature works end-to-end",
+  ].join("\n");
+
+  const STORY_ACS = [
+    {
+      index: 1,
+      firstLine: "Given a walk-through was supplied",
+      coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+      verificationType: "vitest" as const,
+    },
+    {
+      index: 2,
+      firstLine: "Given no walk-through was supplied",
+      coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+      verificationType: "vitest" as const,
+    },
+  ];
+
+  // -------------------------------------------------------------------------
+  // AC1: walk-through present → rendered verbatim in how-to-test
+  // -------------------------------------------------------------------------
+
+  it("AC1: how-to-test shows the developer's walk-through verbatim when supplied", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      title: "Walk-through story",
+      narrative: "As a reviewer I want the walk-through.",
+      riskTier: "medium",
+      howToTestWalkthrough: WALK_THROUGH,
+    });
+    const howIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howIdx, riskIdx);
+
+    // Walk-through content is present.
+    expect(howSection).toContain(WALK_THROUGH);
+  });
+
+  it("AC1: how-to-test does NOT echo the per-AC automated-check list when walk-through is present", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      howToTestWalkthrough: WALK_THROUGH,
+    });
+    const howIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howIdx, riskIdx);
+
+    // No "AC1: Run X" style lines in how-to-test.
+    expect(howSection).not.toContain("AC1: Run");
+    expect(howSection).not.toContain("AC2: Run");
+    // The test target path should not appear in how-to-test (it lives in Evidence).
+    expect(howSection).not.toContain("pr-body.test.ts");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC2: walk-through absent → honest fallback, never the AC list
+  // -------------------------------------------------------------------------
+
+  it("AC2: how-to-test states plainly that no walk-through was provided when none is supplied", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      title: "Walk-through story",
+      narrative: "As a reviewer I want the walk-through.",
+    });
+    const howIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howIdx, riskIdx);
+
+    // Honest fallback is present.
+    expect(howSection.toLowerCase()).toContain("no walk-through was provided");
+  });
+
+  it("AC2: how-to-test does NOT echo the per-AC list or fabricate steps when walk-through is absent", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+    });
+    const howIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howIdx, riskIdx);
+
+    // No AC-numbered lines in how-to-test.
+    expect(howSection).not.toContain("AC1:");
+    expect(howSection).not.toContain("AC2:");
+    // No run instructions echoed from Evidence.
+    expect(howSection).not.toContain("Run `");
+  });
+
+  it("AC2: an empty string walk-through triggers the honest fallback, not fabricated steps", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      howToTestWalkthrough: "   ",
+    });
+    const howIdx = body.indexOf("## How to check it yourself");
+    const riskIdx = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howIdx, riskIdx);
+
+    expect(howSection.toLowerCase()).toContain("no walk-through was provided");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC3: how-to-test and Evidence are content-disjoint
+  // -------------------------------------------------------------------------
+
+  it("AC3: no content line appears in both how-to-test and Evidence when walk-through is present", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      howToTestWalkthrough: WALK_THROUGH,
+    });
+
+    const howStart = body.indexOf("## How to check it yourself");
+    const riskStart = body.indexOf("## Risk and blast radius");
+    const evidenceStart = body.indexOf("## Evidence");
+    const machineStart = body.indexOf("<!-- flow:pr:machine -->");
+
+    const howLines = new Set(
+      body
+        .slice(howStart, riskStart)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const evidenceLines = new Set(
+      body
+        .slice(evidenceStart, machineStart)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+
+    const overlap = [...howLines].filter((l) => evidenceLines.has(l));
+    expect(overlap).toHaveLength(0);
+  });
+
+  it("AC3: no content line appears in both how-to-test and Evidence when walk-through is absent", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+    });
+
+    const howStart = body.indexOf("## How to check it yourself");
+    const riskStart = body.indexOf("## Risk and blast radius");
+    const evidenceStart = body.indexOf("## Evidence");
+    const machineStart = body.indexOf("<!-- flow:pr:machine -->");
+
+    const howLines = new Set(
+      body
+        .slice(howStart, riskStart)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const evidenceLines = new Set(
+      body
+        .slice(evidenceStart, machineStart)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+
+    const overlap = [...howLines].filter((l) => evidenceLines.has(l));
+    expect(overlap).toHaveLength(0);
+  });
+
+  it("AC3: Evidence section is unchanged — still lists per-criterion automated checks and gate result", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: STORY_ACS,
+      summary: "Summary",
+      howToTestWalkthrough: WALK_THROUGH,
+    });
+
+    const evidenceStart = body.indexOf("## Evidence");
+    const machineStart = body.indexOf("<!-- flow:pr:machine -->");
+    const evidenceSection = body.slice(evidenceStart, machineStart);
+
+    // Gate result statement.
+    expect(evidenceSection.toLowerCase()).toContain("build-and-test gate passed");
+    // Per-criterion entries in Evidence.
+    expect(evidenceSection).toContain("AC1 →");
+    expect(evidenceSection).toContain("AC2 →");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC4: integration — full write-up with and without walk-through
+  // -------------------------------------------------------------------------
+
+  it("AC4 (integration): full write-up with walk-through — how-to-test shows walk-through, Evidence shows checks, no overlap", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: [
+        {
+          index: 1,
+          firstLine: "**Given** a story with a walk-through, **When** the PR is opened, **Then** the how-to-test section renders it.",
+          coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+          verificationType: "vitest" as const,
+        },
+        {
+          index: 2,
+          firstLine: "**Given** a story with no walk-through, **When** the PR is opened, **Then** an honest line is shown.",
+          coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+          verificationType: "vitest" as const,
+        },
+      ],
+      summary: "Implements the developer-authored walk-through in how-to-test.",
+      title: "The how-to-test section shows the developer's walk-through",
+      narrative: "As a reviewer I want a by-hand walk-through so I can confirm the feature works.",
+      riskTier: "medium",
+      howToTestWalkthrough: WALK_THROUGH,
+    });
+
+    // Five sections exist in order.
+    const sectionOrder = [
+      "## What changed",
+      "## Why",
+      "## How to check it yourself",
+      "## Risk and blast radius",
+      "## Evidence",
+      "<!-- flow:pr:machine -->",
+    ].map((h) => body.indexOf(h));
+    for (let i = 0; i < sectionOrder.length - 1; i++) {
+      expect(sectionOrder[i]).toBeGreaterThanOrEqual(0);
+      expect(sectionOrder[i]).toBeLessThan(sectionOrder[i + 1]!);
+    }
+
+    // How-to-test shows the walk-through, ending in the user action.
+    const howStart = body.indexOf("## How to check it yourself");
+    const riskStart = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howStart, riskStart);
+    expect(howSection).toContain(WALK_THROUGH);
+    // Walk-through ends in the user action (last step).
+    expect(howSection).toContain("confirm the feature works");
+
+    // Evidence has per-criterion checks and gate result, not the walk-through.
+    const evidenceStart = body.indexOf("## Evidence");
+    const machineStart = body.indexOf("<!-- flow:pr:machine -->");
+    const evidenceSection = body.slice(evidenceStart, machineStart);
+    expect(evidenceSection).toContain("AC1 →");
+    expect(evidenceSection).toContain("AC2 →");
+    expect(evidenceSection.toLowerCase()).toContain("build-and-test gate passed");
+    expect(evidenceSection).not.toContain(WALK_THROUGH);
+
+    // Disjointness: no content line in both.
+    const howLines = new Set(
+      howSection
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const evidenceLines = new Set(
+      evidenceSection
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const overlap = [...howLines].filter((l) => evidenceLines.has(l));
+    expect(overlap).toHaveLength(0);
+  });
+
+  it("AC4 (integration): full write-up with NO walk-through — honest line shown, no overlap with Evidence", () => {
+    const body = composePrBody({
+      ref: "native:01KVAE4PF6",
+      specPath: ".flow/native-stories/01KVAE4PF6.md",
+      acs: [
+        {
+          index: 1,
+          firstLine: "**Given** a story with no walk-through, **When** the PR is opened, **Then** an honest line is shown.",
+          coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+          verificationType: "vitest" as const,
+        },
+      ],
+      summary: "No walk-through supplied — honest fallback should appear.",
+      title: "The how-to-test section shows the honest fallback",
+      narrative: "As a reviewer I want an honest statement when no walk-through was provided.",
+      riskTier: "low",
+      // howToTestWalkthrough intentionally absent
+    });
+
+    // How-to-test shows the honest fallback.
+    const howStart = body.indexOf("## How to check it yourself");
+    const riskStart = body.indexOf("## Risk and blast radius");
+    const howSection = body.slice(howStart, riskStart);
+    expect(howSection.toLowerCase()).toContain("no walk-through was provided");
+
+    // Evidence still has per-criterion entries and gate result.
+    const evidenceStart = body.indexOf("## Evidence");
+    const machineStart = body.indexOf("<!-- flow:pr:machine -->");
+    const evidenceSection = body.slice(evidenceStart, machineStart);
+    expect(evidenceSection).toContain("AC1 →");
+    expect(evidenceSection.toLowerCase()).toContain("build-and-test gate passed");
+
+    // Disjointness: no content line in both.
+    const howLines = new Set(
+      howSection
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const evidenceLines = new Set(
+      evidenceSection
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("##")),
+    );
+    const overlap = [...howLines].filter((l) => evidenceLines.has(l));
+    expect(overlap).toHaveLength(0);
   });
 });

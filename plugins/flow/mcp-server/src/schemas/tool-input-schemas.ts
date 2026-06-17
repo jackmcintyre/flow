@@ -587,6 +587,16 @@ export const runDevTerminalActionInputSchema: ToolInputSchema = {
         "Per-run time budget (milliseconds) for the build/test gates. " +
         "Defaults to 1 200 000 (20 min). Set to 0 to disable the budget.",
     },
+    howToTestWalkthrough: {
+      type: "string",
+      description:
+        "Developer-authored ordered by-hand walk-through of exercising the " +
+        "actual feature in the running product, ending with the reviewer " +
+        "performing the real end-user action. Rendered verbatim in the PR's " +
+        "'How to check it yourself' section. When absent or empty, an honest " +
+        "'no walk-through was provided' fallback is emitted instead — never " +
+        "the per-AC criteria/test list, never fabricated steps.",
+    },
   },
   required: [
     "targetRepoRoot",
