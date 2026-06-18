@@ -206,8 +206,8 @@ describe("getStatus", () => {
 
     // Checkpoint 6's expected confirmation is the parked-adapter known
     // limitation (Story 3.3 lands the BMad adapter detect path); until
-    // then, the README documents the verbatim error toast `/flow:status`
-    // produces on a clean install (observed on Claude Code 2.1.145,
+    // then, the README documents the verbatim error toast `/flow:dashboard`'s
+    // Status section produces on a clean install (observed on Claude Code 2.1.145,
     // 2026-05-20). The earlier `flow v…` / `standards: ok` happy-path
     // block is documented as the post-Story-3.3 target, not as today's
     // observed output.

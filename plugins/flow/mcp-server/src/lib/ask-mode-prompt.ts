@@ -73,5 +73,5 @@ export function formatUnhiredRoleError(role: string): string {
 
 Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
-If you meant a different role id, run /flow:team to see your current roster.`;
+If you meant a different role id, run /flow:dashboard to see your current roster.`;
 }

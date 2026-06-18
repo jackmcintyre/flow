@@ -57452,7 +57452,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "getTeamSnapshot",
-    description: "Return a typed snapshot of the hired team \u2014 roles, domains, fire counts from telemetry, recent persona-knowledge entries. Used by /flow:team (FR108, NFR28). Pure file reads; no LLM in the loop.",
+    description: "Return a typed snapshot of the hired team \u2014 roles, domains, fire counts from telemetry, recent persona-knowledge entries. Used by /flow:dashboard (FR108, NFR28). Pure file reads; no LLM in the loop.",
     inputSchema: getTeamSnapshotInputSchema,
     handler: async (args) => {
       const parsed = external_exports.object({
@@ -57572,7 +57572,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "getBacklogDashboard",
-    description: "Render the outstanding backlog as grouped-by-epic tables generated from live state (Story 9.5). Read-only \u2014 reads the backlog inventory and returns text grouping each item by epic with its state, readiness (the Story 9.1 ready flag), and claimability (dependency-satisfied AND ready, an un-withdrawn to-do item). Never mutates state and never writes a file. MalformedExecutionManifestError surfaces verbatim. Used by the /flow:board skill.",
+    description: "Render the outstanding backlog as grouped-by-epic tables generated from live state (Story 9.5). Read-only \u2014 reads the backlog inventory and returns text grouping each item by epic with its state, readiness (the Story 9.1 ready flag), and claimability (dependency-satisfied AND ready, an un-withdrawn to-do item). Never mutates state and never writes a file. MalformedExecutionManifestError surfaces verbatim. Used by the /flow:dashboard skill.",
     inputSchema: getBacklogDashboardInputSchema,
     handler: async (args) => {
       const root = external_exports.string().min(1).parse(args.targetRepoRoot);

@@ -121,7 +121,7 @@ Materialised stories land in `to-do/` as **not ready**. The readiness brake
 
 This is the proof that the live pipeline runs end-to-end on native:
 
-- **Board:** run `/flow:board`. It should render the backlog **grouped by epic
+- **Board:** run `/flow:dashboard`. It should render the backlog **grouped by epic
   from native state**, with each approved native story shown **claimable** and
   each unapproved one **not claimable**. (Native refs that carry an
   `<epic>.<story>` source id group by epic exactly as BMad refs do; ULID-only

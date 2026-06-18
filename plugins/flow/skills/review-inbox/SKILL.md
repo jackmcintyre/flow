@@ -53,4 +53,4 @@ Never write to a manifest file, never edit `.flow/state/**`, and never run a `gh
 - **Inbox is empty:** the tool returns `emptyInbox: true`; print the empty-state message from Step 3 and exit.
 - **`gh` unavailable or not authenticated:** items are still listed from the inbox, but without issue links. The operator can resolve the repo identity manually if needed.
 - **Malformed inbox files:** the tool skips them and reports them in `malformedCount`. If `malformedCount > 0`, note this to the operator: `Note: <malformedCount> inbox file(s) could not be parsed and were skipped.`
-- **No `.flow/config.yaml`:** the underlying workspace resolution surfaces the resolver's typed error verbatim — resolve the target repo (run `/flow:status` to check) and retry.
+- **No `.flow/config.yaml`:** the underlying workspace resolution surfaces the resolver's typed error verbatim — resolve the target repo (run `/flow:dashboard` to check) and retry.
