@@ -1,3 +1,6 @@
+// Engine-internal workflow — lives in workflows/internal/ so it is NOT
+// auto-discovered as an operator-facing slash command.  Invoked by the
+// run-system CLI seam; not directly user-callable.
 export const meta = {
   name: 'flow-gate-1',
   // NB: this MUST be a single string literal (not a `+` concatenation). The

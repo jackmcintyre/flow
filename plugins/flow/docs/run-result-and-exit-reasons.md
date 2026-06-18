@@ -8,7 +8,7 @@
 This is the companion reference to the
 [unattended run runbook](./unattended-run-runbook.md). The runbook covers
 how to queue stories and launch the `flow-run` workflow
-(`plugins/flow/workflows/run.workflow.js`); this doc explains the structured
+(`plugins/flow/workflows/internal/run.workflow.js`); this doc explains the structured
 object the run **returns** when it stops.
 
 The whole return object is the run's **no-silent-failures surface**: every

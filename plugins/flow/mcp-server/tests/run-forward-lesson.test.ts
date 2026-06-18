@@ -282,7 +282,7 @@ describe("learning-loop AC2 — no lesson leaves the manifest clean and never bl
 
 describe("learning-loop — run workflow wires the capture+forward seams in order", () => {
   const HERE = path.dirname(fileURLToPath(import.meta.url));
-  const RUN = path.resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+  const RUN = path.resolve(HERE, "..", "..", "workflows", "internal", "run.workflow.js");
 
   it("invites recordReviewerLesson in the reviewer prompt (optional, fail-soft)", async () => {
     const src = await fs.readFile(RUN, "utf8");

@@ -761,7 +761,7 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
 // of a pnpm workspace root whose root package.json has no vitest; the walk must
 // delegate to the workspace member that does have vitest.
 //
-// Scenario: `plugins/flow/workflows/run.workflow.js` as the vitest: target.
+// Scenario: `plugins/flow/workflows/internal/run.workflow.js` as the vitest: target.
 //   - Walk finds `plugins/flow/package.json` (workspace root, no vitest).
 //   - pnpm-workspace.yaml lists "mcp-server".
 //   - `plugins/flow/mcp-server/` has vitest in node_modules/.bin/.
@@ -782,11 +782,11 @@ describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegat
 
   /**
    * Build a fixture that mirrors the real repo layout for the AC2 failing case:
-   *   <root>/plugins/flow/package.json           (workspace root, no vitest bin)
-   *   <root>/plugins/flow/pnpm-workspace.yaml    (lists "mcp-server")
+   *   <root>/plugins/flow/package.json                              (workspace root, no vitest bin)
+   *   <root>/plugins/flow/pnpm-workspace.yaml                       (lists "mcp-server")
    *   <root>/plugins/flow/mcp-server/package.json
-   *   <root>/plugins/flow/mcp-server/node_modules/.bin/vitest   (present)
-   *   <root>/plugins/flow/workflows/run.workflow.js            (the vitest: target)
+   *   <root>/plugins/flow/mcp-server/node_modules/.bin/vitest        (present)
+   *   <root>/plugins/flow/workflows/internal/run.workflow.js         (the vitest: target)
    */
   function buildWorkspaceRootFixture(root: string): {
     workspaceRoot: string;
@@ -819,8 +819,8 @@ describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegat
       "#!/usr/bin/env node\n// vitest stub\n",
     );
 
-    // Source file (the vitest: target) — lives in the workflows/ subdirectory
-    const sourceFilePath = path.join(workspaceRoot, "workflows", "run.workflow.js");
+    // Source file (the vitest: target) — lives in the workflows/internal/ subdirectory
+    const sourceFilePath = path.join(workspaceRoot, "workflows", "internal", "run.workflow.js");
     writeFile(sourceFilePath, "// run workflow");
 
     const sourceFileRel = path.relative(root, sourceFilePath);
@@ -844,9 +844,9 @@ describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegat
 
   it("vitest runs from the mcp-server member (not the workspace root) when the target is a workflow source file", async () => {
     // Build a runReviewerSession fixture where the vitest: marker points at
-    // `plugins/flow/workflows/run.workflow.js` but the workspace root has
+    // `plugins/flow/workflows/internal/run.workflow.js` but the workspace root has
     // no vitest — the delegate logic must route pnpm to the mcp-server member.
-    const TEST_FILE_REL = "plugins/flow/workflows/run.workflow.js";
+    const TEST_FILE_REL = "plugins/flow/workflows/internal/run.workflow.js";
     await buildRunnerFixture(tmp, TEST_FILE_REL);
 
     let capturedMemberPkgDir: string | null = null;

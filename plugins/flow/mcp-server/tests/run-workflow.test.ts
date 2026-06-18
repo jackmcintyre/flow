@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import * as vm from "node:vm";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RUN = path.resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+const RUN = path.resolve(HERE, "..", "..", "workflows", "internal", "run.workflow.js");
 const SRC = readFileSync(RUN, "utf8");
 
 describe("Story 8.5 — run workflow integrity", () => {

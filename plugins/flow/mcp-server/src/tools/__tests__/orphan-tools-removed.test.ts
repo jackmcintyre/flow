@@ -40,7 +40,7 @@ const SNAPSHOT_PATH = path.resolve(__dirname, "..", "tool-inventory.snapshot.jso
 /** Path to the run workflow file. */
 const RUN_WORKFLOW_PATH = path.resolve(
   __dirname,
-  "../../../../workflows/run.workflow.js",
+  "../../../../workflows/internal/run.workflow.js",
 );
 
 describe("plugins/flow/mcp-server/src/tools/__tests__/orphan-tools-removed.test.ts", () => {

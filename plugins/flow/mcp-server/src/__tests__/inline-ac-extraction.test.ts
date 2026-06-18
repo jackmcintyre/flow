@@ -45,7 +45,7 @@ import { runDevTerminalAction } from "../tools/run-dev-terminal-action.js";
 // ---------------------------------------------------------------------------
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RUN = path.resolve(HERE, "..", "..", "..", "workflows", "run.workflow.js");
+const RUN = path.resolve(HERE, "..", "..", "..", "workflows", "internal", "run.workflow.js");
 const SRC = readFileSync(RUN, "utf8");
 
 // ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ async function setupRepo(): Promise<TestContext> {
       {
         text: "Given a run run that spawns a builder for a native story, When the orchestrator prepares the build context, Then the story's acceptance criteria are extracted by the orchestrator and passed inline to the builder.",
         kind: "unit",
-        verification: { type: "vitest", target: "plugins/flow/workflows/run.workflow.js" },
+        verification: { type: "vitest", target: "plugins/flow/workflows/internal/run.workflow.js" },
       },
     ],
     title: TITLE,

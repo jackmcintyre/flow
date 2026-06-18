@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import * as vm from "node:vm";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const GATE1 = path.resolve(HERE, "..", "..", "workflows", "gate-1.workflow.js");
+const GATE1 = path.resolve(HERE, "..", "..", "workflows", "internal", "gate-1.workflow.js");
 const SRC = readFileSync(GATE1, "utf8");
 
 describe("Story native:01KTKK2Y73EDDAXK470EZ3MHQ8 — gate-1 workflow integrity", () => {

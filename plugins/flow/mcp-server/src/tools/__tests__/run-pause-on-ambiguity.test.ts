@@ -31,7 +31,7 @@ import { describe, expect, it } from "vitest";
 
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/internal/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
