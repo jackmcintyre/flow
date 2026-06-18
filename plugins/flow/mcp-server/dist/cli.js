@@ -26614,6 +26614,8 @@ function parseNativeStory(absPath, fileContents) {
   const cited_sources = citedSection ? parseCitedSources(citedSection.bodyLines, absPath) : void 0;
   const depSection = sections.get("Dependencies");
   const depends_on = depSection ? parseDependencies2(depSection.bodyLines, absPath) : [];
+  const sourceIssueSection = sections.get("Source Issue");
+  const source_issue = sourceIssueSection ? parseSourceIssue(sourceIssueSection.bodyLines) : void 0;
   const ulid4 = deriveUlidFromPath(absPath);
   const ref = `native:${ulid4}`;
   const source_hash = createHash2("sha256").update(fileContents).digest("hex");
@@ -26627,6 +26629,7 @@ function parseNativeStory(absPath, fileContents) {
     implementation_notes,
     tasks,
     cited_sources,
+    source_issue,
     raw_path: absPath,
     raw_frontmatter: { title, ref },
     source_hash
@@ -26833,6 +26836,13 @@ function parseCitedSources(bodyLines, absPath) {
     });
   }
   return out;
+}
+function parseSourceIssue(bodyLines) {
+  for (const line of bodyLines) {
+    const trimmed = line.trim();
+    if (/^\d+$/.test(trimmed)) return trimmed;
+  }
+  return void 0;
 }
 function deriveUlidFromPath(absPath) {
   const base = absPath.split("/").pop() ?? absPath;
@@ -28124,7 +28134,15 @@ var ExecutionManifestSchema = external_exports.object({
    * secondary lookup key when the primary `pr_number` probe is unavailable.
    * Optional and additive.
    */
-  pr_branch: external_exports.string().min(1).optional()
+  pr_branch: external_exports.string().min(1).optional(),
+  /**
+   * Optional GitHub issue number (bare integer string, e.g. `"42"`) that this
+   * story was authored from. When present, `runDevTerminalAction` appends a
+   * `Closes #<n>` line to the PR body so merging the PR closes the issue on
+   * GitHub automatically. Normalised from a full URL at write time.
+   * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
+   */
+  source_issue: external_exports.string().regex(/^\d+$/).optional()
 }).strict();
 function parseExecutionManifest(input, opts) {
   const result = ExecutionManifestSchema.safeParse(input);
@@ -29373,6 +29391,7 @@ async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath,
     tasks: story.tasks,
     cited_sources: story.cited_sources,
     implementation_notes: story.implementation_notes,
+    source_issue: story.source_issue,
     withdrawn: false,
     blocked_by: "deps-drift",
     discipline_violations: [
@@ -29447,7 +29466,10 @@ function composeManifest(story, adapterName, targetRepoRoot, riskFields = {}) {
     ready: false,
     // Story 10.4 — author-time risk tier from declared paths (folds in `{}` for
     // BMad/legacy stories, leaving both fields absent after stripUndefined).
-    ...riskFields
+    ...riskFields,
+    // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the issue number from the
+    // SourceStory so runDevTerminalAction can append `Closes #<n>` to the PR body.
+    source_issue: story.source_issue
   });
   return ExecutionManifestSchema.parse(raw);
 }
@@ -29575,6 +29597,7 @@ async function scanSources(opts) {
           tasks: story.tasks,
           cited_sources: story.cited_sources,
           implementation_notes: story.implementation_notes,
+          source_issue: story.source_issue,
           withdrawn: false,
           blocked_by: "planning-discipline",
           discipline_violations: disciplineResult.violations.map((v) => ({
@@ -29647,6 +29670,7 @@ async function scanSources(opts) {
           tasks: story.tasks,
           cited_sources: story.cited_sources,
           implementation_notes: story.implementation_notes,
+          source_issue: story.source_issue,
           withdrawn: false,
           blocked_by: "planning-discipline",
           discipline_violations: disciplineResult.violations.map((v) => ({
@@ -29832,7 +29856,16 @@ var WriteNativeStoryInputSchema = external_exports.object({
    * Omitting this field (the default) lets the scan-time classifier decide the
    * lane without any author bias.
    */
-  lane_hint: external_exports.enum(["fast", "full"]).optional()
+  lane_hint: external_exports.enum(["fast", "full"]).optional(),
+  /**
+   * Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — optional GitHub issue reference.
+   * Accepts either a bare issue number (e.g. `"42"`) or a full GitHub issue URL
+   * (e.g. `"https://github.com/owner/repo/issues/42"`). Normalised to the bare
+   * integer string before being written into the story file. When present,
+   * `runDevTerminalAction` appends `Closes #<n>` to the PR body so merging the
+   * PR closes the issue on GitHub without any manual step.
+   */
+  source_issue: external_exports.string().optional()
 });
 var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
 var DEFAULT_DEFINITION_OF_DONE = [
@@ -29843,6 +29876,21 @@ var DEFAULT_DEFINITION_OF_DONE = [
   "- [ ] PR opened against `main` with CI green."
 ].join("\n");
 var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
+function normaliseSourceIssue(raw) {
+  if (raw === void 0 || raw.trim().length === 0) return void 0;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const n2 = parseInt(trimmed, 10);
+    if (n2 > 0) return String(n2);
+    return void 0;
+  }
+  const urlMatch = /\/issues\/(\d+)\/?$/.exec(trimmed);
+  if (urlMatch) {
+    const n2 = parseInt(urlMatch[1], 10);
+    if (n2 > 0) return String(n2);
+  }
+  return void 0;
+}
 function renderNarrativeSentence(narrative) {
   return `As ${indefiniteArticle(narrative.role)} ${narrative.role}, I want ${narrative.want}, so that ${narrative.so_that}.`;
 }
@@ -29885,6 +29933,12 @@ function renderNativeStoryBody(input) {
     }
   }
   lines.push("");
+  const normalisedIssue = normaliseSourceIssue(input.source_issue);
+  if (normalisedIssue !== void 0) {
+    lines.push("## Source Issue", "");
+    lines.push(normalisedIssue);
+    lines.push("");
+  }
   return lines.join("\n");
 }
 async function writeNativeStory(rawInput) {
@@ -29984,6 +30038,9 @@ function inputToSourceStory(input, ref, absPath) {
     implementation_notes: renderImplementationNotesBody(input),
     tasks: input.tasks,
     cited_sources: input.cited_sources,
+    // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the normalised issue
+    // number so scan-sources can persist it onto the manifest.
+    source_issue: normaliseSourceIssue(input.source_issue),
     raw_path: absPath,
     raw_frontmatter: { title: input.title, ref },
     source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
@@ -39437,11 +39494,14 @@ function composePrBody(opts) {
     acLines,
     "<!-- /flow:pr:machine -->"
   ].join("\n");
+  const closesLine = opts.sourceIssue && /^\d+$/.test(opts.sourceIssue) ? `
+
+Closes #${opts.sourceIssue}` : "";
   return `${approverSummary}
 
 ${machineBlock}
 
-${opts.summary}`;
+${opts.summary}${closesLine}`;
 }
 function isRunnableCheck(ac) {
   return ac.verificationType === "vitest" && Boolean(ac.coveringCheck);
@@ -40829,7 +40889,10 @@ async function runDevTerminalAction(opts) {
       title: manifest.title,
       narrative: manifest.narrative,
       riskTier: manifest.risk_tier,
-      howToTestWalkthrough: opts.howToTestWalkthrough
+      howToTestWalkthrough: opts.howToTestWalkthrough,
+      // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — pass the issue number from
+      // the manifest so the PR body contains `Closes #<n>` when present.
+      sourceIssue: manifest.source_issue
     });
     const pluginRoot = getPluginRoot();
     const permissions = await loadRolePermissions({ role: ROLE, pluginRoot });

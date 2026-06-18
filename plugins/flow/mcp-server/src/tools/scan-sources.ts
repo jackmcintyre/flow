@@ -279,6 +279,7 @@ async function writeDepsDriftBlockedManifest(
     tasks: story.tasks,
     cited_sources: story.cited_sources,
     implementation_notes: story.implementation_notes,
+    source_issue: story.source_issue,
     withdrawn: false,
     blocked_by: "deps-drift" as const,
     discipline_violations: [
@@ -427,6 +428,9 @@ function composeManifest(
     // Story 10.4 — author-time risk tier from declared paths (folds in `{}` for
     // BMad/legacy stories, leaving both fields absent after stripUndefined).
     ...riskFields,
+    // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the issue number from the
+    // SourceStory so runDevTerminalAction can append `Closes #<n>` to the PR body.
+    source_issue: story.source_issue,
   });
   // Defensive parse — throws if the composer produced an invalid shape.
   return ExecutionManifestSchema.parse(raw);
@@ -652,6 +656,7 @@ export async function scanSources(opts: {
           tasks: story.tasks,
           cited_sources: story.cited_sources,
           implementation_notes: story.implementation_notes,
+          source_issue: story.source_issue,
           withdrawn: false,
           blocked_by: "planning-discipline" as const,
           discipline_violations: disciplineResult.violations.map((v) => ({
@@ -735,6 +740,7 @@ export async function scanSources(opts: {
           tasks: story.tasks,
           cited_sources: story.cited_sources,
           implementation_notes: story.implementation_notes,
+          source_issue: story.source_issue,
           withdrawn: false,
           blocked_by: "planning-discipline" as const,
           discipline_violations: disciplineResult.violations.map((v) => ({

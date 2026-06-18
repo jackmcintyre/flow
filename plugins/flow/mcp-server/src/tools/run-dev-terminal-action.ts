@@ -562,6 +562,9 @@ export async function runDevTerminalAction(opts: {
       narrative: manifest.narrative,
       riskTier: manifest.risk_tier,
       howToTestWalkthrough: opts.howToTestWalkthrough,
+      // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — pass the issue number from
+      // the manifest so the PR body contains `Closes #<n>` when present.
+      sourceIssue: manifest.source_issue,
     });
 
     // (xi) gh pr create — cwd pinned to gitRoot so `gh` resolves the intended
