@@ -432,7 +432,7 @@ describe("AC6 (user-surface) — un-hired-role error surface (Task 6.7)", () => 
 
 Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
-If you meant a different role id, run /flow:team to see your current roster.`;
+If you meant a different role id, run /flow:dashboard to see your current roster.`;
 
     expect(errorText).toBe(expected);
   });
@@ -456,7 +456,7 @@ If you meant a different role id, run /flow:team to see your current roster.`;
       "Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).",
     );
     expect(errorText).toContain(
-      "If you meant a different role id, run /flow:team to see your current roster.",
+      "If you meant a different role id, run /flow:dashboard to see your current roster.",
     );
   });
 
@@ -654,12 +654,12 @@ describe("AC5 — skill self-consistency: skills/ask/SKILL.md (Task 6.10)", () =
     expect(stepsBody).toContain("You MUST NOT mutate canonical state.");
   });
 
-  it("(v) body contains /flow:ask, /flow:hire, /flow:hire default, /flow:team cross-links", async () => {
+  it("(v) body contains /flow:ask, /flow:hire, /flow:hire default, /flow:dashboard cross-links", async () => {
     const raw = await fs.readFile(SKILL_FILE, "utf8");
     expect(raw).toContain("/flow:ask");
     expect(raw).toContain("/flow:hire");
     expect(raw).toContain("/flow:hire default");
-    expect(raw).toContain("/flow:team");
+    expect(raw).toContain("/flow:dashboard");
   });
 
   it("(vi) body contains 'non-mutating' and enumerates the four permitted reads", async () => {

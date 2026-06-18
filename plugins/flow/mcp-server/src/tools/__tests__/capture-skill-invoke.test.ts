@@ -243,10 +243,10 @@ describe("captureSkillInvoke — plugin-version fallback", () => {
 // ---------------------------------------------------------------------------
 
 describe("captureSkillInvoke — board view recorded exactly once", () => {
-  it("board/SKILL.md no longer carries a prose-call telemetry capture", async () => {
+  it("dashboard/SKILL.md no longer carries a prose-call telemetry capture", async () => {
     const skillMd = path.resolve(
       __dirname,
-      "../../../../skills/board/SKILL.md",
+      "../../../../skills/dashboard/SKILL.md",
     );
     const raw = await fs.readFile(skillMd, "utf8");
     // The Story 6.8 prose-call (mint + recordSkillInvoke) is the double-count

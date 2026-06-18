@@ -95,7 +95,7 @@ After running `/reload-plugins`, verify the worktree code is loaded:
 4. Run `/flow:ask <role> "<question>"` or `/help flow:ask`.
 5. Observe the sentinel string in the response.
 
-If the sentinel is absent, repeat the recipe and check that `/flow:status`
+If the sentinel is absent, repeat the recipe and check that `/flow:dashboard`
 reports the expected version.
 
 ## Cross-references

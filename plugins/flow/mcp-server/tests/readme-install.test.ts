@@ -49,7 +49,7 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
   "/plugin marketplace add ./",
   "/plugin install flow@flow",
   "/reload-plugins",
-  "/flow:status",
+  "/flow:dashboard",
 ]);
 
 interface CodeNode {
@@ -263,7 +263,7 @@ describe("README-install.md user-surface contract (Story 1.10)", () => {
 
     // Step 6 — known-limitation error (Story 3.3 parked the adapter detect)
     it("step 6 documents the parked-adapter known limitation and points at Story 3.3", () => {
-      expect(raw).toMatch(/\/flow:status/);
+      expect(raw).toMatch(/\/flow:dashboard/);
       expect(raw).toMatch(/bmad adapter: detect lands in Story 3\.3/);
       expect(raw).toMatch(/Story 3\.3/);
     });

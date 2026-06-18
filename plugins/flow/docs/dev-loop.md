@@ -71,7 +71,7 @@ plugin-healer behaviour that motivated the deprecation.
 After launching Claude Code with `--plugin-dir`:
 
 ```
-> /flow:status
+> /flow:dashboard
 ```
 
 Should print the plugin version from your worktree's

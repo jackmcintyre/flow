@@ -20,8 +20,6 @@ import {
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { fileURLToPath } from "node:url";
-import { parse as yamlParse } from "yaml";
 import {
   ListToolsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -38,10 +36,6 @@ import {
   extractKnowledgeEntries,
 } from "../src/tools/get-team-snapshot.js";
 import * as loggerModule from "../src/lib/logger.js";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_ROOT = path.resolve(HERE, "..", "..");
-const SKILL_FILE = path.resolve(PLUGIN_ROOT, "skills", "team", "SKILL.md");
 
 const FIXED_HIRED_AT = "2026-06-01T12:00:00.000Z";
 const FIXED_VERSION = "0.1.0";
@@ -817,58 +811,6 @@ describe("AC3(j) — knowledge entry stripping (Task 7.14)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task 7.15 — AC4: skill self-consistency
-// ---------------------------------------------------------------------------
-describe("AC4 — skill self-consistency (Task 7.15)", () => {
-  it("(i) SKILL.md frontmatter parses and name === 'flow:team'", () => {
-    const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
-    // Extract YAML frontmatter (between --- delimiters).
-    const match = /^---\n([\s\S]*?)\n---/.exec(raw);
-    expect(match, "frontmatter not found").toBeTruthy();
-    const frontmatter = yamlParse(match![1]!);
-    expect(frontmatter.name).toBe("flow:team");
-  });
-
-  it("(ii) allowed_tools is exactly ['Read']", () => {
-    const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
-    const match = /^---\n([\s\S]*?)\n---/.exec(raw);
-    const frontmatter = yamlParse(match![1]!);
-    expect(frontmatter.allowed_tools).toEqual(["Read"]);
-  });
-
-  it("(iii) body contains required sections in correct order", () => {
-    const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
-    const sections = [
-      "# What this skill does",
-      "# Prerequisites",
-      "# Steps",
-      "# Failure modes",
-    ];
-    let lastIdx = 0;
-    for (const section of sections) {
-      const idx = raw.indexOf(section);
-      expect(idx, `missing section: ${section}`).toBeGreaterThan(-1);
-      expect(idx, `section out of order: ${section}`).toBeGreaterThan(lastIdx);
-      lastIdx = idx;
-    }
-  });
-
-  it("(iv) Steps section names the MCP tool getTeamSnapshot", () => {
-    const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
-    const stepsStart = raw.indexOf("# Steps");
-    const stepsEnd = raw.indexOf("\n# ", stepsStart + 1);
-    const stepsBody = raw.slice(stepsStart, stepsEnd === -1 ? undefined : stepsEnd);
-    expect(stepsBody).toContain("getTeamSnapshot");
-  });
-
-  it("(v) body contains /flow:team, /flow:hire, /flow:hire default cross-links", () => {
-    const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
-    expect(raw).toContain("/flow:team");
-    expect(raw).toContain("/flow:hire");
-    expect(raw).toContain("/flow:hire default");
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Bug 2 fix — TOCTOU PersonaFileNotFoundError mid-snapshot
 // ---------------------------------------------------------------------------

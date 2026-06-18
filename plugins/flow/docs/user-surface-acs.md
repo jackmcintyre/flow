@@ -24,7 +24,7 @@ output.
 
 An AC is `user-surface` if and only if it references at least one of:
 
-- **(i) a slash command literal** (e.g. `/flow:status`, `/ship-story`)
+- **(i) a slash command literal** (e.g. `/flow:dashboard`, `/ship-story`)
 - **(ii) a CLI command the operator types verbatim** (e.g. `pnpm install`,
   `git clone`, `python3 scripts/foo.py`)
 - **(iii) a file path the README/install docs instruct the user to copy or
@@ -99,7 +99,7 @@ User-surface (tag required):
 ```
 **AC1 (user-surface):**
 **Given** the operator has installed the flow plugin,
-**When** they run `/flow:status` in a fresh Claude Code session,
+**When** they run `/flow:dashboard` in a fresh Claude Code session,
 **Then** the tab-complete picker lists the command and invoking it prints
 the plugin version.
 ```

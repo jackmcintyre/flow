@@ -19,9 +19,9 @@ If the operator invokes this skill with the single argument `default` (also acce
 When the argument matches, run these steps and do NOT proceed to the interactive **Steps** section below:
 
 1. **Identify the target repo root** as `targetRepoRoot` (the current Claude Code workspace root). Do NOT call `getStatus` — fresh repos may not have `.flow/config.yaml` yet and the MCP tools used here (`readPersona`, `instantiatePersona`) take `targetRepoRoot` directly.
-2. **Refuse if a roster already exists.** List `{targetRepoRoot}/team/` (excluding `custom/` and `_archived/`). If ANY subdirectory contains `PERSONA.md`, print the literal line `Team already hired. Run /flow:hire to add more roles, or /flow:team to view the current roster.` and exit cleanly (exit code 0 — not a failure).
+2. **Refuse if a roster already exists.** List `{targetRepoRoot}/team/` (excluding `custom/` and `_archived/`). If ANY subdirectory contains `PERSONA.md`, print the literal line `Team already hired. Run /flow:hire to add more roles, or /flow:dashboard to view the current roster.` and exit cleanly (exit code 0 — not a failure).
 3. **Hire the default roster.** For each role in `["planner", "generalist-dev", "generalist-reviewer", "retro-analyst", "orchestrator"]` IN THAT EXACT ORDER, call `instantiatePersona({ targetRepoRoot, role })`. On success, print `Hired: {role} → {result.path}`. On `PersonaAlreadyExistsError` (shouldn't happen after step 2's guard, but defend in depth), print `Already hired: {role} (no change).` and continue. On any other error, surface the error message verbatim and exit non-zero.
-4. **Terminal line.** After all five `instantiatePersona` calls complete, print `Default roster hired (5 roles). Run /flow:team to view, or /flow:hire to add more.` and exit cleanly.
+4. **Terminal line.** After all five `instantiatePersona` calls complete, print `Default roster hired (5 roles). Run /flow:dashboard to view, or /flow:hire to add more.` and exit cleanly.
 
 # Prerequisites
 

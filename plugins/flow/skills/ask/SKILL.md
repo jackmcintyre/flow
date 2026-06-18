@@ -17,7 +17,7 @@ This is a one-shot surface: one question, one response. For follow-up questions,
 **Canonical use case (FR76):** Ask the planner to translate a reviewer's verdict comment without breaking the dev loop.
 `/flow:ask planner "explain this reviewer verdict comment: ..."`
 
-If your team is not yet hired, run `/flow:hire` to go through the full hiring conversation, or `/flow:hire default` to instantly hire the default roster. To see who is currently hired (including role ids), run `/flow:team`.
+If your team is not yet hired, run `/flow:hire` to go through the full hiring conversation, or `/flow:hire default` to instantly hire the default roster. To see who is currently hired (including role ids), run `/flow:dashboard`.
 
 # Prerequisites
 
@@ -38,7 +38,7 @@ A target repo with the specific `{role}` already hired — i.e. `{target-repo}/t
 
      Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
-     If you meant a different role id, run /flow:team to see your current roster.
+     If you meant a different role id, run /flow:dashboard to see your current roster.
      ```
    - If it throws `PersonaFileMalformedError`, print `flow:ask — persona for "{role}" is malformed: {zod-message}. Open {target-repo}/team/{role}/PERSONA.md and fix the malformation; git revert {persona-path} is the bail-out.` and exit.
    - Otherwise capture the persona's `## Prompt` section body.

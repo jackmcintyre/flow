@@ -228,21 +228,20 @@ describe("recordSkillInvoke — skill.invoke write-path", () => {
     expect(event.session_id).toBe(sessionUlid);
   });
 
-  it("the shipped /flow:board SKILL.md no longer carries the prose-call seam (double-count removed)", async () => {
-    // native:01KV4YGR removed the Story 6.8 prose-call from /flow:board so the
-    // deterministic PreToolUse hook is the SOLE recorder for the board view —
-    // no second event per use. The SKILL.md must no longer name the seam tools
+  it("the shipped /flow:dashboard SKILL.md no longer carries the prose-call seam (double-count removed)", async () => {
+    // The deterministic PreToolUse hook is the SOLE recorder for the dashboard
+    // view — no second event per use. The SKILL.md must not name the seam tools
     // or call recordSkillInvoke. Its own `version:` line is retained — the hook
-    // reads it as the board view's declared version (the AC3 passthrough source).
+    // reads it as the dashboard view's declared version (the AC3 passthrough source).
     const skillPath = path.resolve(
       __dirname,
-      "../../../../skills/board/SKILL.md",
+      "../../../../skills/dashboard/SKILL.md",
     );
     const raw = await fs.readFile(skillPath, "utf8");
     expect(raw).not.toContain("recordSkillInvoke");
     expect(raw).not.toMatch(/allowed_tools:.*mintSessionUlid/);
     expect(raw).not.toContain('invocation_source: "user-slash-command"');
-    // The board view still declares its own version line (AC3 passthrough source).
+    // The dashboard view still declares its own version line (AC3 passthrough source).
     expect(raw).toMatch(/^version:\s*0\.1\.0\s*$/m);
   });
 });

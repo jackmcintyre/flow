@@ -105,29 +105,28 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    | Skill | Description |
    |---|---|
-   | `/flow:status` | Print the current plugin version, target repo, adapter, and standards-doc state. |
+   | `/flow:dashboard` | One-shot cockpit — plugin/repo status, the outstanding backlog grouped by epic, and your hired team, in one read-only view. |
    | `/flow:hire` | Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. Or `/flow:hire default` to hire the default five-role roster directly, no interactive proposal. |
    | `/flow:plan` | Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills. Stories are materialised into the backlog automatically — no separate scan command needed. |
-   | `/flow:team` | Print a one-shot snapshot of your hired team — roles, domains, recent knowledge entries, fire counts. |
    | `/flow:ask` | Open a non-mutating side-session with a hired role — ask one question, get one answer. |
 
-6. **Run `/<plugin>:status` and see the current adapter state.**
+6. **Run `/<plugin>:dashboard` and see the current adapter state.**
 
    ```text
-   /flow:status
+   /flow:dashboard
    ```
 
    (Run inside Claude Code, with `<target-repo>` loaded as the workspace.)
 
-   Expected confirmation **today** — a known-limitation error toast:
+   Expected confirmation **today** — the dashboard's **Status** section renders a known-limitation toast as a per-section `unavailable —` line:
 
    ```text
    bmad adapter: detect lands in Story 3.3
    ```
 
-   This is the **current ground-truth output on a clean install**. The BMad adapter's detect path is parked — it ships in Story 3.3 ("BMad adapter detect path"). Until then, `/flow:status` correctly reports that no adapter has been confirmed for the repo. Seeing the line above means the plugin is installed, the MCP server is running, and the status tool is wired through end-to-end; only the adapter probe is still stubbed.
+   This is the **current ground-truth output on a clean install**. The BMad adapter's detect path is parked — it ships in Story 3.3 ("BMad adapter detect path"). Until then, the dashboard's **Status** section correctly reports that no adapter has been confirmed for the repo. Seeing the line above means the plugin is installed, the MCP server is running, and the read tools are wired through end-to-end; only the adapter probe is still stubbed.
 
-   Once Story 3.3 lands, this step will instead return the full status block (`flow vX.Y.Z`, target repo, adapter, standards, cycle). This README will be updated in the same change.
+   Once Story 3.3 lands, the **Status** section will instead render the full status block (`flow vX.Y.Z`, target repo, adapter, standards, cycle). This README will be updated in the same change.
 
 ## Planning-discipline enforcement
 
@@ -175,7 +174,7 @@ You can open any execution manifest in a text editor and change it directly. Thi
 
 **Schema-violating edits:** If your edit produces invalid YAML (for example, you remove the `title` field, which is required), the next plugin skill invocation that reads the manifest will surface a `MalformedExecutionManifestError` with the path to the offending field. Fix the YAML in your editor and re-run the skill.
 
-**Where hand-edits are NOT allowed:** `.yaml` files under `<target-repo>/.flow/state/in-progress/` are read-only for operators in v1. Once the dev loop has claimed a story (moved it to `in-progress/`), the plugin owns those bytes. The next skill invocation (`/flow:status`, `/flow:plan`, or any future tool that acts on the in-progress layer) will detect the edit and refuse to proceed with this message:
+**Where hand-edits are NOT allowed:** `.yaml` files under `<target-repo>/.flow/state/in-progress/` are read-only for operators in v1. Once the dev loop has claimed a story (moved it to `in-progress/`), the plugin owns those bytes. The next skill invocation (`/flow:dashboard`, `/flow:plan`, or any future tool that acts on the in-progress layer) will detect the edit and refuse to proceed with this message:
 
 ```
 Refusing: <ref> in in-progress/ has been hand-edited (fields: <comma-separated field names>). v1 does not support editing stories mid-flight. Wait for the story to land in done/ or blocked/, or discard it via /flow:plan.

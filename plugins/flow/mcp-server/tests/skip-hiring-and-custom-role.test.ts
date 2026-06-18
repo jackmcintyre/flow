@@ -212,7 +212,7 @@ async function runSkipHiringFlow(opts: {
   for (const role of roleSubdirs) {
     if (existsSync(path.join(teamDir, role, "PERSONA.md"))) {
       confirmations.push(
-        "Team already hired. Run /flow:hire to add more roles, or /flow:team to view the current roster.",
+        "Team already hired. Run /flow:hire to add more roles, or /flow:dashboard to view the current roster.",
       );
       return { confirmations, instantiateCalls, subagentSpawns };
     }
@@ -242,7 +242,7 @@ async function runSkipHiringFlow(opts: {
 
   // Step 4 — terminal line.
   confirmations.push(
-    "Default roster hired (5 roles). Run /flow:team to view, or /flow:hire to add more.",
+    "Default roster hired (5 roles). Run /flow:dashboard to view, or /flow:hire to add more.",
   );
 
   return { confirmations, instantiateCalls, subagentSpawns };
@@ -415,7 +415,7 @@ describe("Story 2.5 AC1 / AC4(a) — /flow:skip-hiring fast path", () => {
       expect(hiredLines[i]).toBe(expected);
     }
     expect(result.confirmations[result.confirmations.length - 1]).toBe(
-      "Default roster hired (5 roles). Run /flow:team to view, or /flow:hire to add more.",
+      "Default roster hired (5 roles). Run /flow:dashboard to view, or /flow:hire to add more.",
     );
   });
 
@@ -431,7 +431,7 @@ describe("Story 2.5 AC1 / AC4(a) — /flow:skip-hiring fast path", () => {
     expect(second.instantiateCalls.length).toBe(0);
     expect(second.subagentSpawns).toBe(0);
     expect(second.confirmations).toContain(
-      "Team already hired. Run /flow:hire to add more roles, or /flow:team to view the current roster.",
+      "Team already hired. Run /flow:hire to add more roles, or /flow:dashboard to view the current roster.",
     );
   });
 });
