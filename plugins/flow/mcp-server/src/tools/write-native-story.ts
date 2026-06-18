@@ -169,7 +169,7 @@ export const DEFAULT_RISK_REASONING =
  * is absent, blank, or does not contain a recognisable positive integer.
  * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
  */
-export function normaliseSourceIssue(raw: string | undefined): string | undefined {
+function normaliseSourceIssue(raw: string | undefined): string | undefined {
   if (raw === undefined || raw.trim().length === 0) return undefined;
   const trimmed = raw.trim();
   // Bare integer.
