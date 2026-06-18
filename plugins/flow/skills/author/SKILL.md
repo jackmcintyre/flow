@@ -1,7 +1,7 @@
 ---
 name: flow:author
 description: "Propose a feature in plain language and get back a drafted story spec that has already passed the discipline checks and is parked in the backlog as not-ready."
-allowed_tools: [Task, readCatalogue, readBacklogInventory, validatePlannerBacklog, writeNativeStory, getStatus, markStoryReady]
+allowed_tools: [Task, readCatalogue, readBacklogInventory, validatePlannerBacklog, writeNativeStory, getStatus]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/9-2-author-seam-feature-to-drafted-story.md -->
@@ -46,16 +46,9 @@ A target repo with `.flow/config.yaml` resolved to a **`native`** adapter. (The 
 7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report to the operator:
    - the draft's **short handle** (first 8 characters of the ULID for native refs) alongside the full **ref** — e.g. `[01KT1NR9] native:01KT1NR9F6133VHY601SF3BD5N`. Display the short handle as the primary identifier; include the full ref for completeness.
    - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and approved),
-   - the next step: run `/flow:ready` to approve it once it has been judged. The draft is already in the backlog (materialisation is automatic — no separate scan step is needed). To re-sync if you edit the story file directly afterwards, run `/flow:plan`.
+   - the next step: run `/flow:ready <ref>` to grade and approve it — the readiness cockpit now runs the judge panel as part of approving, so you see the per-lens verdict before you admit the story to the build loop. The draft is already in the backlog (materialisation is automatic — no separate scan step is needed). To re-sync if you edit the story file directly afterwards, run `/flow:plan`.
 
-8. **Inline approval prompt.** If a judge panel grade has been surfaced for the newly drafted story (i.e., `/flow:judge` was run in this same session and its verdict is visible in the conversation), immediately present the grade summary to the operator and ask a single yes/no question before the skill exits:
-
-   > Grade: [pass/fail summary per lens]. Approve this story for building now? (yes / no)
-
-   - If the operator explicitly answers **yes** (or a clear affirmative): call `markStoryReady({ targetRepoRoot, ref: <draft ref>, ready: true })`. Report the result — the story is now claimable by the build loop.
-   - If the operator answers **no**, says nothing, or gives any response other than an explicit yes: do **not** call `markStoryReady`. Report that the story remains parked not-approved, and remind the operator they can approve it later via `/flow:ready`.
-   - The inline prompt MUST NOT call `markStoryReady` without an explicit yes from the operator in that same turn. No deferred or assumed approval.
-   - If no judge panel grade is available in the current session, skip this step entirely and surface the next-step note from step 7 (run `/flow:judge`, then `/flow:ready`).
+8. **Approval happens in `/flow:ready`, not here.** This skill never marks a story ready. A freshly drafted story is parked not-ready behind the readiness brake; to admit it, the operator runs `/flow:ready <ref>`, which grades it with the diverse-lens judge panel and — on their explicit approval — flips it ready. Do not call `markStoryReady` from this skill, and never offer an inline approval that would bypass the grade.
 
 Never write to a story file or a manifest directly, never edit `.flow/state/**` or `.flow/native-stories/**` by hand, and never run a git command from this skill — every write flows through the `writeNativeStory` tool, which owns the discipline gate and the atomic write. Your job is to relay the operator's feature description to the author subagent and report the result.
 
