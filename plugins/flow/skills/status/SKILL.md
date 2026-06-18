@@ -2,6 +2,7 @@
 name: flow:status
 description: Print the current plugin version, target repo, adapter, and standards-doc state.
 allowed_tools: [Read]
+user_invocable: false
 ---
 
 # /flow:status

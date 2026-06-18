@@ -2,6 +2,7 @@
 name: flow:team
 description: Print a one-shot snapshot of your hired team — roles, domains, recent knowledge entries, fire counts.
 allowed_tools: [Read]
+user_invocable: false
 ---
 
 # /flow:team

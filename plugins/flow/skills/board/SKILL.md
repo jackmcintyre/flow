@@ -3,6 +3,7 @@ name: flow:board
 description: "The cockpit read surface — render the outstanding backlog as grouped-by-epic tables generated from live state, with each item's status, readiness, and claimability."
 allowed_tools: [getBacklogDashboard]
 version: 0.1.0
+user_invocable: false
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/9-5-generated-backlog-dashboard.md -->
