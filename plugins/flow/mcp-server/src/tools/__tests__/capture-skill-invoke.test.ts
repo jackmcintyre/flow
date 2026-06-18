@@ -269,6 +269,108 @@ describe("captureSkillInvoke — board view recorded exactly once", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Issue #390 — stamp the active story ref so the effectiveness scorer can join
+// the invoke to a downstream reviewer.verdict (which carries the same ref).
+// ---------------------------------------------------------------------------
+
+describe("captureSkillInvoke — active story-ref attribution (issue #390)", () => {
+  const inProgressDir = "/abs/repo/.flow/state/in-progress";
+
+  it("stamps story_id from the single in-progress manifest", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:run", { cwd: "/abs/repo" }), {
+      readInProgressDirImpl: async (dir) => {
+        expect(dir).toBe(inProgressDir);
+        return ["native:01STORYAAA.yaml"];
+      },
+      readFileImpl: async () =>
+        `ref: "native:01STORYAAA"\nstatus: in-progress\nclaimed_by: "run-ulid"\n`,
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.storyId).toBe("native:01STORYAAA");
+  });
+
+  it("does NOT stamp story_id when no story is in progress (operator-session skill)", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:retro", { cwd: "/abs/repo" }), {
+      readInProgressDirImpl: async () => [],
+      readFileImpl: async () => "",
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.storyId).toBeUndefined();
+  });
+
+  it("does NOT guess under concurrency (multiple in-progress manifests)", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:run", { cwd: "/abs/repo" }), {
+      readInProgressDirImpl: async () => [
+        "native:01STORYAAA.yaml",
+        "native:01STORYBBB.yaml",
+      ],
+      readFileImpl: async (filePath: string) =>
+        filePath.includes("AAA")
+          ? `ref: "native:01STORYAAA"\nstatus: in-progress\n`
+          : `ref: "native:01STORYBBB"\nstatus: in-progress\n`,
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    // Ambiguous → no attribution rather than a wrong one.
+    expect(calls[0]!.storyId).toBeUndefined();
+  });
+
+  it("ignores snapshot baselines and non-in-progress manifests when resolving the active ref", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await captureSkillInvoke(skillPayload("flow:run", { cwd: "/abs/repo" }), {
+      readInProgressDirImpl: async () => [
+        "native:01STORYAAA.snapshot.yaml", // claim baseline — not a manifest
+        "native:01STORYBBB.yaml", // a stray non-in-progress manifest
+        "native:01STORYCCC.yaml", // the one real in-progress story
+      ],
+      readFileImpl: async (filePath: string) => {
+        if (filePath.includes("snapshot")) return `ref: "native:01STORYAAA"\nstatus: to-do\n`;
+        if (filePath.includes("BBB")) return `ref: "native:01STORYBBB"\nstatus: to-do\n`;
+        return `ref: "native:01STORYCCC"\nstatus: in-progress\n`;
+      },
+      recordImpl: async (opts) => {
+        calls.push(opts as unknown as Record<string, unknown>);
+        return { recorded: true as const };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.storyId).toBe("native:01STORYCCC");
+  });
+
+  it("fail-soft: an unreadable in-progress dir yields no story_id, still records", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const result = await captureSkillInvoke(
+      skillPayload("flow:run", { cwd: "/abs/repo" }),
+      {
+        readInProgressDirImpl: async () => {
+          throw new Error("boom");
+        },
+        recordImpl: async (opts) => {
+          calls.push(opts as unknown as Record<string, unknown>);
+          return { recorded: true as const };
+        },
+      },
+    );
+    expect(result).toEqual({ recorded: true });
+    expect(calls[0]!.storyId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC3 — fail-soft: never throws, never records on bad input
 // ---------------------------------------------------------------------------
 

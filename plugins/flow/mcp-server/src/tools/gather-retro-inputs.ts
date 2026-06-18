@@ -252,6 +252,12 @@ export interface RetroInputs {
    * MUST NOT recount invocations from raw telemetry, mirroring the
    * `fireCountSignal` and `recurringFriction` disciplines.
    *
+   * GUARD (issue #390): when `attribution === "no-completed-flows"` there were
+   * NO `READY FOR MERGE` verdicts to attribute against, so a wall of
+   * `effectiveness_ratio: 0` means "nothing to attribute", NOT "every skill is
+   * useless". The retro-analyst MUST NOT ground a skill-retire / skill-revise
+   * proposal on effectiveness ratios in that state.
+   *
    * Story native:01KT49PKTMJPJM7WMCB67TA6EY.
    */
   skillEffectiveness: SkillEffectivenessResult;

@@ -29,6 +29,7 @@
 
 import * as path from "node:path";
 import { promises as fs } from "node:fs";
+import { parse as yamlParse } from "yaml";
 import { recordSkillInvoke } from "./record-skill-invoke.js";
 
 export interface CaptureSkillInvokeResult {
@@ -50,6 +51,12 @@ export interface CaptureSkillInvokeDeps {
   recordImpl?: typeof recordSkillInvoke;
   readFileImpl?: (filePath: string) => Promise<string>;
   pluginRoot?: string;
+  /**
+   * Test seam: inject the list of `.flow/state/in-progress/` directory entries
+   * so the active-story-ref derivation is deterministic without touching disk.
+   * Production callers omit this (the real `fs.readdir` is used).
+   */
+  readInProgressDirImpl?: (dirPath: string) => Promise<string[]>;
 }
 
 /**
@@ -117,6 +124,89 @@ async function resolveSkillMeta(
 }
 
 /**
+ * Best-effort resolve the story `ref` that a skill invocation belongs to, so the
+ * recorded `skill.invoke` carries a `story_id` the effectiveness scorer can join
+ * to a downstream `reviewer.verdict` (which stamps `story_id = resultFile.ref`).
+ *
+ * ### Why this is the join key (issue #390)
+ * The `skill.invoke` envelope `session_id` is the Claude Code HARNESS session id
+ * of whichever (sub)agent fired the skill; the `reviewer.verdict` `session_id`
+ * is the run-minted ULID (`mintSessionUlid`) the orchestrator stamps in
+ * `postReviewerComments`. Those two ids come from different namespaces and can
+ * NEVER match, so the original `session_id`-only join produced
+ * `useful_fire_count: 0` for every skill. The story `ref` is the one identifier
+ * BOTH sides can carry: the verdict already has it; this seam puts it on the
+ * invoke side.
+ *
+ * ### How the ref is determined (and the concurrency guard)
+ * A story under active build has a manifest in
+ * `<targetRepoRoot>/.flow/state/in-progress/<ref>.yaml`. When EXACTLY ONE such
+ * manifest exists, that story's `ref` is unambiguously the active flow and is
+ * returned. When ZERO are in progress (an operator-session skill outside any
+ * flow) or MORE THAN ONE are in progress (concurrent builds — a naive read can't
+ * tell which flow this skill belongs to), this returns `undefined` and the
+ * invoke is recorded WITHOUT a `story_id`. That is the conservative choice: a
+ * wrong attribution would corrupt the metric, whereas a missing one merely falls
+ * back to the (harmless) session-only join. The project's recommended serial
+ * mode (`maxConcurrency: 1`) is the single-in-progress case, so attribution
+ * fires for the common path.
+ *
+ * NEVER throws — any read/parse failure returns `undefined` (fail-soft; the
+ * capture seam's AC3 contract must hold).
+ */
+async function resolveActiveStoryRef(
+  targetRepoRoot: string,
+  readInProgressDirImpl:
+    | ((dirPath: string) => Promise<string[]>)
+    | undefined,
+  readFileImpl: (filePath: string) => Promise<string>,
+): Promise<string | undefined> {
+  try {
+    const inProgressDir = path.join(
+      targetRepoRoot,
+      ".flow",
+      "state",
+      "in-progress",
+    );
+    const entries = readInProgressDirImpl
+      ? await readInProgressDirImpl(inProgressDir)
+      : await fs.readdir(inProgressDir);
+
+    // Full execution manifests only — exclude the `<ref>.snapshot.yaml` claim
+    // baselines (they are not manifests and carry no authoritative ref/status).
+    const manifestFiles = entries.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml"),
+    );
+
+    const inProgressRefs: string[] = [];
+    for (const file of manifestFiles) {
+      let parsed: unknown;
+      try {
+        const raw = await readFileImpl(path.join(inProgressDir, file));
+        parsed = yamlParse(raw);
+      } catch {
+        continue; // unreadable/unparseable manifest — skip, never fatal
+      }
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        (parsed as Record<string, unknown>).status === "in-progress" &&
+        typeof (parsed as Record<string, unknown>).ref === "string" &&
+        ((parsed as Record<string, unknown>).ref as string).length > 0
+      ) {
+        inProgressRefs.push((parsed as Record<string, unknown>).ref as string);
+      }
+    }
+
+    // Attribute ONLY when exactly one story is in progress (unambiguous).
+    return inProgressRefs.length === 1 ? inProgressRefs[0] : undefined;
+  } catch {
+    // Dir absent (no flow running) or any other error → no attribution.
+    return undefined;
+  }
+}
+
+/**
  * Derive a `skill.invoke` event from a raw `PreToolUse` hook payload and record
  * it through the canonical write-path. Returns `{ recorded }` — never throws.
  */
@@ -160,10 +250,20 @@ export async function captureSkillInvoke(
 
     const meta = await resolveSkillMeta(skillName, pluginRoot, readFileImpl);
 
+    // Resolve the active story flow's ref so the recorded invoke carries a
+    // `story_id` the effectiveness scorer can join to the reviewer verdict
+    // (issue #390). Fail-soft: an unresolvable/ambiguous flow → no story_id.
+    const storyId = await resolveActiveStoryRef(
+      targetRepoRoot,
+      deps.readInProgressDirImpl,
+      readFileImpl,
+    );
+
     await recordImpl({
       targetRepoRoot,
       sessionUlid,
       agent: "agent",
+      ...(storyId !== undefined ? { storyId } : {}),
       data: {
         skill_name: skillName,
         skill_path: meta.skillPath,
