@@ -57467,7 +57467,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "writeNativeStory",
-    description: "Write a new native-adapter story file under <targetRepoRoot>/.flow/native-stories/<ULID>.md. Refuses with WrongAdapterError if the active adapter is not 'native'. Fail-closed discipline gate (Story 9.2): refuses with DisciplineViolationError and writes nothing if the candidate violates an authoring-time planning-discipline rule (e.g. a state-mutating story with no integration AC). On a successful write, emits exactly one draft.authored telemetry event. Used by the planner subagent (/flow:plan) and the author subagent (/flow:author) (Story 3.4 / 9.2).",
+    description: "Write a new native-adapter story file under <targetRepoRoot>/.flow/native-stories/<ULID>.md. Refuses with WrongAdapterError if the active adapter is not 'native'. Fail-closed discipline gate (Story 9.2): refuses with DisciplineViolationError and writes nothing if the candidate violates an authoring-time planning-discipline rule (e.g. a state-mutating story with no integration AC). On a successful write, emits exactly one draft.authored telemetry event. Used by the planner subagent and the author subagent, both behind /flow:plan (Story 3.4 / 9.2).",
     inputSchema: writeNativeStoryInputSchema,
     handler: async (args) => {
       try {

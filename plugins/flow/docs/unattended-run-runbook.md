@@ -25,8 +25,8 @@ stories. Before you launch it, get the stories you want run into that queue:
    take them the whole way without a human eyeball. (Risk tiers are defined in
    [`risk-tiering.md`](./risk-tiering.md).)
 2. **Materialise the stories.** For native-adapter repos, stories are materialised
-   into `.flow/state/to-do/` automatically when authored via `/flow:plan` or
-   `/flow:author`. For BMad-adapter repos, run `/flow:plan` after authoring BMad
+   into `.flow/state/to-do/` automatically when authored via `/flow:plan`
+   (the planning conversation or the `/flow:plan <feature>` one-shot). For BMad-adapter repos, run `/flow:plan` after authoring BMad
    stories — the planning flow scans on exit automatically. Only stories that
    land in `to-do/` are claimable by the run. If you have hand-edited a source
    story file directly, re-run `/flow:plan` to pick up the changes.

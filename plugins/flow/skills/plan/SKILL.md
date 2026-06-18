@@ -1,7 +1,7 @@
 ---
 name: flow:plan
-description: "Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills and materialise the backlog automatically."
-allowed_tools: [Task, readBacklogInventory, getStatus, scanSources]
+description: "Open a planning conversation, or draft a single story in one shot with `/flow:plan <feature>`. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills and materialise the backlog automatically."
+allowed_tools: [Task, readBacklogInventory, getStatus, scanSources, readCatalogue, validatePlannerBacklog, writeNativeStory]
 ---
 
 # /flow:plan
@@ -10,13 +10,33 @@ allowed_tools: [Task, readBacklogInventory, getStatus, scanSources]
 
 Opens a planning conversation. For `adapter: native` repos, this skill spawns the planner subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/flow/catalogue/planner.md`; the subagent drives the conversation and writes ULID-named story files under `<target-repo>/.flow/native-stories/` — each story is materialised into the backlog automatically by `writeNativeStory` as it is written, with no separate scan step required. For `adapter: bmad` repos, this skill points you at BMad's authoring skills (`/bmad-create-story`, `/bmad-edit-prd`) and automatically materialises newly authored stories into execution manifests on exit — no separate scan command is needed.
 
+**Two ways in:** bare `/flow:plan` opens the full multi-story planning conversation; `/flow:plan <feature>` (a plain-language feature description as the argument) is the one-shot fast path — it drafts **one** story from your sentence with no conversation. The fast path is native-only; see the **Fast path** section below.
+
 **Hand-edit refresh (both adapters):** If you edit a source story file directly outside the planning conversation, run `/flow:plan` again to pick up the changes. The planning flow calls the scan capability before presenting results, so re-running `/flow:plan` is the supported replacement for the retired `/flow:scan` command.
+
+# Fast path — one-shot authoring (`/flow:plan <feature>`)
+
+When the operator invokes this skill with a plain-language **feature description** as the argument, draft a single story from it directly — no planning conversation, no multi-story elicitation. This is the lean "propose one feature" seam (Epic 9, gate 1); it spawns a lean **author** subagent (distinct from the conversational planner) that produces exactly one draft.
+
+The drafted story is never auto-ready: it is written **parked not-ready** behind the readiness brake (Story 9.1). To grade and approve it, the operator runs `/flow:ready <ref>` (which runs the judge panel as part of approving). Nothing the fast path drafts can be built until it is graded and approved — that is the gate working.
+
+When a feature-description argument is present, run these steps and do NOT open the planning conversation below:
+
+1. **Identify the target repo root** (the current Claude Code workspace root) as `targetRepoRoot`.
+2. **Resolve the active adapter.** Call `getStatus({ targetRepoRoot })`. If the resolved `adapter` is **not** `native`, tell the operator that one-shot authoring is native-only and that BMad workspaces author via BMad's own skills (`/bmad-create-story`), then run bare `/flow:plan` (the conversation/BMad-pointer branch below) instead; stop the fast path. On a typed adapter-resolution error, surface it verbatim and stop.
+3. **Capture the feature description** from the argument. Do not constrain its form.
+4. **Build de-dup context.** Call `readBacklogInventory({ targetRepoRoot })` so the author subagent can avoid drafting a near-duplicate of an existing backlog item. Surface a typed error (e.g. a malformed manifest) verbatim and stop.
+5. **Spawn the author subagent** via Claude Code's `Task` tool: read `readCatalogue({ role: "author" })` and use its `Prompt` section verbatim as the system prompt, then append an `<initial-context>` block containing `targetRepoRoot` (resolved absolute path), the operator's `feature_description`, and the `backlog_inventory` array from step 4. The subagent runs the deterministic **validate-then-write** (`validatePlannerBacklog` for an early friendly check, then `writeNativeStory`, which enforces the discipline gate fail-closed and auto-materialises the draft into the backlog — no separate scan step). The skill is a thin orchestrator and never drafts the story itself.
+6. **Refuse-and-revise.** If the write tool refuses a draft, the subagent surfaces the specific violation codes and proposes a revised framing. Relay the codes and the revision offer; let the operator revise the framing and retry. Nothing is written until a draft passes. Never "fix" a violation by editing a manifest directly.
+7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report: the draft's **short handle** (first 8 chars of the ULID) alongside the full **ref**; that it is **not-ready** (parked behind the brake, not claimable until graded and approved); and the next step — run `/flow:ready <ref>` to grade and approve it. The draft is already in the backlog (materialisation is automatic). Approval happens in `/flow:ready`, never here: do not call `markStoryReady` from this skill.
 
 # Prerequisites
 
 A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first invocation by the workspace resolver — see `docs/README-install.md` checkpoint 5). If absent, the skill calls `getStatus` to trigger the resolver and surfaces any adapter-resolution error verbatim. At least one planning tool must be detectable (BMad stories root or a `.flow/native-stories/` directory) for the resolver to succeed without a config file.
 
 # Steps
+
+0. **Argument check (run first).** If the operator passed a plain-language feature description as the argument, run the **Fast path — one-shot authoring** section above instead of the steps below, and stop. Otherwise — no argument — open the full planning conversation below.
 
 1. **Identify the target repo root.** Use the current Claude Code workspace root as `targetRepoRoot`.
 
