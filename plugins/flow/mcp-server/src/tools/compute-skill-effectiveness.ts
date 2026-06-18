@@ -126,7 +126,7 @@ type PerSkillEffectiveness = z.infer<typeof PerSkillEffectivenessSchema>;
  * Reported on EVERY result (including the empty/zero-invocation cases, where it
  * is `"no-completed-flows"`).
  */
-export const SkillEffectivenessAttribution = z.enum([
+const SkillEffectivenessAttribution = z.enum([
   "no-completed-flows",
   "attributed",
 ]);
