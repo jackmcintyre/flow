@@ -430,7 +430,7 @@ describe("AC6 (user-surface) — un-hired-role error surface (Task 6.7)", () => 
 
     const expected = `flow:ask — role "${role}" is not hired in this repo.
 
-Run /flow:hire to hire a project-shaped team (interactive), or /flow:skip-hiring to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
+Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
 If you meant a different role id, run /flow:team to see your current roster.`;
 
@@ -453,7 +453,7 @@ If you meant a different role id, run /flow:team to see your current roster.`;
     // Byte-for-byte check: the three lines of the AC6 block are present verbatim.
     expect(errorText).toContain(`flow:ask — role "${role}" is not hired in this repo.`);
     expect(errorText).toContain(
-      "Run /flow:hire to hire a project-shaped team (interactive), or /flow:skip-hiring to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).",
+      "Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).",
     );
     expect(errorText).toContain(
       "If you meant a different role id, run /flow:team to see your current roster.",
@@ -654,11 +654,11 @@ describe("AC5 — skill self-consistency: skills/ask/SKILL.md (Task 6.10)", () =
     expect(stepsBody).toContain("You MUST NOT mutate canonical state.");
   });
 
-  it("(v) body contains /flow:ask, /flow:hire, /flow:skip-hiring, /flow:team cross-links", async () => {
+  it("(v) body contains /flow:ask, /flow:hire, /flow:hire default, /flow:team cross-links", async () => {
     const raw = await fs.readFile(SKILL_FILE, "utf8");
     expect(raw).toContain("/flow:ask");
     expect(raw).toContain("/flow:hire");
-    expect(raw).toContain("/flow:skip-hiring");
+    expect(raw).toContain("/flow:hire default");
     expect(raw).toContain("/flow:team");
   });
 

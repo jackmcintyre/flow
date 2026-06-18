@@ -398,7 +398,7 @@ describe("AC3(b) — empty-team fixture (Task 7.6)", () => {
     const expectedEmpty = [
       "flow team — 0 role(s)",
       "",
-      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:skip-hiring to hire the default roster.",
+      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:hire default to hire the default roster.",
     ].join("\n");
 
     expect(output).toBe(expectedEmpty);
@@ -861,11 +861,11 @@ describe("AC4 — skill self-consistency (Task 7.15)", () => {
     expect(stepsBody).toContain("getTeamSnapshot");
   });
 
-  it("(v) body contains /flow:team, /flow:hire, /flow:skip-hiring cross-links", () => {
+  it("(v) body contains /flow:team, /flow:hire, /flow:hire default cross-links", () => {
     const raw = require("fs").readFileSync(SKILL_FILE, "utf8");
     expect(raw).toContain("/flow:team");
     expect(raw).toContain("/flow:hire");
-    expect(raw).toContain("/flow:skip-hiring");
+    expect(raw).toContain("/flow:hire default");
   });
 });
 

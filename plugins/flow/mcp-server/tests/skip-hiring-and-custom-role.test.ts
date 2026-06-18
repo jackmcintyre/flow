@@ -177,8 +177,9 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// runSkipHiringFlow — in-process simulation of the /flow:skip-hiring
-// skill body (Task 5). Mirrors the contract in skills/skip-hiring/SKILL.md:
+// runSkipHiringFlow — in-process simulation of the `/flow:hire default`
+// fast path (formerly the /flow:skip-hiring skill). Mirrors the contract in
+// the "Fast path" section of skills/hire/SKILL.md:
 //   step 2 — refuse if any role subdir under team/ has a PERSONA.md
 //   step 3 — call instantiatePersona for the five default-roster roles
 //   step 4 — print the terminal line
@@ -648,16 +649,16 @@ describe("Story 2.5 AC4(e) — hiring-manager allowlist includes readCustomRole"
 });
 
 // ===========================================================================
-// AC4(f) — skip-hiring SKILL.md self-consistency
+// AC4(f) — hire SKILL.md fast-path self-consistency
+//
+// The standalone /flow:skip-hiring skill was retired; its default-roster
+// fast path was folded into /flow:hire as the `/flow:hire default` argument.
+// This block asserts the fast path lives in hire/SKILL.md and the retired
+// skill folder is gone.
 // ===========================================================================
-describe("Story 2.5 AC4(f) — skills/skip-hiring/SKILL.md self-consistency", () => {
-  it("frontmatter and required body sections are present in order", async () => {
-    const skillPath = path.join(
-      PLUGIN_ROOT,
-      "skills",
-      "skip-hiring",
-      "SKILL.md",
-    );
+describe("AC4(f) — skills/hire/SKILL.md fast-path self-consistency", () => {
+  it("frontmatter and the fast-path section are present", async () => {
+    const skillPath = path.join(PLUGIN_ROOT, "skills", "hire", "SKILL.md");
     const raw = await fs.readFile(skillPath, "utf8");
     const fmMatch = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(raw);
     expect(fmMatch).not.toBeNull();
@@ -666,28 +667,37 @@ describe("Story 2.5 AC4(f) — skills/skip-hiring/SKILL.md self-consistency", ()
       description: string;
       allowed_tools: string[];
     };
-    expect(fm.name).toBe("flow:skip-hiring");
-    // (ii) allowed_tools exactly ["Read"] — NO Task.
-    expect(fm.allowed_tools).toEqual(["Read"]);
+    expect(fm.name).toBe("flow:hire");
+    // The fast path calls instantiatePersona directly (no subagent), so the
+    // skill's own allowlist must include it.
+    expect(fm.allowed_tools).toContain("instantiatePersona");
 
     const body = fmMatch![2]!;
-    const required = [
-      "# What this skill does",
-      "# Prerequisites",
-      "# Steps",
-      "# Failure modes",
-    ];
-    let cursor = 0;
-    for (const heading of required) {
-      const idx = body.indexOf(heading, cursor);
-      expect(idx, `missing or out-of-order: ${heading}`).toBeGreaterThan(-1);
-      cursor = idx + heading.length;
+    // (i) a dedicated fast-path section exists, triggered by `default`.
+    expect(body).toContain("# Fast path");
+    expect(body).toContain("/flow:hire default");
+    // (ii) it hires the five default-roster roles.
+    for (const role of [
+      "planner",
+      "generalist-dev",
+      "generalist-reviewer",
+      "retro-analyst",
+      "orchestrator",
+    ]) {
+      expect(body).toContain(role);
     }
+    // (iii) the retired standalone command is no longer referenced.
+    expect(body).not.toContain("/flow:skip-hiring");
+  });
 
-    // (iv) body references /flow:skip-hiring at least once.
-    expect(body).toContain("/flow:skip-hiring");
-    // (v) body references /flow:hire at least once (cross-link).
-    expect(body).toContain("/flow:hire");
+  it("the retired skip-hiring skill folder is gone", () => {
+    const retiredPath = path.join(
+      PLUGIN_ROOT,
+      "skills",
+      "skip-hiring",
+      "SKILL.md",
+    );
+    expect(existsSync(retiredPath)).toBe(false);
   });
 });
 
