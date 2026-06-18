@@ -1,7 +1,7 @@
 ---
 name: flow:hire
-description: Open a hiring conversation — the hiring manager reads your repo and proposes a starting team.
-allowed_tools: [Read, Task]
+description: Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. Or `/flow:hire default` to hire the default roster instantly, no conversation.
+allowed_tools: [Read, Task, readPersona, instantiatePersona]
 ---
 
 # /flow:hire
@@ -10,12 +10,27 @@ allowed_tools: [Read, Task]
 
 Opens a project-shaped hiring conversation. The hiring-manager subagent reads your repo at a high level (language, top-level layout, README excerpt, recent commits, dependency manifests), proposes the default roster (`planner`, `generalist-dev`, `generalist-reviewer`, `retro-analyst`, `orchestrator`) plus any catalogue specialists justified by what it observed, and — after you approve — writes a persona file to `{target-repo}/team/{role}/PERSONA.md` for each agreed role. Re-running `/flow:hire` against an already-hired team surfaces the current roster and offers hire-one-more / view-persona / done actions.
 
+For a no-conversation shortcut, invoke `/flow:hire default` to hire the five default-roster roles directly — see the **Fast path** section below.
+
+# Fast path — `/flow:hire default`
+
+If the operator invokes this skill with the single argument `default` (also accept `skip` or `fast`), **skip the hiring conversation entirely** and hire the five default-roster roles directly — no hiring-manager subagent, no repo-signal read. This is the "I just want to try it" path; end-to-end in seconds against a fresh repo. For a project-shaped team with specialist additions justified by your repo, use plain `/flow:hire` instead.
+
+When the argument matches, run these steps and do NOT proceed to the interactive **Steps** section below:
+
+1. **Identify the target repo root** as `targetRepoRoot` (the current Claude Code workspace root). Do NOT call `getStatus` — fresh repos may not have `.flow/config.yaml` yet and the MCP tools used here (`readPersona`, `instantiatePersona`) take `targetRepoRoot` directly.
+2. **Refuse if a roster already exists.** List `{targetRepoRoot}/team/` (excluding `custom/` and `_archived/`). If ANY subdirectory contains `PERSONA.md`, print the literal line `Team already hired. Run /flow:hire to add more roles, or /flow:team to view the current roster.` and exit cleanly (exit code 0 — not a failure).
+3. **Hire the default roster.** For each role in `["planner", "generalist-dev", "generalist-reviewer", "retro-analyst", "orchestrator"]` IN THAT EXACT ORDER, call `instantiatePersona({ targetRepoRoot, role })`. On success, print `Hired: {role} → {result.path}`. On `PersonaAlreadyExistsError` (shouldn't happen after step 2's guard, but defend in depth), print `Already hired: {role} (no change).` and continue. On any other error, surface the error message verbatim and exit non-zero.
+4. **Terminal line.** After all five `instantiatePersona` calls complete, print `Default roster hired (5 roles). Run /flow:team to view, or /flow:hire to add more.` and exit cleanly.
+
 # Prerequisites
 
 - A target repo. `.flow/config.yaml` is **not** required — `/flow:hire` is explicitly designed to run on a fresh repo before any config exists.
 - The `hiring-manager` catalogue role and `permissions/hiring-manager.yaml` spec ship with the plugin; no operator setup beyond install.
 
 # Steps
+
+0. **Argument check (run first).** If the invocation argument is `default` (or `skip` / `fast`), run the **Fast path** section above instead of the steps below, and stop. Otherwise — no argument, or any other argument — continue with the interactive hiring conversation below.
 
 1. **Identify the target repo root.** Use the current Claude Code workspace root as `targetRepoRoot`. Do NOT call `getStatus` from inside this skill or its subagent — fresh repos won't have `.flow/config.yaml` yet and adapter resolution will fail. The hiring-manager subagent's allowlist (`readCatalogue`, `instantiatePersona`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`, `heartbeat`) is deliberately scoped to tools that do not require adapter resolution.
 2. **Detect existing roster (mode detection — MUST run BEFORE any proposal is drafted).** List directories under `{targetRepoRoot}/team/` (excluding `custom/` and `_archived/`). Each subdirectory whose name matches a catalogue role id and which contains a `PERSONA.md` file represents an already-hired role — i.e. look for `{targetRepoRoot}/team/{role}/PERSONA.md`. For each such entry, call `readPersona({ targetRepoRoot, role })` to collect `{ role, domain, hired_at }`. If the list is non-empty, the conversation enters RE-ENTRY mode and the subagent emits the re-entry block verbatim instead of a fresh-hire proposal; otherwise fresh-hire mode. The catalogue prompt is authoritative on this — do not draft a fresh-hire proposal until you have confirmed the team directory is missing or contains no `{role}/PERSONA.md` files. Additionally, list `{targetRepoRoot}/team/custom/` if it exists; for each `{role-id}.md` file, call `readCustomRole({ targetRepoRoot, role: {role-id} })` and pass the resulting `CatalogueRole` list to the subagent in the `<initial-context>` block under a new `<custom-roles>` child element. The subagent uses this list per the catalogue's "Custom-role discovery" subsection — both to surface custom roles in proposal / re-entry blocks AND to know which `add {role}` responses to resolve via `readCustomRole` vs `readCatalogue`.
@@ -29,6 +44,6 @@ Opens a project-shaped hiring conversation. The hiring-manager subagent reads yo
 - **Adapter-resolution error from any allowlisted tool:** none of the six allowlisted tools should require adapter resolution. A `NoAdapterMatchedError` from `readCatalogue` / `instantiatePersona` / `readPersona` / `lookupRoleByDomain` / `readRepoSignals` / `heartbeat` is a programming bug — surface the error in the reply for the operator to file, but do not abort the hire flow on its account.
 - **Catalogue read fails:** `CatalogueRoleNotFoundError` for `hiring-manager` is a plugin-install corruption case — check `plugins/flow/catalogue/hiring-manager.md` is present.
 - **`instantiatePersona` refuses with `PersonaAlreadyExistsError`:** the skill prints `Already hired: {role} (no change).` and continues with the remaining approved subset. Mid-conversation partial idempotency is acceptable.
-- **User declines all hires:** the skill exits cleanly with `No roles hired. Run /flow:hire again or /flow:skip-hiring to hire the default roster.`. Not a failure.
+- **User declines all hires:** the skill exits cleanly with `No roles hired. Run /flow:hire again or /flow:hire default to hire the default roster.`. Not a failure.
 - **Subagent invents a role outside the catalogue:** the catalogue prompt instructs the subagent to refuse; `readCatalogue` returns `CatalogueRoleNotFoundError` for an invented role and the subagent surfaces the manual escape hatch under `{target-repo}/team/custom/` (FR92).
 - **Custom-role file fails validation:** `readCustomRole` throws `CatalogueShapeError`. The skill surfaces the diagnostic verbatim as `Custom role file at {path} failed validation: {message}` and re-prompts. The operator fixes the file and re-runs `/flow:hire`. Not a skill-level failure.

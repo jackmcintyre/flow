@@ -56,7 +56,7 @@
  * Edge case: if `<targetRepoRoot>/team/<role>/PERSONA.md` does not exist,
  * `readPersona` throws `PersonaFileNotFoundError`. This tool propagates it
  * verbatim. The skill must surface it and stop — the operator MUST run
- * `/flow:hire` (or `/flow:skip-hiring`) before `/flow:start`.
+ * `/flow:hire` (or `/flow:hire default`) before `/flow:start`.
  *
  * The dev subagent's `permissions/generalist-dev.yaml` MUST NOT include
  * `buildPersonaSpawnPrompt` — the subagent does not assemble its own prompt;

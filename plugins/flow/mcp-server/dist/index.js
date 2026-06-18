@@ -52306,7 +52306,7 @@ function renderTeamSnapshot(snapshot) {
   lines.push("");
   if (roles.length === 0) {
     lines.push(
-      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:skip-hiring to hire the default roster."
+      "No hired roles found. Run /flow:hire to hire a project-shaped team, or /flow:hire default to hire the default roster."
     );
   } else {
     for (let i2 = 0; i2 < roles.length; i2++) {

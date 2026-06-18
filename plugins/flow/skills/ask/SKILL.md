@@ -17,11 +17,11 @@ This is a one-shot surface: one question, one response. For follow-up questions,
 **Canonical use case (FR76):** Ask the planner to translate a reviewer's verdict comment without breaking the dev loop.
 `/flow:ask planner "explain this reviewer verdict comment: ..."`
 
-If your team is not yet hired, run `/flow:hire` to go through the full hiring conversation, or `/flow:skip-hiring` to instantly hire the default roster. To see who is currently hired (including role ids), run `/flow:team`.
+If your team is not yet hired, run `/flow:hire` to go through the full hiring conversation, or `/flow:hire default` to instantly hire the default roster. To see who is currently hired (including role ids), run `/flow:team`.
 
 # Prerequisites
 
-A target repo with the specific `{role}` already hired — i.e. `{target-repo}/team/{role}/PERSONA.md` exists and parses. Created by `/flow:hire` or `/flow:skip-hiring`.
+A target repo with the specific `{role}` already hired — i.e. `{target-repo}/team/{role}/PERSONA.md` exists and parses. Created by `/flow:hire` or `/flow:hire default`.
 
 `.flow/config.yaml` is NOT required. The skill takes `targetRepoRoot` directly; the adapter is not consulted.
 
@@ -36,7 +36,7 @@ A target repo with the specific `{role}` already hired — i.e. `{target-repo}/t
      ```
      flow:ask — role "{role}" is not hired in this repo.
 
-     Run /flow:hire to hire a project-shaped team (interactive), or /flow:skip-hiring to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
+     Run /flow:hire to hire a project-shaped team (interactive), or /flow:hire default to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
      If you meant a different role id, run /flow:team to see your current roster.
      ```
@@ -74,7 +74,7 @@ A target repo with the specific `{role}` already hired — i.e. `{target-repo}/t
 
 # Failure modes
 
-- **Role not hired:** the skill prints the error block from Step 3 and exits. Run `/flow:hire` to hire interactively, or `/flow:skip-hiring` to hire the default roster.
+- **Role not hired:** the skill prints the error block from Step 3 and exits. Run `/flow:hire` to hire interactively, or `/flow:hire default` to hire the default roster.
 - **Persona file malformed:** the skill prints a diagnostic naming the path and the Zod issue, and exits. Open the persona file directly (it is plain Markdown per NFR25) and fix the malformation; `git revert {persona-path}` is the bail-out.
 - **Empty `{question}`:** the skill prints the usage line and exits. Re-invoke with a quoted question.
 - **The asked role yields to a different role (locked-phrase yield in its reply):** the yield (`This sits in {role}'s domain — handing off.`) is surfaced as plain text in the printed reply. `/flow:ask` does NOT chain — the operator decides whether to re-invoke `/flow:ask` against the yielded-to role.

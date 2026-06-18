@@ -106,8 +106,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    | Skill | Description |
    |---|---|
    | `/flow:status` | Print the current plugin version, target repo, adapter, and standards-doc state. |
-   | `/flow:hire` | Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. |
-   | `/flow:skip-hiring` | Hire the default five-role roster directly without an interactive proposal. |
+   | `/flow:hire` | Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. Or `/flow:hire default` to hire the default five-role roster directly, no interactive proposal. |
    | `/flow:plan` | Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills. Stories are materialised into the backlog automatically — no separate scan command needed. |
    | `/flow:team` | Print a one-shot snapshot of your hired team — roles, domains, recent knowledge entries, fire counts. |
    | `/flow:ask` | Open a non-mutating side-session with a hired role — ask one question, get one answer. |

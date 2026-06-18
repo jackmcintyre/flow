@@ -217,7 +217,7 @@ async function runHireFlow(opts: {
   // Fresh-hire mode (AC1–AC3).
   if (opts.response === "decline") {
     confirmations.push(
-      "No roles hired. Run /flow:hire again or /flow:skip-hiring to hire the default roster.",
+      "No roles hired. Run /flow:hire again or /flow:hire default to hire the default roster.",
     );
     return {
       signals,
@@ -542,7 +542,7 @@ describe("Story 2.4 AC3 — decline path", () => {
     expect(result.instantiateCalls.length).toBe(0);
     expect(existsSync(path.join(tmp, "team"))).toBe(false);
     expect(result.confirmations).toContain(
-      "No roles hired. Run /flow:hire again or /flow:skip-hiring to hire the default roster.",
+      "No roles hired. Run /flow:hire again or /flow:hire default to hire the default roster.",
     );
 
     spy.mockRestore();
@@ -670,7 +670,15 @@ describe("Story 2.4 Task 7.10 — skills/hire/SKILL.md self-consistency", () => 
       allowed_tools: string[];
     };
     expect(fm.name).toBe("flow:hire");
-    expect(fm.allowed_tools).toEqual(["Read", "Task"]);
+    // Read + Task drive the interactive conversation; readPersona +
+    // instantiatePersona drive the `/flow:hire default` fast path (formerly
+    // the standalone /flow:skip-hiring skill).
+    expect(fm.allowed_tools).toEqual([
+      "Read",
+      "Task",
+      "readPersona",
+      "instantiatePersona",
+    ]);
 
     // Body sections in order.
     const body = fmMatch![2]!;
