@@ -629,7 +629,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("recordMaintainerFeedback");
       // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review). 55 → 56.
       expect(toolNames).toContain("reviewMaintainerInbox");
-      expect(toolNames.length).toBe(56);
+      // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback. 56 → 57.
+      expect(toolNames).toContain("dismissMaintainerFeedback");
+      expect(toolNames.length).toBe(57);
     } finally {
       await client.close();
       await server.close();

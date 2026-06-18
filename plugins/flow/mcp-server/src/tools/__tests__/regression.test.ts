@@ -190,6 +190,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot"],
   },
+  dismissMaintainerFeedback: {
+    required: ["targetRepoRoot", "id"],
+    properties: ["targetRepoRoot", "id"],
+  },
   recordReviewerLesson: {
     required: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],
     properties: ["targetRepoRoot", "sessionUlid", "ref", "lesson"],

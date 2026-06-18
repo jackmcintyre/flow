@@ -39,6 +39,7 @@
   "recordAgentFriction",
   "recordMaintainerFeedback",
   "reviewMaintainerInbox",
+  "dismissMaintainerFeedback",
   "recordReviewerLesson",
   "recordSkillInvoke",
   "recordStoryRetro",

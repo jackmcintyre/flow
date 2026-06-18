@@ -61,6 +61,7 @@ import { adjudicateQualityLead } from "./tools/quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./tools/record-agent-friction.js";
 import { recordMaintainerFeedback } from "./tools/record-maintainer-feedback.js";
 import { reviewMaintainerInbox } from "./tools/review-maintainer-inbox.js";
+import { dismissMaintainerFeedback } from "./tools/dismiss-maintainer-feedback.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
@@ -154,6 +155,12 @@ const TOOLS: Record<string, ToolFn> = {
   // MCP session.
   //   node dist/cli.js reviewMaintainerInbox --json '{"targetRepoRoot":"..."}'
   reviewMaintainerInbox,
+  // Story native:01KVDXX (surface-maintainer-findings-in-run) — dismissMaintainerFeedback:
+  // archive one inbox item by id so it stops re-surfacing in the /flow:run closing summary.
+  // Idempotent no-op on a missing/already-dismissed id; throws on a malformed id. Exposed on
+  // the no-MCP run path so the run skill can dismiss without a persistent MCP session.
+  //   node dist/cli.js dismissMaintainerFeedback --json '{"targetRepoRoot":"...","id":"..."}'
+  dismissMaintainerFeedback,
   // Story native:01KT2Q51E24XKMM4YEF0ADRKNG — read-only lens→role resolver (FU2).
   // Callable on the no-MCP run/gate path: node dist/cli.js resolveLensRoles --json
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js

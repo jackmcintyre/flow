@@ -645,7 +645,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
     // Story native:01KT7S0E2 removed bmadToNativeIngest (auditor-confirmed orphan) = 54 total.
     // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture) = 55 total.
     // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review) = 56 total.
-    expect(result.tools.length).toBe(56);
+    // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback (dismiss inbox finding) = 57 total.
+    expect(result.tools.length).toBe(57);
 
     await client.close();
     await server.close();

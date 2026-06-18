@@ -2490,6 +2490,30 @@ export class MalformedMaintainerFeedbackError extends DomainError {
   }
 }
 
+/**
+ * `dismissMaintainerFeedback` was called with an `id` that is not a 26-char
+ * Crockford base32 ULID. The dismiss tool refuses garbage input loudly rather
+ * than silently treating it as a no-op, so a typo'd id surfaces as an error
+ * instead of looking like "nothing to dismiss".
+ *
+ * Mirrors `MalformedMaintainerFeedbackError`'s shape (typed, names the offending
+ * value and the schema module).
+ *
+ * Story native:01KVDXX (surface-maintainer-findings-in-run).
+ */
+export class InvalidMaintainerFeedbackIdError extends DomainError {
+  readonly id: string;
+
+  constructor(opts: { id: string }) {
+    super(
+      `dismissMaintainerFeedback refused: id '${opts.id}' is not a 26-char ` +
+        `Crockford base32 ULID. See mcp-server/src/schemas/maintainer-feedback.ts ` +
+        `for the canonical id shape.`,
+    );
+    this.id = opts.id;
+  }
+}
+
 export class NotAnEligibleDraftError extends DomainError {
   readonly ref: string;
   readonly foundState: string | null;
