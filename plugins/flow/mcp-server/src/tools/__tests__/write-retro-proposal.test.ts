@@ -1110,7 +1110,7 @@ describe("renderRetroRecommendationsBlock — AC1 (integration): pending recomme
     expect(block).toContain("[team-change]");
     expect(block).toContain("Security patterns keep surfacing.");
     // Pointer to the review step
-    expect(block).toContain("/flow:accept-proposal");
+    expect(block).toContain("/flow:retro");
   });
 
   it("uses singular 'change' when exactly 1 proposal is pending", () => {
@@ -1124,7 +1124,7 @@ describe("renderRetroRecommendationsBlock — AC1 (integration): pending recomme
     expect(block).not.toContain("changes");
     expect(block).toContain("[persona-append]");
     expect(block).toContain("One lesson to absorb.");
-    expect(block).toContain("/flow:accept-proposal");
+    expect(block).toContain("/flow:retro");
   });
 
   it("preserves ordering: proposals appear in the same order they are passed in", () => {
@@ -1153,7 +1153,7 @@ describe("renderRetroRecommendationsBlock — AC2 (unit): zero-pending case emit
     // No list items — no numbering, no bracket notation
     expect(block).not.toMatch(/\d+\.\s+\[/);
     // No pointer to accept-proposal (nothing to act on)
-    expect(block).not.toContain("/flow:accept-proposal");
+    expect(block).not.toContain("/flow:retro");
   });
 
   it("mentions automatic application in the nothing-to-review line", () => {
@@ -1247,7 +1247,7 @@ describe("renderRetroRecommendationsBlock — integration with summariseRetroPro
     // The auto-absorbed proposal must NOT appear in the output
     expect(block).not.toContain("This one was auto-absorbed.");
     // Pointer to accept-proposal
-    expect(block).toContain("/flow:accept-proposal");
+    expect(block).toContain("/flow:retro");
   });
 
   it("when all proposals are auto-absorbed, the block is the nothing-to-review line", async () => {
@@ -1281,7 +1281,7 @@ describe("renderRetroRecommendationsBlock — integration with summariseRetroPro
 
     // AC2: single clean nothing-to-review line, no list, no accept-proposal pointer
     expect(block).toContain("nothing to review");
-    expect(block).not.toContain("/flow:accept-proposal");
+    expect(block).not.toContain("/flow:retro");
     expect(block).not.toMatch(/\d+\.\s+\[/);
   });
 });

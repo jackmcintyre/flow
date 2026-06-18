@@ -21,7 +21,7 @@
  * **Two-phase, deterministic seam.** A subagent/CLI cannot hold an interactive
  * prompt, so the confirm gate is two tool calls, not a blocking prompt — the
  * load-bearing decision lives in the tool layer, not skill prose. The
- * `/flow:accept-proposal` skill orchestrates: preview → show diff → ask the
+ * `/flow:retro` skill orchestrates this (step 7c): preview → show diff → ask the
  * operator → on an explicit yes, call again with `confirm: true`. A declined
  * apply is simply "the operator never makes the confirm call" — nothing
  * changed, fully re-runnable.

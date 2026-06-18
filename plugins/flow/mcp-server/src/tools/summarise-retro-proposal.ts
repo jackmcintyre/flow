@@ -66,7 +66,17 @@ export interface RetroProposalSummary {
    */
   noProposals: boolean;
   /** Per-proposal summary entries (empty array when `noProposals` is true). */
-  proposals: Array<{ type: RetroProposal["type"]; rationale: string; id: string }>;
+  proposals: Array<{
+    type: RetroProposal["type"];
+    rationale: string;
+    id: string;
+    /**
+     * True when the proposal already carries an `applied` block (applied via
+     * the accept gate or auto-absorb). Lets the retro skill filter the
+     * un-applied (pending) proposals worth surfacing for review.
+     */
+    applied: boolean;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +117,7 @@ export async function summariseRetroProposal(opts: {
     type: p.type,
     rationale: p.rationale,
     id: p.id,
+    applied: p.applied !== undefined,
   }));
 
   return {
@@ -139,7 +150,7 @@ export interface PendingProposalEntry {
  *
  * **AC1 path (pending > 0):** returns a multi-line block naming N pending
  * recommendation(s) — each with its kind and rationale — plus a pointer to
- * the `/flow:accept-proposal` review step.
+ * the `/flow:retro` review-and-apply step.
  *
  * **AC2 path (pending === 0):** returns a single clean "nothing to review"
  * line with no list and no extra noise.
@@ -163,7 +174,7 @@ export function renderRetroRecommendationsBlock(
     .map((p, i) => `  ${i + 1}. [${p.type}] ${p.rationale}`)
     .join("\n");
   const footer =
-    "Run `/flow:accept-proposal` to review and apply each recommendation.";
+    "Run `/flow:retro` to review and apply each recommendation.";
 
   return `${header}\n${items}\n${footer}`;
 }
