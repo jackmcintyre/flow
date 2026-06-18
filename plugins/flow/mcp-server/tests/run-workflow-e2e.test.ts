@@ -50,8 +50,8 @@ import { createSmokeScratchRepo } from "../src/tools/create-smoke-scratch-repo.j
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// tests/ → mcp-server → plugins/flow → workflows/
-const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+// tests/ → mcp-server → plugins/flow → workflows/internal/
+const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "internal", "run.workflow.js");
 // tests/ → mcp-server → dist/cli.js
 const CLI = resolve(HERE, "..", "dist", "cli.js");
 

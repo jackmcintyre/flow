@@ -1,7 +1,7 @@
 /**
  * `runPhaseStart` / `runPhaseDone` CLI tools — Story 8.18.
  *
- * The run workflow (`plugins/flow/workflows/run.workflow.js`) brackets each
+ * The run workflow (`plugins/flow/workflows/internal/run.workflow.js`) brackets each
  * major per-story phase (dev-build, review, gate) with an operator-facing
  * progress line: a `start` line as it enters the phase and a `done` line —
  * carrying the elapsed wall-clock time — as it leaves. These are emitted

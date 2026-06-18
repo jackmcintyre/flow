@@ -51,13 +51,13 @@ import {
 // ---------------------------------------------------------------------------
 
 // This file: plugins/flow/mcp-server/src/__tests__/gate-1-verifiability-pinnability.test.ts
-// gate-1.workflow.js: plugins/flow/workflows/gate-1.workflow.js
+// gate-1.workflow.js: plugins/flow/workflows/internal/gate-1.workflow.js
 // rubric: _bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(THIS_DIR, "..", "..", ".."); // plugins/flow
 const REPO_ROOT = path.resolve(PLUGIN_ROOT, "..", ".."); // project root
 
-const GATE1_WORKFLOW_PATH = path.join(PLUGIN_ROOT, "workflows", "gate-1.workflow.js");
+const GATE1_WORKFLOW_PATH = path.join(PLUGIN_ROOT, "workflows", "internal", "gate-1.workflow.js");
 const RUBRIC_PATH = path.join(
   REPO_ROOT,
   "_bmad-output",

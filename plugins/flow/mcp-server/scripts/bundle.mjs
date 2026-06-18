@@ -18,7 +18,7 @@
  * `assert-bundle`). See memory `plugin-not-bundled-install-broken`.
  *
  * Outputs overwrite the tsc stubs at the SAME paths that
- * `.claude-plugin/plugin.json#mcpServers` and `workflows/run.workflow.js`
+ * `.claude-plugin/plugin.json#mcpServers` and `workflows/internal/run.workflow.js`
  * already reference, so no caller path changes. Wired into `pnpm build` after
  * `tsc` + `normalise-dist`.
  *

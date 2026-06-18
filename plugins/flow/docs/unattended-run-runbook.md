@@ -5,7 +5,7 @@
 > invocation from the workflow source each time.
 
 This runbook walks the end-to-end operator flow for the `flow-run` workflow
-(`plugins/flow/workflows/run.workflow.js`). For each story the run claims the
+(`plugins/flow/workflows/internal/run.workflow.js`). For each story the run claims the
 next ready story, runs the generalist-dev to implement it and open a PR, runs the
 reviewer, derives a verdict, and runs the auto-merge gate. It does this entirely
 through one-shot CLI seams, so no persistent MCP server sits on the run path.
@@ -83,12 +83,12 @@ The workflow `args` are delivered as a JSON string. A typical launch passes:
 >
 > When you point the Workflow tool at the run script, the `scriptPath` you
 > pass **must be an absolute path** (e.g.
-> `/Users/you/projects/crew/plugins/flow/workflows/run.workflow.js`).
+> `/Users/you/projects/crew/plugins/flow/workflows/internal/run.workflow.js`).
 >
 > A **relative** path is resolved against the plugin directory, which **doubles
 > the prefix** — the runtime looks for the script under the plugin dir *plus*
 > your relative path and fails to find it. Always pass the fully-qualified
-> absolute path to `run.workflow.js`.
+> absolute path to `workflows/internal/run.workflow.js`.
 
 The `cli` arg above has the same constraint for the same reason: it is an
 absolute path to `mcp-server/dist/cli.js`, never a relative one.

@@ -373,7 +373,7 @@ describe("builder-lesson AC3 — reviewer and builder lessons both appear on the
 
 describe("builder-lesson AC4 — run workflow wires the capture+forward seams in order", () => {
   const HERE = path.dirname(fileURLToPath(import.meta.url));
-  const RUN = path.resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+  const RUN = path.resolve(HERE, "..", "..", "workflows", "internal", "run.workflow.js");
 
   it("invites recordDevLesson in the dev prompt (optional, fail-soft)", async () => {
     const src = await fs.readFile(RUN, "utf8");

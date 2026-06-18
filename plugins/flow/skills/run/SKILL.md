@@ -80,7 +80,7 @@ Build the `args` JSON object (omit optional fields the operator did not supply):
 
 Invoke the `Workflow` tool with:
 
-- **`scriptPath`**: `<CLAUDE_PLUGIN_ROOT>/workflows/run.workflow.js` (absolute — a relative path will double-resolve and fail)
+- **`scriptPath`**: `<CLAUDE_PLUGIN_ROOT>/workflows/internal/run.workflow.js` (absolute — a relative path will double-resolve and fail)
 - **`args`**: the JSON string above
 
 > The `scriptPath` **must** be absolute. A relative path is resolved against the plugin directory at runtime, doubling the prefix and failing to find the script.

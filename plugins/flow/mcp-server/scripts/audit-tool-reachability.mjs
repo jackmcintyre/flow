@@ -39,7 +39,7 @@ const PLUGIN_ROOT = resolve(MCP_SERVER_ROOT, "..");
 const REGISTER_TS = resolve(MCP_SERVER_ROOT, "src/tools/register.ts");
 const CLI_TS = resolve(MCP_SERVER_ROOT, "src/cli.ts");
 const SKILLS_DIR = resolve(PLUGIN_ROOT, "skills");
-const WORKFLOWS_DIR = resolve(PLUGIN_ROOT, "workflows");
+const WORKFLOWS_DIR = resolve(PLUGIN_ROOT, "workflows", "internal");
 
 // ---------------------------------------------------------------------------
 // Dynamic-tool allowlist — tool names built at runtime that are legitimately

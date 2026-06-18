@@ -31,7 +31,7 @@ import { execa } from "execa";
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "run.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "..", "..", "workflows", "internal", "run.workflow.js");
 const CLI = resolve(HERE, "..", "dist", "cli.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (

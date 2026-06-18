@@ -47,7 +47,7 @@ import { runPhaseStart, runPhaseDone } from "../run-phase-progress.js";
 // ── Locate the real workflow source ────────────────────────────────────────
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/tools/__tests__ → up to mcp-server → up to plugins/flow → workflows/.
-const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/run.workflow.js");
+const WORKFLOW_PATH = resolve(HERE, "../../../../workflows/internal/run.workflow.js");
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]

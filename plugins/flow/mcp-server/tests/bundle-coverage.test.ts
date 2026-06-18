@@ -42,7 +42,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_ROOT = resolve(HERE, "..");
 const PLUGIN_ROOT = resolve(SERVER_ROOT, "..");
 const SRC_DIR = resolve(SERVER_ROOT, "src");
-const WORKFLOWS_DIR = resolve(PLUGIN_ROOT, "workflows");
+const WORKFLOWS_DIR = resolve(PLUGIN_ROOT, "workflows", "internal");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,11 +89,11 @@ async function enumerateSourceFiles(): Promise<string[]> {
 }
 
 /**
- * Build the workflow-only reachable set by scanning `plugins/flow/workflows/*.js`
+ * Build the workflow-only reachable set by scanning `plugins/flow/workflows/internal/*.js`
  * for relative imports that resolve into `src/`.
  *
- * In practice the current workflow files (`run.workflow.js`,
- * `gate-1.workflow.js`) do NOT import directly from src/ — they only call CLI
+ * In practice the current workflow files (`internal/run.workflow.js`,
+ * `internal/gate-1.workflow.js`) do NOT import directly from src/ — they only call CLI
  * seams via `node ${CLI} <tool>`. The allowlist is empty today, but this
  * infrastructure ensures future workflows that do import from src/ are
  * automatically excluded from the not-shipped list (AC2).
@@ -315,7 +315,7 @@ describe("bundle coverage (Story native:01KT7RVAKC56AZ6WP5XAD583AJ)", () => {
     });
 
     it("current workflow files (run + gate-1) do not produce any workflow-only reachable entries", () => {
-      // The actual run.workflow.js and gate-1.workflow.js use CLI seams and
+      // The actual internal/run.workflow.js and internal/gate-1.workflow.js use CLI seams and
       // do not import directly from src/. The workflow-reachable set is empty.
       expect(workflowReachable.size).toBe(0);
     });
