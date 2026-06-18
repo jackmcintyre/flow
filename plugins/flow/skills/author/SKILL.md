@@ -46,7 +46,7 @@ A target repo with `.flow/config.yaml` resolved to a **`native`** adapter. (The 
 7. **Report the draft.** When the subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, report to the operator:
    - the draft's **short handle** (first 8 characters of the ULID for native refs) alongside the full **ref** — e.g. `[01KT1NR9] native:01KT1NR9F6133VHY601SF3BD5N`. Display the short handle as the primary identifier; include the full ref for completeness.
    - that it is **not-ready** (parked in the backlog behind the readiness brake — not claimable until judged and approved),
-   - the next step: run `/flow:ready` to approve it once it has been judged. The draft is already in the backlog (materialisation is automatic — no `/flow:scan` is needed). `/flow:scan` remains available to re-sync if the story file is edited directly afterwards.
+   - the next step: run `/flow:ready` to approve it once it has been judged. The draft is already in the backlog (materialisation is automatic — no separate scan step is needed). To re-sync if you edit the story file directly afterwards, run `/flow:plan`.
 
 8. **Inline approval prompt.** If a judge panel grade has been surfaced for the newly drafted story (i.e., `/flow:judge` was run in this same session and its verdict is visible in the conversation), immediately present the grade summary to the operator and ask a single yes/no question before the skill exits:
 
@@ -63,5 +63,5 @@ Never write to a story file or a manifest directly, never edit `.flow/state/**` 
 
 - **Wrong adapter:** `getStatus` resolves a non-native adapter. `/flow:author` is native-only; point the operator at `/flow:plan`.
 - **The draft violates a discipline rule:** `writeNativeStory` throws `DisciplineViolationError` carrying the violation codes (e.g. `missing-integration-ac`) and writes nothing. This is the refuse-and-revise path (step 6) — surface the codes, revise the framing, retry. It is the gate working, not a tool failure.
-- **A backlog manifest is malformed:** `readBacklogInventory` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:scan`) and retry.
+- **A backlog manifest is malformed:** `readBacklogInventory` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:plan` to re-materialise) and retry.
 - **No adapter / fresh repo:** `getStatus` surfaces `NoAdapterMatchedError`. Suggest `/flow:hire` to initialise the team and create the `.flow/native-stories/` directory first.

@@ -279,7 +279,7 @@ describe("AC4(e) — BMad edit-pending: planner prompt encodes the refusal strin
   it("planner.md contains the edit-pending BMad refusal string", async () => {
     const raw = await fs.readFile(PLANNER_MD, "utf8");
     expect(raw).toContain(
-      '"Edit-pending is native-only in v1. Edit the source story in <adapter-name> and run /flow:scan."',
+      '"Edit-pending is native-only in v1. Edit the source story in <adapter-name> and run /flow:plan to materialise the changes."',
     );
   });
 });

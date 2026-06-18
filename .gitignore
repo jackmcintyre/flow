@@ -4,13 +4,19 @@ coverage/
 *.log
 .DS_Store
 .sprint-orchestrator/
-.flow/
-.flow
-# Exception: the native adapter's test fixtures contain a fake `.flow/` tree
-# (committed test data, not a local backlog). Without this negation, `git add`
-# of a modified fixture under `.flow/` errors on the ignore rule.
-!plugins/flow/mcp-server/src/adapters/native/fixtures/**/.flow/
-!plugins/flow/mcp-server/src/adapters/native/fixtures/**/.flow/**
+# .flow runtime state — project-specific, not source.
+# We ignore all content but track the empty state-directory scaffolding
+# (.flow/state/to-do/ and .flow/state/in-progress/) via .gitkeep so that
+# fresh review worktrees have the expected directory structure for AC checks.
+.flow/*
+!.flow/state/
+.flow/state/*
+!.flow/state/to-do/
+!.flow/state/in-progress/
+.flow/state/to-do/*
+.flow/state/in-progress/*
+!.flow/state/to-do/.gitkeep
+!.flow/state/in-progress/.gitkeep
 __pycache__/
 *.pyc
 

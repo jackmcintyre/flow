@@ -108,8 +108,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    | `/flow:status` | Print the current plugin version, target repo, adapter, and standards-doc state. |
    | `/flow:hire` | Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. |
    | `/flow:skip-hiring` | Hire the default five-role roster directly without an interactive proposal. |
-   | `/flow:plan` | Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills. |
-   | `/flow:scan` | Scan the active adapter's source stories into `.flow/state/to-do/` execution manifests. Idempotent. |
+   | `/flow:plan` | Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills. Stories are materialised into the backlog automatically — no separate scan command needed. |
    | `/flow:team` | Print a one-shot snapshot of your hired team — roles, domains, recent knowledge entries, fire counts. |
    | `/flow:ask` | Open a non-mutating side-session with a hired role — ask one question, get one answer. |
 
@@ -142,15 +141,15 @@ Story 3.5 introduced automatic planning-discipline validation at two points in t
 - `missing-ship-gate` — no story in the backlog is flagged as the release gate. Fix: designate one story (`ship_gate: true`) or author a dedicated ship-gate story that `depends_on` every other story.
 - `state-mutating-without-integration-ac` — scan-time mirror of `missing-integration-ac` (forward-compat).
 
-**At scan time (`/flow:scan` — BMad and native adapters):** If a source story violates a discipline rule, `scan-sources` writes its manifest to `.flow/state/blocked/<ref>.yaml` (not `to-do/`) with `status: blocked`, `blocked_by: planning-discipline`, and a `discipline_violations:` block naming the rule. The `/flow:scan` output prints a `blocked:` line naming the affected refs.
+**At materialise time (on exit from `/flow:plan`, or automatically via `writeNativeStory` on the native adapter):** If a source story violates a discipline rule, `scan-sources` writes its manifest to `.flow/state/blocked/<ref>.yaml` (not `to-do/`) with `status: blocked`, `blocked_by: planning-discipline`, and a `discipline_violations:` block naming the rule. The materialise output prints a `blocked:` line naming the affected refs.
 
-**Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/flow:scan`. The next scan detects the changed `source_hash` and re-evaluates the story against the discipline rules. If it now passes, the blocked manifest is deleted and a new `to-do/` manifest is written automatically — the story is promoted and ready for the dev loop to claim. If the story is still violating, the blocked manifest is rewritten with the updated hash and latest violations. If the source is unchanged since the last scan, the blocked manifest is left untouched (no spurious mtime updates).
+**Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/flow:plan`. The next materialise pass detects the changed `source_hash` and re-evaluates the story against the discipline rules. If it now passes, the blocked manifest is deleted and a new `to-do/` manifest is written automatically — the story is promoted and ready for the dev loop to claim. If the story is still violating, the blocked manifest is rewritten with the updated hash and latest violations. If the source is unchanged since the last materialise, the blocked manifest is left untouched (no spurious mtime updates).
 
 ## Discarding a feature (FR78)
 
 Story 3.6 introduces a first-class discard flow accessible from `/flow:plan` on its second and subsequent invocations (re-open mode). Two branches:
 
-**Native adapter — revert/deprecate story:** When you choose `discard` against a `native:<ULID>` ref, the planner authors a new story with the title prefix `revert/deprecate: ` followed by the original story's title. This new story enters the backlog as a fresh `to-do/` manifest on the next `/flow:scan`. The original native story file and its execution manifest are never deleted — they remain on disk for traceability.
+**Native adapter — revert/deprecate story:** When you choose `discard` against a `native:<ULID>` ref, the planner authors a new story with the title prefix `revert/deprecate: ` followed by the original story's title. This new story is materialised into the backlog automatically when written (via `writeNativeStory`). The original native story file and its execution manifest are never deleted — they remain on disk for traceability.
 
 **External-adapter (BMad) — manifest withdrawal:** When you choose `discard` against a `bmad:<source-id>` ref (or any non-native ref), the plugin calls the `markWithdrawn` MCP tool, which flips `withdrawn: true` in the execution manifest in-place (same state directory, same filename). The plugin then surfaces a reminder: `"Manifest marked withdrawn. Close the source story in <adapter-name> manually — the plugin cannot edit the source tool's tree."` Closing the source story in BMad (or whichever external tool owns it) is your responsibility.
 
@@ -173,7 +172,7 @@ You can open any execution manifest in a text editor and change it directly. Thi
 | `depends_on` | The list of refs this story must come after. |
 | `withdrawn` | Set `true` to manually withdraw the story from the backlog. |
 
-**What happens on the next `/flow:scan`:** If the source story's content has not changed since the last scan, your edited values are preserved — `scan-sources` detects no change to the source hash and leaves the manifest untouched. If the source story's content has changed (its fingerprint differs), `scan-sources` rewrites only the `source_hash` and `source_path` fields; your edits to `title`, `narrative`, `acceptance_criteria`, `implementation_notes`, `depends_on`, and `withdrawn` are preserved.
+**What happens on the next materialise pass (via `/flow:plan`):** If the source story's content has not changed since the last scan, your edited values are preserved — `scan-sources` detects no change to the source hash and leaves the manifest untouched. If the source story's content has changed (its fingerprint differs), `scan-sources` rewrites only the `source_hash` and `source_path` fields; your edits to `title`, `narrative`, `acceptance_criteria`, `implementation_notes`, `depends_on`, and `withdrawn` are preserved.
 
 **Schema-violating edits:** If your edit produces invalid YAML (for example, you remove the `title` field, which is required), the next plugin skill invocation that reads the manifest will surface a `MalformedExecutionManifestError` with the path to the offending field. Fix the YAML in your editor and re-run the skill.
 

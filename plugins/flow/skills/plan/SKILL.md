@@ -1,14 +1,16 @@
 ---
 name: flow:plan
-description: "Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills."
-allowed_tools: [Task, readBacklogInventory, getStatus, markStoryReady]
+description: "Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills and materialise the backlog automatically."
+allowed_tools: [Task, readBacklogInventory, getStatus, markStoryReady, scanSources]
 ---
 
 # /flow:plan
 
 # What this skill does
 
-Opens a planning conversation. For `adapter: native` repos, this skill spawns the planner subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/flow/catalogue/planner.md`; the subagent drives the conversation and writes ULID-named story files under `<target-repo>/.flow/native-stories/`. For `adapter: bmad` repos, this skill points you at BMad's authoring skills (`/bmad-create-story`, `/bmad-edit-prd`) and offers a follow-up `/flow:scan` pass to materialise newly authored stories into execution manifests.
+Opens a planning conversation. For `adapter: native` repos, this skill spawns the planner subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/flow/catalogue/planner.md`; the subagent drives the conversation and writes ULID-named story files under `<target-repo>/.flow/native-stories/` — each story is materialised into the backlog automatically by `writeNativeStory` as it is written, with no separate scan step required. For `adapter: bmad` repos, this skill points you at BMad's authoring skills (`/bmad-create-story`, `/bmad-edit-prd`) and automatically materialises newly authored stories into execution manifests on exit — no separate scan command is needed.
+
+**Hand-edit refresh (both adapters):** If you edit a source story file directly outside the planning conversation, run `/flow:plan` again to pick up the changes. The planning flow calls the scan capability before presenting results, so re-running `/flow:plan` is the supported replacement for the retired `/flow:scan` command.
 
 # Prerequisites
 
@@ -35,7 +37,7 @@ A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first inv
        - `existing_manifests`: a JSON array of refs already under `<targetRepoRoot>/.flow/state/to-do/` (kept for Story 3.4 backward compatibility).
    - The planner subagent runs the planning conversation (four-step loop on first-run or action-menu on re-open) and calls `writeNativeStory` / `markWithdrawn` for each approved action. The skill is a thin orchestrator — do not duplicate the subagent's conversational logic.
    - **The four-step planning loop (`mode === "first-run"` or when operator chooses `add` from the re-open action menu).** The subagent drives this loop; the skill does not branch on the action choice.
-   - **Exit condition (native branch):** the planner subagent emits the catalogue's terminal locked phrase: `Handoff to generalist-dev — story <story-id> ready to claim`. When that phrase appears, the skill presents the inline approval prompt (see below) for each newly drafted story that has a judge panel grade available in the current session, then exits and offers the operator a follow-up `/flow:scan` to materialise the new stories.
+   - **Exit condition (native branch):** the planner subagent emits the catalogue's terminal locked phrase: `Handoff to generalist-dev — story <story-id> ready to claim`. When that phrase appears, the skill presents the inline approval prompt (see below) for each newly drafted story that has a judge panel grade available in the current session, then exits. Stories are already materialised in the backlog — `writeNativeStory` calls the scan capability internally on each write, so no separate scan step is needed. If you have hand-edited a source story file directly, re-run `/flow:plan` to pick up the changes.
    - **Inline approval prompt (native branch only):** For each drafted story whose judge panel grade is visible in the current session, after the planner subagent's handoff phrase, present the grade summary and ask the operator a single yes/no question before the skill exits:
 
      > Grade: [pass/fail summary per lens]. Approve story [short-handle] for building now? (yes / no)
@@ -46,7 +48,7 @@ A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first inv
      - If no judge panel grade is available in the current session for a story, skip the prompt for that story and surface the next-step note (run `/flow:judge`, then `/flow:ready`).
 
 5. **`adapter: bmad` branch:** Call `readBacklogInventory({ targetRepoRoot })` the same way as Step 4 (the tool skips the native-stories scan on BMad workspaces). On typed errors, surface verbatim and stop. Determine `mode` from the returned `mode` field.
-   - **First-run (no manifests yet):** print the following fixed pointer block verbatim, then offer the `/flow:scan` follow-up:
+   - **First-run (no manifests yet):** print the following fixed pointer block verbatim, then automatically call `scanSources({ targetRepoRoot })` to materialise any stories that have been authored since the last scan. Print the scan result verbatim. Do NOT prompt the operator to run a scan manually — materialisation is automatic.
 
      ```
      BMad adapter detected. The flow plugin does not author BMad stories directly.
@@ -55,7 +57,7 @@ A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first inv
      - /bmad-create-story  — author the next story in your backlog
      - /bmad-edit-prd      — edit the PRD before story authoring
 
-     Once you have authored your stories, run /flow:scan to materialise them
+     Once you have authored your stories, run /flow:plan to materialise them
      into per-story execution manifests under .flow/state/to-do/.
      ```
 
@@ -69,7 +71,7 @@ A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first inv
 
      Then spawn the planner subagent with the BMad-branch system prompt and the `<initial-context>` block (including `mode: "re-open"` and `backlog_inventory`). The subagent's BMad-branch behaviour (refuses `writeNativeStory`; only new write affordance is `markWithdrawn`) is preserved. The discard offer is what gives the operator an interactive surface for withdrawal in re-open mode.
 
-   - **Exit condition (BMad branch):** the operator types `done`, accepts the `/flow:scan` offer, or the planner subagent emits the locked handoff phrase (re-open mode only). The skill exits after the pointer block if the operator types `done`; it invokes `scanSources` if the operator accepts the scan offer.
+   - **Exit condition (BMad branch):** the operator types `done` or the planner subagent emits the locked handoff phrase (re-open mode only). The skill automatically calls `scanSources({ targetRepoRoot })` on exit and prints the result verbatim — this picks up any stories authored or hand-edited since the last scan, so the operator never needs to run a separate scan command.
 
 6. **Exit.** Both branches end with confirmation of what was written (native) or a pointer to the next step (BMad).
 

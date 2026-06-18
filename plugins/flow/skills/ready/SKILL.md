@@ -20,7 +20,7 @@ Readiness is a flat operator flag on the item's manifest, orthogonal to its stat
 
 # Prerequisites
 
-A target repo with `.flow/config.yaml` resolved and at least one scanned backlog item under `<target-repo>/.flow/state/to-do/` (run `/flow:scan` first if the backlog is empty).
+A target repo with `.flow/config.yaml` resolved and at least one backlog item under `<target-repo>/.flow/state/to-do/` (run `/flow:plan` first if the backlog is empty — the planning flow materialises stories automatically).
 
 # Steps
 
@@ -31,7 +31,7 @@ A target repo with `.flow/config.yaml` resolved and at least one scanned backlog
    - **ready** — `ready` (approved, claimable) or `not ready` (behind the brake)
    - **deps** — `deps ready` when `depsReady` is true; otherwise `waiting on: <unmet depends_on refs>`
    - A one-line note that an item is only claimed by the run when it is BOTH `ready` AND `deps ready`.
-   If `todos` is empty, say the backlog has no un-claimed items and point the operator at `/flow:scan` (to scan source stories) or `/flow:plan`.
+   If `todos` is empty, say the backlog has no un-claimed items and point the operator at `/flow:plan` (which materialises stories automatically).
 4. **Toggle readiness:** if the operator named an item (and a direction) when invoking the skill, or once they tell you which item to toggle and whether to mark it ready or not-ready, call the `markStoryReady` MCP tool with `{ targetRepoRoot, ref: <chosen ref>, ready: <true|false> }`. Do this once per chosen item.
    - On a real toggle it reports the new `ready` value and `noop: false`; when the item already held that value it reports `noop: true` (nothing changed).
    - Then re-run step 2/3 so the operator sees the updated backlog.
@@ -51,5 +51,5 @@ Never write to a manifest file, never delete a file directly, never edit `.flow/
   - `wrong-adapter` — the ref belongs to a non-native adapter; use `/flow:plan` or `markWithdrawn` for external-adapter refs.
   - `not-found` — this reason is never reached on the discard path because absent refs return a no-op result rather than an error; it is listed here for completeness.
   Surface the error verbatim and do not delete any file yourself.
-- **No `.flow/config.yaml` / no backlog:** if `listClaimableTodos` returns an empty `todos` list, the backlog has nothing to approve yet — run `/flow:scan` to project source stories into the backlog first.
-- **A backlog manifest is malformed:** `listClaimableTodos` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:scan`) and retry.
+- **No `.flow/config.yaml` / no backlog:** if `listClaimableTodos` returns an empty `todos` list, the backlog has nothing to approve yet — run `/flow:plan` to author and materialise source stories into the backlog.
+- **A backlog manifest is malformed:** `listClaimableTodos` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:plan` to re-materialise) and retry.

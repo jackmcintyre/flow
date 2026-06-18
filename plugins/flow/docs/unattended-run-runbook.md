@@ -24,15 +24,17 @@ stories. Before you launch it, get the stories you want run into that queue:
    stories — docs-only or purely-additive changes — so the auto-merge gate can
    take them the whole way without a human eyeball. (Risk tiers are defined in
    [`risk-tiering.md`](./risk-tiering.md).)
-2. **Run `/flow:scan`.** Scanning reads your active adapter's source stories and
-   writes one execution manifest per story into `.flow/state/to-do/`. Only
-   stories that land in `to-do/` are claimable by the run. `/flow:scan` is
-   idempotent — re-running it is safe and only picks up new or changed stories.
-3. **Approve the stories with `/flow:ready`.** Scanned stories land in `to-do/` as
+2. **Materialise the stories.** For native-adapter repos, stories are materialised
+   into `.flow/state/to-do/` automatically when authored via `/flow:plan` or
+   `/flow:author`. For BMad-adapter repos, run `/flow:plan` after authoring BMad
+   stories — the planning flow scans on exit automatically. Only stories that
+   land in `to-do/` are claimable by the run. If you have hand-edited a source
+   story file directly, re-run `/flow:plan` to pick up the changes.
+3. **Approve the stories with `/flow:ready`.** Materialised stories land in `to-do/` as
    **not ready**. The readiness brake (Story 9.1) is fail-closed: the run claims
    **nothing** until you approve it. Mark each story you want run as `ready` via
    `/flow:ready` (the underlying `markStoryReady` is also a one-shot CLI seam, so
-   the same approval works mid-run when the MCP server is down). A scan→launch with
+   the same approval works mid-run when the MCP server is down). A plan→launch with
    no approval runs zero stories — that is the brake working, not a bug.
 
 After approving, confirm the manifests are present (`.flow/state/to-do/`) and
