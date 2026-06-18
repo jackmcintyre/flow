@@ -192,6 +192,18 @@ export type SourceStory = {
   raw_path: string;
   raw_frontmatter: Record<string, unknown>;
   source_hash: string;
+  /**
+   * Optional GitHub issue reference supplied by the operator when authoring
+   * the story (`writeNativeStory` `source_issue` field). Carried from the
+   * native story file → SourceStory → execution manifest → PR body as a
+   * `Closes #<n>` line so merging the PR closes the linked issue automatically.
+   *
+   * The value is already normalised to a bare issue number (integer string)
+   * by the time it reaches SourceStory — `writeNativeStory` normalises a full
+   * GitHub issue URL to the short form before writing the story file.
+   * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
+   */
+  source_issue?: string;
 };
 
 type ChangeEvent =

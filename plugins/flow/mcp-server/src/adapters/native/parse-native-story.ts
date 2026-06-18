@@ -105,6 +105,15 @@ export function parseNativeStory(absPath: string, fileContents: string): SourceS
   const depSection = sections.get("Dependencies");
   const depends_on = depSection ? parseDependencies(depSection.bodyLines, absPath) : [];
 
+  // Source Issue (optional — Story native:01KVC6N2K6AEEGYHG98N2WJQ8M).
+  // Stored as a bare integer line under `## Source Issue`. The section is
+  // written by `renderNativeStoryBody` when the author supplies `source_issue`
+  // on the `writeNativeStory` call; its absence is the no-op path.
+  const sourceIssueSection = sections.get("Source Issue");
+  const source_issue = sourceIssueSection
+    ? parseSourceIssue(sourceIssueSection.bodyLines)
+    : undefined;
+
   const ulid = deriveUlidFromPath(absPath);
   const ref = `native:${ulid}`;
 
@@ -120,6 +129,7 @@ export function parseNativeStory(absPath: string, fileContents: string): SourceS
     implementation_notes,
     tasks,
     cited_sources,
+    source_issue,
     raw_path: absPath,
     raw_frontmatter: { title, ref },
     source_hash,
@@ -433,6 +443,22 @@ function parseCitedSources(bodyLines: string[], absPath: string): string[] {
     });
   }
   return out;
+}
+
+/**
+ * Parse the optional `## Source Issue` section (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M).
+ *
+ * Expected body: a single line containing a bare positive integer (the GitHub
+ * issue number, already normalised from a full URL by `writeNativeStory`).
+ * Returns `undefined` when the section body contains no parseable integer line
+ * (graceful degradation — the PR body simply has no `Closes` line).
+ */
+function parseSourceIssue(bodyLines: string[]): string | undefined {
+  for (const line of bodyLines) {
+    const trimmed = line.trim();
+    if (/^\d+$/.test(trimmed)) return trimmed;
+  }
+  return undefined;
 }
 
 /**

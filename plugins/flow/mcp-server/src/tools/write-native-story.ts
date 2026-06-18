@@ -99,6 +99,15 @@ const WriteNativeStoryInputSchema = z.object({
    * lane without any author bias.
    */
   lane_hint: z.enum(["fast", "full"]).optional(),
+  /**
+   * Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — optional GitHub issue reference.
+   * Accepts either a bare issue number (e.g. `"42"`) or a full GitHub issue URL
+   * (e.g. `"https://github.com/owner/repo/issues/42"`). Normalised to the bare
+   * integer string before being written into the story file. When present,
+   * `runDevTerminalAction` appends `Closes #<n>` to the PR body so merging the
+   * PR closes the issue on GitHub without any manual step.
+   */
+  source_issue: z.string().optional(),
 });
 
 export type WriteNativeStoryInput = z.infer<typeof WriteNativeStoryInputSchema>;
@@ -148,6 +157,35 @@ export const DEFAULT_RISK_REASONING =
   "No elevated risk identified — confirm at dev time. Highest-risk failure mode: TBD by dev.";
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// source_issue normalisation
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise a raw `source_issue` value (either a bare integer string like `"42"`
+ * or a full GitHub issue URL like `"https://github.com/owner/repo/issues/42"`)
+ * to the bare positive-integer string form. Returns `undefined` when the input
+ * is absent, blank, or does not contain a recognisable positive integer.
+ * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
+ */
+function normaliseSourceIssue(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim().length === 0) return undefined;
+  const trimmed = raw.trim();
+  // Bare integer.
+  if (/^\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    if (n > 0) return String(n);
+    return undefined;
+  }
+  // Full GitHub issue URL: extract the trailing integer segment.
+  const urlMatch = /\/issues\/(\d+)\/?$/.exec(trimmed);
+  if (urlMatch) {
+    const n = parseInt(urlMatch[1]!, 10);
+    if (n > 0) return String(n);
+  }
+  return undefined;
+}
 
 /**
  * Render the canonical narrative sentence from the structured parts (Story
@@ -243,6 +281,16 @@ function renderNativeStoryBody(input: WriteNativeStoryInput): string {
     }
   }
   lines.push("");
+
+  // ## Source Issue (optional — Story native:01KVC6N2K6AEEGYHG98N2WJQ8M).
+  // Emitted only when the author supplied a source_issue. The bare integer form
+  // is what parseNativeStory's parseSourceIssue() reads back.
+  const normalisedIssue = normaliseSourceIssue(input.source_issue);
+  if (normalisedIssue !== undefined) {
+    lines.push("## Source Issue", "");
+    lines.push(normalisedIssue);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
@@ -500,6 +548,9 @@ function inputToSourceStory(
     implementation_notes: renderImplementationNotesBody(input),
     tasks: input.tasks,
     cited_sources: input.cited_sources,
+    // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the normalised issue
+    // number so scan-sources can persist it onto the manifest.
+    source_issue: normaliseSourceIssue(input.source_issue),
     raw_path: absPath,
     raw_frontmatter: { title: input.title, ref },
     source_hash: createHash("sha256").update(renderNativeStoryBody(input)).digest("hex"),

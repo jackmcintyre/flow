@@ -440,6 +440,15 @@ export const ExecutionManifestSchema = z
      * Optional and additive.
      */
     pr_branch: z.string().min(1).optional(),
+
+    /**
+     * Optional GitHub issue number (bare integer string, e.g. `"42"`) that this
+     * story was authored from. When present, `runDevTerminalAction` appends a
+     * `Closes #<n>` line to the PR body so merging the PR closes the issue on
+     * GitHub automatically. Normalised from a full URL at write time.
+     * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
+     */
+    source_issue: z.string().regex(/^\d+$/).optional(),
   })
   .strict();
 

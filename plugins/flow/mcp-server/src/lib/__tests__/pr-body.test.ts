@@ -586,6 +586,90 @@ describe("composePrBody — honest ACs and verification (native:01KV4R2Q)", () =
 });
 
 // ---------------------------------------------------------------------------
+// composePrBody — source issue / Closes line (native:01KVC6N2)
+// ---------------------------------------------------------------------------
+
+describe("composePrBody — source issue Closes line (native:01KVC6N2)", () => {
+  const BASE_OPTS = {
+    ref: "native:01KVC6N2K6AEEGYHG98N2WJQ8M",
+    specPath: ".flow/native-stories/01KVC6N2K6AEEGYHG98N2WJQ8M.md",
+    acs: [
+      {
+        index: 1,
+        firstLine: "**Given** the operator authors a story with a GitHub issue reference. **When** the build team opens the PR. **Then** the PR description contains a 'Closes #<n>' line.",
+        coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+        verificationType: "vitest" as const,
+      },
+      {
+        index: 2,
+        firstLine: "**Given** the operator authors a story without a GitHub issue reference. **When** the build team opens the PR. **Then** the PR description contains no 'Closes' line.",
+        coveringCheck: "plugins/flow/mcp-server/src/lib/__tests__/pr-body.test.ts",
+        verificationType: "vitest" as const,
+      },
+    ],
+    title: "A story authored from a GitHub issue carries that issue's reference into its pull request",
+    narrative: "As an operator who files a GitHub issue to track recurring team friction, I want to supply the issue's reference when I author a story from it, so that the PR body contains a Closes line.",
+    riskTier: "medium",
+    summary: "Implements source_issue → Closes #<n> in PR body.",
+    howToTestWalkthrough: "1. Author a story with source_issue set to 42.\n2. Open the resulting PR.\n3. Confirm the PR body contains 'Closes #42'.",
+  };
+
+  // AC1: PR body contains 'Closes #<n>' when source_issue is present.
+  it("AC1: PR body contains 'Closes #<n>' when sourceIssue is supplied", () => {
+    const body = composePrBody({ ...BASE_OPTS, sourceIssue: "42" });
+    expect(body).toContain("Closes #42");
+  });
+
+  it("AC1: 'Closes' line appears after the free-form summary (trailing position)", () => {
+    const body = composePrBody({ ...BASE_OPTS, sourceIssue: "42" });
+    // The `Closes #42` auto-close keyword is appended at the very end of the body.
+    // Use lastIndexOf so AC prose that mentions "Closes #<n>" doesn't give a false hit.
+    const summaryIdx = body.lastIndexOf(BASE_OPTS.summary);
+    const closesIdx = body.lastIndexOf("Closes #42");
+    expect(summaryIdx).toBeGreaterThanOrEqual(0);
+    expect(closesIdx).toBeGreaterThan(summaryIdx);
+  });
+
+  it("AC1: 'Closes' line appears after the machine block (trailing position)", () => {
+    const body = composePrBody({ ...BASE_OPTS, sourceIssue: "42" });
+    const machineEndIdx = body.lastIndexOf("<!-- /flow:pr:machine -->");
+    const closesIdx = body.lastIndexOf("Closes #42");
+    expect(machineEndIdx).toBeGreaterThanOrEqual(0);
+    expect(closesIdx).toBeGreaterThan(machineEndIdx);
+  });
+
+  it("AC1: Closes line uses the correct format 'Closes #<n>'", () => {
+    const body = composePrBody({ ...BASE_OPTS, sourceIssue: "123" });
+    expect(body).toContain("Closes #123");
+  });
+
+  // AC2: No 'Closes' line when sourceIssue is absent.
+  // Note: the AC text itself mentions 'Closes #<n>' as prose — we check for
+  // the actual auto-close keyword line `\nCloses #<digits>` to avoid false
+  // positives from the AC prose.
+  it("AC2: PR body contains no standalone Closes keyword line when sourceIssue is absent", () => {
+    const body = composePrBody({ ...BASE_OPTS });
+    // The standalone `Closes #<n>` line always starts after a blank line
+    // at the very end of the body — regex anchored to end-of-string.
+    expect(body).not.toMatch(/\nCloses #\d+\s*$/);
+  });
+
+  it("AC2: body with no sourceIssue is identical to what it would be without this change", () => {
+    // Call composePrBody without sourceIssue — body ends with the free-form summary.
+    const bodyWithout = composePrBody({ ...BASE_OPTS });
+    const bodyWithUndefined = composePrBody({ ...BASE_OPTS, sourceIssue: undefined });
+    expect(bodyWithout).toBe(bodyWithUndefined);
+    // The body ends with the summary (no trailing newline / Closes line).
+    expect(bodyWithout.endsWith(BASE_OPTS.summary)).toBe(true);
+  });
+
+  it("AC2: an empty string sourceIssue produces no standalone Closes keyword line", () => {
+    const body = composePrBody({ ...BASE_OPTS, sourceIssue: "" });
+    expect(body).not.toMatch(/\nCloses #\d+\s*$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // composePrBody — developer walk-through in how-to-test (native:01KVAE4PF6)
 // ---------------------------------------------------------------------------
 

@@ -231,6 +231,13 @@ export function composePrBody(opts: {
    * automated-test list, and never fabricates steps.
    */
   howToTestWalkthrough?: string;
+  /**
+   * Optional GitHub issue number (bare integer string, e.g. `"42"`).
+   * When present, a `Closes #<n>` line is appended after the free-form summary
+   * so that merging the PR closes the linked issue on GitHub automatically.
+   * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
+   */
+  sourceIssue?: string;
 }): string {
   // ---------------------------------------------------------------------------
   // Section 1: Approver summary (five plain-language sections)
@@ -260,9 +267,16 @@ export function composePrBody(opts: {
   ].join("\n");
 
   // ---------------------------------------------------------------------------
-  // Assemble: approver summary → machine block → free-form summary
+  // Assemble: approver summary → machine block → free-form summary → Closes line
   // ---------------------------------------------------------------------------
-  return `${approverSummary}\n\n${machineBlock}\n\n${opts.summary}`;
+  // (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M) When a source_issue is present,
+  // append a `Closes #<n>` line after the free-form summary. GitHub recognises
+  // this keyword anywhere in the PR body and auto-closes the issue on merge.
+  const closesLine =
+    opts.sourceIssue && /^\d+$/.test(opts.sourceIssue)
+      ? `\n\nCloses #${opts.sourceIssue}`
+      : "";
+  return `${approverSummary}\n\n${machineBlock}\n\n${opts.summary}${closesLine}`;
 }
 
 /**
