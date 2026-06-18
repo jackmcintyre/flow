@@ -1,7 +1,7 @@
 ---
 name: flow:run
 description: "Stage-1 stateless run: a per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the run path, so the cascade-SIGTERM disconnect cannot occur by construction. The main loop dispatches up to maxConcurrency stories at once (Story 8.22); per-dev worktree isolation (8.20) makes that safe. Recovers crash-orphaned stories first (auto-resume, serial). Story 8.5 + crash-recovery + concurrency."
-allowed_tools: [Bash, Workflow]
+allowed_tools: [Bash, Workflow, dismissMaintainerFeedback]
 ---
 
 # /flow:run
@@ -122,6 +122,28 @@ When `autoRetroOutcome` is present in the result, surface the team's retrospecti
 - **`autoRetroOutcome.status === 'skipped'`:** state that the retro was skipped (no stories completed this run).
 - **`autoRetroOutcome.status === 'failed'`:** state that the retro did not complete and the cycle was not advanced.
 - **`autoRetroOutcome` is `null`** (queue was not fully emptied): omit the retro block entirely.
+
+### Maintainer findings (surfaced whenever the team flagged a tool issue)
+
+The run result carries `maintainerFindings` — an array of structural tool-limitation findings the team filed about flow itself (via `recordMaintainerFeedback`) while it worked. This is the push surface that replaces the old standalone `/flow:review-inbox` command: the operator no longer has to remember to check the inbox.
+
+- **When `maintainerFindings` is non-empty:** surface it as a closing block after the retro block. Tell the operator the team flagged N tool issue(s) about flow itself during the run, then list each one as `[<tool_area>] <problem>` followed by its `issueUrl` (the ready-to-file GitHub new-issue link). Make clear the operator opens and submits each link themselves — nothing is filed automatically. Example:
+
+  ```
+  Maintainer findings: the team flagged N issue(s) with flow itself during this run.
+  You open/submit these yourself — nothing is filed automatically.
+    1. [<tool_area>] <problem>
+       File it: <issueUrl>
+    2. [<tool_area>] <problem>
+       File it: <issueUrl>
+  For any you will NOT file, dismiss it so it won't re-appear next run.
+  ```
+
+  Each entry carries `{ id, tool_area, problem, trigger, suggested_direction?, issueUrl? }`. Use these fields directly. If a finding has no `issueUrl` (gh was unavailable), list the finding without a link and note the operator can resolve the repo identity manually.
+
+  **Offer dismiss.** For any finding the operator says they will NOT file, call the `dismissMaintainerFeedback` MCP tool once per dismissal with `{ targetRepoRoot, id: <that finding's id> }`. A dismissed finding is archived and will not re-surface in future runs. Findings the operator leaves un-dismissed remain in the inbox and re-appear in the next run's closing summary — that is intended, so an un-actioned finding is never lost.
+
+- **When `maintainerFindings` is empty or absent:** render nothing for this block — no heading, no "none" line. Keep the closing summary quiet when there is nothing to act on.
 
 # Failure modes
 

@@ -1099,6 +1099,28 @@ if (RETRO_PROPOSAL_TIMESTAMP) {
   }
 }
 
+// SURFACE OPEN MAINTAINER FINDINGS (Story native:01KVDXX — surface-maintainer-findings-in-run):
+// read the maintainer inbox so the closing summary can list each open finding (the
+// structural tool-limitation items the team filed during this run) with its ready-to-file
+// GitHub issue link. This is the deterministic-seam read path mirroring pendingProposals:
+// the inbox files ARE the source of truth, and this read-only call gives the run the
+// structured per-item data it needs to render the operator-facing list + offer dismiss.
+// Fail-soft: retryable+swallow; a garble or ENOENT degrades to [] (closing summary then
+// renders nothing — no noise). Dismissed items live in a subdir reviewMaintainerInbox
+// ignores, so already-dismissed findings never re-surface here.
+let maintainerFindings = []
+{
+  const inbox = await seam(
+    `node ${CLI} reviewMaintainerInbox --json '${J({ targetRepoRoot: REPO })}'`,
+    'maintainer-inbox',
+    true, // retryable — reading the inbox is idempotent
+    true, // swallow — best-effort; a garble never breaks the run
+  )
+  if (inbox && !inbox._parseError && Array.isArray(inbox.items)) {
+    maintainerFindings = inbox.items
+  }
+}
+
 // The return object IS the no-silent-failures surface: every ref lands in exactly
 // one of completed / merged / pausedForHuman / blocked, with a run reason.
 // `resumed` additionally records which stories were crash-recovered this run.
@@ -1124,4 +1146,12 @@ return {
   //     all proposals were auto-absorbed or the summary seam degraded.
   // { status: 'failed', error } when the retro threw (cycle not advanced).
   autoRetroOutcome,
+  // Open maintainer findings (Story native:01KVDXX — surface-maintainer-findings-in-run).
+  // Each entry is a reviewMaintainerInbox item: { id, raised_at, tool_area, problem,
+  //   trigger, suggested_direction?, issueUrl? }. The closing summary lists these so the
+  //   operator can open each ready-to-file issueUrl themselves (nothing is filed
+  //   automatically) or dismiss any they will not file via dismissMaintainerFeedback.
+  //   Empty array when the inbox is empty or the read seam degraded — the summary then
+  //   renders nothing (no noise). Dismissed items do not appear here.
+  maintainerFindings,
 }

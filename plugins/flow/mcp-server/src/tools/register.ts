@@ -43,6 +43,7 @@ import {
   recordAgentFrictionInputSchema,
   recordMaintainerFeedbackInputSchema,
   reviewMaintainerInboxInputSchema,
+  dismissMaintainerFeedbackInputSchema,
   recordReviewerLessonInputSchema,
   recordSkillInvokeInputSchema,
   recordStoryRetroInputSchema,
@@ -116,6 +117,7 @@ import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-ad
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
 import { reviewMaintainerInbox } from "./review-maintainer-inbox.js";
+import { dismissMaintainerFeedback } from "./dismiss-maintainer-feedback.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
@@ -2006,6 +2008,56 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           },
         ],
       };
+    },
+  });
+
+  // Story native:01KVDXX (surface-maintainer-findings-in-run) — dismissMaintainerFeedback:
+  // archive one stored maintainer-feedback item the operator will NOT file, so it stops
+  // re-surfacing in every /flow:run closing summary. Moves the matching .json file into
+  // .flow/maintainer-inbox/dismissed/ (content intact). reviewMaintainerInbox naturally
+  // ignores the dismissed/ subdir (it reads only top-level .json files). Idempotent — a
+  // missing/already-dismissed id is a clean no-op. Throws on a malformed (non-ULID) id.
+  server.registerTool({
+    name: "dismissMaintainerFeedback",
+    description:
+      "Dismiss (archive) one stored maintainer-feedback item by its ULID id so it stops " +
+      "re-appearing in the /flow:run closing summary. Moves the matching file from " +
+      ".flow/maintainer-inbox/ into .flow/maintainer-inbox/dismissed/ — the file content " +
+      "is preserved (archive, not delete) and reviewMaintainerInbox no longer returns it. " +
+      "Idempotent: dismissing an unknown or already-dismissed id is a clean no-op " +
+      "(dismissed:false, noop:true), never an error. Refuses a malformed (non-ULID) id. " +
+      "The move touches ONLY .flow/maintainer-inbox/ and leaves the team's working state " +
+      "and backlog byte-unchanged. Story native:01KVDXX.",
+    inputSchema: dismissMaintainerFeedbackInputSchema,
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            id: z.string().min(1),
+          })
+          .parse(args);
+        const result = await dismissMaintainerFeedback({
+          targetRepoRoot: parsed.targetRepoRoot,
+          id: parsed.id,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 

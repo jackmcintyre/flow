@@ -458,6 +458,15 @@ export const reviewMaintainerInboxInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot"],
 };
 
+export const dismissMaintainerFeedbackInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    id: { type: "string" },
+  },
+  required: ["targetRepoRoot", "id"],
+};
+
 export const recordAgentFrictionInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -847,6 +856,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   recordAgentFriction: recordAgentFrictionInputSchema,
   recordMaintainerFeedback: recordMaintainerFeedbackInputSchema,
   reviewMaintainerInbox: reviewMaintainerInboxInputSchema,
+  dismissMaintainerFeedback: dismissMaintainerFeedbackInputSchema,
   recordReviewerLesson: recordReviewerLessonInputSchema,
   recordSkillInvoke: recordSkillInvokeInputSchema,
   recordStoryRetro: recordStoryRetroInputSchema,
