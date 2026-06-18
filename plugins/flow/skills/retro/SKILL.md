@@ -1,7 +1,7 @@
 ---
 name: flow:retro
-description: "Run the cycle-level retro-analyst over the cycle's done manifests, telemetry, prior proposals, and rule registry to produce one retro-proposal markdown file."
-allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory, openCycle]
+description: "Run the cycle-level retro-analyst over the cycle's done manifests, telemetry, prior proposals, and rule registry to produce recommendations — then review each one and, on your explicit yes, apply it through the diff-then-confirm gate or queue it as a backlog story."
+allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetroProposal, readBacklogInventory, openCycle, acceptProposal]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/6-2-retro-skill-and-retro-analyst-subagent.md § AC1 -->
@@ -10,7 +10,7 @@ allowed_tools: [getStatus, gatherRetroInputs, readCatalogue, Task, summariseRetr
 
 # What this skill does
 
-Runs the cycle-level retrospective. It gathers a deterministic input bundle from the cycle's outcomes — every `done/` execution manifest (with its structured `lessons[]`), the telemetry event summary, the list of prior retro proposals, and (when present) the rule registry — then spawns the **retro-analyst** subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/flow/catalogue/retro-analyst.md`. The subagent reasons over the bundle, surfaces patterns, and writes **exactly one** proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md` via the `writeRetroProposal` tool. The proposal is diff-then-confirm: the analyst proposes, you (the operator) accept or reject in a later step (Epic 6b).
+Runs the cycle-level retrospective. It gathers a deterministic input bundle from the cycle's outcomes — every `done/` execution manifest (with its structured `lessons[]`), the telemetry event summary, the list of prior retro proposals, and (when present) the rule registry — then spawns the **retro-analyst** subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/flow/catalogue/retro-analyst.md`. The subagent reasons over the bundle, surfaces patterns, and writes **exactly one** proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md` via the `writeRetroProposal` tool. The retro then **walks you through acting on each recommendation in the same flow** (this absorbs the former standalone `/flow:accept-proposal` command): for every un-applied proposal — those just produced **and** any left pending from earlier runs — you choose to **apply it now** through the diff-then-confirm gate, **queue it as a backlog story**, or **skip** it. The analyst proposes; nothing changes canonical state until your explicit yes.
 
 The skill is a thin orchestrator. The deterministic *facts* the analyst reasons over are gathered by the `gatherRetroInputs` tool, not scraped from prose — the load-bearing seam is the tool-gathered bundle plus the analyst's read-only permission surface (`permissions/retro-analyst.yaml`), not this skill's prose.
 
@@ -64,30 +64,39 @@ The retro works against **any adapter**. There is no branch on adapter name — 
 
    **Conditional constraint:** This call is gated strictly on the locked handoff phrase appearing in the subagent output. Do NOT call `openCycle` if the subagent terminated without the handoff phrase (proposal write failed or incomplete) — a failed write must not advance the cycle. Do NOT call `openCycle` inside the retro-analyst subagent itself or inside `writeRetroProposal` — the trigger belongs in this orchestrating skill, after the durable write is confirmed.
 
-   After surfacing the message, exit. The proposal is ready for human review; accepting/applying it is a later step (Epic 6b).
+   After surfacing the message, proceed to step 7 to review and act on the recommendations.
 
-7. **Offer to queue fix-worthy proposals as backlog stories (operator-gated).** After rendering the summary (step 5) and advancing the cycle (step 6), present the operator with the list of proposals. For each proposal in the summary:
-   - A proposal is **fix-worthy** when its `type` is any concrete change variant (every proposal type in the closed schema is fix-worthy — an empty `proposals` array means nothing warranted a fix, and step 5c already rendered "no recommended changes").
-   - An empty `proposals` array was already handled in step 5c ("This cycle yielded no recommended changes.") — skip step 7 entirely.
+7. **Review and act on pending recommendations (operator-gated).** After rendering the summary (step 5) and advancing the cycle (step 6), assemble the full set of **un-applied** proposals and walk the operator through each one. This step absorbs the former standalone `/flow:accept-proposal` command — the diff-then-confirm apply gate now lives here.
 
-   For each fix-worthy proposal, ask the operator a single yes/no question:
+   7a. **Assemble the pending set.** Combine two sources:
+   - the proposals from the file just written (the step 5b summary), and
+   - the un-applied proposals from earlier runs: for each path in the `priorProposals` list from step 3, call `summariseRetroProposal({ absPath: <path> })` and collect its `proposals`.
 
-   > Finding: **\<type\>** (\<id\>): \<rationale\>. Queue this as a backlog story? (yes / no)
+   Keep only proposals whose `applied` flag is `false` (every `summariseRetroProposal` proposal entry carries an `applied` boolean). An already-applied proposal is never re-offered. If the combined pending set is empty, tell the operator there is nothing to act on (step 5c already rendered "no recommended changes" for an empty current run) and exit.
 
-   - If the operator says **no** (or skips): move on. Do not draft a story.
-   - If the operator says **yes**: proceed to sub-step 7a.
+   7b. **For each pending proposal, offer three actions.** Present the proposal and ask the operator to choose exactly one:
 
-   7a. **Build de-dup context.** Call `readBacklogInventory({ targetRepoRoot })` once (you may reuse this result across all proposals in the same retro session). Surface a typed error verbatim and stop if it fires.
+   > Recommendation: **\<type\>** (\<id\>): \<rationale\>. **Apply** it now, **queue** it as a backlog story, or **skip**? (apply / queue / skip)
 
-   7b. **Spawn the author subagent** via Claude Code's `Task` tool to draft a story for the confirmed proposal:
-   - Read `readCatalogue({ role: "author" })` and use its `Prompt` section verbatim as the `Task` system prompt.
-   - Append an `<initial-context>` block containing: `targetRepoRoot`, a `feature_description` that faithfully translates the retro finding into a plain-language feature request (cite the proposal's `type`, `id`, and `rationale`), and the `backlog_inventory` from step 7a.
-   - The author subagent calls `writeNativeStory` — it is the ONLY path that may call `writeNativeStory`. **The retro skill itself MUST NOT call `writeNativeStory` directly.** This boundary is load-bearing: the retro-analyst's permission surface excludes `writeNativeStory` and that constraint must not be bypassed.
-   - When the author subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, extract the `<ref>` and report it to the operator: "Draft **\<ref\>** queued as not-ready — grade and approve it via `/flow:ready <ref>` when ready to build."
+   - **skip** (or no / no answer): move on, nothing changes.
+   - **apply** → sub-step 7c (the diff-then-confirm gate).
+   - **queue** → sub-step 7d (draft a backlog story).
 
-   7c. **On a refuse-and-revise from the author:** If the author subagent surfaces a `DisciplineViolationError` (the drafted story violated a discipline rule), relay the violation codes and the revision offer to the operator verbatim. Nothing was written. Offer to retry with a revised framing; do NOT silently re-attempt without operator input.
+   Handle one proposal at a time — one proposal, one choice, one action (or none). Never batch-apply, batch-queue, or assume the operator's intent.
 
-   **Operator-gated diff-then-confirm contract:** Never draft a story silently. The operator must confirm each proposal individually before anything is written to the backlog. One proposal = one confirm = one draft (or none). Do not batch-confirm or assume the operator's intent.
+   7c. **Apply now — the diff-then-confirm gate.** The load-bearing decision lives in the `acceptProposal` tool, modelled as two calls; this skill never mutates a file or runs git directly.
+   - **Preview:** call `acceptProposal({ targetRepoRoot, proposalId: <id> })` **without** `confirm`. If it returns `status: "already-applied"`, report the prior `appliedSha`/`appliedAt` and move on (idempotent no-op — should not occur after the 7a filter). Otherwise it returns `{ status: "preview", type, diff }` and changes nothing on disk.
+   - **Show the diff and require an explicit yes.** Render the `diff` verbatim with the proposal `type` and `id`, and ask *"Apply this change? (yes/no)"*. Proceed only on an explicit affirmative; on anything else, stop — nothing changed, fully re-runnable later.
+   - **Confirm:** on an explicit yes, call `acceptProposal({ targetRepoRoot, proposalId: <id>, confirm: true })`. The tool runs the proposal kind's registered apply handler, commits the changed paths together with the proposal-file `applied` stamp in a single commit through the plugin git wrapper (no force, no `--no-verify`), emits one `retro.proposal.applied` event, and returns `{ status: "applied", appliedSha }`. Report the `appliedSha` and move on to the next proposal.
+   - If `acceptProposal` throws `ProposalKindNotApplicableYetError` (no apply handler for this kind yet — it names the kind and the story that ships its handler), relay the typed message verbatim; the proposal is untouched. Where the change is really build work, offer the **queue** path (7d) instead.
+
+   7d. **Queue as a backlog story.** When the operator chooses **queue**:
+   - **Build de-dup context.** Call `readBacklogInventory({ targetRepoRoot })` once (reuse the result across proposals in the same retro session). Surface a typed error verbatim and stop if it fires.
+   - **Spawn the author subagent** via Claude Code's `Task` tool to draft a story for the chosen proposal: read `readCatalogue({ role: "author" })` and use its `Prompt` section verbatim as the `Task` system prompt; append an `<initial-context>` block containing `targetRepoRoot`, a `feature_description` that faithfully translates the retro finding into a plain-language feature request (cite the proposal's `type`, `id`, and `rationale`), and the `backlog_inventory`. The author subagent calls `writeNativeStory` — it is the ONLY path that may call `writeNativeStory`. **The retro skill itself MUST NOT call `writeNativeStory` directly** — the retro-analyst's permission surface excludes it and that constraint must not be bypassed.
+   - When the author subagent emits its locked handoff phrase `Handoff — draft <ref> authored, not-ready, awaiting judgment`, extract the `<ref>` and report: "Draft **\<ref\>** queued as not-ready — grade and approve it via `/flow:ready <ref>` when ready to build."
+   - **On a refuse-and-revise:** if the author surfaces a `DisciplineViolationError`, relay the violation codes and the revision offer verbatim. Nothing was written. Offer to retry with a revised framing; do NOT silently re-attempt without operator input.
+
+   **Operator-gated contract:** Never apply a change or draft a story silently. The operator confirms each proposal individually — one proposal = one explicit choice = one action (or none). Applying commits to canonical state through the gate; queuing writes a not-ready draft. Do not batch-confirm or assume intent.
 
 # Failure modes
 
@@ -96,4 +105,5 @@ The retro works against **any adapter**. There is no branch on adapter name — 
 - **`MalformedExecutionManifestError`** (a `.yaml` in `.flow/state/done/` is corrupt): surfaced by `gatherRetroInputs`. Surface verbatim and stop — the operator must fix or remove the malformed manifest before re-running the retro. Unlike a corrupt telemetry line (which is skipped + counted), a corrupt done/ manifest is a hard stop because it would silently drop a story's outcomes from the cycle analysis.
 - **Corrupt telemetry lines:** NOT a failure. `gatherRetroInputs` skips them and returns the count in `telemetrySummary.skipped_count`. The analyst is instructed to note a non-zero `skipped_count` in its rationale rather than crash.
 - **`CatalogueRoleNotFoundError`** (from `readCatalogue`): the `retro-analyst.md` catalogue file is missing from the plugin tree. This is a plugin-packaging bug; surface the error verbatim.
+- **Apply gate errors (step 7c):** `acceptProposal` surfaces typed errors verbatim — `ProposalNotFoundError` (id not found across proposal files), `AmbiguousProposalIdError` (the id matched two files — a bug; fix the duplicate), or `ProposalKindNotApplicableYetError` (no registered apply handler for the kind yet — the proposal is untouched and can be queued as a story or applied once the handler ships). A declined apply (no explicit yes) changes nothing and is fully re-runnable.
 - **The subagent terminates without the locked handoff phrase:** the analyst did not complete a proposal write. Inspect the subagent's final output for a yield phrase or an error. The retro can be re-run; `writeRetroProposal` refuses to overwrite an existing proposal (immutable artifacts), so a partial write does not corrupt prior proposals.

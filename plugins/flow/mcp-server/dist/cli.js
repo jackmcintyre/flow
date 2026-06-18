@@ -45317,7 +45317,8 @@ async function summariseRetroProposal(opts) {
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
     rationale: p.rationale,
-    id: p.id
+    id: p.id,
+    applied: p.applied !== void 0
   }));
   return {
     absPath,
