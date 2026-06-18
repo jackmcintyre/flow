@@ -66,7 +66,7 @@ const STEPS: ReadonlyArray<{ stepNumber: number; name: string; tool: string | nu
   { stepNumber: 1, name: "scratch-repo", tool: "createSmokeScratchRepo" },
   { stepNumber: 2, name: "skip-hiring", tool: "getTeamSnapshot" },
   { stepNumber: 3, name: "plan", tool: "readBacklogInventory" },
-  { stepNumber: 4, name: "scan", tool: "listClaimableTodos" },
+  { stepNumber: 4, name: "materialise", tool: "listClaimableTodos" },
   { stepNumber: 5, name: "start", tool: null },
 ];
 

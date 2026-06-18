@@ -103,16 +103,17 @@ the board and run operate on native state.
 > config: the resolver takes the config branch and never consults `detect()`. Do
 > not rely on detection to pick native — pin it in the config.
 
-### 4. Scan native into the to-do queue
+### 4. Materialise native stories into the to-do queue
 
-Run `/flow:scan`. The native adapter projects each `.flow/native-stories/<ULID>.md`
-into an execution manifest under `.flow/state/to-do/`. Scan is idempotent and
-fail-closed: a native story that cannot parse / clear Tier-0 is loudly warned and
-**not** projected (never silently dropped) — fix the source and re-scan.
+Run `/flow:plan`. The plan skill calls the scan capability automatically on exit,
+projecting each `.flow/native-stories/<ULID>.md` into an execution manifest under
+`.flow/state/to-do/`. Materialisation is idempotent and fail-closed: a native story
+that cannot parse / clear Tier-0 is loudly warned and **not** projected (never
+silently dropped) — fix the source and re-run `/flow:plan`.
 
 ### 5. Approve the stories you want claimable
 
-Scanning lands stories in `to-do/` as **not ready**. The readiness brake
+Materialised stories land in `to-do/` as **not ready**. The readiness brake
 (Story 9.1) is fail-closed: the run claims nothing until you approve it. Use
 `/flow:ready` to mark each story you want the run to pick up as `ready: true`.
 

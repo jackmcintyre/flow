@@ -37,5 +37,5 @@ Never write to a manifest file, never edit `.flow/state/**`, and never run a git
 
 # Failure modes
 
-- **A backlog manifest is malformed:** `getBacklogDashboard` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:scan`) and retry.
+- **A backlog manifest is malformed:** `getBacklogDashboard` propagates `MalformedExecutionManifestError`, naming the file and offending field. Fix the manifest (or re-run `/flow:plan` to re-materialise) and retry.
 - **No `.flow/config.yaml`:** the underlying workspace resolution surfaces the resolver's typed error verbatim — resolve the target repo (run `/flow:status` to check) and retry.

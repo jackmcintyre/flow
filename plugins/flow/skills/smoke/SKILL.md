@@ -1,14 +1,14 @@
 ---
 name: flow:smoke
-description: Stand up a clean smoke-harness scratch repo and chain skip-hiring → plan → scan with assertion checkpoints so smokes start from a known-good state.
+description: Stand up a clean smoke-harness scratch repo and chain skip-hiring → plan with assertion checkpoints so smokes start from a known-good state.
 allowed_tools: [createSmokeScratchRepo, getTeamSnapshot, readBacklogInventory, listClaimableTodos]
 ---
 
 # What this skill does
 
-`/flow:smoke <label>` creates a disposable scratch repo pre-seeded with a valid git history, a minimal `.flow/config.yaml`, and a `.flow/standards.md`, then walks through the four setup steps (`skip-hiring → plan → scan`) with a tool-layer checkpoint after each one. Every checkpoint emits a `[smoke] step N (<name>): ok` log line on success or a `[smoke] step N (<name>): FAILED — <reason>` line and an immediate halt on failure.
+`/flow:smoke <label>` creates a disposable scratch repo pre-seeded with a valid git history, a minimal `.flow/config.yaml`, and a `.flow/standards.md`, then walks through the setup steps (`skip-hiring → plan`) with a tool-layer checkpoint after each one. Every checkpoint emits a `[smoke] step N (<name>): ok` log line on success or a `[smoke] step N (<name>): FAILED — <reason>` line and an immediate halt on failure.
 
-Step 5 delivers a handoff message and returns control to the operator. The start step is deliberately **not** auto-invoked — the whole point of the smoke is for the operator to observe it themselves.
+Stories authored through `/flow:plan` are materialised into the backlog automatically (no separate scan step). Step 4 confirms the manifests are present, then step 5 delivers a handoff message and returns control to the operator. The start step is deliberately **not** auto-invoked — the whole point of the smoke is for the operator to observe it themselves.
 
 # Prerequisites
 
@@ -44,14 +44,14 @@ Checkpoint: call `readBacklogInventory({ targetRepoRoot: scratchRoot })`. Assert
 - On success: print `[smoke] step 3 (plan): ok`.
 - On failure: print `[smoke] step 3 (plan): FAILED — <reason>` and halt.
 
-## Step 4 — scan
+## Step 4 — verify materialisation
 
-Operator invokes `/flow:scan` against the scratch repo.
+Stories authored through `/flow:plan` are materialised automatically — no separate scan step is needed. Verify materialisation happened:
 
 Checkpoint: call `listClaimableTodos({ targetRepoRoot: scratchRoot })`. Assert ≥1 manifest is now present in `.flow/state/to-do/`.
 
-- On success: print `[smoke] step 4 (scan): ok`.
-- On failure: print `[smoke] step 4 (scan): FAILED — <reason>` and halt.
+- On success: print `[smoke] step 4 (materialise): ok`.
+- On failure: print `[smoke] step 4 (materialise): FAILED — <reason>` and halt.
 
 ## Step 5 — start
 
@@ -67,7 +67,7 @@ The `[smoke] step N (<name>): FAILED — <reason>` pattern applies to all step f
 
 **(c) Planner exited without authoring any source story** (Step 3) — the planner subagent completed but wrote no `writeNativeStory` call. Retry with explicit instructions to author at least one story before exiting.
 
-**(d) `/flow:scan` produced zero claimable manifests** (Step 4) — most often a source-story shape defect. See memory `project_native_scan_silent_skip`: `/flow:scan` returns all-zero counts when no file matches the expected ULID regex. Inspect the native-stories directory for filenames that don't match the ULID pattern.
+**(d) zero claimable manifests after plan** (Step 4) — most often a source-story shape defect or the planner did not call `writeNativeStory`. See memory `project_native_scan_silent_skip`: materialisation returns all-zero counts when no file matches the expected ULID regex. Inspect the native-stories directory for filenames that don't match the ULID pattern.
 
 **(e) Operator forgot `--plugin-dir`** — every MCP tool call will fail with `tool not found`. Restart Claude Code with the correct `--plugin-dir <path-to-plugins/flow>` flag.
 

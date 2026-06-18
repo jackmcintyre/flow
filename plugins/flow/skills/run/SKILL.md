@@ -17,7 +17,7 @@ See `docs/unattended-run-runbook.md` for the full operator playbook, including h
 # Prerequisites
 
 - Plugin installed (MCP server running). The `Workflow` tool is provided by Claude Code, not the flow MCP server — no MCP call is needed to invoke it.
-- At least one ready-and-approved story in `.flow/state/to-do/` (use `/flow:scan` then `/flow:ready`). A run with nothing claimable exits immediately with `runReason: "queue-emptied"` — that is correct behaviour, not a bug.
+- At least one ready-and-approved story in `.flow/state/to-do/` (use `/flow:plan` to author and materialise stories, then `/flow:ready` to approve them). A run with nothing claimable exits immediately with `runReason: "queue-emptied"` — that is correct behaviour, not a bug.
 
 # Steps
 
@@ -127,5 +127,5 @@ When `autoRetroOutcome` is present in the result, surface the team's retrospecti
 
 - **`CLAUDE_PLUGIN_ROOT` unset or empty:** this variable is set by Claude Code when loading a plugin skill. If it is missing, the plugin is not loaded correctly — run `echo $CLAUDE_PLUGIN_ROOT` to confirm and restart Claude Code with `--plugin-dir <path-to-plugins/flow>` or reinstall via `/plugin install flow@flow`.
 - **Engine file missing (`cli.js` not found):** the pre-flight check in Step 2 catches this and stops before the run starts. Rebuild the plugin and reinstall.
-- **Run exits immediately with `runReason: "queue-emptied"` and zero stories claimed:** the queue was empty or no story had `ready: true`. Run `/flow:scan` then `/flow:ready` to approve stories before launching.
+- **Run exits immediately with `runReason: "queue-emptied"` and zero stories claimed:** the queue was empty or no story had `ready: true`. Run `/flow:plan` to author and materialise stories, then `/flow:ready` to approve them before launching.
 - **Workflow tool not available:** the `Workflow` tool is a Claude Code built-in. If it is not available in this session, the plugin environment is incomplete — restart Claude Code.

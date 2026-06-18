@@ -268,20 +268,13 @@ describe("AC5 (post 5.19 flip) — malformed manifest is contained, not thrown",
 });
 
 // ---------------------------------------------------------------------------
-// AC7 — SKILL.md contains required content anchors (structural anchor)
+// AC7 — SKILL.md content anchors (retired — /flow:scan skill removed in
+// native:01KVCFDDECZR57R5YH50GYEA17; scan capability lives in MCP tool only)
 // ---------------------------------------------------------------------------
-
-describe("skills/scan/SKILL.md content anchors (AC7)", () => {
-  it("SKILL.md contains 'name: flow:scan' and 'scan-sources'", async () => {
-    const skillPath = path.join(getPluginRoot(), "skills", "scan", "SKILL.md");
-    const contents = await fs.readFile(skillPath, "utf8");
-
-    // AC7 anchor 1: frontmatter name field.
-    expect(contents).toContain("name: flow:scan");
-    // AC7 anchor 2: body references the MCP tool (kebab-case form, as asserted by AC7).
-    expect(contents).toContain("scan-sources");
-  });
-});
+// The /flow:scan skill has been retired. The scan capability remains available
+// via the scanSources MCP tool, called internally by writeNativeStory and by
+// the /flow:plan skill on exit. The skill-file test that previously guarded
+// skills/scan/SKILL.md is removed alongside the file itself.
 
 // ---------------------------------------------------------------------------
 // Story 3.5 AC4 — scan-sources writes blocked manifest for discipline violation

@@ -58,7 +58,7 @@ describe("Story 3.6 AC5 — planner prompt re-open mode subsection", () => {
   it("enumerates the edit-pending BMad refusal string verbatim", async () => {
     const prompt = await getPlannerPromptSection();
     expect(prompt).toContain(
-      '"Edit-pending is native-only in v1. Edit the source story in <adapter-name> and run /flow:scan."',
+      '"Edit-pending is native-only in v1. Edit the source story in <adapter-name> and run /flow:plan to materialise the changes."',
     );
   });
 
