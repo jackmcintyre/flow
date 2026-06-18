@@ -1,7 +1,7 @@
 ---
 name: flow:plan
 description: "Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills and materialise the backlog automatically."
-allowed_tools: [Task, readBacklogInventory, getStatus, markStoryReady, scanSources]
+allowed_tools: [Task, readBacklogInventory, getStatus, scanSources]
 ---
 
 # /flow:plan
@@ -37,15 +37,8 @@ A target repo. `.flow/config.yaml` SHOULD be present (auto-detected on first inv
        - `existing_manifests`: a JSON array of refs already under `<targetRepoRoot>/.flow/state/to-do/` (kept for Story 3.4 backward compatibility).
    - The planner subagent runs the planning conversation (four-step loop on first-run or action-menu on re-open) and calls `writeNativeStory` / `markWithdrawn` for each approved action. The skill is a thin orchestrator — do not duplicate the subagent's conversational logic.
    - **The four-step planning loop (`mode === "first-run"` or when operator chooses `add` from the re-open action menu).** The subagent drives this loop; the skill does not branch on the action choice.
-   - **Exit condition (native branch):** the planner subagent emits the catalogue's terminal locked phrase: `Handoff to generalist-dev — story <story-id> ready to claim`. When that phrase appears, the skill presents the inline approval prompt (see below) for each newly drafted story that has a judge panel grade available in the current session, then exits. Stories are already materialised in the backlog — `writeNativeStory` calls the scan capability internally on each write, so no separate scan step is needed. If you have hand-edited a source story file directly, re-run `/flow:plan` to pick up the changes.
-   - **Inline approval prompt (native branch only):** For each drafted story whose judge panel grade is visible in the current session, after the planner subagent's handoff phrase, present the grade summary and ask the operator a single yes/no question before the skill exits:
-
-     > Grade: [pass/fail summary per lens]. Approve story [short-handle] for building now? (yes / no)
-
-     - If the operator explicitly answers **yes** (or a clear affirmative): call `markStoryReady({ targetRepoRoot, ref: <story ref>, ready: true })`. Report the result — the story is now claimable by the build loop.
-     - If the operator answers **no**, says nothing, or gives any response other than an explicit yes: do **not** call `markStoryReady`. Report that the story remains parked not-approved, and remind the operator they can approve it later via `/flow:ready`.
-     - The inline prompt MUST NOT call `markStoryReady` without an explicit yes from the operator in that same turn. No deferred or assumed approval.
-     - If no judge panel grade is available in the current session for a story, skip the prompt for that story and surface the next-step note (run `/flow:judge`, then `/flow:ready`).
+   - **Exit condition (native branch):** the planner subagent emits the catalogue's terminal locked phrase: `Handoff to generalist-dev — story <story-id> ready to claim`. When that phrase appears, the skill reports each newly drafted story and points the operator at `/flow:ready <ref>` to grade and approve it, then exits. Stories are already materialised in the backlog — `writeNativeStory` calls the scan capability internally on each write, so no separate scan step is needed. If you have hand-edited a source story file directly, re-run `/flow:plan` to pick up the changes.
+   - **Approval happens in `/flow:ready`, not here (native branch).** This skill never marks a story ready. Each drafted story is parked not-ready behind the readiness brake; to admit it, the operator runs `/flow:ready <ref>`, which grades it with the diverse-lens judge panel and — on their explicit approval — flips it ready. Do not call `markStoryReady` from this skill, and never offer an inline approval that would bypass the grade.
 
 5. **`adapter: bmad` branch:** Call `readBacklogInventory({ targetRepoRoot })` the same way as Step 4 (the tool skips the native-stories scan on BMad workspaces). On typed errors, surface verbatim and stop. Determine `mode` from the returned `mode` field.
    - **First-run (no manifests yet):** print the following fixed pointer block verbatim, then automatically call `scanSources({ targetRepoRoot })` to materialise any stories that have been authored since the last scan. Print the scan result verbatim. Do NOT prompt the operator to run a scan manually — materialisation is automatic.

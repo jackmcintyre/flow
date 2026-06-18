@@ -1719,7 +1719,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   });
 
   // Story 9.3 — aggregateJudgePanel: the panel-aggregation half of gate 1 Tier 1.
-  // Called by the /flow:judge skill AFTER it has spawned one judge per lens (each
+  // Called by the /flow:ready skill (judge-on-approve) AFTER it has spawned one judge per lens (each
   // from a distinct role) and each judge has written its verdict via writeLensVerdict.
   // Classifies the draft's risk tier (selects the Considered bar), reads the five
   // per-lens files (never transcripts), assembles + validates the PanelVerdict, and
@@ -2025,7 +2025,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "specialist for a lens when one is on the team. Returns { lensRoles, hiredRoles }. " +
       "Throws LensJudgeUnavailableError (naming the first uncovered lens) when the roster is " +
       "too small or too narrow to staff all five distinct judges. " +
-      "Read-only: does NOT mutate state. Used by both the interactive /flow:judge skill and " +
+      "Read-only: does NOT mutate state. Used by both the interactive /flow:ready skill (judge-on-approve) and " +
       "the unattended gate-1.workflow.js (via the CLI seam) so no operator ever hand-picks " +
       "judge assignments.",
     inputSchema: resolveLensRolesInputSchema,
