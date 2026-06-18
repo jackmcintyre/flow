@@ -173,6 +173,8 @@ describe("computeSkillEffectiveness — AC2 known distribution", () => {
     expect(result.window_size).toBe(DEFAULT_SKILL_EFFECTIVENESS_WINDOW);
     expect(result.sample_size).toBe(5); // five skill.invoke events
     expect(result.malformed_lines).toBe(0);
+    // READY FOR MERGE verdicts existed → real signal (issue #390).
+    expect(result.attribution).toBe("attributed");
   });
 
   it("does not count a verdict that PRECEDES the invocation as a useful fire", async () => {
@@ -248,6 +250,7 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
       window_size: DEFAULT_SKILL_EFFECTIVENESS_WINDOW,
       sample_size: 0,
       malformed_lines: 0,
+      attribution: "no-completed-flows",
     });
   });
 
@@ -352,6 +355,44 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
         }),
       ).rejects.toBeInstanceOf(SkillEffectivenessWindowInvalidError);
     }
+  });
+
+  it("reports attribution:no-completed-flows when no READY FOR MERGE verdict exists to attribute (issue #390)", async () => {
+    // Skills fired, but the cycle has NO useful verdict (e.g. just-opened, or all
+    // verdicts were NEEDS CHANGES). A wall of zero ratios must read as "nothing
+    // to attribute", NOT "every skill useless".
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "sN", skill_name: "flow:plan", story_id: "bmad:1.1" }),
+      makeInvoke({ ts: makeTs(2000), session_id: "sN", skill_name: "flow:board", story_id: "bmad:1.1" }),
+      makeVerdict({ ts: makeTs(3000), session_id: "sN", pr_number: 1, verdict: "NEEDS CHANGES", story_id: "bmad:1.1" }),
+    ].map(assertValid);
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+    });
+    expect(result.attribution).toBe("no-completed-flows");
+    // The per-skill map still reports the (zero) ratios — the field is the guard.
+    expect(result.per_skill["flow:plan"]!.useful_fire_count).toBe(0);
+  });
+
+  it("joins invoke→verdict on story_id across divergent session_ids (issue #390 root cause)", async () => {
+    // THE BUG: the capture seam stamps the harness session_id on skill.invoke,
+    // while post-reviewer-comments stamps a run ULID on reviewer.verdict — the
+    // two NEVER match. The story_id join must still credit the useful fire.
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "harness-sess-abc", skill_name: "flow:run", story_id: "native:01STORY" }),
+      makeVerdict({ ts: makeTs(2000), session_id: "run-ulid-xyz", pr_number: 7, verdict: "READY FOR MERGE", story_id: "native:01STORY" }),
+    ].map(assertValid);
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+    });
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1, // joined on story_id despite mismatched session_id
+      effectiveness_ratio: 1,
+    });
+    expect(result.attribution).toBe("attributed");
   });
 
   it("is deterministic — identical telemetry yields identical numbers across runs", async () => {

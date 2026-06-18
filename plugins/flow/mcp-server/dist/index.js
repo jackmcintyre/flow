@@ -48421,11 +48421,22 @@ var PerSkillEffectivenessSchema = external_exports.object({
   useful_fire_count: external_exports.number().int().nonnegative(),
   effectiveness_ratio: external_exports.number().min(0).max(1)
 }).strict();
+var SkillEffectivenessAttribution = external_exports.enum([
+  "no-completed-flows",
+  "attributed"
+]);
 var SkillEffectivenessResultSchema = external_exports.object({
   per_skill: external_exports.record(external_exports.string(), PerSkillEffectivenessSchema),
   window_size: external_exports.number().int().positive(),
   sample_size: external_exports.number().int().nonnegative(),
-  malformed_lines: external_exports.number().int().nonnegative()
+  malformed_lines: external_exports.number().int().nonnegative(),
+  /**
+   * Whether there was anything to attribute useful fires to. See
+   * `SkillEffectivenessAttribution`. Distinguishes "no completed flows" from
+   * "attributed zero useful fires" so the retro signal is not misread as
+   * universal skill ineffectiveness (issue #390).
+   */
+  attribution: SkillEffectivenessAttribution
 }).strict();
 async function computeSkillEffectiveness(opts) {
   const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl } = opts;
@@ -48441,7 +48452,9 @@ async function computeSkillEffectiveness(opts) {
     per_skill: {},
     window_size: window2,
     sample_size: 0,
-    malformed_lines: 0
+    malformed_lines: 0,
+    // No telemetry at all → nothing to attribute (never "every skill useless").
+    attribution: "no-completed-flows"
   };
   let jsonlFiles;
   try {
@@ -48502,29 +48515,45 @@ async function computeSkillEffectiveness(opts) {
   });
   const windowedInvokes = sortedInvokes.slice(0, window2);
   const usefulVerdictsBySession = /* @__PURE__ */ new Map();
+  const usefulVerdictsByStory = /* @__PURE__ */ new Map();
+  let usefulVerdictCount = 0;
   for (const v of verdicts) {
     if (v.data.verdict !== USEFUL_VERDICT) {
       continue;
     }
+    usefulVerdictCount++;
+    const key = { ts: v.ts, storyId: v.story_id };
     const list = usefulVerdictsBySession.get(v.session_id) ?? [];
-    list.push({ ts: v.ts, storyId: v.story_id });
+    list.push(key);
     usefulVerdictsBySession.set(v.session_id, list);
+    if (v.story_id !== void 0) {
+      const storyList = usefulVerdictsByStory.get(v.story_id) ?? [];
+      storyList.push(key);
+      usefulVerdictsByStory.set(v.story_id, storyList);
+    }
   }
   const tally = /* @__PURE__ */ new Map();
   for (const inv of windowedInvokes) {
     const skill = inv.data.skill_name;
     const entry = tally.get(skill) ?? { invoke: 0, useful: 0 };
     entry.invoke++;
-    const candidates = usefulVerdictsBySession.get(inv.session_id) ?? [];
-    const isUseful = candidates.some((v) => {
-      if (!(v.ts > inv.ts)) {
-        return false;
-      }
-      if (inv.story_id !== void 0 && v.storyId !== void 0) {
-        return v.storyId === inv.story_id;
-      }
-      return true;
-    });
+    let isUseful = false;
+    if (inv.story_id !== void 0) {
+      const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
+      isUseful = byStory.some((v) => v.ts > inv.ts);
+    }
+    if (!isUseful) {
+      const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
+      isUseful = bySession.some((v) => {
+        if (!(v.ts > inv.ts)) {
+          return false;
+        }
+        if (inv.story_id !== void 0 && v.storyId !== void 0) {
+          return v.storyId === inv.story_id;
+        }
+        return true;
+      });
+    }
     if (isUseful) {
       entry.useful++;
     }
@@ -48542,7 +48571,10 @@ async function computeSkillEffectiveness(opts) {
     per_skill,
     window_size: window2,
     sample_size: windowedInvokes.length,
-    malformed_lines
+    malformed_lines,
+    // If there were no READY FOR MERGE verdicts to join against, the zero
+    // ratios mean "nothing to attribute" — NOT "every skill is useless" (#390).
+    attribution: usefulVerdictCount > 0 ? "attributed" : "no-completed-flows"
   };
 }
 

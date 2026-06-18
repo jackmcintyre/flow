@@ -10,9 +10,15 @@
  *
  *   - `invoke_count`        — count of `skill.invoke` events for the skill.
  *   - `useful_fire_count`   — invocations followed by a `READY FOR MERGE`
- *                             `reviewer.verdict` within the same story flow
- *                             (join on `session_id`, and on `story_id` too when
- *                             both events carry one).
+ *                             `reviewer.verdict` within the same story flow.
+ *                             PRIMARY join is on `story_id` (the story ref the
+ *                             invoke and the verdict BOTH carry); a `session_id`
+ *                             join is the fallback for invokes with no story ref.
+ *                             See issue #390 — the original session-only join
+ *                             could never fire because the invoke's `session_id`
+ *                             (Claude Code harness session) and the verdict's
+ *                             `session_id` (run ULID from `mintSessionUlid`) come
+ *                             from different namespaces and never match.
  *   - `effectiveness_ratio` — `useful_fire_count / invoke_count` (`0` when the
  *                             skill fired but no useful fire followed; never
  *                             `NaN` — a skill with `invoke_count === 0` does
@@ -103,6 +109,29 @@ const PerSkillEffectivenessSchema = z
 type PerSkillEffectiveness = z.infer<typeof PerSkillEffectivenessSchema>;
 
 /**
+ * Attribution state of the result — lets the retro consumer tell apart two very
+ * different worlds that both yield `useful_fire_count: 0` everywhere (issue
+ * #390):
+ *
+ * - `"no-completed-flows"` — there were NO `READY FOR MERGE` reviewer verdicts
+ *   in the telemetry pool to attribute invocations to (e.g. a just-opened cycle
+ *   with no done manifests yet, or the verdict/invoke join key never lined up).
+ *   A wall of zero ratios here means "nothing to attribute", NOT "every skill is
+ *   useless" — the retro MUST NOT ground a skill-retire/skill-revise on it.
+ * - `"attributed"` — at least one `READY FOR MERGE` verdict existed to join
+ *   against, so the per-skill ratios are a real effectiveness signal (a zero
+ *   ratio for a given skill then genuinely means it never preceded a useful
+ *   verdict).
+ *
+ * Reported on EVERY result (including the empty/zero-invocation cases, where it
+ * is `"no-completed-flows"`).
+ */
+export const SkillEffectivenessAttribution = z.enum([
+  "no-completed-flows",
+  "attributed",
+]);
+
+/**
  * Zod schema for the `computeSkillEffectiveness` return value. Mirrors
  * `AgreementMetricResultSchema`: a deterministic, `.strict()` result with the
  * per-skill map plus the window/sample/malformed bookkeeping. The empty case
@@ -114,6 +143,13 @@ export const SkillEffectivenessResultSchema = z
     window_size: z.number().int().positive(),
     sample_size: z.number().int().nonnegative(),
     malformed_lines: z.number().int().nonnegative(),
+    /**
+     * Whether there was anything to attribute useful fires to. See
+     * `SkillEffectivenessAttribution`. Distinguishes "no completed flows" from
+     * "attributed zero useful fires" so the retro signal is not misread as
+     * universal skill ineffectiveness (issue #390).
+     */
+    attribution: SkillEffectivenessAttribution,
   })
   .strict();
 
@@ -178,6 +214,8 @@ export async function computeSkillEffectiveness(
     window_size: window,
     sample_size: 0,
     malformed_lines: 0,
+    // No telemetry at all → nothing to attribute (never "every skill useless").
+    attribution: "no-completed-flows",
   };
 
   let jsonlFiles: string[];
@@ -274,20 +312,42 @@ export async function computeSkillEffectiveness(
   // ------------------------------------------------------------------
   type VerdictKey = { ts: string; storyId?: string };
   const usefulVerdictsBySession = new Map<string, VerdictKey[]>();
+  // Index the SAME useful verdicts by story_id too — the primary join key now
+  // that the invoke and verdict session_id namespaces are known to diverge
+  // (issue #390). A skill.invoke stamped with the active story ref joins a
+  // verdict carrying that same ref regardless of session_id.
+  const usefulVerdictsByStory = new Map<string, VerdictKey[]>();
+  // Count of READY FOR MERGE verdicts available to attribute against — drives
+  // the `attribution` field (issue #390): zero means "no completed flows", so a
+  // wall of zero ratios is NOT a claim that every skill is useless.
+  let usefulVerdictCount = 0;
 
   for (const v of verdicts) {
     if (v.data.verdict !== USEFUL_VERDICT) {
       continue;
     }
+    usefulVerdictCount++;
+    const key: VerdictKey = { ts: v.ts, storyId: v.story_id };
     const list = usefulVerdictsBySession.get(v.session_id) ?? [];
-    list.push({ ts: v.ts, storyId: v.story_id });
+    list.push(key);
     usefulVerdictsBySession.set(v.session_id, list);
+    if (v.story_id !== undefined) {
+      const storyList = usefulVerdictsByStory.get(v.story_id) ?? [];
+      storyList.push(key);
+      usefulVerdictsByStory.set(v.story_id, storyList);
+    }
   }
 
   // ------------------------------------------------------------------
   // Step 6: Walk the windowed invocations; tally per skill.
-  // A "useful fire": a later READY FOR MERGE verdict in the same session
-  // (and same story_id when BOTH the invoke and the verdict carry one).
+  // A "useful fire": a later READY FOR MERGE verdict in the SAME story flow.
+  // Two join keys are tried (issue #390):
+  //   1. story_id — the primary key. The invoke now carries the active story
+  //      ref (stamped by the capture seam) and the verdict carries the same
+  //      ref, so this joins across the divergent session_id namespaces.
+  //   2. session_id — the legacy key, kept for invokes that carry no story_id
+  //      (e.g. a user-slash-command outside a story) AND for the case where an
+  //      invoke and verdict genuinely share a session id.
   // ------------------------------------------------------------------
   const tally = new Map<string, { invoke: number; useful: number }>();
 
@@ -296,20 +356,31 @@ export async function computeSkillEffectiveness(
     const entry = tally.get(skill) ?? { invoke: 0, useful: 0 };
     entry.invoke++;
 
-    const candidates = usefulVerdictsBySession.get(inv.session_id) ?? [];
-    const isUseful = candidates.some((v) => {
-      // The verdict must come strictly after the invocation.
-      if (!(v.ts > inv.ts)) {
-        return false;
-      }
-      // When BOTH carry a story_id, they must match. When the invocation has
-      // no story_id (e.g. a user-slash-command outside a story), the
-      // session_id + later-ts join alone qualifies.
-      if (inv.story_id !== undefined && v.storyId !== undefined) {
-        return v.storyId === inv.story_id;
-      }
-      return true;
-    });
+    // Primary join: same story_id, later verdict. Fires whenever the invoke
+    // carries a story_id matching a useful verdict's story_id.
+    let isUseful = false;
+    if (inv.story_id !== undefined) {
+      const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
+      isUseful = byStory.some((v) => v.ts > inv.ts);
+    }
+
+    // Fallback join: same session_id, later verdict. Used when the story_id
+    // join did not fire — chiefly invokes with no story_id (outside a flow).
+    if (!isUseful) {
+      const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
+      isUseful = bySession.some((v) => {
+        if (!(v.ts > inv.ts)) {
+          return false;
+        }
+        // When BOTH carry a story_id, they must match (don't credit a verdict
+        // from a different story that happens to share a session). When the
+        // invocation has no story_id, the session + later-ts join qualifies.
+        if (inv.story_id !== undefined && v.storyId !== undefined) {
+          return v.storyId === inv.story_id;
+        }
+        return true;
+      });
+    }
 
     if (isUseful) {
       entry.useful++;
@@ -334,5 +405,8 @@ export async function computeSkillEffectiveness(
     window_size: window,
     sample_size: windowedInvokes.length,
     malformed_lines,
+    // If there were no READY FOR MERGE verdicts to join against, the zero
+    // ratios mean "nothing to attribute" — NOT "every skill is useless" (#390).
+    attribution: usefulVerdictCount > 0 ? "attributed" : "no-completed-flows",
   };
 }

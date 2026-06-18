@@ -28276,11 +28276,22 @@ var PerSkillEffectivenessSchema = external_exports.object({
   useful_fire_count: external_exports.number().int().nonnegative(),
   effectiveness_ratio: external_exports.number().min(0).max(1)
 }).strict();
+var SkillEffectivenessAttribution = external_exports.enum([
+  "no-completed-flows",
+  "attributed"
+]);
 var SkillEffectivenessResultSchema = external_exports.object({
   per_skill: external_exports.record(external_exports.string(), PerSkillEffectivenessSchema),
   window_size: external_exports.number().int().positive(),
   sample_size: external_exports.number().int().nonnegative(),
-  malformed_lines: external_exports.number().int().nonnegative()
+  malformed_lines: external_exports.number().int().nonnegative(),
+  /**
+   * Whether there was anything to attribute useful fires to. See
+   * `SkillEffectivenessAttribution`. Distinguishes "no completed flows" from
+   * "attributed zero useful fires" so the retro signal is not misread as
+   * universal skill ineffectiveness (issue #390).
+   */
+  attribution: SkillEffectivenessAttribution
 }).strict();
 async function computeSkillEffectiveness(opts) {
   const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl } = opts;
@@ -28296,7 +28307,9 @@ async function computeSkillEffectiveness(opts) {
     per_skill: {},
     window_size: window2,
     sample_size: 0,
-    malformed_lines: 0
+    malformed_lines: 0,
+    // No telemetry at all → nothing to attribute (never "every skill useless").
+    attribution: "no-completed-flows"
   };
   let jsonlFiles;
   try {
@@ -28357,29 +28370,45 @@ async function computeSkillEffectiveness(opts) {
   });
   const windowedInvokes = sortedInvokes.slice(0, window2);
   const usefulVerdictsBySession = /* @__PURE__ */ new Map();
+  const usefulVerdictsByStory = /* @__PURE__ */ new Map();
+  let usefulVerdictCount = 0;
   for (const v of verdicts) {
     if (v.data.verdict !== USEFUL_VERDICT) {
       continue;
     }
+    usefulVerdictCount++;
+    const key = { ts: v.ts, storyId: v.story_id };
     const list = usefulVerdictsBySession.get(v.session_id) ?? [];
-    list.push({ ts: v.ts, storyId: v.story_id });
+    list.push(key);
     usefulVerdictsBySession.set(v.session_id, list);
+    if (v.story_id !== void 0) {
+      const storyList = usefulVerdictsByStory.get(v.story_id) ?? [];
+      storyList.push(key);
+      usefulVerdictsByStory.set(v.story_id, storyList);
+    }
   }
   const tally = /* @__PURE__ */ new Map();
   for (const inv of windowedInvokes) {
     const skill = inv.data.skill_name;
     const entry = tally.get(skill) ?? { invoke: 0, useful: 0 };
     entry.invoke++;
-    const candidates = usefulVerdictsBySession.get(inv.session_id) ?? [];
-    const isUseful = candidates.some((v) => {
-      if (!(v.ts > inv.ts)) {
-        return false;
-      }
-      if (inv.story_id !== void 0 && v.storyId !== void 0) {
-        return v.storyId === inv.story_id;
-      }
-      return true;
-    });
+    let isUseful = false;
+    if (inv.story_id !== void 0) {
+      const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
+      isUseful = byStory.some((v) => v.ts > inv.ts);
+    }
+    if (!isUseful) {
+      const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
+      isUseful = bySession.some((v) => {
+        if (!(v.ts > inv.ts)) {
+          return false;
+        }
+        if (inv.story_id !== void 0 && v.storyId !== void 0) {
+          return v.storyId === inv.story_id;
+        }
+        return true;
+      });
+    }
     if (isUseful) {
       entry.useful++;
     }
@@ -28397,7 +28426,10 @@ async function computeSkillEffectiveness(opts) {
     per_skill,
     window_size: window2,
     sample_size: windowedInvokes.length,
-    malformed_lines
+    malformed_lines,
+    // If there were no READY FOR MERGE verdicts to join against, the zero
+    // ratios mean "nothing to attribute" — NOT "every skill is useless" (#390).
+    attribution: usefulVerdictCount > 0 ? "attributed" : "no-completed-flows"
   };
 }
 
@@ -44446,6 +44478,7 @@ async function extractNativeStoryAcs(opts) {
 }
 
 // src/tools/capture-skill-invoke.ts
+var import_yaml33 = __toESM(require_dist(), 1);
 import * as path74 from "node:path";
 import { promises as fs54 } from "node:fs";
 
@@ -44506,6 +44539,36 @@ async function resolveSkillMeta(skillName, pluginRoot, readFileImpl) {
   }
   return { skillPath: skillName, skillVersion: "unknown", skillScope: "plugin" };
 }
+async function resolveActiveStoryRef(targetRepoRoot, readInProgressDirImpl, readFileImpl) {
+  try {
+    const inProgressDir = path74.join(
+      targetRepoRoot,
+      ".flow",
+      "state",
+      "in-progress"
+    );
+    const entries = readInProgressDirImpl ? await readInProgressDirImpl(inProgressDir) : await fs54.readdir(inProgressDir);
+    const manifestFiles = entries.filter(
+      (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
+    );
+    const inProgressRefs = [];
+    for (const file2 of manifestFiles) {
+      let parsed;
+      try {
+        const raw = await readFileImpl(path74.join(inProgressDir, file2));
+        parsed = (0, import_yaml33.parse)(raw);
+      } catch {
+        continue;
+      }
+      if (parsed !== null && typeof parsed === "object" && parsed.status === "in-progress" && typeof parsed.ref === "string" && parsed.ref.length > 0) {
+        inProgressRefs.push(parsed.ref);
+      }
+    }
+    return inProgressRefs.length === 1 ? inProgressRefs[0] : void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function captureSkillInvoke(rawHookPayload, deps = {}) {
   const recordImpl = deps.recordImpl ?? recordSkillInvoke;
   const readFileImpl = deps.readFileImpl ?? ((filePath) => fs54.readFile(filePath, "utf8"));
@@ -44526,10 +44589,16 @@ async function captureSkillInvoke(rawHookPayload, deps = {}) {
     const targetRepoRoot = typeof payload.cwd === "string" && payload.cwd.length > 0 ? payload.cwd : process.cwd();
     const sessionUlid = typeof payload.session_id === "string" && payload.session_id.length > 0 ? payload.session_id : "unknown-session";
     const meta3 = await resolveSkillMeta(skillName, pluginRoot, readFileImpl);
+    const storyId = await resolveActiveStoryRef(
+      targetRepoRoot,
+      deps.readInProgressDirImpl,
+      readFileImpl
+    );
     await recordImpl({
       targetRepoRoot,
       sessionUlid,
       agent: "agent",
+      ...storyId !== void 0 ? { storyId } : {},
       data: {
         skill_name: skillName,
         skill_path: meta3.skillPath,
@@ -44545,12 +44614,12 @@ async function captureSkillInvoke(rawHookPayload, deps = {}) {
 }
 
 // src/tools/auto-absorb-retro-proposals.ts
-var import_yaml35 = __toESM(require_dist(), 1);
+var import_yaml36 = __toESM(require_dist(), 1);
 import { promises as fs57 } from "node:fs";
 import * as path77 from "node:path";
 
 // src/lib/locate-proposal.ts
-var import_yaml33 = __toESM(require_dist(), 1);
+var import_yaml34 = __toESM(require_dist(), 1);
 import { promises as fs55 } from "node:fs";
 import * as path75 from "node:path";
 
@@ -44739,7 +44808,7 @@ async function locateProposal(opts) {
     const absPath = path75.join(proposalsDir, file2);
     const raw = await fs55.readFile(absPath, "utf8");
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml33.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml34.parse)(frontmatterRaw);
     const parsedFile = parseRetroProposalFile(parsedYaml);
     parsedFile.proposals.forEach((proposal, index) => {
       if (proposal.id === proposalId) {
@@ -44775,7 +44844,7 @@ function isEnoent14(err) {
 // src/lib/apply-persona-append.ts
 import { promises as fs56 } from "node:fs";
 import * as path76 from "node:path";
-var import_yaml34 = __toESM(require_dist(), 1);
+var import_yaml35 = __toESM(require_dist(), 1);
 var TOOL_NAME3 = "acceptProposal";
 function personaRelPath(targetRole) {
   return `team/${targetRole}/PERSONA.md`;
@@ -44802,7 +44871,7 @@ function reconstructPersonaFile2(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml34.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml35.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -44970,7 +45039,7 @@ function stampProposalAutoAbsorbed(rawFile, located, appliedAt, idempotencyKey, 
       (p, i2) => i2 === located.index ? { ...p, applied: appliedBlock } : p
     )
   };
-  const fm = (0, import_yaml35.stringify)(
+  const fm = (0, import_yaml36.stringify)(
     {
       iso_timestamp: file2.iso_timestamp,
       cycle_window: file2.cycle_window,
@@ -45147,7 +45216,7 @@ async function autoAbsorbProposalFile(opts) {
   let proposals;
   try {
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml35.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
     const file2 = parseRetroProposalFile(parsedYaml);
     proposals = file2.proposals;
   } catch (err) {
@@ -45168,13 +45237,13 @@ async function autoAbsorbProposalFile(opts) {
 }
 
 // src/tools/summarise-retro-proposal.ts
-var import_yaml36 = __toESM(require_dist(), 1);
+var import_yaml37 = __toESM(require_dist(), 1);
 import { promises as fs58 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
   const raw = await fs58.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml37.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
