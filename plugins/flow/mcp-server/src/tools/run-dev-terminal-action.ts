@@ -579,14 +579,23 @@ export async function runDevTerminalAction(opts: {
       ...(execaImpl ? { execaImpl } : {}),
     });
 
+    // When the branch already has an open PR (rework iteration), `gh pr create`
+    // exits non-zero with a message of the form "a pull request for branch …
+    // already exists:\nhttps://github.com/…/pull/<n>". Extract the URL from
+    // stderr so the rework path can return the existing PR rather than failing.
+    let prUrl = ghResult.stdout.trim();
     if (ghResult.exitCode !== 0) {
-      throw new GhPrCreateFailedError({
-        stderr: ghResult.stderr,
-        diagnostic: `gh pr create exited with code ${ghResult.exitCode}`,
-      });
+      const alreadyExistsMatch = ghResult.stderr.match(
+        /already exists:\s*(https:\/\/github\.com\/[^\s]+\/pull\/\d+)/,
+      );
+      if (!alreadyExistsMatch) {
+        throw new GhPrCreateFailedError({
+          stderr: ghResult.stderr,
+          diagnostic: `gh pr create exited with code ${ghResult.exitCode}`,
+        });
+      }
+      prUrl = alreadyExistsMatch[1]!;
     }
-
-    const prUrl = ghResult.stdout.trim();
     if (!prUrl || !prUrl.startsWith("https://github.com/")) {
       throw new GhPrCreateFailedError({
         stderr: ghResult.stderr,

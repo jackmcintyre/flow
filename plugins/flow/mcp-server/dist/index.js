@@ -54369,13 +54369,19 @@ async function runDevTerminalAction(opts) {
       cwd: gitRoot,
       ...execaImpl ? { execaImpl } : {}
     });
+    let prUrl = ghResult.stdout.trim();
     if (ghResult.exitCode !== 0) {
-      throw new GhPrCreateFailedError({
-        stderr: ghResult.stderr,
-        diagnostic: `gh pr create exited with code ${ghResult.exitCode}`
-      });
+      const alreadyExistsMatch = ghResult.stderr.match(
+        /already exists:\s*(https:\/\/github\.com\/[^\s]+\/pull\/\d+)/
+      );
+      if (!alreadyExistsMatch) {
+        throw new GhPrCreateFailedError({
+          stderr: ghResult.stderr,
+          diagnostic: `gh pr create exited with code ${ghResult.exitCode}`
+        });
+      }
+      prUrl = alreadyExistsMatch[1];
     }
-    const prUrl = ghResult.stdout.trim();
     if (!prUrl || !prUrl.startsWith("https://github.com/")) {
       throw new GhPrCreateFailedError({
         stderr: ghResult.stderr,
