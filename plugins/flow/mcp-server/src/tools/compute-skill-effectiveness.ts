@@ -108,7 +108,7 @@ const USEFUL_VERDICT = "READY FOR MERGE" as const;
  *                  construction, so grading it on the verdict join would always
  *                  return 0 — a false signal.
  */
-export type SkillTier = "execution" | "planning" | "cockpit";
+type SkillTier = "execution" | "planning" | "cockpit";
 
 /**
  * Exhaustive tier table for the currently-shipped flow: skill palette.
@@ -135,7 +135,7 @@ const SKILL_TIER_TABLE: Record<string, SkillTier> = {
  * Unknown names fall back to `"execution"` so new skills are never
  * silently granted a false-positive score.
  */
-export function getSkillTier(skillName: string): SkillTier {
+function getSkillTier(skillName: string): SkillTier {
   return SKILL_TIER_TABLE[skillName] ?? "execution";
 }
 
