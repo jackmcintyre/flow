@@ -51088,6 +51088,9 @@ function parseMaintainerFeedbackInput(input) {
 // src/tools/build-feedback-issue-url.ts
 var MAX_URL_BYTES = 8192;
 var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
+function composeFeedbackIssueTitle(item) {
+  return `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+}
 function composeFeedbackIssueBody(item) {
   const lines = [
     `**Problem**`,
@@ -51104,7 +51107,7 @@ function composeFeedbackIssueBody(item) {
 }
 function buildFeedbackIssueUrl(opts) {
   const { owner, repo, item } = opts;
-  const title = `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+  const title = composeFeedbackIssueTitle(item);
   const body = composeFeedbackIssueBody(item);
   const base = `https://github.com/${owner}/${repo}/issues/new`;
   const encodedTitle = encodeURIComponent(title);
@@ -51132,6 +51135,16 @@ function buildFeedbackIssueUrl(opts) {
   const shortenedBody = body.slice(0, lo) + SHORTENED_NOTE;
   const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
   return { url: shortenedUrl, bodyShortened: true };
+}
+function renderFeedbackLinkBlock(issueUrl, title, body) {
+  if (!issueUrl) return null;
+  const escapedTitle = title.replace(/'/g, "'\\''");
+  const escapedBody = body.replace(/'/g, "'\\''");
+  return [
+    `[Open in GitHub](${issueUrl})`,
+    issueUrl,
+    `gh issue create --title '${escapedTitle}' --body '${escapedBody}'`
+  ].join("\n");
 }
 function resolveGhRepoIdentity(execSyncImpl) {
   try {
@@ -51176,8 +51189,12 @@ async function recordMaintainerFeedback(opts) {
   const absPath = maintainerInboxItemPath(targetRepoRoot, id, raisedAt);
   await atomicWriteFile(absPath, JSON.stringify(fullItem, null, 2));
   let issueUrl;
+  let issueTitle;
+  let issueBody;
   const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
   if (repoIdentity !== null) {
+    issueTitle = composeFeedbackIssueTitle(validated);
+    issueBody = composeFeedbackIssueBody(validated);
     const urlResult = buildFeedbackIssueUrl({
       owner: repoIdentity.owner,
       repo: repoIdentity.repo,
@@ -51185,7 +51202,12 @@ async function recordMaintainerFeedback(opts) {
     });
     issueUrl = urlResult.url;
   }
-  return { ok: true, id, absPath, ...issueUrl !== void 0 ? { issueUrl } : {} };
+  return {
+    ok: true,
+    id,
+    absPath,
+    ...issueUrl !== void 0 ? { issueUrl, issueTitle, issueBody } : {}
+  };
 }
 
 // src/tools/gather-retro-inputs.ts
@@ -58777,10 +58799,11 @@ function registerAllTools(server) {
           item: args.item
         };
         const result = await recordMaintainerFeedback(parsed);
-        const responseText = result.issueUrl !== void 0 ? JSON.stringify({
+        const linkBlock = result.issueUrl !== void 0 && result.issueTitle !== void 0 && result.issueBody !== void 0 ? renderFeedbackLinkBlock(result.issueUrl, result.issueTitle, result.issueBody) : null;
+        const responseText = linkBlock !== null ? JSON.stringify({
           ...result,
-          _message: `Feedback captured. Open this link to review and file the GitHub issue:
-${result.issueUrl}`
+          _message: `Feedback captured. Open or file the GitHub issue:
+${linkBlock}`
         }) : JSON.stringify(result);
         return {
           content: [{ type: "text", text: responseText }]
@@ -58832,7 +58855,12 @@ ${result.issueUrl}`
 [${i2 + 1}] ${item.tool_area}: ${item.problem.slice(0, 120)}`
         );
         if (item.issueUrl) {
-          summaryLines.push(`    \u2192 ${item.issueUrl}`);
+          const title = composeStoredItemIssueTitle(item);
+          const body = composeStoredItemIssueBody(item);
+          const linkBlock = renderFeedbackLinkBlock(item.issueUrl, title, body);
+          if (linkBlock !== null) {
+            summaryLines.push(`    ${linkBlock.split("\n").join("\n    ")}`);
+          }
         }
       }
       return {

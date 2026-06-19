@@ -30811,6 +30811,9 @@ function parseMaintainerFeedbackInput(input) {
 // src/tools/build-feedback-issue-url.ts
 var MAX_URL_BYTES = 8192;
 var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
+function composeFeedbackIssueTitle(item) {
+  return `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+}
 function composeFeedbackIssueBody(item) {
   const lines = [
     `**Problem**`,
@@ -30827,7 +30830,7 @@ function composeFeedbackIssueBody(item) {
 }
 function buildFeedbackIssueUrl(opts) {
   const { owner, repo, item } = opts;
-  const title = `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+  const title = composeFeedbackIssueTitle(item);
   const body = composeFeedbackIssueBody(item);
   const base = `https://github.com/${owner}/${repo}/issues/new`;
   const encodedTitle = encodeURIComponent(title);
@@ -30899,8 +30902,12 @@ async function recordMaintainerFeedback(opts) {
   const absPath = maintainerInboxItemPath(targetRepoRoot, id, raisedAt);
   await atomicWriteFile(absPath, JSON.stringify(fullItem, null, 2));
   let issueUrl;
+  let issueTitle;
+  let issueBody;
   const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
   if (repoIdentity !== null) {
+    issueTitle = composeFeedbackIssueTitle(validated);
+    issueBody = composeFeedbackIssueBody(validated);
     const urlResult = buildFeedbackIssueUrl({
       owner: repoIdentity.owner,
       repo: repoIdentity.repo,
@@ -30908,7 +30915,12 @@ async function recordMaintainerFeedback(opts) {
     });
     issueUrl = urlResult.url;
   }
-  return { ok: true, id, absPath, ...issueUrl !== void 0 ? { issueUrl } : {} };
+  return {
+    ok: true,
+    id,
+    absPath,
+    ...issueUrl !== void 0 ? { issueUrl, issueTitle, issueBody } : {}
+  };
 }
 
 // src/tools/gather-retro-inputs.ts

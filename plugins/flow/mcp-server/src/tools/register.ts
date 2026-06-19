@@ -117,7 +117,13 @@ import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
 import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 import { recordAgentFriction } from "./record-agent-friction.js";
 import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
-import { reviewMaintainerInbox } from "./review-maintainer-inbox.js";
+import { renderFeedbackLinkBlock } from "./build-feedback-issue-url.js";
+import type { MaintainerFeedbackItem } from "../schemas/maintainer-feedback.js";
+import {
+  reviewMaintainerInbox,
+  composeStoredItemIssueTitle,
+  composeStoredItemIssueBody,
+} from "./review-maintainer-inbox.js";
 import { dismissMaintainerFeedback } from "./dismiss-maintainer-feedback.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
 import { recallLesson } from "./recall-lesson.js";
@@ -1941,11 +1947,17 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         const result = await recordMaintainerFeedback(parsed);
         // Surface the issueUrl prominently when present so the operator
         // can see and follow it immediately in their live session.
+        // Emit all three fallback paths: markdown hyperlink, plain bare URL,
+        // and a ready-to-run gh issue create command (Story native:01KVEZQKWPH8V627QJSAF5F4E6).
+        const linkBlock =
+          result.issueUrl !== undefined && result.issueTitle !== undefined && result.issueBody !== undefined
+            ? renderFeedbackLinkBlock(result.issueUrl, result.issueTitle, result.issueBody)
+            : null;
         const responseText =
-          result.issueUrl !== undefined
+          linkBlock !== null
             ? JSON.stringify({
                 ...result,
-                _message: `Feedback captured. Open this link to review and file the GitHub issue:\n${result.issueUrl}`,
+                _message: `Feedback captured. Open or file the GitHub issue:\n${linkBlock}`,
               })
             : JSON.stringify(result);
         return {
@@ -2011,6 +2023,9 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       }
 
       // Build a human-readable summary alongside the structured payload.
+      // Each item's link block contains all three fallback paths: markdown
+      // hyperlink, plain bare URL, and a gh issue create command
+      // (Story native:01KVEZQKWPH8V627QJSAF5F4E6).
       const summaryLines: string[] = [
         `Maintainer inbox — ${result.items.length} item${result.items.length === 1 ? "" : "s"}:`,
       ];
@@ -2019,7 +2034,14 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           `\n[${i + 1}] ${item.tool_area}: ${item.problem.slice(0, 120)}`,
         );
         if (item.issueUrl) {
-          summaryLines.push(`    → ${item.issueUrl}`);
+          // The inbox item carries the same required fields as MaintainerFeedbackItem;
+          // the cast is safe for the title/body composers.
+          const title = composeStoredItemIssueTitle(item as unknown as MaintainerFeedbackItem);
+          const body = composeStoredItemIssueBody(item as unknown as MaintainerFeedbackItem);
+          const linkBlock = renderFeedbackLinkBlock(item.issueUrl, title, body);
+          if (linkBlock !== null) {
+            summaryLines.push(`    ${linkBlock.split("\n").join("\n    ")}`);
+          }
         }
       }
 

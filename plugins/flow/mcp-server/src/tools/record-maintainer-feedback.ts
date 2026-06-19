@@ -54,6 +54,8 @@ import {
 import type { MaintainerFeedbackItem } from "../schemas/maintainer-feedback.js";
 import {
   buildFeedbackIssueUrl,
+  composeFeedbackIssueTitle,
+  composeFeedbackIssueBody,
   resolveGhRepoIdentity,
 } from "./build-feedback-issue-url.js";
 
@@ -92,6 +94,18 @@ export interface RecordMaintainerFeedbackResult {
    * (Story native:01KV7XXKZ0TBPYETZP2X81T40S AC1/AC2)
    */
   issueUrl?: string;
+  /**
+   * Plain (un-encoded) issue title used to compose `issueUrl`.
+   * Present when `issueUrl` is present; used by the handler to build the
+   * `gh issue create` command without re-decoding the URL.
+   */
+  issueTitle?: string;
+  /**
+   * Plain (un-encoded) issue body used to compose `issueUrl`.
+   * Present when `issueUrl` is present; used by the handler to build the
+   * `gh issue create` command without re-decoding the URL.
+   */
+  issueBody?: string;
 }
 
 /**
@@ -173,9 +187,16 @@ export async function recordMaintainerFeedback(
   // This is fail-soft: when gh is unavailable or the repo identity cannot be
   // resolved, the inbox write above is the primary result; issueUrl is simply
   // omitted. Nothing is ever filed automatically.
+  //
+  // Also compute the plain title and body strings so the handler can produce
+  // the `gh issue create` command fallback without re-decoding the URL.
   let issueUrl: string | undefined;
+  let issueTitle: string | undefined;
+  let issueBody: string | undefined;
   const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
   if (repoIdentity !== null) {
+    issueTitle = composeFeedbackIssueTitle(validated);
+    issueBody = composeFeedbackIssueBody(validated);
     const urlResult = buildFeedbackIssueUrl({
       owner: repoIdentity.owner,
       repo: repoIdentity.repo,
@@ -184,5 +205,10 @@ export async function recordMaintainerFeedback(
     issueUrl = urlResult.url;
   }
 
-  return { ok: true, id, absPath, ...(issueUrl !== undefined ? { issueUrl } : {}) };
+  return {
+    ok: true,
+    id,
+    absPath,
+    ...(issueUrl !== undefined ? { issueUrl, issueTitle, issueBody } : {}),
+  };
 }
