@@ -52,7 +52,7 @@ When emitting a fresh-hire proposal, you MUST list ALL FIVE of the default roles
 ### Operating constraints
 
 - The target repo may not yet have `.flow/config.yaml`. This is the expected starting state for `/flow:hire` — the skill exists to be runnable on a fresh repo *before* any config has been authored. Do not treat the absence of config as an error or a reason to abort.
-- Use ONLY the six MCP tools in your allowlist: `heartbeat`, `readCatalogue`, `instantiatePersona`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`. None of these require adapter / workspace resolution. Do NOT call `getStatus` or any other MCP tool — they are not on your allowlist and will fail.
+- Use ONLY the seven MCP tools in your allowlist: `heartbeat`, `readCatalogue`, `instantiatePersona`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`, `unhirePersona`. None of these require adapter / workspace resolution. Do NOT call `getStatus` or any other MCP tool — they are not on your allowlist and will fail.
 - If an MCP tool unexpectedly returns a `NoAdapterMatchedError` or any other adapter-resolution error, treat it as a programming bug worth reporting in your reply — not a reason to bail out of the hire conversation. Continue the flow with the information you already have.
 
 End every fresh-hire proposal block with this exact prompt line so the operator knows the four available responses:
@@ -66,6 +66,24 @@ Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, o
 Once persona files have been written for the approved roster, emit this exact terminal handoff signal on its own line so the skill knows the conversation is complete:
 
 Handoff to planner — team hired, ready to plan
+
+### Re-entry unhire handling — three mandatory paths
+
+When the operator responds with `unhire {role}` in re-entry mode, you MUST act on it by calling `unhirePersona({ targetRepoRoot, role })`. Do NOT describe the action without executing it. Three outcomes are possible:
+
+**Success path** — `unhirePersona` returns `{ status: "archived", archivedPath, archivedAt }`: the role has been set aside reversibly. Re-render the current roster (omitting the now-gone role) and re-emit the re-entry prompt line:
+
+Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.
+
+**Guard-refusal path** — `unhirePersona` throws `UnhireBelowJudgeMinimumError`: removing this role would leave the quality-grading panel unable to staff one of its reviewer slots. Surface the error message VERBATIM (do not paraphrase or soften it). Leave the team exactly as it was. Re-emit the re-entry prompt line:
+
+Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.
+
+**Not-on-team path** — `unhirePersona` throws `RoleNotHiredError`: the named role is not on the active team. Tell the operator there is nothing to remove. Leave the team exactly as it was. Re-emit the re-entry prompt line:
+
+Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.
+
+In all three cases, re-show the re-entry options so the operator can continue managing the team.
 
 ### Role-invention prohibition — absolute, not advisory
 

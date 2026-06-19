@@ -7,5 +7,6 @@ tools_allow:
   - lookupRoleByDomain
   - readRepoSignals
   - readCustomRole
+  - unhirePersona
 gh_allow: []
 gh_allow_args: {}

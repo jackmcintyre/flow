@@ -8,7 +8,7 @@ allowed_tools: [Read, Task, readPersona, instantiatePersona]
 
 # What this skill does
 
-Opens a project-shaped hiring conversation. The hiring-manager subagent reads your repo at a high level (language, top-level layout, README excerpt, recent commits, dependency manifests), proposes the default roster (`planner`, `generalist-dev`, `generalist-reviewer`, `retro-analyst`, `orchestrator`) plus any catalogue specialists justified by what it observed, and — after you approve — writes a persona file to `{target-repo}/team/{role}/PERSONA.md` for each agreed role. Re-running `/flow:hire` against an already-hired team surfaces the current roster and offers hire-one-more / view-persona / done actions.
+Opens a project-shaped hiring conversation. The hiring-manager subagent reads your repo at a high level (language, top-level layout, README excerpt, recent commits, dependency manifests), proposes the default roster (`planner`, `generalist-dev`, `generalist-reviewer`, `retro-analyst`, `orchestrator`) plus any catalogue specialists justified by what it observed, and — after you approve — writes a persona file to `{target-repo}/team/{role}/PERSONA.md` for each agreed role. Re-running `/flow:hire` against an already-hired team surfaces the current roster and offers hire-one-more / unhire / view-persona / done actions. The unhire action sets the named role aside reversibly (archived, not deleted) or shows a guard refusal if removing it would leave the quality-grading panel unable to staff its reviewer slots.
 
 For a no-conversation shortcut, invoke `/flow:hire default` to hire the five default-roster roles directly — see the **Fast path** section below.
 
