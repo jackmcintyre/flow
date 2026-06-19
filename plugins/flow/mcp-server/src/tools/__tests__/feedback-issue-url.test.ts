@@ -30,6 +30,7 @@ import { recordMaintainerFeedback } from "../record-maintainer-feedback.js";
 import {
   buildFeedbackIssueUrl,
   composeFeedbackIssueBody,
+  renderFeedbackLinkBlock,
   resolveGhRepoIdentity,
 } from "../build-feedback-issue-url.js";
 
@@ -251,6 +252,98 @@ describe("resolveGhRepoIdentity", () => {
     };
     const result = resolveGhRepoIdentity(malformedExecSync);
     expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderFeedbackLinkBlock — unit tests (Story native:01KVEZQKWPH8V627QJSAF5F4E6)
+//
+// AC1 (integration via helper): the _message field contains (a) a markdown
+//   hyperlink, (b) a plain bare URL on its own line, and (c) a gh issue create
+//   command with --title and --body pre-filled.
+// AC3: when issueUrl is absent, returns null — no blank or malformed lines emitted.
+// ---------------------------------------------------------------------------
+
+describe("renderFeedbackLinkBlock (AC1/AC3)", () => {
+  const SAMPLE_URL = "https://github.com/test-owner/test-repo/issues/new?title=foo&body=bar";
+  const SAMPLE_TITLE = "[tool-feedback] some-tool: A problem description";
+  const SAMPLE_BODY = "**Problem**\nA problem description\n\n**Tool area**\nsome-tool\n\n**Trigger**\nsome-trigger";
+
+  it("returns a string containing a markdown hyperlink (AC1a)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).not.toBeNull();
+    expect(block).toContain(`[Open in GitHub](${SAMPLE_URL})`);
+  });
+
+  it("returns a string containing the plain bare URL on its own line (AC1b)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).not.toBeNull();
+    const lines = block!.split("\n");
+    // The plain URL must appear as a standalone line (not embedded in markdown).
+    expect(lines).toContain(SAMPLE_URL);
+  });
+
+  it("returns a string containing a gh issue create command (AC1c)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).not.toBeNull();
+    expect(block).toContain("gh issue create");
+    expect(block).toContain("--title");
+    expect(block).toContain("--body");
+  });
+
+  it("gh command includes the title text (AC1c)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    // The title should appear within the single-quoted --title value.
+    expect(block).toContain(SAMPLE_TITLE);
+  });
+
+  it("gh command includes the body text (AC1c)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    // The body content should appear within the single-quoted --body value.
+    expect(block).toContain("A problem description");
+  });
+
+  it("returns null when issueUrl is undefined — no blank or malformed lines emitted (AC3)", () => {
+    const block = renderFeedbackLinkBlock(undefined, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).toBeNull();
+  });
+
+  it("returns null when issueUrl is null (AC3)", () => {
+    const block = renderFeedbackLinkBlock(null, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).toBeNull();
+  });
+
+  it("returns null when issueUrl is an empty string (AC3)", () => {
+    const block = renderFeedbackLinkBlock("", SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).toBeNull();
+  });
+
+  it("shell-escapes embedded single quotes in the title (AC1c)", () => {
+    const titleWithQuote = "It's a problem with 'quotes'";
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, titleWithQuote, SAMPLE_BODY);
+    expect(block).not.toBeNull();
+    // Embedded single quotes must be escaped as '\'' so the shell command is valid.
+    expect(block).toContain("It'\\''s a problem with '\\''quotes'\\''");
+  });
+
+  it("shell-escapes embedded single quotes in the body (AC1c)", () => {
+    const bodyWithQuote = "The tool said 'hello' and then failed.";
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, bodyWithQuote);
+    expect(block).not.toBeNull();
+    // The body content in the gh command must have single quotes escaped.
+    expect(block).toContain("The tool said '\\''hello'\\'' and then failed.");
+  });
+
+  it("the three elements are on separate lines (AC1)", () => {
+    const block = renderFeedbackLinkBlock(SAMPLE_URL, SAMPLE_TITLE, SAMPLE_BODY);
+    expect(block).not.toBeNull();
+    const lines = block!.split("\n");
+    // Line 1: markdown hyperlink
+    expect(lines[0]).toMatch(/^\[Open in GitHub\]\(/);
+    // Line 2: plain bare URL
+    expect(lines[1]).toBe(SAMPLE_URL);
+    // Line 3: gh issue create command
+    expect(lines[2]).toMatch(/^gh issue create /);
   });
 });
 

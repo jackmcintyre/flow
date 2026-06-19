@@ -53,8 +53,20 @@ const SHORTENED_NOTE =
   "\n\n_(body shortened — see full detail in the maintainer inbox)_";
 
 // ---------------------------------------------------------------------------
-// Body composer
+// Title and body composers
 // ---------------------------------------------------------------------------
+
+/**
+ * Compose the issue title from a live-session feedback item.
+ *
+ * Format: `[tool-feedback] <tool_area>: <problem (first 120 chars)>`
+ *
+ * Exported so callers (e.g. the register.ts handler) can obtain the plain
+ * title for the `gh issue create` command without re-decoding the URL.
+ */
+export function composeFeedbackIssueTitle(item: MaintainerFeedbackInput): string {
+  return `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+}
 
 /**
  * Compose the human-readable issue body from a feedback item's fields.
@@ -121,7 +133,7 @@ export function buildFeedbackIssueUrl(
 ): FeedbackIssueUrlResult {
   const { owner, repo, item } = opts;
 
-  const title = `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+  const title = composeFeedbackIssueTitle(item);
   const body = composeFeedbackIssueBody(item);
 
   const base = `https://github.com/${owner}/${repo}/issues/new`;
@@ -159,6 +171,53 @@ export function buildFeedbackIssueUrl(
   const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
 
   return { url: shortenedUrl, bodyShortened: true };
+}
+
+// ---------------------------------------------------------------------------
+// Link-block renderer
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a three-element link block for a pre-filled GitHub issue URL.
+ *
+ * Produces:
+ *   [Open in GitHub](<url>)
+ *   <url>
+ *   gh issue create --title '<escaped-title>' --body '<escaped-body>'
+ *
+ * The three elements give the operator three independent paths to act on the
+ * feedback regardless of whether their terminal renders clickable hyperlinks:
+ *   (1) Markdown hyperlink — renders as a clickable link in supporting terminals.
+ *   (2) Plain bare URL — can be copy-pasted into any browser.
+ *   (3) gh issue create command — works entirely in the terminal without a browser.
+ *
+ * When `issueUrl` is absent (gh unavailable), returns `null` so callers can
+ * degrade cleanly to the existing no-link message with no blank or malformed lines.
+ *
+ * Shell escaping: single-quote the title and body values; replace any embedded
+ * `'` with `'\''` (close quote, literal single-quote, reopen quote).
+ *
+ * @param issueUrl - The assembled pre-filled GitHub new-issue URL (or undefined/null).
+ * @param title    - The plain (un-encoded) issue title text.
+ * @param body     - The plain (un-encoded) issue body text.
+ * @returns The formatted three-element block string, or `null` when issueUrl is absent.
+ */
+export function renderFeedbackLinkBlock(
+  issueUrl: string | null | undefined,
+  title: string,
+  body: string,
+): string | null {
+  if (!issueUrl) return null;
+
+  // Escape embedded single quotes for safe shell interpolation.
+  const escapedTitle = title.replace(/'/g, "'\\''");
+  const escapedBody = body.replace(/'/g, "'\\''");
+
+  return [
+    `[Open in GitHub](${issueUrl})`,
+    issueUrl,
+    `gh issue create --title '${escapedTitle}' --body '${escapedBody}'`,
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------

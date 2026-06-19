@@ -26,6 +26,7 @@ import {
   composeStoredItemIssueBody,
   buildStoredItemIssueUrl,
 } from "../review-maintainer-inbox.js";
+import { renderFeedbackLinkBlock } from "../build-feedback-issue-url.js";
 import type { MaintainerFeedbackItem } from "../../schemas/maintainer-feedback.js";
 
 // ---------------------------------------------------------------------------
@@ -529,6 +530,109 @@ describe("reviewMaintainerInbox — resilience (malformed files skipped)", () =>
 
     expect(result.items).toHaveLength(1);
     expect(result.malformedCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reviewMaintainerInbox — three-element link block (Story native:01KVEZQKWPH8V627QJSAF5F4E6 AC2)
+//
+// When gh is available, each item's issueUrl can be used with the title/body
+// composers and renderFeedbackLinkBlock to produce a block containing:
+//   (a) a markdown hyperlink
+//   (b) a plain bare URL on its own line
+//   (c) a gh issue create command with --title and --body pre-filled
+// ---------------------------------------------------------------------------
+
+describe("reviewMaintainerInbox — three-element link block (AC2)", () => {
+  it("each item has issueUrl and can produce a three-element link block via renderFeedbackLinkBlock", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      execSyncImpl: STUB_EXEC_SYNC,
+    });
+
+    expect(result.items).toHaveLength(1);
+    const item = result.items[0]!;
+    expect(item.issueUrl).toBeDefined();
+
+    // Compose title and body (same approach as the register.ts handler).
+    const title = composeStoredItemIssueTitle(item as MaintainerFeedbackItem);
+    const body = composeStoredItemIssueBody(item as MaintainerFeedbackItem);
+    const linkBlock = renderFeedbackLinkBlock(item.issueUrl!, title, body);
+
+    expect(linkBlock).not.toBeNull();
+    // (a) markdown hyperlink
+    expect(linkBlock).toContain(`[Open in GitHub](${item.issueUrl})`);
+    // (b) plain bare URL on its own line
+    const lines = linkBlock!.split("\n");
+    expect(lines).toContain(item.issueUrl!);
+    // (c) gh issue create command
+    expect(linkBlock).toContain("gh issue create --title");
+    expect(linkBlock).toContain("--body");
+  });
+
+  it("link block contains the item's title and problem text in the gh command", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      execSyncImpl: STUB_EXEC_SYNC,
+    });
+
+    const item = result.items[0]!;
+    const title = composeStoredItemIssueTitle(item as MaintainerFeedbackItem);
+    const body = composeStoredItemIssueBody(item as MaintainerFeedbackItem);
+    const linkBlock = renderFeedbackLinkBlock(item.issueUrl!, title, body);
+
+    // The title should contain the tool_area.
+    expect(linkBlock).toContain(SAMPLE_ITEM.tool_area);
+    // The body portion of the gh command should contain the problem.
+    expect(linkBlock).toContain(SAMPLE_ITEM.problem);
+  });
+
+  it("multiple items each get their own three-element link block data", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+    await writeInboxItem(root, SAMPLE_ITEM_2);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      execSyncImpl: STUB_EXEC_SYNC,
+    });
+
+    expect(result.items).toHaveLength(2);
+
+    for (const item of result.items) {
+      expect(item.issueUrl).toBeDefined();
+      const title = composeStoredItemIssueTitle(item as MaintainerFeedbackItem);
+      const body = composeStoredItemIssueBody(item as MaintainerFeedbackItem);
+      const linkBlock = renderFeedbackLinkBlock(item.issueUrl!, title, body);
+
+      expect(linkBlock).not.toBeNull();
+      expect(linkBlock).toContain("[Open in GitHub]");
+      expect(linkBlock).toContain(item.issueUrl!);
+      expect(linkBlock).toContain("gh issue create");
+    }
+  });
+
+  it("when gh is unavailable, renderFeedbackLinkBlock returns null — no link block emitted (AC3)", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      execSyncImpl: FAILING_EXEC_SYNC,
+    });
+
+    expect(result.items).toHaveLength(1);
+    const item = result.items[0]!;
+    // No issueUrl when gh is unavailable.
+    expect(item.issueUrl).toBeUndefined();
+
+    // Attempting to build a link block with no URL should return null cleanly.
+    const title = composeStoredItemIssueTitle(item as MaintainerFeedbackItem);
+    const body = composeStoredItemIssueBody(item as MaintainerFeedbackItem);
+    const linkBlock = renderFeedbackLinkBlock(item.issueUrl, title, body);
+    expect(linkBlock).toBeNull();
   });
 });
 
