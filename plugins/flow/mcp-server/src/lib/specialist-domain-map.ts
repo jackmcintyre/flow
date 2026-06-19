@@ -27,18 +27,6 @@
  * "no specialist hire needed".
  */
 
-/** The catalogue domain string for security work. */
-export const DOMAIN_SECURITY = "authentication authorization and secret handling";
-
-/** The catalogue domain string for test-specialist work. */
-export const DOMAIN_TEST = "test design and coverage gaps";
-
-/** The catalogue domain string for docs work. */
-export const DOMAIN_DOCS = "developer-facing documentation and READMEs";
-
-/** The catalogue domain string for debugger work. */
-export const DOMAIN_DEBUG = "failure-mode diagnosis and root-cause isolation";
-
 /**
  * Map of catalogue domain string → specialist role id.
  *
@@ -47,10 +35,10 @@ export const DOMAIN_DEBUG = "failure-mode diagnosis and root-cause isolation";
  * `null` for them.
  */
 const DOMAIN_TO_SPECIALIST: ReadonlyMap<string, string> = new Map([
-  [DOMAIN_SECURITY, "security-specialist"],
-  [DOMAIN_TEST, "test-specialist"],
-  [DOMAIN_DOCS, "docs-specialist"],
-  [DOMAIN_DEBUG, "debugger"],
+  ["authentication authorization and secret handling", "security-specialist"],
+  ["test design and coverage gaps", "test-specialist"],
+  ["developer-facing documentation and READMEs", "docs-specialist"],
+  ["failure-mode diagnosis and root-cause isolation", "debugger"],
 ]);
 
 /**
@@ -65,22 +53,6 @@ const DOMAIN_TO_SPECIALIST: ReadonlyMap<string, string> = new Map([
  */
 export function specialistRoleForDomain(domain: string): string | null {
   return DOMAIN_TO_SPECIALIST.get(domain) ?? null;
-}
-
-/**
- * Return the catalogue domain string for a well-known specialist role.
- *
- * The inverse of `specialistRoleForDomain`. Used by the stall-gap rule to
- * resolve a stalled domain back to its owning role name for the
- * recommendation.
- *
- * Returns `null` when the role is not a specialist or is not in the map.
- */
-export function domainForSpecialistRole(role: string): string | null {
-  for (const [domain, r] of DOMAIN_TO_SPECIALIST) {
-    if (r === role) return domain;
-  }
-  return null;
 }
 
 /** All specialist roles this mapping tracks. */

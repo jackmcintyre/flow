@@ -46,7 +46,7 @@ const AnalyzeTeamFitInputSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /** A hire recommendation with the evidence refs / counts that triggered it. */
-export interface HireRecommendation {
+interface HireRecommendation {
   /** The specialist role to hire (matches catalogue role id). */
   role: string;
   /** Plain-language reason for this recommendation. */
@@ -60,7 +60,7 @@ export interface HireRecommendation {
 }
 
 /** A recommendation to let a specialist go, with evidence. */
-export interface UnhireRecommendation {
+interface UnhireRecommendation {
   /** The specialist role to let go. */
   role: string;
   /** Plain-language reason for this recommendation. */
@@ -73,7 +73,7 @@ export interface UnhireRecommendation {
 }
 
 /** A capability gap: a domain where recurring stalls show the team lacks coverage. */
-export interface CapabilityGap {
+interface CapabilityGap {
   /** The uncovered domain string (from the stall events). */
   domain: string;
   /** Plain-language signal: stall count and specialist to hire. */

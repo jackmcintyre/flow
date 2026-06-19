@@ -45449,15 +45449,11 @@ import { promises as fs60 } from "node:fs";
 import * as path79 from "node:path";
 
 // src/lib/specialist-domain-map.ts
-var DOMAIN_SECURITY = "authentication authorization and secret handling";
-var DOMAIN_TEST = "test design and coverage gaps";
-var DOMAIN_DOCS = "developer-facing documentation and READMEs";
-var DOMAIN_DEBUG = "failure-mode diagnosis and root-cause isolation";
 var DOMAIN_TO_SPECIALIST = /* @__PURE__ */ new Map([
-  [DOMAIN_SECURITY, "security-specialist"],
-  [DOMAIN_TEST, "test-specialist"],
-  [DOMAIN_DOCS, "docs-specialist"],
-  [DOMAIN_DEBUG, "debugger"]
+  ["authentication authorization and secret handling", "security-specialist"],
+  ["test design and coverage gaps", "test-specialist"],
+  ["developer-facing documentation and READMEs", "docs-specialist"],
+  ["failure-mode diagnosis and root-cause isolation", "debugger"]
 ]);
 function specialistRoleForDomain(domain2) {
   return DOMAIN_TO_SPECIALIST.get(domain2) ?? null;
