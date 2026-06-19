@@ -12,9 +12,14 @@
  * functions with no IO. This is the same test strategy as `get-team-snapshot.test.ts`.
  */
 
-import { describe, expect, it } from "vitest";
-import { advise, renderHelpAdvice } from "./help-advisor.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { stringify as yamlStringify } from "yaml";
+import { advise, getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 import type { HelpAdvice } from "./help-advisor.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
 
 // ---------------------------------------------------------------------------
 // Helper — build a minimal snapshot for the pure `advise` function
@@ -240,5 +245,172 @@ describe("edge cases", () => {
       const output = renderHelpAdvice(advice);
       expect(output).toMatch(/^flow:help/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getHelpAdvice — integration against a real filesystem
+//
+// The pure-function suites above cover the priority ladder and renderer. These
+// tests drive the public `getHelpAdvice` end-to-end against tmpdir fixtures so
+// the state readers (team presence + backlog summary) are exercised against the
+// actual on-disk shapes the advisor reads in a live project — the same strategy
+// as list-claimable-todos.test.ts. This is what makes each AC's "Given a project
+// in state X" clause real rather than simulated through a hand-built snapshot.
+// ---------------------------------------------------------------------------
+
+describe("getHelpAdvice — live project state (filesystem)", () => {
+  let tmpRoot: string;
+
+  async function makeStateDirs(): Promise<void> {
+    for (const state of ["to-do", "in-progress", "done", "blocked"]) {
+      await fs.mkdir(path.join(tmpRoot, ".flow", "state", state), { recursive: true });
+    }
+  }
+
+  function manifestYaml(
+    ref: string,
+    opts: { ready?: boolean; status?: string; withdrawn?: boolean; depends_on?: string[] } = {},
+  ): string {
+    return yamlStringify(
+      {
+        ref,
+        status: opts.status ?? "to-do",
+        adapter: "native",
+        source_path: `.flow/native-stories/${ref.replace("native:", "")}.md`,
+        source_hash: "a".repeat(64),
+        depends_on: opts.depends_on ?? [],
+        acceptance_criteria: [
+          { text: "Given something, when something, then something works.", kind: "integration" },
+        ],
+        title: `Story ${ref}`,
+        narrative: "As a user, I want something so that I can use it.",
+        withdrawn: opts.withdrawn ?? false,
+        ready: opts.ready ?? false,
+      },
+      { lineWidth: 0 },
+    );
+  }
+
+  async function writeManifest(
+    state: string,
+    ref: string,
+    opts?: Parameters<typeof manifestYaml>[1],
+  ): Promise<void> {
+    const p = path.join(tmpRoot, ".flow", "state", state, `${ref}.yaml`);
+    await atomicWriteFile(p, manifestYaml(ref, opts));
+  }
+
+  async function hireRole(role: string): Promise<void> {
+    await fs.mkdir(path.join(tmpRoot, "team", role), { recursive: true });
+  }
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "flow-help-advisor-"));
+    await makeStateDirs();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  // AC2 — no team set up yet
+  it("no team directory at all → recommends setting up a team (/flow:hire)", async () => {
+    // No team/ dir, empty backlog.
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("no-team");
+    expect(advice.command).toBe("/flow:hire");
+  });
+
+  it("team dir exists but holds only skip dirs / hidden / non-dir entries → still no team", async () => {
+    await fs.mkdir(path.join(tmpRoot, "team", "custom"), { recursive: true });
+    await fs.mkdir(path.join(tmpRoot, "team", "_archived"), { recursive: true });
+    await fs.mkdir(path.join(tmpRoot, "team", ".hidden"), { recursive: true });
+    await atomicWriteFile(path.join(tmpRoot, "team", "README.md"), "not a role");
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("no-team");
+  });
+
+  // AC4 — parked drafts not yet approved
+  it("team hired + a parked (not-ready) draft → recommends approving via /flow:ready", async () => {
+    await hireRole("planner");
+    await writeManifest("to-do", "native:01HZHELP000000000000000001", { ready: false });
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("parked-drafts");
+    expect(advice.command).toBe("/flow:ready");
+  });
+
+  it("a withdrawn to-do item is ignored (not counted as a parked draft)", async () => {
+    await hireRole("planner");
+    await writeManifest("to-do", "native:01HZHELP000000000000000099", {
+      ready: false,
+      withdrawn: true,
+    });
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    // Withdrawn item is filtered by isClaimable → backlog reads as empty.
+    expect(advice.situation).toBe("backlog-empty");
+  });
+
+  // AC3 — approved work waiting, nothing building
+  it("team + a ready story whose deps are all done → recommends starting a run (/flow:run)", async () => {
+    await hireRole("planner");
+    await writeManifest("done", "native:01HZHELP0000000000000000DEP");
+    await writeManifest("to-do", "native:01HZHELP000000000000000002", {
+      ready: true,
+      depends_on: ["native:01HZHELP0000000000000000DEP"],
+    });
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("approved-and-idle");
+    expect(advice.command).toBe("/flow:run");
+  });
+
+  it("a ready story with an unmet dependency is neither claimable nor parked → backlog-empty", async () => {
+    await hireRole("planner");
+    // dep manifest is NOT in done/ → depsReady false.
+    await writeManifest("to-do", "native:01HZHELP000000000000000003", {
+      ready: true,
+      depends_on: ["native:01HZHELP0000000000000MISSING"],
+    });
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("backlog-empty");
+    expect(advice.command).toBe("/flow:plan");
+  });
+
+  // work-in-progress
+  it("an in-progress build (snapshot sidecar ignored) → recommends checking the dashboard", async () => {
+    await hireRole("planner");
+    await writeManifest("in-progress", "native:01HZHELP000000000000000004", {
+      status: "in-progress",
+    });
+    // A snapshot sidecar must NOT be counted as a second in-progress story.
+    await atomicWriteFile(
+      path.join(
+        tmpRoot,
+        ".flow",
+        "state",
+        "in-progress",
+        "native:01HZHELP000000000000000004.snapshot.yaml",
+      ),
+      "snapshot: true\n",
+    );
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("work-in-progress");
+    expect(advice.command).toBe("/flow:dashboard");
+  });
+
+  // backlog-empty (team present, nothing queued)
+  it("team hired, empty backlog → recommends planning new work (/flow:plan)", async () => {
+    await hireRole("planner");
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("backlog-empty");
+    expect(advice.command).toBe("/flow:plan");
+  });
+
+  it("missing .flow/state directories entirely → reads as empty backlog, not an error", async () => {
+    // Fresh repo: team hired but no .flow/state tree yet.
+    await fs.rm(path.join(tmpRoot, ".flow"), { recursive: true, force: true });
+    await hireRole("planner");
+    const advice = await getHelpAdvice({ targetRepoRoot: tmpRoot });
+    expect(advice.situation).toBe("backlog-empty");
   });
 });
