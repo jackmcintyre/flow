@@ -91,37 +91,89 @@ export const DEFAULT_SKILL_EFFECTIVENESS_WINDOW = 50;
 const USEFUL_VERDICT = "READY FOR MERGE" as const;
 
 // ---------------------------------------------------------------------------
+// Skill-tier table
+// ---------------------------------------------------------------------------
+
+/**
+ * Three-tier model for skill effectiveness scoring:
+ *
+ * - `execution`  — drives stories to READY FOR MERGE; scored by the verdict
+ *                  join (existing logic). Unknown skills fall back to this tier
+ *                  (conservative — prevents false-positive ratios for new skills
+ *                  that the table has not yet catalogued).
+ * - `planning`   — orchestrates the cycle; scored on invoke presence
+ *                  (useful_fire_count = invoke_count, ratio 1.0 whenever invoked).
+ * - `cockpit`    — informational / read-only; scored on invoke presence (same
+ *                  as planning). A cockpit skill cannot produce a verdict by
+ *                  construction, so grading it on the verdict join would always
+ *                  return 0 — a false signal.
+ */
+type SkillTier = "execution" | "planning" | "cockpit";
+
+/**
+ * Exhaustive tier table for the currently-shipped flow: skill palette.
+ * Unknown names fall back to `"execution"` (conservative).
+ */
+const SKILL_TIER_TABLE: Record<string, SkillTier> = {
+  // Execution tier — drives stories through the build-and-review path.
+  "flow:run": "execution",
+
+  // Planning / authoring tier — orchestrates the cycle.
+  "flow:plan": "planning",
+  "flow:hire": "planning",
+  "flow:retro": "planning",
+
+  // Cockpit / read-only tier — informational tools.
+  "flow:dashboard": "cockpit",
+  "flow:ready": "cockpit",
+  "flow:ask": "cockpit",
+  "flow:help": "cockpit",
+};
+
+/**
+ * Look up the tier for a given skill name.
+ * Unknown names fall back to `"execution"` so new skills are never
+ * silently granted a false-positive score.
+ */
+function getSkillTier(skillName: string): SkillTier {
+  return SKILL_TIER_TABLE[skillName] ?? "execution";
+}
+
+// ---------------------------------------------------------------------------
 // Output schema & type
 // ---------------------------------------------------------------------------
 
 /**
  * Per-skill effectiveness stats. `.strict()` so unknown-key injection is
  * rejected (mirrors `AgreementMetricResultSchema`'s posture).
+ *
+ * `skill_tier` is optional so existing callers that only read the three
+ * numeric fields keep compiling without change; it is populated for every
+ * skill emitted by the new code path.
  */
 const PerSkillEffectivenessSchema = z
   .object({
     invoke_count: z.number().int().nonnegative(),
     useful_fire_count: z.number().int().nonnegative(),
     effectiveness_ratio: z.number().min(0).max(1),
+    skill_tier: z.enum(["execution", "planning", "cockpit"]).optional(),
   })
   .strict();
 
 type PerSkillEffectiveness = z.infer<typeof PerSkillEffectivenessSchema>;
 
 /**
- * Attribution state of the result — lets the retro consumer tell apart two very
- * different worlds that both yield `useful_fire_count: 0` everywhere (issue
- * #390):
+ * Attribution state of the result — lets the retro consumer tell apart worlds
+ * that both yield `useful_fire_count: 0` everywhere (issue #390):
  *
- * - `"no-completed-flows"` — there were NO `READY FOR MERGE` reviewer verdicts
- *   in the telemetry pool to attribute invocations to (e.g. a just-opened cycle
- *   with no done manifests yet, or the verdict/invoke join key never lined up).
- *   A wall of zero ratios here means "nothing to attribute", NOT "every skill is
- *   useless" — the retro MUST NOT ground a skill-retire/skill-revise on it.
- * - `"attributed"` — at least one `READY FOR MERGE` verdict existed to join
- *   against, so the per-skill ratios are a real effectiveness signal (a zero
- *   ratio for a given skill then genuinely means it never preceded a useful
- *   verdict).
+ * - `"no-completed-flows"` — no execution-tier `READY FOR MERGE` verdict
+ *   existed AND no planning/cockpit-tier skill was invoked in this window.
+ *   A wall of zero ratios here means "nothing to attribute", NOT "every skill
+ *   is useless" — the retro MUST NOT ground a skill-retire/skill-revise on it.
+ * - `"attributed"` — EITHER at least one `READY FOR MERGE` verdict existed to
+ *   join against (for execution-tier skills), OR at least one planning/cockpit
+ *   tier skill was invoked (tier-appropriate useful fire). Either condition
+ *   means the per-skill ratios are a real effectiveness signal.
  *
  * Reported on EVERY result (including the empty/zero-invocation cases, where it
  * is `"no-completed-flows"`).
@@ -340,46 +392,70 @@ export async function computeSkillEffectiveness(
 
   // ------------------------------------------------------------------
   // Step 6: Walk the windowed invocations; tally per skill.
-  // A "useful fire": a later READY FOR MERGE verdict in the SAME story flow.
-  // Two join keys are tried (issue #390):
-  //   1. story_id — the primary key. The invoke now carries the active story
-  //      ref (stamped by the capture seam) and the verdict carries the same
-  //      ref, so this joins across the divergent session_id namespaces.
-  //   2. session_id — the legacy key, kept for invokes that carry no story_id
-  //      (e.g. a user-slash-command outside a story) AND for the case where an
-  //      invoke and verdict genuinely share a session id.
+  //
+  // "Useful fire" is tier-dependent (tier table above):
+  //
+  //   execution tier (default for unknown skills):
+  //     A later READY FOR MERGE verdict in the SAME story flow.
+  //     Two join keys tried (issue #390):
+  //       1. story_id — primary key (invoke + verdict carry the same ref
+  //          despite divergent session_id namespaces).
+  //       2. session_id — legacy key for invokes with no story_id.
+  //
+  //   planning / cockpit tier:
+  //     Presence-based: every invocation is a useful fire by definition.
+  //     These skills are architecturally decoupled from the build-and-review
+  //     path; scoring them on the verdict join would always return 0 — a
+  //     false signal that would fill the retro inbox with retire/revise
+  //     proposals for perfectly healthy tools.
+  //
   // ------------------------------------------------------------------
-  const tally = new Map<string, { invoke: number; useful: number }>();
+  const tally = new Map<string, { invoke: number; useful: number; tier: SkillTier }>();
+
+  // Track whether ANY planning/cockpit skill was invoked — used to widen
+  // the attribution field (a cockpit-only cycle with no done stories is
+  // still "attributed", not "no-completed-flows").
+  let anyNonExecutionInvoke = false;
 
   for (const inv of windowedInvokes) {
     const skill = inv.data.skill_name;
-    const entry = tally.get(skill) ?? { invoke: 0, useful: 0 };
+    const tier = getSkillTier(skill);
+    const entry = tally.get(skill) ?? { invoke: 0, useful: 0, tier };
     entry.invoke++;
 
-    // Primary join: same story_id, later verdict. Fires whenever the invoke
-    // carries a story_id matching a useful verdict's story_id.
     let isUseful = false;
-    if (inv.story_id !== undefined) {
-      const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
-      isUseful = byStory.some((v) => v.ts > inv.ts);
-    }
 
-    // Fallback join: same session_id, later verdict. Used when the story_id
-    // join did not fire — chiefly invokes with no story_id (outside a flow).
-    if (!isUseful) {
-      const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
-      isUseful = bySession.some((v) => {
-        if (!(v.ts > inv.ts)) {
-          return false;
-        }
-        // When BOTH carry a story_id, they must match (don't credit a verdict
-        // from a different story that happens to share a session). When the
-        // invocation has no story_id, the session + later-ts join qualifies.
-        if (inv.story_id !== undefined && v.storyId !== undefined) {
-          return v.storyId === inv.story_id;
-        }
-        return true;
-      });
+    if (tier === "planning" || tier === "cockpit") {
+      // Presence-based: every invocation is a useful fire.
+      isUseful = true;
+      anyNonExecutionInvoke = true;
+    } else {
+      // execution tier: verdict-join criterion (existing logic, unchanged).
+
+      // Primary join: same story_id, later verdict. Fires whenever the invoke
+      // carries a story_id matching a useful verdict's story_id.
+      if (inv.story_id !== undefined) {
+        const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
+        isUseful = byStory.some((v) => v.ts > inv.ts);
+      }
+
+      // Fallback join: same session_id, later verdict. Used when the story_id
+      // join did not fire — chiefly invokes with no story_id (outside a flow).
+      if (!isUseful) {
+        const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
+        isUseful = bySession.some((v) => {
+          if (!(v.ts > inv.ts)) {
+            return false;
+          }
+          // When BOTH carry a story_id, they must match (don't credit a verdict
+          // from a different story that happens to share a session). When the
+          // invocation has no story_id, the session + later-ts join qualifies.
+          if (inv.story_id !== undefined && v.storyId !== undefined) {
+            return v.storyId === inv.story_id;
+          }
+          return true;
+        });
+      }
     }
 
     if (isUseful) {
@@ -397,16 +473,22 @@ export async function computeSkillEffectiveness(
       invoke_count: counts.invoke,
       useful_fire_count: counts.useful,
       effectiveness_ratio: counts.invoke === 0 ? 0 : counts.useful / counts.invoke,
+      skill_tier: counts.tier,
     };
   }
+
+  // Attribution is "attributed" when EITHER:
+  //   - at least one READY FOR MERGE verdict existed for execution-tier scoring,
+  //   - OR at least one planning/cockpit-tier skill was invoked (presence-based).
+  // Only "no-completed-flows" when neither condition is met (truly nothing to
+  // attribute — a cycle with no done stories AND no planning/cockpit activity).
+  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke;
 
   return {
     per_skill,
     window_size: window,
     sample_size: windowedInvokes.length,
     malformed_lines,
-    // If there were no READY FOR MERGE verdicts to join against, the zero
-    // ratios mean "nothing to attribute" — NOT "every skill is useless" (#390).
-    attribution: usefulVerdictCount > 0 ? "attributed" : "no-completed-flows",
+    attribution: isAttributed ? "attributed" : "no-completed-flows",
   };
 }

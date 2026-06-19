@@ -231,6 +231,7 @@ describe("skill-effectiveness attribution end-to-end (issue #390)", () => {
       invoke_count: 1,
       useful_fire_count: 1,
       effectiveness_ratio: 1,
+      skill_tier: "execution",
     });
     expect(result.attribution).toBe("attributed");
   });

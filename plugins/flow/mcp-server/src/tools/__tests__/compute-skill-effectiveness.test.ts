@@ -153,21 +153,25 @@ describe("computeSkillEffectiveness — AC2 known distribution", () => {
       invoke_count: 1,
       useful_fire_count: 1,
       effectiveness_ratio: 1,
+      skill_tier: "planning",
     });
     expect(result.per_skill["flow:board"]).toEqual({
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
+      skill_tier: "execution",
     });
     expect(result.per_skill["flow:judge"]).toEqual({
       invoke_count: 2,
       useful_fire_count: 2,
       effectiveness_ratio: 1,
+      skill_tier: "execution",
     });
     expect(result.per_skill["flow:scan"]).toEqual({
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
+      skill_tier: "execution",
     });
 
     expect(result.window_size).toBe(DEFAULT_SKILL_EFFECTIVENESS_WINDOW);
@@ -192,6 +196,7 @@ describe("computeSkillEffectiveness — AC2 known distribution", () => {
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
+      skill_tier: "execution",
     });
   });
 
@@ -210,6 +215,7 @@ describe("computeSkillEffectiveness — AC2 known distribution", () => {
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
+      skill_tier: "execution",
     });
   });
 
@@ -230,6 +236,7 @@ describe("computeSkillEffectiveness — AC2 known distribution", () => {
       invoke_count: 1,
       useful_fire_count: 1,
       effectiveness_ratio: 1,
+      skill_tier: "execution",
     });
   });
 });
@@ -301,6 +308,7 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
       invoke_count: 1,
       useful_fire_count: 1,
       effectiveness_ratio: 1,
+      skill_tier: "planning",
     });
     expect(result.malformed_lines).toBe(2); // bad-JSON + schema-invalid; blank not counted
     expect(result.sample_size).toBe(1);
@@ -329,6 +337,7 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
       invoke_count: 2,
       useful_fire_count: 2,
       effectiveness_ratio: 1,
+      skill_tier: "planning",
     });
   });
 
@@ -357,10 +366,11 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
     }
   });
 
-  it("reports attribution:no-completed-flows when no READY FOR MERGE verdict exists to attribute (issue #390)", async () => {
-    // Skills fired, but the cycle has NO useful verdict (e.g. just-opened, or all
-    // verdicts were NEEDS CHANGES). A wall of zero ratios must read as "nothing
-    // to attribute", NOT "every skill useless".
+  it("reports attribution:attributed when planning-tier skill fires even with no READY FOR MERGE verdict (issue #390 widened)", async () => {
+    // flow:plan is a planning-tier skill — presence-based scoring means its
+    // invoke IS a useful fire regardless of verdicts. The cycle attribution is
+    // therefore "attributed" (not "no-completed-flows") so the retro does not
+    // misread planning activity as universal skill ineffectiveness.
     const events = [
       makeInvoke({ ts: makeTs(1000), session_id: "sN", skill_name: "flow:plan", story_id: "bmad:1.1" }),
       makeInvoke({ ts: makeTs(2000), session_id: "sN", skill_name: "flow:board", story_id: "bmad:1.1" }),
@@ -370,9 +380,32 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
       targetRepoRoot: ROOT,
       ...seams({ "2026-05.jsonl": events }),
     });
+    // flow:plan is planning-tier — its invoke IS a useful fire, so "attributed".
+    expect(result.attribution).toBe("attributed");
+    // flow:plan presence-scored: useful_fire_count equals invoke_count.
+    expect(result.per_skill["flow:plan"]!.useful_fire_count).toBe(1);
+    expect(result.per_skill["flow:plan"]!.effectiveness_ratio).toBe(1);
+    // flow:board is unknown (falls back to execution tier) — no READY FOR MERGE
+    // → useful_fire_count 0, ratio 0.
+    expect(result.per_skill["flow:board"]!.useful_fire_count).toBe(0);
+  });
+
+  it("reports attribution:no-completed-flows when ONLY pure execution-tier skills fire with no READY FOR MERGE verdict", async () => {
+    // flow:run is execution-tier, flow:unknown-new-skill falls back to execution.
+    // No READY FOR MERGE verdict and no planning/cockpit invocations → "nothing
+    // to attribute" (true negative, not a false "useless" signal).
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "sX", skill_name: "flow:run", story_id: "bmad:5.5" }),
+      makeInvoke({ ts: makeTs(2000), session_id: "sX", skill_name: "flow:unknown-new-skill", story_id: "bmad:5.5" }),
+      makeVerdict({ ts: makeTs(3000), session_id: "sX", pr_number: 5, verdict: "NEEDS CHANGES", story_id: "bmad:5.5" }),
+    ].map(assertValid);
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+    });
     expect(result.attribution).toBe("no-completed-flows");
-    // The per-skill map still reports the (zero) ratios — the field is the guard.
-    expect(result.per_skill["flow:plan"]!.useful_fire_count).toBe(0);
+    expect(result.per_skill["flow:run"]!.useful_fire_count).toBe(0);
+    expect(result.per_skill["flow:unknown-new-skill"]!.useful_fire_count).toBe(0);
   });
 
   it("joins invoke→verdict on story_id across divergent session_ids (issue #390 root cause)", async () => {
@@ -391,6 +424,7 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
       invoke_count: 1,
       useful_fire_count: 1, // joined on story_id despite mismatched session_id
       effectiveness_ratio: 1,
+      skill_tier: "execution",
     });
     expect(result.attribution).toBe("attributed");
   });
@@ -405,5 +439,132 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
     const a = await computeSkillEffectiveness(opts);
     const b = await computeSkillEffectiveness(opts);
     expect(a).toEqual(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier-aware scoring — Story native:01KVEYY1 AC1 + AC2 + AC3
+// ---------------------------------------------------------------------------
+
+describe("computeSkillEffectiveness — tier-aware scoring", () => {
+  it("AC1: mixed execution+planning cycle yields differentiated per-tier scores — flow:run on verdict join, flow:plan on presence", async () => {
+    // Scenario: /flow:plan invoked 5 times, /flow:run invoked 2 times; both runs
+    // reach READY FOR MERGE. The retro analyst must see:
+    //   - flow:plan: effectiveness_ratio 1.0 (planning tier — presence-based)
+    //   - flow:run:  effectiveness_ratio 1.0 (execution tier — verdict join)
+    // Without tier-aware scoring, flow:plan would score 0 (never directly
+    // precedes a verdict under the old join criterion).
+    const planInvokes = [1000, 2000, 3000, 4000, 5000].map((ms) =>
+      makeInvoke({ ts: makeTs(ms), session_id: "sess-plan", skill_name: "flow:plan" }),
+    );
+    const runInvoke1 = makeInvoke({ ts: makeTs(6000), session_id: "sess-run-1", skill_name: "flow:run", story_id: "native:S01" });
+    const runVerdict1 = makeVerdict({ ts: makeTs(7000), session_id: "run-ulid-1", pr_number: 1, verdict: "READY FOR MERGE", story_id: "native:S01" });
+    const runInvoke2 = makeInvoke({ ts: makeTs(8000), session_id: "sess-run-2", skill_name: "flow:run", story_id: "native:S02" });
+    const runVerdict2 = makeVerdict({ ts: makeTs(9000), session_id: "run-ulid-2", pr_number: 2, verdict: "READY FOR MERGE", story_id: "native:S02" });
+
+    const events = [...planInvokes, runInvoke1, runVerdict1, runInvoke2, runVerdict2].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+    });
+
+    // Round-trips through the strict schema.
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+
+    // flow:run — execution tier, verdict join: both invocations joined to their
+    // own READY FOR MERGE verdicts via story_id → ratio 1.
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 2,
+      useful_fire_count: 2,
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+
+    // flow:plan — planning tier, presence-based: all 5 invocations are useful
+    // fires → ratio 1 (non-zero, so the retro sees a real positive signal).
+    expect(result.per_skill["flow:plan"]).toEqual({
+      invoke_count: 5,
+      useful_fire_count: 5,
+      effectiveness_ratio: 1,
+      skill_tier: "planning",
+    });
+
+    // Both scores are present and non-zero → "attributed".
+    expect(result.attribution).toBe("attributed");
+  });
+
+  it("AC2: cockpit-only cycle with no READY FOR MERGE verdicts yields positive effectiveness_ratio for cockpit skills", async () => {
+    // Scenario: only /flow:dashboard and /flow:ask were invoked; no stories
+    // shipped yet. The retro must not read this as "all skills useless".
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "sess-cockpit", skill_name: "flow:dashboard" }),
+      makeInvoke({ ts: makeTs(2000), session_id: "sess-cockpit", skill_name: "flow:dashboard" }),
+      makeInvoke({ ts: makeTs(3000), session_id: "sess-cockpit", skill_name: "flow:ask" }),
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+    });
+
+    // Round-trips through the strict schema.
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+
+    // flow:dashboard — cockpit tier, presence-based: 2 invocations → ratio 1.
+    expect(result.per_skill["flow:dashboard"]).toEqual({
+      invoke_count: 2,
+      useful_fire_count: 2,
+      effectiveness_ratio: 1,
+      skill_tier: "cockpit",
+    });
+
+    // flow:ask — cockpit tier, presence-based: 1 invocation → ratio 1.
+    expect(result.per_skill["flow:ask"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1,
+      effectiveness_ratio: 1,
+      skill_tier: "cockpit",
+    });
+
+    // Cockpit invocations qualify as "attributed" — the retro can distinguish
+    // "cockpit skills actively used, no stories done yet" from "all useless".
+    expect(result.attribution).toBe("attributed");
+    // No verdicts → usefulVerdictCount is 0, but attribution is still "attributed"
+    // because anyNonExecutionInvoke is true.
+    expect(result.per_skill).not.toHaveProperty("flow:run");
+  });
+
+  it("AC3: unknown skill name (not in tier table) falls back to execution tier and is scored on the verdict join", async () => {
+    // A brand-new skill not yet in the tier table must NOT receive a false-positive
+    // ratio — it falls back to execution tier and is scored on the verdict join.
+    const events = [
+      // Invoked before the verdict → would be useful IF execution-tier join fires.
+      makeInvoke({ ts: makeTs(1000), session_id: "sess-new", skill_name: "flow:brand-new-skill", story_id: "native:S99" }),
+      makeVerdict({ ts: makeTs(2000), session_id: "run-ulid-new", pr_number: 99, verdict: "READY FOR MERGE", story_id: "native:S99" }),
+      // A second invocation with NO verdict → NOT useful (execution-tier, no join match).
+      makeInvoke({ ts: makeTs(3000), session_id: "sess-new2", skill_name: "flow:brand-new-skill", story_id: "native:S100" }),
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+    });
+
+    // Round-trips through the strict schema.
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+
+    // flow:brand-new-skill — execution fallback: first invoke joined to its
+    // READY FOR MERGE (story_id join), second has no verdict → ratio 0.5.
+    expect(result.per_skill["flow:brand-new-skill"]).toEqual({
+      invoke_count: 2,
+      useful_fire_count: 1,
+      effectiveness_ratio: 0.5,
+      skill_tier: "execution",
+    });
+
+    // Execution fallback means the skill CAN'T produce a false-positive
+    // presence-based score — it must earn its ratio via the verdict join.
+    expect(result.attribution).toBe("attributed");
   });
 });

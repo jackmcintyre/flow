@@ -122,18 +122,21 @@ describe("AC1 — gatherRetroInputs includes skillEffectiveness.per_skill with c
     expect(bundle.skillEffectiveness).toBeDefined();
     const perSkill = bundle.skillEffectiveness.per_skill;
 
-    // flow:plan — 2 invocations, both useful (later READY FOR MERGE in flow) → ratio 1.
+    // flow:plan — planning tier; 2 invocations → presence-scored → ratio 1.
     expect(perSkill["flow:plan"]).toEqual({
       invoke_count: 2,
       useful_fire_count: 2,
       effectiveness_ratio: 1,
+      skill_tier: "planning",
     });
 
-    // flow:author — 1 invocation, no READY FOR MERGE → ratio 0 (never NaN).
+    // flow:author — execution tier (not in tier table); 1 invocation, no READY
+    // FOR MERGE → ratio 0 (never NaN).
     expect(perSkill["flow:author"]).toEqual({
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
+      skill_tier: "execution",
     });
   });
 

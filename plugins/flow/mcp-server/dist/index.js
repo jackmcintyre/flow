@@ -48448,10 +48448,27 @@ import * as path33 from "node:path";
 import { promises as fs26 } from "node:fs";
 var DEFAULT_SKILL_EFFECTIVENESS_WINDOW = 50;
 var USEFUL_VERDICT = "READY FOR MERGE";
+var SKILL_TIER_TABLE = {
+  // Execution tier — drives stories through the build-and-review path.
+  "flow:run": "execution",
+  // Planning / authoring tier — orchestrates the cycle.
+  "flow:plan": "planning",
+  "flow:hire": "planning",
+  "flow:retro": "planning",
+  // Cockpit / read-only tier — informational tools.
+  "flow:dashboard": "cockpit",
+  "flow:ready": "cockpit",
+  "flow:ask": "cockpit",
+  "flow:help": "cockpit"
+};
+function getSkillTier(skillName) {
+  return SKILL_TIER_TABLE[skillName] ?? "execution";
+}
 var PerSkillEffectivenessSchema = external_exports.object({
   invoke_count: external_exports.number().int().nonnegative(),
   useful_fire_count: external_exports.number().int().nonnegative(),
-  effectiveness_ratio: external_exports.number().min(0).max(1)
+  effectiveness_ratio: external_exports.number().min(0).max(1),
+  skill_tier: external_exports.enum(["execution", "planning", "cockpit"]).optional()
 }).strict();
 var SkillEffectivenessAttribution = external_exports.enum([
   "no-completed-flows",
@@ -48565,26 +48582,33 @@ async function computeSkillEffectiveness(opts) {
     }
   }
   const tally = /* @__PURE__ */ new Map();
+  let anyNonExecutionInvoke = false;
   for (const inv of windowedInvokes) {
     const skill = inv.data.skill_name;
-    const entry = tally.get(skill) ?? { invoke: 0, useful: 0 };
+    const tier = getSkillTier(skill);
+    const entry = tally.get(skill) ?? { invoke: 0, useful: 0, tier };
     entry.invoke++;
     let isUseful = false;
-    if (inv.story_id !== void 0) {
-      const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
-      isUseful = byStory.some((v) => v.ts > inv.ts);
-    }
-    if (!isUseful) {
-      const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
-      isUseful = bySession.some((v) => {
-        if (!(v.ts > inv.ts)) {
-          return false;
-        }
-        if (inv.story_id !== void 0 && v.storyId !== void 0) {
-          return v.storyId === inv.story_id;
-        }
-        return true;
-      });
+    if (tier === "planning" || tier === "cockpit") {
+      isUseful = true;
+      anyNonExecutionInvoke = true;
+    } else {
+      if (inv.story_id !== void 0) {
+        const byStory = usefulVerdictsByStory.get(inv.story_id) ?? [];
+        isUseful = byStory.some((v) => v.ts > inv.ts);
+      }
+      if (!isUseful) {
+        const bySession = usefulVerdictsBySession.get(inv.session_id) ?? [];
+        isUseful = bySession.some((v) => {
+          if (!(v.ts > inv.ts)) {
+            return false;
+          }
+          if (inv.story_id !== void 0 && v.storyId !== void 0) {
+            return v.storyId === inv.story_id;
+          }
+          return true;
+        });
+      }
     }
     if (isUseful) {
       entry.useful++;
@@ -48596,17 +48620,17 @@ async function computeSkillEffectiveness(opts) {
     per_skill[skill] = {
       invoke_count: counts.invoke,
       useful_fire_count: counts.useful,
-      effectiveness_ratio: counts.invoke === 0 ? 0 : counts.useful / counts.invoke
+      effectiveness_ratio: counts.invoke === 0 ? 0 : counts.useful / counts.invoke,
+      skill_tier: counts.tier
     };
   }
+  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke;
   return {
     per_skill,
     window_size: window2,
     sample_size: windowedInvokes.length,
     malformed_lines,
-    // If there were no READY FOR MERGE verdicts to join against, the zero
-    // ratios mean "nothing to attribute" — NOT "every skill is useless" (#390).
-    attribution: usefulVerdictCount > 0 ? "attributed" : "no-completed-flows"
+    attribution: isAttributed ? "attributed" : "no-completed-flows"
   };
 }
 
