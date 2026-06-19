@@ -3,6 +3,7 @@ import { DomainError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { AiEngineeringTeamServer } from "../server.js";
 import {
+  analyzeTeamFitInputSchema,
   acceptProposalInputSchema,
   adjudicateQualityLeadInputSchema,
   aggregateJudgePanelInputSchema,
@@ -133,6 +134,7 @@ import { resolveBuildPlan } from "./resolve-build-plan.js";
 import { summariseRetroProposal } from "./summarise-retro-proposal.js";
 import { discardDraft } from "./discard-draft.js";
 import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
+import { analyzeTeamFit } from "./analyze-team-fit.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -559,6 +561,29 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       const advice = await getHelpAdvice({ targetRepoRoot: root });
       return {
         content: [{ type: "text" as const, text: renderHelpAdvice(advice) }],
+      };
+    },
+  });
+
+  // Story native:01KVFAF2T7DPJ5T18PQ534D7XM — analyzeTeamFit: backlog + telemetry-grounded
+  // hire / unhire / gap recommendations. Reads the live roster, backlog (risk tier +
+  // spec text), and telemetry; returns concrete hire / unhire / gap items where every
+  // recommendation carries the evidence (story refs, stall counts) that triggered it.
+  // All detection rules are deterministic (no LLM). Used by /flow:hire and /flow:retro.
+  server.registerTool({
+    name: "analyzeTeamFit",
+    description:
+      "Analyse the live roster, backlog, and telemetry and produce hire / unhire / gap " +
+      "recommendations grounded in real evidence (Story native:01KVFAF2T7DPJ5T18PQ534D7XM). " +
+      "Returns { hire: [{role, reason, evidence}], unhire: [{role, reason, evidence}], " +
+      "gaps: [{domain, signal}] }. " +
+      "All detection rules are deterministic — no LLM, no network, no mutation.",
+    inputSchema: analyzeTeamFitInputSchema,
+    handler: async (args) => {
+      const root = z.string().min(1).parse(args.targetRepoRoot);
+      const result = await analyzeTeamFit({ targetRepoRoot: root });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     },
   });

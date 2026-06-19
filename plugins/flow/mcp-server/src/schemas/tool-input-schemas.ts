@@ -41,6 +41,14 @@ const LENS_NAMES_TUPLE = [
 // Tool input schemas — one per registered tool, alphabetical order
 // ---------------------------------------------------------------------------
 
+export const analyzeTeamFitInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+  },
+  required: ["targetRepoRoot"],
+};
+
 export const acceptProposalInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -824,6 +832,7 @@ export const writeRetroProposalInputSchema: ToolInputSchema = {
  * validates required fields against this map at the entry point.
  */
 export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
+  analyzeTeamFit: analyzeTeamFitInputSchema,
   acceptProposal: acceptProposalInputSchema,
   adjudicateQualityLead: adjudicateQualityLeadInputSchema,
   aggregateJudgePanel: aggregateJudgePanelInputSchema,

@@ -30,6 +30,10 @@ interface Baseline {
 }
 
 const BASELINE: Record<string, Baseline> = {
+  analyzeTeamFit: {
+    required: ["targetRepoRoot"],
+    properties: ["targetRepoRoot"],
+  },
   acceptProposal: {
     required: ["targetRepoRoot", "proposalId"],
     properties: ["targetRepoRoot", "proposalId", "confirm", "role"],

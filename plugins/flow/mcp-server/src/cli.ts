@@ -79,6 +79,7 @@ import { captureSkillInvoke } from "./tools/capture-skill-invoke.js";
 import { autoAbsorbProposalFile } from "./tools/auto-absorb-retro-proposals.js";
 import { readCatalogue } from "./tools/read-catalogue.js";
 import { summariseRetroProposal } from "./tools/summarise-retro-proposal.js";
+import { analyzeTeamFit } from "./tools/analyze-team-fit.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -262,6 +263,12 @@ const TOOLS: Record<string, ToolFn> = {
   // Read-only / idempotent → safe to call from a read-only seam.
   //   node dist/cli.js summariseRetroProposal --json '{"absPath":"..."}'
   summariseRetroProposal,
+  // Story native:01KVFAF2T7DPJ5T18PQ534D7XM — analyzeTeamFit: backlog + telemetry-grounded
+  // hire / unhire / gap recommendations. Reads the live roster, backlog (risk tier +
+  // spec text), and telemetry; returns { hire, unhire, gaps } where every item carries
+  // the concrete evidence that triggered it. All rules are deterministic (no LLM).
+  //   node dist/cli.js analyzeTeamFit --json '{"targetRepoRoot":"..."}'
+  analyzeTeamFit,
 };
 
 function emit(obj: unknown): void {
