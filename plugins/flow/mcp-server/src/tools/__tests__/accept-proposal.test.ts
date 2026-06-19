@@ -50,6 +50,7 @@ import type { RetroProposal } from "../../schemas/retro-proposal.js";
 const ULID_RULE = "01HZRETR0000000000000000A1";
 const ULID_RULE_2 = "01HZRETR0000000000000000A2";
 const ULID_TEAM = "01HZRETR0000000000000000C3";
+const ULID_SHARED_SKILL = "01HZRETR0000000000000000D4";
 const ULID_MISSING = "01HZRETR0000000000000000Z9";
 
 const ISO = "2026-05-28T14:32:11.123Z";
@@ -88,6 +89,26 @@ function teamChangeProposal(id: string): Record<string, unknown> {
     target_role: "security-reviewer",
     justification: "12 fires in the last 10 cycles.",
     predicted_impact: { affected_failure_classes: ["security-audit"] },
+  };
+}
+
+/**
+ * A `shared-skill-promotion` proposal — intentionally not auto-apply-able
+ * (no handler registered; the operator must choreograph the multi-role change).
+ * Used by the AC6 tests to verify the fail-closed unregistered-kind path after
+ * team-change was registered in Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ.
+ */
+function sharedSkillPromotionProposal(id: string): Record<string, unknown> {
+  return {
+    type: "shared-skill-promotion",
+    id,
+    created_at: ISO,
+    rationale: "Two roles independently recorded the same handoff lesson.",
+    sharing_roles: ["generalist-dev", "generalist-reviewer"],
+    shared_lesson_text: "Always emit the handoff phrase on its own line.",
+    representative_lesson_id: "01HZLESSONREPRESENTATIVEAB",
+    proposed_skill_path: ".flow/skills/handoff-phrase-discipline.md",
+    skill_description: "Handoff phrase must appear on its own line.",
   };
 }
 
@@ -582,20 +603,26 @@ describe("acceptProposal — idempotent re-run (AC4)", () => {
 // ---------------------------------------------------------------------------
 
 describe("acceptProposal — unregistered kind fails closed (AC6)", () => {
+  // NOTE: `team-change` was previously used here as the example of an
+  // unregistered kind. Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ registered the
+  // team-change handler, so these tests now use `shared-skill-promotion` —
+  // intentionally not auto-apply-able (no handler registered; the operator must
+  // choreograph the multi-role change manually per KIND_TO_STORY).
+
   it("raises ProposalKindNotApplicableYetError, leaving tree + telemetry untouched", async () => {
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
       isoTimestamp: ISO,
-      proposals: [teamChangeProposal(ULID_TEAM)],
+      proposals: [sharedSkillPromotionProposal(ULID_SHARED_SKILL)],
     });
     const before = await readProposalFile(ISO);
     const git = makeFakeGitCommit();
 
-    // No handlers passed → production registry is empty → fails closed.
+    // No handlers passed → production registry has no shared-skill-promotion handler → fails closed.
     await expect(
       acceptProposal({
         targetRepoRoot: tmpRoot,
-        proposalId: ULID_TEAM,
+        proposalId: ULID_SHARED_SKILL,
         confirm: true,
         gitCommitImpl: git.impl,
       }),
@@ -604,14 +631,14 @@ describe("acceptProposal — unregistered kind fails closed (AC6)", () => {
     // Error names the kind and its planned story.
     await acceptProposal({
       targetRepoRoot: tmpRoot,
-      proposalId: ULID_TEAM,
+      proposalId: ULID_SHARED_SKILL,
       confirm: true,
       gitCommitImpl: git.impl,
     }).catch((err: unknown) => {
       expect(err).toBeInstanceOf(ProposalKindNotApplicableYetError);
       const e = err as ProposalKindNotApplicableYetError;
-      expect(e.kind).toBe("team-change");
-      expect(e.story).toBe("Story 6.10");
+      expect(e.kind).toBe("shared-skill-promotion");
+      expect(e.story).toContain("native:01KV7FJHK9CAAS860MJAG70QVS");
     });
 
     // Nothing committed, proposal byte-identical, no telemetry.
@@ -626,11 +653,11 @@ describe("acceptProposal — unregistered kind fails closed (AC6)", () => {
     await writeRetroProposal({
       targetRepoRoot: tmpRoot,
       isoTimestamp: ISO,
-      proposals: [teamChangeProposal(ULID_TEAM)],
+      proposals: [sharedSkillPromotionProposal(ULID_SHARED_SKILL)],
     });
     // Preview mode (confirm omitted) on an unregistered kind still fails closed.
     await expect(
-      acceptProposal({ targetRepoRoot: tmpRoot, proposalId: ULID_TEAM }),
+      acceptProposal({ targetRepoRoot: tmpRoot, proposalId: ULID_SHARED_SKILL }),
     ).rejects.toBeInstanceOf(ProposalKindNotApplicableYetError);
   });
 });

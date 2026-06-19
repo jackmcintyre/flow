@@ -17,7 +17,7 @@
  *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7 (REGISTERED)
- *   - `team-change`                                   → Story 6.10
+ *   - `team-change`                                   → Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ (REGISTERED)
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
  * The gate is proven end-to-end in tests with a **test-injected fake handler**,
@@ -33,6 +33,7 @@ import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
 import { makeRuleRetirementApplyHandler } from "./apply-rule-retirement.js";
 import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
 import { makePersonaAppendHandler } from "./apply-persona-append.js";
+import { makeTeamChangeHandler } from "./apply-team-change.js";
 import { makePromoteLessonToSkillHandler } from "./apply-promote-lesson-to-skill.js";
 import { makeLessonConsolidationHandler } from "./apply-lesson-consolidation.js";
 import { makeLessonRetirementHandler } from "./apply-lesson-retirement.js";
@@ -106,11 +107,9 @@ export type ProposalApplyRegistry = Map<
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *   - `persona-append`                                → Story 6.9
+ *   - `team-change`                                   → Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ
  *   - `lesson-consolidation`                          → Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T
  *   - `lesson-retirement`                             → Story native:01KV7FGDTQ8FSJ2EEPHHGK0KRQ
- *
- * Still fail closed (no handler) until their story registers them:
- *   - `team-change`                                   → Story 6.10
  *
  * It is intentionally a fresh map (not a shared mutable singleton) per import so
  * a test that mutates a registry never leaks into production; the `rule` handler
@@ -131,6 +130,8 @@ export function createProductionRegistry(): ProposalApplyRegistry {
   }
   // Story 6.9 — persona-append handler.
   registry.set("persona-append", makePersonaAppendHandler());
+  // Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ — team-change handler.
+  registry.set("team-change", makeTeamChangeHandler());
   // Story native:01KT6RHQ1K4KQMASAXNEK6MY7E — promote-lesson-to-skill handler.
   registry.set("promote-lesson-to-skill", makePromoteLessonToSkillHandler({ now: () => new Date() }));
   // Story native:01KV7FFZ5PJKCW6Z6RVJ71XY6T — lesson-consolidation handler.
@@ -156,7 +157,7 @@ export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   "skill-revise": "Story 6.7",
   "skill-supersede": "Story 6.7",
   "skill-retire": "Story 6.7",
-  "team-change": "Story 6.10",
+  "team-change": "Story native:01KVFAP16TD6ENBDSQ9AQQCXTQ",
   "persona-append": "Story 6.9",
   "promote-lesson-to-skill": "Story native:01KT6RHQ1K4KQMASAXNEK6MY7E",
   // `build-story` is intentionally not apply-able: it is a queue-a-build-story
