@@ -633,7 +633,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("dismissMaintainerFeedback");
       // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor). 57 → 58.
       expect(toolNames).toContain("getHelpAdvice");
-      expect(toolNames.length).toBe(58);
+      // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis). 58 → 59.
+      expect(toolNames).toContain("analyzeTeamFit");
+      expect(toolNames.length).toBe(59);
     } finally {
       await client.close();
       await server.close();

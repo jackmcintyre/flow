@@ -625,7 +625,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review). 55 → 56.
     // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback. 56 → 57.
     // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor). 57 → 58.
-    expect(registeredTools.length).toBe(58);
+    // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis). 58 → 59.
+    expect(registeredTools.length).toBe(59);
   });
 });
 
