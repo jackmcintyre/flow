@@ -533,7 +533,8 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
     // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback = 57 total.
     // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor) = 58 total.
     // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis) = 59 total.
-    expect(result.tools.length).toBe(59);
+    // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
+    expect(result.tools.length).toBe(60);
 
     // /flow:ask registers no new MCP tool.
     expect(toolNames).not.toContain("ask");

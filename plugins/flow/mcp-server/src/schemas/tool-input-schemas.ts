@@ -807,6 +807,16 @@ export const writeNativeStoryInputSchema: ToolInputSchema = {
   ],
 };
 
+export const unhirePersonaInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" },
+    clock: { type: "string", description: "ISO-8601 timestamp override for the archived_at stamp (test seam; production callers omit)." },
+  },
+  required: ["targetRepoRoot", "role"],
+};
+
 export const writeRetroProposalInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -888,6 +898,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   scanSources: scanSourcesInputSchema,
   summariseRetroProposal: summariseRetroProposalInputSchema,
   validatePlannerBacklog: validatePlannerBacklogInputSchema,
+  unhirePersona: unhirePersonaInputSchema,
   writeLensVerdict: writeLensVerdictInputSchema,
   writeNativeStory: writeNativeStoryInputSchema,
   writeRetroProposal: writeRetroProposalInputSchema,

@@ -648,7 +648,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
     // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback (dismiss inbox finding) = 57 total.
     // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor) = 58 total.
     // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis) = 59 total.
-    expect(result.tools.length).toBe(59);
+    // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
+    expect(result.tools.length).toBe(60);
 
     await client.close();
     await server.close();
