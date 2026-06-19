@@ -99,6 +99,7 @@ import {
 import { parsePersonaFile } from "../lib/persona-file.js";
 import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
 import { MaintainerFeedbackItemSchema } from "../schemas/maintainer-feedback.js";
+import { analyzeTeamFit, type AnalyzeTeamFitResult } from "./analyze-team-fit.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -320,6 +321,28 @@ export interface RetroInputs {
    * Story native:01KV7FJHK9CAAS860MJAG70QVS.
    */
   crossRoleSharedLessons: CrossRoleSharedLesson[];
+  /**
+   * Team-fit analysis signal computed by the A1 `analyzeTeamFit` analyzer
+   * (Story native:01KVFAF2T7DPJ5T18PQ534D7XM). This is a pure read — no
+   * writes. The retro-analyst MUST draft `team-change` proposals ONLY from
+   * this pre-computed signal — it MUST NOT re-derive gaps or idle-specialist
+   * conclusions from raw telemetry or backlog data in prose, mirroring the
+   * `fireCountSignal` and `recurringFriction` disciplines.
+   *
+   *  - `hire`: roles recommended for hire, each with the evidence (story refs
+   *    or stall counts) that triggered the recommendation.
+   *  - `unhire`: specialist roles that did no useful work in the window and
+   *    whose removal would not break the grading panel, each with evidence.
+   *  - `gaps`: uncovered domains where recurring stalls show the team lacks
+   *    coverage.
+   *
+   * The `affected_failure_classes` for a team-change proposal derived from
+   * this signal MUST be drawn from the evidence items on the matching
+   * hire/unhire entry — never invented in prose.
+   *
+   * Story native:01KVFAS0EQH9ZP4CZBSMD9C33H.
+   */
+  teamFitSignal: AnalyzeTeamFitResult;
 }
 
 export interface GatherRetroInputsOptions {
@@ -444,12 +467,30 @@ export async function gatherRetroInputs(
   // (Story native:01KV7FJHK9CAAS860MJAG70QVS). This is a pure read — no writes.
   const crossRoleSharedLessons = await gatherCrossRoleSharedLessons(targetRepoRoot);
 
+  // Compute team-fit signal (Story native:01KVFAS0EQH9ZP4CZBSMD9C33H). This is a
+  // pure read — analyzeTeamFit reads the roster, backlog, and telemetry but makes
+  // no writes. The retro-analyst MUST draft team-change proposals from this
+  // pre-computed signal only — not by re-deriving gaps from raw data.
+  //
+  // Fail-soft: if analyzeTeamFit cannot resolve the workspace (e.g. missing
+  // .flow/config.yaml on a repo that has not been initialised yet) or any other
+  // unexpected error occurs, return an empty signal rather than crashing the
+  // retro. The same pattern is used by draftHardeningStories for the same reason.
+  let teamFitSignal: AnalyzeTeamFitResult;
+  try {
+    teamFitSignal = await analyzeTeamFit({ targetRepoRoot });
+  } catch {
+    // Cannot analyse team fit (e.g. missing config.yaml or empty backlog) —
+    // return the safe empty shape so the retro proceeds normally.
+    teamFitSignal = { hire: [], unhire: [], gaps: [] };
+  }
+
   // Consolidate recurring friction into maintainer-feedback items
   // (Story native:01KV84GRHFV6F6E6M1B32WH6HS). One item per recurring kind,
   // deduped so re-runs over unchanged data raise no duplicates.
   await raiseRecurringFrictionFeedback(targetRepoRoot, recurringFriction);
 
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons };
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons, teamFitSignal };
 }
 
 // ---------------------------------------------------------------------------
