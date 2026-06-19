@@ -2576,3 +2576,51 @@ export class MissingWalkthroughError extends DomainError {
     this.ref = opts.ref;
   }
 }
+
+/**
+ * `unhirePersona` was called with a role that is not currently on the active
+ * team (not present as `team/<role>/PERSONA.md`). The caller should check the
+ * live roster first.
+ *
+ * (Story native:01KVF66HWKXCM7GYNRR9YJFKB2)
+ */
+export class RoleNotHiredError extends DomainError {
+  readonly role: string;
+
+  constructor(opts: { role: string }) {
+    super(
+      `unhirePersona refused: role '${opts.role}' is not on the active team — ` +
+        `no persona file found at team/${opts.role}/PERSONA.md. ` +
+        `Check the live roster with getTeamSnapshot before unhiring. ` +
+        `(Story native:01KVF66HWKXCM7GYNRR9YJFKB2)`,
+    );
+    this.role = opts.role;
+  }
+}
+
+/**
+ * `unhirePersona` was asked to unhire a role, but doing so would leave the
+ * quality-grading panel unable to staff all five of its distinct reviewer
+ * slots (as determined by the judge panel's own bipartite matcher).
+ *
+ * The `unstaffedLens` field names the FIRST lens that would go uncovered
+ * in `LENS_NAMES` order after the removal.
+ *
+ * (Story native:01KVF66HWKXCM7GYNRR9YJFKB2)
+ */
+export class UnhireBelowJudgeMinimumError extends DomainError {
+  readonly role: string;
+  readonly unstaffedLens: string;
+
+  constructor(opts: { role: string; unstaffedLens: string }) {
+    super(
+      `unhirePersona refused: removing role '${opts.role}' would leave the ` +
+        `quality-grading panel unable to staff the '${opts.unstaffedLens}' lens — ` +
+        `the team must retain enough distinct roles to cover all five reviewer slots. ` +
+        `Hire a replacement before removing this role. ` +
+        `(Story native:01KVF66HWKXCM7GYNRR9YJFKB2)`,
+    );
+    this.role = opts.role;
+    this.unstaffedLens = opts.unstaffedLens;
+  }
+}

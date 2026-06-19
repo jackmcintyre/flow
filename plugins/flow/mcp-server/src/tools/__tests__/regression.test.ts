@@ -279,6 +279,10 @@ const BASELINE: Record<string, Baseline> = {
       "definition_of_done", "risk_reasoning", "depends_on", "sessionUlid",
     ],
   },
+  unhirePersona: {
+    required: ["targetRepoRoot", "role"],
+    properties: ["targetRepoRoot", "role", "clock"],
+  },
   writeRetroProposal: {
     required: ["targetRepoRoot", "isoTimestamp", "proposals"],
     properties: ["targetRepoRoot", "isoTimestamp", "proposals", "cycleWindow", "role"],

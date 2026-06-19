@@ -59,6 +59,7 @@ import {
   scanSourcesInputSchema,
   summariseRetroProposalInputSchema,
   validatePlannerBacklogInputSchema,
+  unhirePersonaInputSchema,
   writeLensVerdictInputSchema,
   writeNativeStoryInputSchema,
   writeRetroProposalInputSchema,
@@ -135,6 +136,7 @@ import { summariseRetroProposal } from "./summarise-retro-proposal.js";
 import { discardDraft } from "./discard-draft.js";
 import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 import { analyzeTeamFit } from "./analyze-team-fit.js";
+import { unhirePersona } from "./unhire-persona.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -585,6 +587,47 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
+    },
+  });
+
+  // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 — unhirePersona: safely set aside a
+  // teammate reversibly. Moves team/<role>/PERSONA.md to team/_archived/<role>/PERSONA.md,
+  // stamping archived_at. Refuses if removal would leave the quality-grading panel
+  // unable to staff all five lens slots (reuses the judge panel's bipartite matcher).
+  // Idempotent: already-archived → no-op; absent-from-both → RoleNotHiredError.
+  server.registerTool({
+    name: "unhirePersona",
+    description:
+      "Safely set aside a teammate reversibly (Story native:01KVF66HWKXCM7GYNRR9YJFKB2). " +
+      "Moves team/<role>/PERSONA.md to team/_archived/<role>/PERSONA.md, stamping archived_at. " +
+      "Refuses with UnhireBelowJudgeMinimumError if removal would leave the quality-grading " +
+      "panel unable to staff all five distinct lens reviewer slots — the guard uses the same " +
+      "bipartite matcher as the judge panel, NOT a hardcoded head-count. " +
+      "Idempotent: role already archived → { status: 'already-archived' } (no-op, no error). " +
+      "Role absent from both live team and archive → RoleNotHiredError. " +
+      "Returns { status: 'archived', archivedPath, archivedAt } on success.",
+    inputSchema: unhirePersonaInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          role: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await unhirePersona(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 

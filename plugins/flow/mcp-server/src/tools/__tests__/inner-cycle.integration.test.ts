@@ -552,7 +552,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // ---------------------------------------------------------------------------
 
 describe("AC4(g): tool count and required tools present", () => {
-  it("registered tool list has exactly 58 entries and contains the required tools but NOT runDevSession", async () => {
+  it("registered tool list has exactly 60 entries and contains the required tools but NOT runDevSession", async () => {
     const server = createServer();
     registerAllTools(server);
 
@@ -635,7 +635,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("getHelpAdvice");
       // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis). 58 → 59.
       expect(toolNames).toContain("analyzeTeamFit");
-      expect(toolNames.length).toBe(59);
+      // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire). 59 → 60.
+      expect(toolNames).toContain("unhirePersona");
+      expect(toolNames.length).toBe(60);
     } finally {
       await client.close();
       await server.close();

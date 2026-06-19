@@ -54,6 +54,7 @@
   "scanOrphanedInProgress",
   "scanSources",
   "summariseRetroProposal",
+  "unhirePersona",
   "validatePlannerBacklog",
   "writeLensVerdict",
   "writeNativeStory",

@@ -80,6 +80,7 @@ import { autoAbsorbProposalFile } from "./tools/auto-absorb-retro-proposals.js";
 import { readCatalogue } from "./tools/read-catalogue.js";
 import { summariseRetroProposal } from "./tools/summarise-retro-proposal.js";
 import { analyzeTeamFit } from "./tools/analyze-team-fit.js";
+import { unhirePersona } from "./tools/unhire-persona.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -269,6 +270,12 @@ const TOOLS: Record<string, ToolFn> = {
   // the concrete evidence that triggered it. All rules are deterministic (no LLM).
   //   node dist/cli.js analyzeTeamFit --json '{"targetRepoRoot":"..."}'
   analyzeTeamFit,
+  // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 — unhirePersona: safely set aside a
+  // teammate reversibly. Archives team/<role>/PERSONA.md under team/_archived/ and
+  // refuses if the removal would leave the judge panel unable to staff all five lenses
+  // (uses the bipartite matcher — not a head-count). Idempotent on already-archived.
+  //   node dist/cli.js unhirePersona --json '{"targetRepoRoot":"...","role":"<role>"}'
+  unhirePersona,
 };
 
 function emit(obj: unknown): void {

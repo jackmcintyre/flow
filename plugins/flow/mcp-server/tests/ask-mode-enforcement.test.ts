@@ -469,7 +469,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback = 57 total.
       // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor) = 58 total.
       // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis) = 59 total.
-      expect(result.tools.length, "expected exactly 59 tools").toBe(59);
+      // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
+      expect(result.tools.length, "expected exactly 60 tools").toBe(60);
     } finally {
       await client.close();
       await server.close();
