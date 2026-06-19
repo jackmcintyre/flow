@@ -10769,6 +10769,13 @@ var getBacklogDashboardInputSchema = {
   },
   required: ["targetRepoRoot"]
 };
+var getHelpAdviceInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
 var getStatusInputSchema = {
   type: "object",
   properties: {
@@ -11293,6 +11300,7 @@ var TOOL_INPUT_SCHEMAS = {
   discardDraft: discardDraftInputSchema,
   gatherRetroInputs: gatherRetroInputsInputSchema,
   getBacklogDashboard: getBacklogDashboardInputSchema,
+  getHelpAdvice: getHelpAdviceInputSchema,
   getStatus: getStatusInputSchema,
   getTeamSnapshot: getTeamSnapshotInputSchema,
   instantiatePersona: instantiatePersonaInputSchema,

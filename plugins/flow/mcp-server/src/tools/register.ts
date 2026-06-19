@@ -20,6 +20,7 @@ import {
   discardDraftInputSchema,
   gatherRetroInputsInputSchema,
   getBacklogDashboardInputSchema,
+  getHelpAdviceInputSchema,
   getStatusInputSchema,
   getTeamSnapshotInputSchema,
   instantiatePersonaInputSchema,
@@ -125,6 +126,7 @@ import { resolveJudgePlan } from "./resolve-judge-plan.js";
 import { resolveBuildPlan } from "./resolve-build-plan.js";
 import { summariseRetroProposal } from "./summarise-retro-proposal.js";
 import { discardDraft } from "./discard-draft.js";
+import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -528,6 +530,30 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         }
         throw err;
       }
+    },
+  });
+
+  // Story native:01KVEHE5XNBHKVVZ624GPAW9FF — getHelpAdvice: context-aware
+  // next-action advisor for the /flow:help skill. Reads live project state
+  // (team presence, backlog readiness, in-progress builds) and returns the
+  // single best next action for the operator right now. Pure file reads;
+  // no LLM, no network, no mutation.
+  server.registerTool({
+    name: "getHelpAdvice",
+    description:
+      "Return a context-aware next-action recommendation grounded in the live project state " +
+      "(Story native:01KVEHE5XNBHKVVZ624GPAW9FF). " +
+      "Reads team presence, backlog readiness, and in-progress build counts; " +
+      "returns the single best next action for the operator right now with the " +
+      "command that performs it. " +
+      "Pure file reads — no LLM, no network, no mutation. Used by /flow:help.",
+    inputSchema: getHelpAdviceInputSchema,
+    handler: async (args) => {
+      const root = z.string().min(1).parse(args.targetRepoRoot);
+      const advice = await getHelpAdvice({ targetRepoRoot: root });
+      return {
+        content: [{ type: "text" as const, text: renderHelpAdvice(advice) }],
+      };
     },
   });
 

@@ -245,6 +245,14 @@ export const getBacklogDashboardInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot"],
 };
 
+export const getHelpAdviceInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+  },
+  required: ["targetRepoRoot"],
+};
+
 export const getStatusInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -833,6 +841,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   discardDraft: discardDraftInputSchema,
   gatherRetroInputs: gatherRetroInputsInputSchema,
   getBacklogDashboard: getBacklogDashboardInputSchema,
+  getHelpAdvice: getHelpAdviceInputSchema,
   getStatus: getStatusInputSchema,
   getTeamSnapshot: getTeamSnapshotInputSchema,
   instantiatePersona: instantiatePersonaInputSchema,

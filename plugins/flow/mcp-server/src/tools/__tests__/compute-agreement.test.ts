@@ -590,7 +590,7 @@ describe("AC4n — AgreementMetricResultSchema strict rejection", () => {
 // (4o) MCP tool registration smoke test — computeAgreement in register.ts
 // ---------------------------------------------------------------------------
 describe("AC4o — MCP tool registration smoke", () => {
-  it("register.ts includes computeAgreement (tool count 30)", async () => {
+  it("register.ts includes computeAgreement (tool count 58)", async () => {
     const { registerAllTools } = await import("../register.js");
     const registeredTools: string[] = [];
     const fakeServer = {
@@ -624,7 +624,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture). 54 → 55.
     // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review). 55 → 56.
     // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback. 56 → 57.
-    expect(registeredTools.length).toBe(57);
+    // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor). 57 → 58.
+    expect(registeredTools.length).toBe(58);
   });
 });
 

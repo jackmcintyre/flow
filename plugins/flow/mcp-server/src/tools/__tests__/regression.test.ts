@@ -98,6 +98,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot"],
   },
+  getHelpAdvice: {
+    required: ["targetRepoRoot"],
+    properties: ["targetRepoRoot"],
+  },
   getStatus: {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot"],

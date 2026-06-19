@@ -552,7 +552,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // ---------------------------------------------------------------------------
 
 describe("AC4(g): tool count and required tools present", () => {
-  it("registered tool list has exactly 55 entries and contains the required tools but NOT runDevSession", async () => {
+  it("registered tool list has exactly 58 entries and contains the required tools but NOT runDevSession", async () => {
     const server = createServer();
     registerAllTools(server);
 
@@ -631,7 +631,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("reviewMaintainerInbox");
       // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback. 56 → 57.
       expect(toolNames).toContain("dismissMaintainerFeedback");
-      expect(toolNames.length).toBe(57);
+      // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor). 57 → 58.
+      expect(toolNames).toContain("getHelpAdvice");
+      expect(toolNames.length).toBe(58);
     } finally {
       await client.close();
       await server.close();

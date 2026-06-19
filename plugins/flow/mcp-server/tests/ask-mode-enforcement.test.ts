@@ -467,7 +467,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KV7FHZ41Z6CFPABW1B8J38BV added recordMaintainerFeedback (maintainer inbox capture) = 55 total.
       // Story native:01KV9QR3VK11RDD1ZDPVJ7SEYA added reviewMaintainerInbox (on-demand inbox review) = 56 total.
       // Story native:01KVDXX (surface-maintainer-findings-in-run) added dismissMaintainerFeedback = 57 total.
-      expect(result.tools.length, "expected exactly 57 tools").toBe(57);
+      // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor) = 58 total.
+      expect(result.tools.length, "expected exactly 58 tools").toBe(58);
     } finally {
       await client.close();
       await server.close();

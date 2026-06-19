@@ -16,6 +16,7 @@
   "discardDraft",
   "gatherRetroInputs",
   "getBacklogDashboard",
+  "getHelpAdvice",
   "getStatus",
   "getTeamSnapshot",
   "instantiatePersona",
