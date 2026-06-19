@@ -8,5 +8,7 @@ tools_allow:
   - readRepoSignals
   - readCustomRole
   - unhirePersona
+  - analyzeTeamFit
+  - readBacklogInventory
 gh_allow: []
 gh_allow_args: {}
