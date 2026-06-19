@@ -626,19 +626,22 @@ describe("Story 2.5 AC3 / AC4(d) — custom-role parse failure", () => {
 
 // ===========================================================================
 // AC4(e) — permission allowlist
-// (Updated by native:01KVFAAPMZWNK8838CMP4SNNC4 to add unhirePersona — now eight.)
+// (Updated by native:01KVFAAPMZWNK8838CMP4SNNC4 to add unhirePersona — now eight.
+//  Updated by native:01KVFAJNTE61SFC3MBJF27Q6NV to add analyzeTeamFit + readBacklogInventory — now ten.)
 // ===========================================================================
 describe("Story 2.5 AC4(e) — hiring-manager allowlist includes readCustomRole", () => {
-  it("tools_allow contains exactly the eight expected entries (includes unhirePersona after wiring story)", async () => {
+  it("tools_allow contains exactly the ten expected entries (includes unhirePersona + analyzeTeamFit + readBacklogInventory)", async () => {
     const perms = await loadRolePermissions({
       pluginRoot: getPluginRoot(),
       role: "hiring-manager",
     });
     expect([...perms.tools_allow].sort()).toEqual(
       [
+        "analyzeTeamFit",
         "heartbeat",
         "instantiatePersona",
         "lookupRoleByDomain",
+        "readBacklogInventory",
         "readCatalogue",
         "readCustomRole",
         "readPersona",

@@ -557,17 +557,19 @@ describe("Story 2.4 AC3 — decline path", () => {
 // unhirePersona — now eight. We update here to keep the suite consistent
 // with the shipped hiring-manager.yaml.)
 // ===========================================================================
-describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-unhire-wiring: includes readCustomRole + unhirePersona)", () => {
-  it("tools_allow contains exactly the eight expected entries", async () => {
+describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-demand-driven: includes readCustomRole + unhirePersona + analyzeTeamFit + readBacklogInventory)", () => {
+  it("tools_allow contains exactly the ten expected entries", async () => {
     const perms = await loadRolePermissions({
       pluginRoot: getPluginRoot(),
       role: "hiring-manager",
     });
     expect([...perms.tools_allow].sort()).toEqual(
       [
+        "analyzeTeamFit",
         "heartbeat",
         "instantiatePersona",
         "lookupRoleByDomain",
+        "readBacklogInventory",
         "readCatalogue",
         "readCustomRole",
         "readPersona",
@@ -675,12 +677,14 @@ describe("Story 2.4 Task 7.10 — skills/hire/SKILL.md self-consistency", () => 
     expect(fm.name).toBe("flow:hire");
     // Read + Task drive the interactive conversation; readPersona +
     // instantiatePersona drive the `/flow:hire default` fast path (formerly
-    // the standalone /flow:skip-hiring skill).
+    // the standalone /flow:skip-hiring skill); analyzeTeamFit is called
+    // fail-soft to gather demand-driven fit analysis (Story B).
     expect(fm.allowed_tools).toEqual([
       "Read",
       "Task",
       "readPersona",
       "instantiatePersona",
+      "analyzeTeamFit",
     ]);
 
     // Body sections in order.
