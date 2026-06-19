@@ -2034,10 +2034,10 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           `\n[${i + 1}] ${item.tool_area}: ${item.problem.slice(0, 120)}`,
         );
         if (item.issueUrl) {
-          // ReviewedInboxItem is structurally compatible with MaintainerFeedbackItem
-          // (same required fields); the cast is safe for the title/body composers.
-          const title = composeStoredItemIssueTitle(item as MaintainerFeedbackItem);
-          const body = composeStoredItemIssueBody(item as MaintainerFeedbackItem);
+          // The inbox item carries the same required fields as MaintainerFeedbackItem;
+          // the cast is safe for the title/body composers.
+          const title = composeStoredItemIssueTitle(item as unknown as MaintainerFeedbackItem);
+          const body = composeStoredItemIssueBody(item as unknown as MaintainerFeedbackItem);
           const linkBlock = renderFeedbackLinkBlock(item.issueUrl, title, body);
           if (linkBlock !== null) {
             summaryLines.push(`    ${linkBlock.split("\n").join("\n    ")}`);
