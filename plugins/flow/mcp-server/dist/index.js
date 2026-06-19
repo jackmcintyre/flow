@@ -49120,8 +49120,8 @@ function dedupePaths(paths) {
 
 // src/tools/gather-retro-inputs.ts
 var import_yaml24 = __toESM(require_dist2(), 1);
-import { promises as fs39 } from "node:fs";
-import * as path49 from "node:path";
+import { promises as fs40 } from "node:fs";
+import * as path50 from "node:path";
 
 // src/schemas/cycle-state.ts
 import { promises as fs31 } from "node:fs";
@@ -51917,6 +51917,206 @@ async function recordMaintainerFeedback(opts) {
   };
 }
 
+// src/tools/analyze-team-fit.ts
+import { promises as fs39 } from "node:fs";
+import * as path49 from "node:path";
+
+// src/lib/specialist-domain-map.ts
+var DOMAIN_TO_SPECIALIST = /* @__PURE__ */ new Map([
+  ["authentication authorization and secret handling", "security-specialist"],
+  ["test design and coverage gaps", "test-specialist"],
+  ["developer-facing documentation and READMEs", "docs-specialist"],
+  ["failure-mode diagnosis and root-cause isolation", "debugger"]
+]);
+function specialistRoleForDomain(domain2) {
+  return DOMAIN_TO_SPECIALIST.get(domain2) ?? null;
+}
+var ALL_SPECIALIST_ROLES = Array.from(
+  DOMAIN_TO_SPECIALIST.values()
+);
+
+// src/tools/analyze-team-fit.ts
+var AnalyzeTeamFitInputSchema = external_exports.object({
+  targetRepoRoot: external_exports.string().min(1)
+});
+var MONTH_BUCKET_REGEX = /^\d{4}-\d{2}\.jsonl$/;
+async function readTelemetrySummary(targetRepoRoot) {
+  const telemetryDir = path49.join(targetRepoRoot, ".flow", "telemetry");
+  const stallsByDomain = /* @__PURE__ */ new Map();
+  const usefulWorkByRole = /* @__PURE__ */ new Map();
+  let entries;
+  try {
+    entries = await fs39.readdir(telemetryDir);
+  } catch {
+    return { stallsByDomain, usefulWorkByRole };
+  }
+  for (const entry of entries) {
+    if (!MONTH_BUCKET_REGEX.test(entry)) continue;
+    const filePath = path49.join(telemetryDir, entry);
+    let raw;
+    try {
+      raw = await fs39.readFile(filePath, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      if (line.trim() === "") continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const result = TelemetryEventSchema.safeParse(parsed);
+      if (!result.success) continue;
+      const event = result.data;
+      if (event.type === "agent.invoke" || event.type === "reviewer.verdict") {
+        const role = event.agent;
+        usefulWorkByRole.set(role, (usefulWorkByRole.get(role) ?? 0) + 1);
+      }
+      if (event.type === "yield.handoff") {
+        const domain2 = event.data.domain;
+        const storyId = event.story_id ?? "unknown";
+        if (!stallsByDomain.has(domain2)) {
+          stallsByDomain.set(domain2, /* @__PURE__ */ new Set());
+        }
+        stallsByDomain.get(domain2).add(storyId);
+      }
+    }
+  }
+  return { stallsByDomain, usefulWorkByRole };
+}
+async function readHiredRoles(targetRepoRoot) {
+  const teamDir = path49.join(targetRepoRoot, "team");
+  let dirEntries;
+  try {
+    dirEntries = await fs39.readdir(teamDir);
+  } catch {
+    return [];
+  }
+  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
+  const hiredRoles = [];
+  for (const entry of dirEntries) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    let stat2;
+    try {
+      stat2 = await fs39.stat(path49.join(teamDir, entry));
+    } catch {
+      continue;
+    }
+    if (!stat2.isDirectory()) continue;
+    try {
+      await fs39.access(path49.join(teamDir, entry, "PERSONA.md"));
+    } catch {
+      continue;
+    }
+    hiredRoles.push(entry);
+  }
+  hiredRoles.sort();
+  return hiredRoles;
+}
+function wouldBreakPanel(role, hiredRoles) {
+  const rosterWithout = hiredRoles.filter((r) => r !== role);
+  try {
+    resolveLensRoleBinding(rosterWithout);
+    return false;
+  } catch {
+    return true;
+  }
+}
+function isTestHeavy(specText) {
+  const lower = specText.toLowerCase();
+  return /\btest[- ]?(coverage|design|suite|plan|strategy)\b/.test(lower) || /\bwrite tests?\b/.test(lower) || /\btest specialist\b/.test(lower) || /\btest[- ]?heavy\b/.test(lower) || /\btest[- ]?first\b/.test(lower);
+}
+function isDocsHeavy(specText) {
+  const lower = specText.toLowerCase();
+  return /\bdocumentation\b/.test(lower) || /\bdocs[- ]?(specialist|work|coverage|update|improve|generate|write)\b/.test(lower) || /\breadme\b/.test(lower) || /\bdocs[- ]?heavy\b/.test(lower) || /\bdocs[- ]?only\b/.test(lower);
+}
+async function analyzeTeamFit(rawInput) {
+  const input = AnalyzeTeamFitInputSchema.parse(rawInput);
+  const { targetRepoRoot } = input;
+  const [hiredRoles, backlog, telemetry] = await Promise.all([
+    readHiredRoles(targetRepoRoot),
+    readBacklogInventory({
+      targetRepoRoot,
+      includeSpecText: true
+    }),
+    readTelemetrySummary(targetRepoRoot)
+  ]);
+  const hire = [];
+  const unhire = [];
+  const gaps = [];
+  const hiredRoleSet = new Set(hiredRoles);
+  if (!hiredRoleSet.has("security-specialist")) {
+    const highRiskRefs = backlog.backlog_inventory.filter((e) => e.riskTier === "high" && !e.withdrawn && e.state !== "done").map((e) => e.ref);
+    if (highRiskRefs.length > 0) {
+      hire.push({
+        role: "security-specialist",
+        reason: `${highRiskRefs.length} high-risk stor${highRiskRefs.length === 1 ? "y" : "ies"} in the backlog require security coverage.`,
+        evidence: highRiskRefs
+      });
+    }
+  }
+  if (!hiredRoleSet.has("test-specialist")) {
+    const testHeavyRefs = backlog.backlog_inventory.filter(
+      (e) => !e.withdrawn && e.state !== "done" && e.specText !== void 0 && isTestHeavy(e.specText)
+    ).map((e) => e.ref);
+    if (testHeavyRefs.length > 0) {
+      hire.push({
+        role: "test-specialist",
+        reason: `${testHeavyRefs.length} queued stor${testHeavyRefs.length === 1 ? "y" : "ies"} contain test-heavy work that a test specialist should lead.`,
+        evidence: testHeavyRefs
+      });
+    }
+  }
+  if (!hiredRoleSet.has("docs-specialist")) {
+    const docsHeavyRefs = backlog.backlog_inventory.filter(
+      (e) => !e.withdrawn && e.state !== "done" && e.specText !== void 0 && isDocsHeavy(e.specText)
+    ).map((e) => e.ref);
+    if (docsHeavyRefs.length > 0) {
+      hire.push({
+        role: "docs-specialist",
+        reason: `${docsHeavyRefs.length} queued stor${docsHeavyRefs.length === 1 ? "y" : "ies"} contain documentation work that a docs specialist should own.`,
+        evidence: docsHeavyRefs
+      });
+    }
+  }
+  const STALL_THRESHOLD = 2;
+  for (const [domain2, storySet] of telemetry.stallsByDomain) {
+    if (storySet.size < STALL_THRESHOLD) continue;
+    const specialistRole = specialistRoleForDomain(domain2);
+    const stallCount = storySet.size;
+    gaps.push({
+      domain: domain2,
+      signal: specialistRole !== null ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". Hiring ${specialistRole} would close this gap.` : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". No specialist in the catalogue maps to this domain.`
+    });
+    if (specialistRole !== null && !hiredRoleSet.has(specialistRole)) {
+      const alreadyHireEntry = hire.find((h2) => h2.role === specialistRole);
+      if (!alreadyHireEntry) {
+        hire.push({
+          role: specialistRole,
+          reason: `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} waiting for "${domain2}" expertise that nobody on the team covers.`,
+          evidence: [`stall-count:${stallCount}`, `domain:${domain2}`]
+        });
+      } else {
+        alreadyHireEntry.evidence.push(`stall-count:${stallCount}`, `domain:${domain2}`);
+      }
+    }
+  }
+  for (const role of hiredRoles) {
+    if (!ALL_SPECIALIST_ROLES.includes(role)) continue;
+    const usefulWork = telemetry.usefulWorkByRole.get(role) ?? 0;
+    if (usefulWork > 0) continue;
+    if (wouldBreakPanel(role, hiredRoles)) continue;
+    unhire.push({
+      role,
+      reason: `${role} produced no useful work in the recent window and their absence would not prevent the grading panel from running.`,
+      evidence: ["no useful work in the recent window"]
+    });
+  }
+  return { hire, unhire, gaps };
+}
+
 // src/tools/gather-retro-inputs.ts
 var TELEMETRY_FILE_REGEX = /\.jsonl$/;
 var MECHANICAL_FAILURE_THRESHOLD = 2;
@@ -51955,14 +52155,20 @@ async function gatherRetroInputs(opts) {
     now: opts.retirableNow
   });
   const crossRoleSharedLessons = await gatherCrossRoleSharedLessons(targetRepoRoot);
+  let teamFitSignal;
+  try {
+    teamFitSignal = await analyzeTeamFit({ targetRepoRoot });
+  } catch {
+    teamFitSignal = { hire: [], unhire: [], gaps: [] };
+  }
   await raiseRecurringFrictionFeedback(targetRepoRoot, recurringFriction);
-  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons };
+  return { doneManifests, telemetrySummary, priorProposals, ruleRegistry, fireCountSignal, recurringFriction, skillEffectiveness, mechanicalFailuresDrafted, nearDuplicateLessonPairs, retirableLessons, crossRoleSharedLessons, teamFitSignal };
 }
 async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
-  const doneDir = path49.join(targetRepoRoot, ".flow", "state", "done");
+  const doneDir = path50.join(targetRepoRoot, ".flow", "state", "done");
   let entries;
   try {
-    entries = await fs39.readdir(doneDir);
+    entries = await fs40.readdir(doneDir);
   } catch (err) {
     if (isEnoent10(err)) {
       return [];
@@ -51972,24 +52178,24 @@ async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
   const manifestFiles = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
   const manifests = [];
   for (const file2 of manifestFiles) {
-    const absPath = path49.join(doneDir, file2);
+    const absPath = path50.join(doneDir, file2);
     if (windowStartMs !== null) {
-      const stat2 = await fs39.stat(absPath);
+      const stat2 = await fs40.stat(absPath);
       if (stat2.mtimeMs < windowStartMs) {
         continue;
       }
     }
-    const raw = await fs39.readFile(absPath, "utf8");
+    const raw = await fs40.readFile(absPath, "utf8");
     const parsed = (0, import_yaml24.parse)(raw);
     manifests.push(parseExecutionManifest(parsed, { absPath }));
   }
   return manifests;
 }
 async function gatherTelemetry(targetRepoRoot, windowStartMs) {
-  const telemetryDir = path49.join(targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path50.join(targetRepoRoot, ".flow", "telemetry");
   let entries;
   try {
-    entries = await fs39.readdir(telemetryDir);
+    entries = await fs40.readdir(telemetryDir);
   } catch (err) {
     if (isEnoent10(err)) {
       return { events: [], skipped_count: 0 };
@@ -52000,8 +52206,8 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   const events = [];
   let skipped_count = 0;
   for (const file2 of files) {
-    const absPath = path49.join(telemetryDir, file2);
-    const raw = await fs39.readFile(absPath, "utf8");
+    const absPath = path50.join(telemetryDir, file2);
+    const raw = await fs40.readFile(absPath, "utf8");
     const lines = raw.split("\n");
     for (const line of lines) {
       if (line.trim() === "") {
@@ -52028,10 +52234,10 @@ async function gatherTelemetry(targetRepoRoot, windowStartMs) {
   return { events, skipped_count };
 }
 async function gatherPriorProposals(targetRepoRoot) {
-  const proposalsDir = path49.join(targetRepoRoot, ".flow", "retro-proposals");
+  const proposalsDir = path50.join(targetRepoRoot, ".flow", "retro-proposals");
   let entries;
   try {
-    entries = await fs39.readdir(proposalsDir);
+    entries = await fs40.readdir(proposalsDir);
   } catch (err) {
     if (isEnoent10(err)) {
       return [];
@@ -52039,7 +52245,7 @@ async function gatherPriorProposals(targetRepoRoot) {
     throw err;
   }
   const proposals = entries.filter((f) => f.endsWith(".md")).map((f) => ({
-    path: path49.join(proposalsDir, f),
+    path: path50.join(proposalsDir, f),
     // The writer keys the filename by ISO timestamp (Story 6.3):
     // `<isoTimestamp>.md`. Strip the `.md` suffix to recover it.
     iso_timestamp: f.slice(0, -".md".length)
@@ -52048,14 +52254,14 @@ async function gatherPriorProposals(targetRepoRoot) {
   return proposals;
 }
 async function gatherRuleRegistry(targetRepoRoot) {
-  const registryPath = path49.join(
+  const registryPath = path50.join(
     targetRepoRoot,
     "docs",
     "discipline-rules.yaml"
   );
   let raw;
   try {
-    raw = await fs39.readFile(registryPath, "utf8");
+    raw = await fs40.readFile(registryPath, "utf8");
   } catch (err) {
     if (isEnoent10(err)) {
       return null;
@@ -52209,10 +52415,10 @@ function recurringFrictionDedupKey(kind) {
   return `${RECURRING_FRICTION_DEDUP_PREFIX}${kind}`;
 }
 async function readExistingDedupKeys(targetRepoRoot) {
-  const inboxDir = path49.join(targetRepoRoot, ".flow", "maintainer-inbox");
+  const inboxDir = path50.join(targetRepoRoot, ".flow", "maintainer-inbox");
   let entries;
   try {
-    entries = await fs39.readdir(inboxDir);
+    entries = await fs40.readdir(inboxDir);
   } catch (err) {
     if (isEnoent10(err)) return /* @__PURE__ */ new Set();
     throw err;
@@ -52220,10 +52426,10 @@ async function readExistingDedupKeys(targetRepoRoot) {
   const keys = /* @__PURE__ */ new Set();
   for (const file2 of entries) {
     if (!file2.endsWith(".json")) continue;
-    const absPath = path49.join(inboxDir, file2);
+    const absPath = path50.join(inboxDir, file2);
     let raw;
     try {
-      raw = await fs39.readFile(absPath, "utf8");
+      raw = await fs40.readFile(absPath, "utf8");
     } catch {
       continue;
     }
@@ -52321,10 +52527,10 @@ function tokenise(text) {
 }
 var NEAR_DUPLICATE_THRESHOLD = 0.35;
 async function gatherNearDuplicateLessonPairs(targetRepoRoot) {
-  const teamDir = path49.join(targetRepoRoot, "team");
+  const teamDir = path50.join(targetRepoRoot, "team");
   let roleEntries;
   try {
-    roleEntries = await fs39.readdir(teamDir);
+    roleEntries = await fs40.readdir(teamDir);
   } catch (err) {
     if (isEnoent10(err)) return [];
     throw err;
@@ -52335,15 +52541,15 @@ async function gatherNearDuplicateLessonPairs(targetRepoRoot) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
     let stat2;
     try {
-      stat2 = await fs39.stat(path49.join(teamDir, entry));
+      stat2 = await fs40.stat(path50.join(teamDir, entry));
     } catch {
       continue;
     }
     if (!stat2.isDirectory()) continue;
-    const personaPath = path49.join(teamDir, entry, "PERSONA.md");
+    const personaPath = path50.join(teamDir, entry, "PERSONA.md");
     let raw;
     try {
-      raw = await fs39.readFile(personaPath, "utf8");
+      raw = await fs40.readFile(personaPath, "utf8");
     } catch (err) {
       if (isEnoent10(err)) continue;
       throw err;
@@ -52380,10 +52586,10 @@ async function gatherNearDuplicateLessonPairs(targetRepoRoot) {
   return pairs;
 }
 async function gatherRetirableLessons(targetRepoRoot, opts = {}) {
-  const teamDir = path49.join(targetRepoRoot, "team");
+  const teamDir = path50.join(targetRepoRoot, "team");
   let roleEntries;
   try {
-    roleEntries = await fs39.readdir(teamDir);
+    roleEntries = await fs40.readdir(teamDir);
   } catch (err) {
     if (isEnoent10(err)) return [];
     throw err;
@@ -52394,15 +52600,15 @@ async function gatherRetirableLessons(targetRepoRoot, opts = {}) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
     let stat2;
     try {
-      stat2 = await fs39.stat(path49.join(teamDir, entry));
+      stat2 = await fs40.stat(path50.join(teamDir, entry));
     } catch {
       continue;
     }
     if (!stat2.isDirectory()) continue;
-    const personaPath = path49.join(teamDir, entry, "PERSONA.md");
+    const personaPath = path50.join(teamDir, entry, "PERSONA.md");
     let raw;
     try {
-      raw = await fs39.readFile(personaPath, "utf8");
+      raw = await fs40.readFile(personaPath, "utf8");
     } catch (err) {
       if (isEnoent10(err)) continue;
       throw err;
@@ -52423,10 +52629,10 @@ async function gatherRetirableLessons(targetRepoRoot, opts = {}) {
 }
 var CROSS_ROLE_SIMILARITY_THRESHOLD = 0.35;
 async function gatherCrossRoleSharedLessons(targetRepoRoot) {
-  const teamDir = path49.join(targetRepoRoot, "team");
+  const teamDir = path50.join(targetRepoRoot, "team");
   let roleEntries;
   try {
-    roleEntries = await fs39.readdir(teamDir);
+    roleEntries = await fs40.readdir(teamDir);
   } catch (err) {
     if (isEnoent10(err)) return [];
     throw err;
@@ -52437,15 +52643,15 @@ async function gatherCrossRoleSharedLessons(targetRepoRoot) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
     let stat2;
     try {
-      stat2 = await fs39.stat(path49.join(teamDir, entry));
+      stat2 = await fs40.stat(path50.join(teamDir, entry));
     } catch {
       continue;
     }
     if (!stat2.isDirectory()) continue;
-    const personaPath = path49.join(teamDir, entry, "PERSONA.md");
+    const personaPath = path50.join(teamDir, entry, "PERSONA.md");
     let raw;
     try {
-      raw = await fs39.readFile(personaPath, "utf8");
+      raw = await fs40.readFile(personaPath, "utf8");
     } catch (err) {
       if (isEnoent10(err)) continue;
       throw err;
@@ -52517,8 +52723,8 @@ function isEnoent10(err) {
 
 // src/tools/list-claimable-todos.ts
 var import_yaml25 = __toESM(require_dist2(), 1);
-import { promises as fs40 } from "node:fs";
-import * as path50 from "node:path";
+import { promises as fs41 } from "node:fs";
+import * as path51 from "node:path";
 
 // src/lib/short-handle.ts
 function shortHandle(ref) {
@@ -52533,13 +52739,13 @@ function shortHandle(ref) {
 // src/tools/list-claimable-todos.ts
 async function listClaimableTodos(opts) {
   const { targetRepoRoot } = opts;
-  const stateRoot = path50.join(targetRepoRoot, ".flow", "state");
-  const todoDir = path50.join(stateRoot, "to-do");
-  const inProgressDir = path50.join(stateRoot, "in-progress");
-  const doneDir = path50.join(stateRoot, "done");
+  const stateRoot = path51.join(targetRepoRoot, ".flow", "state");
+  const todoDir = path51.join(stateRoot, "to-do");
+  const inProgressDir = path51.join(stateRoot, "in-progress");
+  const doneDir = path51.join(stateRoot, "done");
   let todoEntries;
   try {
-    todoEntries = await fs40.readdir(todoDir);
+    todoEntries = await fs41.readdir(todoDir);
   } catch (err) {
     if (isEnoent11(err)) {
       todoEntries = [];
@@ -52550,10 +52756,10 @@ async function listClaimableTodos(opts) {
   const yamlEntries = todoEntries.filter((f) => f.endsWith(".yaml")).sort();
   const candidates = [];
   for (const entry of yamlEntries) {
-    const absPath = path50.join(todoDir, entry);
+    const absPath = path51.join(todoDir, entry);
     let raw;
     try {
-      raw = await fs40.readFile(absPath, "utf8");
+      raw = await fs41.readFile(absPath, "utf8");
     } catch (err) {
       if (isEnoent11(err)) {
         continue;
@@ -52567,9 +52773,9 @@ async function listClaimableTodos(opts) {
     }
     let depsReady = true;
     for (const dep of manifest.depends_on) {
-      const depPath = path50.join(doneDir, `${dep}.yaml`);
+      const depPath = path51.join(doneDir, `${dep}.yaml`);
       try {
-        await fs40.stat(depPath);
+        await fs41.stat(depPath);
       } catch (err) {
         if (isEnoent11(err)) {
           depsReady = false;
@@ -52589,7 +52795,7 @@ async function listClaimableTodos(opts) {
   }
   let inProgressCount = 0;
   try {
-    const inProgressEntries = await fs40.readdir(inProgressDir);
+    const inProgressEntries = await fs41.readdir(inProgressDir);
     inProgressCount = inProgressEntries.filter(
       (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
     ).length;
@@ -52698,7 +52904,7 @@ function renderBacklogDashboard(snapshot) {
 }
 
 // src/tools/get-status.ts
-import * as path51 from "node:path";
+import * as path52 from "node:path";
 
 // src/schemas/status-report.ts
 var ULID_REGEX2 = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -52766,7 +52972,7 @@ async function getStatus(opts) {
       throw err;
     }
   }
-  const standardsPath = path51.join(workspace.targetRepoRoot, "docs", "standards.md");
+  const standardsPath = path52.join(workspace.targetRepoRoot, "docs", "standards.md");
   let standardsReport;
   try {
     await lookupStandards(workspace.targetRepoRoot);
@@ -52806,7 +53012,7 @@ function renderStatus(report) {
 
 // src/tools/open-cycle.ts
 var import_yaml26 = __toESM(require_dist2(), 1);
-import * as path52 from "node:path";
+import * as path53 from "node:path";
 function isoForFilename(iso) {
   return iso.replace(/[:.]/g, "-");
 }
@@ -52858,7 +53064,7 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     done_manifests: inputs.doneManifests,
     retro_proposals: inputs.priorProposals.map((p) => ({
       // Store repo-relative paths so the archive is portable.
-      path: path52.relative(targetRepoRoot, p.path),
+      path: path53.relative(targetRepoRoot, p.path),
       iso_timestamp: p.iso_timestamp
     })),
     telemetry_summary: {
@@ -52867,24 +53073,24 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
     }
   };
   const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
-  const absPath = path52.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
+  const absPath = path53.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
   await atomicWriteFile(absPath, (0, import_yaml26.stringify)(archiveRecord, { lineWidth: 0 }));
   return absPath;
 }
 
 // src/tools/get-team-snapshot.ts
-import { promises as fs42 } from "node:fs";
-import * as path54 from "node:path";
+import { promises as fs43 } from "node:fs";
+import * as path55 from "node:path";
 
 // src/lib/team-stats.ts
-import { promises as fs41 } from "node:fs";
-import * as path53 from "node:path";
-var MONTH_BUCKET_REGEX = /^\d{4}-\d{2}\.jsonl$/;
+import { promises as fs42 } from "node:fs";
+import * as path54 from "node:path";
+var MONTH_BUCKET_REGEX2 = /^\d{4}-\d{2}\.jsonl$/;
 async function readTeamTelemetryStats(opts) {
-  const telemetryDir = path53.join(opts.targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path54.join(opts.targetRepoRoot, ".flow", "telemetry");
   let entries;
   try {
-    entries = await fs41.readdir(telemetryDir);
+    entries = await fs42.readdir(telemetryDir);
   } catch (err) {
     if (isEnoent12(err)) {
       return { fireCountsByAgent: {}, malformedLines: 0, malformedFiles: 0 };
@@ -52895,11 +53101,11 @@ async function readTeamTelemetryStats(opts) {
   let malformedLines = 0;
   let malformedFiles = 0;
   for (const entry of entries) {
-    if (!MONTH_BUCKET_REGEX.test(entry)) {
+    if (!MONTH_BUCKET_REGEX2.test(entry)) {
       continue;
     }
-    const filePath = path53.join(telemetryDir, entry);
-    const raw = await fs41.readFile(filePath, "utf8");
+    const filePath = path54.join(telemetryDir, entry);
+    const raw = await fs42.readFile(filePath, "utf8");
     const lines = raw.split("\n");
     let fileHasMalformation = false;
     for (const line of lines) {
@@ -52968,10 +53174,10 @@ var TeamSnapshotSchema = external_exports.object({
 async function getTeamSnapshot(opts) {
   const { targetRepoRoot } = opts;
   const knowledgeLimit = opts.knowledgeLimit ?? 3;
-  const teamDir = path54.join(targetRepoRoot, "team");
+  const teamDir = path55.join(targetRepoRoot, "team");
   let dirEntries;
   try {
-    dirEntries = await fs42.readdir(teamDir);
+    dirEntries = await fs43.readdir(teamDir);
   } catch (err) {
     if (isEnoent13(err)) {
       const stats2 = await readTeamTelemetryStats({ targetRepoRoot });
@@ -52992,7 +53198,7 @@ async function getTeamSnapshot(opts) {
     }
     let stat2;
     try {
-      stat2 = await fs42.stat(path54.join(teamDir, entry));
+      stat2 = await fs43.stat(path55.join(teamDir, entry));
     } catch {
       continue;
     }
@@ -53122,25 +53328,25 @@ function isEnoent13(err) {
 }
 
 // src/tools/lookup-role-by-domain.ts
-import { promises as fs43 } from "node:fs";
-import * as path55 from "node:path";
+import { promises as fs44 } from "node:fs";
+import * as path56 from "node:path";
 async function lookupRoleByDomain(opts) {
-  const teamDir = path55.join(opts.targetRepoRoot, "team");
+  const teamDir = path56.join(opts.targetRepoRoot, "team");
   try {
-    await fs43.stat(teamDir);
+    await fs44.stat(teamDir);
   } catch (err) {
     if (isEnoent14(err)) {
       return { role: null };
     }
     throw err;
   }
-  const entries = await fs43.readdir(teamDir);
+  const entries = await fs44.readdir(teamDir);
   for (const entry of entries) {
     if (entry === "custom" || entry === "_archived") continue;
-    const subPath = path55.join(teamDir, entry);
+    const subPath = path56.join(teamDir, entry);
     let isDir = false;
     try {
-      const stat2 = await fs43.stat(subPath);
+      const stat2 = await fs44.stat(subPath);
       isDir = stat2.isDirectory();
     } catch (err) {
       if (isEnoent14(err)) continue;
@@ -53171,8 +53377,8 @@ function isEnoent14(err) {
 
 // src/tools/mark-withdrawn.ts
 var import_yaml27 = __toESM(require_dist2(), 1);
-import { promises as fs44 } from "node:fs";
-import * as path56 from "node:path";
+import { promises as fs45 } from "node:fs";
+import * as path57 from "node:path";
 var MarkWithdrawnInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -53190,7 +53396,7 @@ function serialiseManifest(manifest) {
 }
 async function markWithdrawn(rawInput) {
   const input = MarkWithdrawnInputSchema.parse(rawInput);
-  const targetRepoRoot = path56.resolve(input.targetRepoRoot);
+  const targetRepoRoot = path57.resolve(input.targetRepoRoot);
   const { ref } = input;
   const workspace = await resolveWorkspace({ targetRepoRoot });
   if (workspace.activeAdapterName === "native") {
@@ -53201,13 +53407,13 @@ async function markWithdrawn(rawInput) {
       toolName: "markWithdrawn"
     });
   }
-  const stateRoot = path56.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path57.join(targetRepoRoot, ".flow", "state");
   let foundState = null;
   let foundAbsPath = null;
   for (const stateName of STATE_NAMES) {
-    const candidate = path56.join(stateRoot, stateName, `${ref}.yaml`);
+    const candidate = path57.join(stateRoot, stateName, `${ref}.yaml`);
     try {
-      await fs44.stat(candidate);
+      await fs45.stat(candidate);
       foundState = stateName;
       foundAbsPath = candidate;
       break;
@@ -53217,11 +53423,11 @@ async function markWithdrawn(rawInput) {
   if (foundState === null || foundAbsPath === null) {
     throw new ManifestNotFoundError({
       ref,
-      expectedAbsPath: path56.join(stateRoot, "to-do", `${ref}.yaml`),
+      expectedAbsPath: path57.join(stateRoot, "to-do", `${ref}.yaml`),
       fromState: "to-do"
     });
   }
-  const rawText = await fs44.readFile(foundAbsPath, "utf8");
+  const rawText = await fs45.readFile(foundAbsPath, "utf8");
   const parsed = (0, import_yaml27.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
@@ -53244,8 +53450,8 @@ async function markWithdrawn(rawInput) {
 
 // src/tools/mark-story-ready.ts
 var import_yaml28 = __toESM(require_dist2(), 1);
-import { promises as fs45 } from "node:fs";
-import * as path57 from "node:path";
+import { promises as fs46 } from "node:fs";
+import * as path58 from "node:path";
 var MarkStoryReadyInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1),
@@ -53259,16 +53465,16 @@ var MarkStoryReadyInputSchema = external_exports.object({
 });
 async function markStoryReady(rawInput) {
   const input = MarkStoryReadyInputSchema.parse(rawInput);
-  const targetRepoRoot = path57.resolve(input.targetRepoRoot);
+  const targetRepoRoot = path58.resolve(input.targetRepoRoot);
   const { ref, ready } = input;
   const sessionUlid = input.sessionUlid ?? "operator";
-  const stateRoot = path57.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path58.join(targetRepoRoot, ".flow", "state");
   let foundState = null;
   let foundAbsPath = null;
   for (const stateName of STATE_NAMES) {
-    const candidate = path57.join(stateRoot, stateName, `${ref}.yaml`);
+    const candidate = path58.join(stateRoot, stateName, `${ref}.yaml`);
     try {
-      await fs45.stat(candidate);
+      await fs46.stat(candidate);
       foundState = stateName;
       foundAbsPath = candidate;
       break;
@@ -53281,7 +53487,7 @@ async function markStoryReady(rawInput) {
   if (foundState !== "to-do") {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
   }
-  const rawText = await fs45.readFile(foundAbsPath, "utf8");
+  const rawText = await fs46.readFile(foundAbsPath, "utf8");
   const parsed = (0, import_yaml28.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
@@ -53291,7 +53497,7 @@ async function markStoryReady(rawInput) {
     return { ref, ready, noop: true, state: foundState };
   }
   try {
-    await fs45.stat(foundAbsPath);
+    await fs46.stat(foundAbsPath);
   } catch {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
   }
@@ -53301,11 +53507,11 @@ async function markStoryReady(rawInput) {
   for (const stateName of STATE_NAMES) {
     if (stateName === "to-do") continue;
     try {
-      await fs45.stat(path57.join(stateRoot, stateName, `${ref}.yaml`));
+      await fs46.stat(path58.join(stateRoot, stateName, `${ref}.yaml`));
     } catch {
       continue;
     }
-    await fs45.rm(foundAbsPath, { force: true });
+    await fs46.rm(foundAbsPath, { force: true });
     throw new NotAnEligibleBacklogItemError({ ref, foundState: stateName, reason: "not-in-to-do" });
   }
   await logTelemetryEvent({
@@ -53322,8 +53528,8 @@ async function markStoryReady(rawInput) {
 }
 
 // src/tools/read-repo-signals.ts
-import { promises as fs46 } from "node:fs";
-import * as path58 from "node:path";
+import { promises as fs47 } from "node:fs";
+import * as path59 from "node:path";
 
 // src/lib/repo-signal-detectors.ts
 var LANG_FILE_MAP = {
@@ -53395,7 +53601,7 @@ var RepoSignalsSchema = external_exports.object({
 
 // src/tools/read-repo-signals.ts
 async function readRepoSignals(opts) {
-  const dirents = await fs46.readdir(opts.targetRepoRoot, {
+  const dirents = await fs47.readdir(opts.targetRepoRoot, {
     withFileTypes: true
   });
   const topLevelLayout = dirents.map((d) => d.name).filter((name) => !name.startsWith(".") || name === ".flow").sort();
@@ -53407,10 +53613,10 @@ async function readRepoSignals(opts) {
     }
   }
   const dependencyManifests = detectDependencyManifests(topLevelLayout);
-  const readmePath = path58.join(opts.targetRepoRoot, "README.md");
+  const readmePath = path59.join(opts.targetRepoRoot, "README.md");
   let readmeExcerpt = "";
   try {
-    const raw = await fs46.readFile(readmePath, "utf8");
+    const raw = await fs47.readFile(readmePath, "utf8");
     readmeExcerpt = truncateReadmeExcerpt(raw);
   } catch (err) {
     if (!isEnoent15(err)) {
@@ -53437,7 +53643,7 @@ async function collectDepthOneManifests(repoRoot, rootDirents) {
     if (!dirent.isDirectory()) continue;
     if (dirent.name.startsWith(".") || dirent.name === "node_modules") continue;
     try {
-      const children = await fs46.readdir(path58.join(repoRoot, dirent.name));
+      const children = await fs47.readdir(path59.join(repoRoot, dirent.name));
       for (const child of children) {
         found.push(child);
       }
@@ -53452,7 +53658,7 @@ function isEnoent15(err) {
 
 // src/tools/validate-planner-backlog.ts
 import { createHash as createHash4 } from "node:crypto";
-import * as path59 from "node:path";
+import * as path60 from "node:path";
 var PendingStoryInputSchema = external_exports.object({
   title: external_exports.string().min(1),
   narrative: external_exports.string().min(1),
@@ -53544,7 +53750,7 @@ function pendingToEnrichedSourceStory(pending, index) {
 }
 async function validatePlannerBacklog(rawInput) {
   const input = ValidatePlannerBacklogInputSchema.parse(rawInput);
-  const targetRepoRoot = path59.resolve(input.targetRepoRoot);
+  const targetRepoRoot = path60.resolve(input.targetRepoRoot);
   const workspace = await resolveWorkspace({ targetRepoRoot });
   if (workspace.activeAdapterName !== "native") {
     throw new WrongAdapterError({
@@ -53626,11 +53832,11 @@ async function validatePlannerBacklog(rawInput) {
 }
 
 // src/tools/claim-next-story.ts
-import * as path63 from "node:path";
+import * as path64 from "node:path";
 
 // src/lib/dep-merge-check.ts
-import { promises as fs47 } from "node:fs";
-import * as path60 from "node:path";
+import { promises as fs48 } from "node:fs";
+import * as path61 from "node:path";
 var import_yaml29 = __toESM(require_dist2(), 1);
 
 // src/lib/pr-body.ts
@@ -53817,7 +54023,7 @@ async function isDependencyPrMerged(opts) {
 }
 async function areDependenciesMerged(opts) {
   const isMerged = opts.isMerged ?? isDependencyPrMerged;
-  const doneDir = path60.join(opts.targetRepoRoot, ".flow", "state", "done");
+  const doneDir = path61.join(opts.targetRepoRoot, ".flow", "state", "done");
   const seen = /* @__PURE__ */ new Map();
   for (const dep of opts.deps) {
     const cached2 = seen.get(dep);
@@ -53825,10 +54031,10 @@ async function areDependenciesMerged(opts) {
       if (!cached2) return false;
       continue;
     }
-    const depPath = path60.join(doneDir, `${dep}.yaml`);
+    const depPath = path61.join(doneDir, `${dep}.yaml`);
     let raw;
     try {
-      raw = await fs47.readFile(depPath, "utf8");
+      raw = await fs48.readFile(depPath, "utf8");
     } catch {
       seen.set(dep, false);
       return false;
@@ -53868,7 +54074,7 @@ async function isOverlapBlockerInFlight(opts) {
 }
 async function anyOverlapBlockerInFlight(opts) {
   const isInFlight = opts.isInFlight ?? isOverlapBlockerInFlight;
-  const doneDir = path60.join(opts.targetRepoRoot, ".flow", "state", "done");
+  const doneDir = path61.join(opts.targetRepoRoot, ".flow", "state", "done");
   const seen = /* @__PURE__ */ new Map();
   for (const ref of opts.blockers) {
     const cached2 = seen.get(ref);
@@ -53876,10 +54082,10 @@ async function anyOverlapBlockerInFlight(opts) {
       if (cached2) return true;
       continue;
     }
-    const depPath = path60.join(doneDir, `${ref}.yaml`);
+    const depPath = path61.join(doneDir, `${ref}.yaml`);
     let raw;
     try {
-      raw = await fs47.readFile(depPath, "utf8");
+      raw = await fs48.readFile(depPath, "utf8");
     } catch {
       seen.set(ref, false);
       continue;
@@ -53910,17 +54116,17 @@ async function anyOverlapBlockerInFlight(opts) {
 
 // src/lib/cited-source-overlap.ts
 var import_yaml30 = __toESM(require_dist2(), 1);
-import { promises as fs48 } from "node:fs";
-import * as path61 from "node:path";
+import { promises as fs49 } from "node:fs";
+import * as path62 from "node:path";
 var STATE_DIRS = ["to-do", "in-progress", "done"];
 async function loadOverlapUniverse(targetRepoRoot) {
-  const stateRoot = path61.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path62.join(targetRepoRoot, ".flow", "state");
   const stories = [];
   for (const location of STATE_DIRS) {
-    const dir = path61.join(stateRoot, location);
+    const dir = path62.join(stateRoot, location);
     let entries;
     try {
-      entries = await fs48.readdir(dir);
+      entries = await fs49.readdir(dir);
     } catch (err) {
       if (isEnoent16(err)) continue;
       throw err;
@@ -53929,7 +54135,7 @@ async function loadOverlapUniverse(targetRepoRoot) {
       if (!entry.endsWith(".yaml") || entry.endsWith(".snapshot.yaml")) continue;
       let raw;
       try {
-        raw = await fs48.readFile(path61.join(dir, entry), "utf8");
+        raw = await fs49.readFile(path62.join(dir, entry), "utf8");
       } catch {
         continue;
       }
@@ -53983,11 +54189,11 @@ function isEnoent16(err) {
 }
 
 // src/lib/session-liveness.ts
-import * as path62 from "node:path";
-import { promises as fs49 } from "node:fs";
+import * as path63 from "node:path";
+import { promises as fs50 } from "node:fs";
 var HEARTBEAT_STALE_MS = 30 * 6e4;
 function heartbeatFilePath(targetRepoRoot, sessionUlid) {
-  return path62.join(
+  return path63.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -54010,7 +54216,7 @@ async function isSessionAlive(targetRepoRoot, sessionUlid, opts) {
   const filePath = heartbeatFilePath(targetRepoRoot, sessionUlid);
   let raw;
   try {
-    raw = await fs49.readFile(filePath, "utf8");
+    raw = await fs50.readFile(filePath, "utf8");
   } catch {
     return false;
   }
@@ -54205,7 +54411,7 @@ async function claimNextStory(opts) {
       throw err;
     }
     if (claimSucceeded) {
-      const manifestPath = path63.resolve(
+      const manifestPath = path64.resolve(
         targetRepoRoot,
         ".flow",
         "state",
@@ -54247,7 +54453,7 @@ async function claimNextStory(opts) {
 }
 
 // src/tools/process-dev-transcript.ts
-import * as path65 from "node:path";
+import * as path66 from "node:path";
 
 // src/skills/handoff-parser.ts
 var HANDOFF_PHRASE_TEMPLATE = "Handoff to reviewer \u2014 story <story-id> ready for review.";
@@ -54271,10 +54477,10 @@ function parseHandoff(transcript, expectedRef) {
 }
 
 // src/lib/read-dev-outcome-file.ts
-import { promises as fs50 } from "node:fs";
-import * as path64 from "node:path";
+import { promises as fs51 } from "node:fs";
+import * as path65 from "node:path";
 function devOutcomeFilePath(targetRepoRoot, sessionUlid, ref) {
-  return path64.join(
+  return path65.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -54288,7 +54494,7 @@ async function readDevOutcomeFile(targetRepoRoot, sessionUlid, ref) {
   const filePath = devOutcomeFilePath(targetRepoRoot, sessionUlid, ref);
   let raw;
   try {
-    raw = await fs50.readFile(filePath, "utf8");
+    raw = await fs51.readFile(filePath, "utf8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") {
@@ -54354,7 +54560,7 @@ async function processDevTranscript(opts) {
     await writeSessionHeartbeat(targetRepoRoot, sessionUlid);
   } catch {
   }
-  const manifestPath = path65.resolve(
+  const manifestPath = path66.resolve(
     targetRepoRoot,
     ".flow",
     "state",
@@ -54517,12 +54723,12 @@ async function processReviewerTranscript(opts) {
 }
 
 // src/tools/run-dev-terminal-action.ts
-import * as path69 from "node:path";
+import * as path70 from "node:path";
 
 // src/lib/extract-acs-from-spec.ts
-import { promises as fs51 } from "node:fs";
+import { promises as fs52 } from "node:fs";
 async function extractAcsFromSpec(specPath) {
-  const raw = await fs51.readFile(specPath, "utf8");
+  const raw = await fs52.readFile(specPath, "utf8");
   const lines = raw.split("\n");
   const AC_HEADING_RE = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
   const results = [];
@@ -54551,8 +54757,8 @@ async function extractAcsFromSpec(specPath) {
 
 // src/lib/gh-error-map.ts
 var import_yaml31 = __toESM(require_dist2(), 1);
-import { promises as fs52 } from "node:fs";
-import * as path66 from "node:path";
+import { promises as fs53 } from "node:fs";
+import * as path67 from "node:path";
 
 // src/schemas/gh-error-map.ts
 var GhErrorMapEntrySchema = external_exports.object({
@@ -54567,7 +54773,7 @@ var GhErrorMapSchema = external_exports.object({
 // src/lib/gh-error-map.ts
 var cache = /* @__PURE__ */ new Map();
 async function parseGhErrorMap(filePath) {
-  const raw = await fs52.readFile(filePath, "utf8");
+  const raw = await fs53.readFile(filePath, "utf8");
   const parsed = (0, import_yaml31.parse)(raw);
   const result = GhErrorMapSchema.safeParse(parsed);
   if (!result.success) {
@@ -54611,7 +54817,7 @@ async function parseGhErrorMap(filePath) {
   return { entries };
 }
 async function loadGhErrorMap(pluginRoot) {
-  const absPath = path66.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
+  const absPath = path67.resolve(pluginRoot, "permissions", "gh-error-map.yaml");
   const cached2 = cache.get(absPath);
   if (cached2 !== void 0) {
     return cached2;
@@ -54694,8 +54900,8 @@ async function gh(opts) {
 
 // src/state/load-role-permissions.ts
 var import_yaml32 = __toESM(require_dist2(), 1);
-import { promises as fs53 } from "node:fs";
-import * as path67 from "node:path";
+import { promises as fs54 } from "node:fs";
+import * as path68 from "node:path";
 
 // src/schemas/role-permissions.ts
 var RolePermissionsSchema = external_exports.object({
@@ -54713,10 +54919,10 @@ function formatZodIssues5(issues) {
   return `${dottedPath}: ${first.message}`;
 }
 async function loadRolePermissions(opts) {
-  const specPath = path67.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
+  const specPath = path68.join(opts.pluginRoot, "permissions", `${opts.role}.yaml`);
   let raw;
   try {
-    raw = await fs53.readFile(specPath, "utf8");
+    raw = await fs54.readFile(specPath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") {
       throw new RolePermissionsMissingError({ role: opts.role, specPath });
@@ -54743,12 +54949,12 @@ async function loadRolePermissions(opts) {
 }
 
 // src/lib/run-project-build.ts
-import * as path68 from "node:path";
+import * as path69 from "node:path";
 var DEFAULT_BUILD_TEST_TIMEOUT_MS = 20 * 60 * 1e3;
 var PROJECT_BUILD_COMMAND = "pnpm";
 var PROJECT_BUILD_ARGS = ["build"];
 function deriveProjectBuildCwd(devWorkingDir) {
-  return path68.join(devWorkingDir, "plugins", "flow");
+  return path69.join(devWorkingDir, "plugins", "flow");
 }
 async function runProjectBuild(opts) {
   const execaImpl = opts.execaImpl ?? execa;
@@ -54835,7 +55041,7 @@ async function runDevTerminalAction(opts) {
   }
   const branch = buildBranchSlug({ ref, title });
   const manifest = await readManifest(manifestPath);
-  const specPath = path69.isAbsolute(manifest.source_path) ? manifest.source_path : path69.join(targetRepoRoot, manifest.source_path);
+  const specPath = path70.isAbsolute(manifest.source_path) ? manifest.source_path : path70.join(targetRepoRoot, manifest.source_path);
   const acs = opts.inlineAcs ? opts.inlineAcs : await extractAcsFromSpec(specPath);
   const gitRoot = targetRepoRoot;
   let committedPaths = ["."];
@@ -55021,7 +55227,7 @@ async function runDevTerminalAction(opts) {
       role: ROLE,
       ...execaImpl ? { execaImpl } : {}
     });
-    const specPathForPr = path69.isAbsolute(manifest.source_path) ? path69.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
+    const specPathForPr = path70.isAbsolute(manifest.source_path) ? path70.relative(targetRepoRoot, manifest.source_path) : manifest.source_path;
     const manifestAcsByIndex = new Map(
       (manifest.acceptance_criteria ?? []).map((ac, i2) => [i2 + 1, ac])
     );
@@ -55096,7 +55302,7 @@ async function runDevTerminalAction(opts) {
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2)
     );
     try {
-      const inProgressManifestPath = path69.join(
+      const inProgressManifestPath = path70.join(
         ledgerRoot,
         ".flow",
         "state",
@@ -55118,24 +55324,24 @@ async function runDevTerminalAction(opts) {
 }
 
 // src/tools/run-reviewer-session.ts
-import * as path71 from "node:path";
-import * as fs55 from "node:fs/promises";
+import * as path72 from "node:path";
+import * as fs56 from "node:fs/promises";
 import { accessSync, readFileSync as readFileSync4, readdirSync as readdirSync2 } from "node:fs";
 var import_yaml33 = __toESM(require_dist2(), 1);
 
 // src/lib/materialise-pr-branch-worktree.ts
-import * as path70 from "node:path";
-import * as fs54 from "node:fs/promises";
+import * as path71 from "node:path";
+import * as fs55 from "node:fs/promises";
 function reviewWorktreesRoot(targetRepoRoot, sessionUlid) {
-  return path70.join(
-    path70.dirname(targetRepoRoot),
+  return path71.join(
+    path71.dirname(targetRepoRoot),
     ".flow-worktrees",
     sessionUlid
   );
 }
 function reviewWorktreePath(targetRepoRoot, sessionUlid, storyRef) {
   const storySlug = sanitiseRefForPathSegment(storyRef);
-  return path70.join(
+  return path71.join(
     reviewWorktreesRoot(targetRepoRoot, sessionUlid),
     `review-${storySlug}-worktree`
   );
@@ -55198,10 +55404,10 @@ async function materialisePrBranchWorktree(opts) {
     );
   }
   const worktreePath = reviewWorktreePath(targetRepoRoot, sessionUlid, storyRef);
-  await fs54.mkdir(path70.dirname(worktreePath), { recursive: true });
+  await fs55.mkdir(path71.dirname(worktreePath), { recursive: true });
   let staleExists = false;
   try {
-    await fs54.access(worktreePath);
+    await fs55.access(worktreePath);
     staleExists = true;
   } catch {
   }
@@ -55219,7 +55425,7 @@ async function materialisePrBranchWorktree(opts) {
         `[materialise-pr-branch-worktree] git worktree remove failed (exit ${reapResult.exitCode}): ${reapResult.stderr}. Falling back to fs.rm for unregistered stale path.`
       );
       try {
-        await fs54.rm(worktreePath, { recursive: true, force: true });
+        await fs55.rm(worktreePath, { recursive: true, force: true });
         await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
         setupLog.push(
           `[materialise-pr-branch-worktree] stale path removed via fs.rm.`
@@ -55274,7 +55480,7 @@ async function materialisePrBranchWorktree(opts) {
         `[materialise-pr-branch-worktree] cleanup: git worktree remove ${worktreePath} --force failed (exit ${removeResult.exitCode}): ${removeResult.stderr}. Worktree is left at ${worktreePath} \u2014 operator can run 'git worktree prune' to clean up.`
       );
       try {
-        await fs54.rm(worktreePath, { recursive: true, force: true });
+        await fs55.rm(worktreePath, { recursive: true, force: true });
         await runGit(["worktree", "prune"], targetRepoRoot, execaImpl);
       } catch {
       }
@@ -55311,9 +55517,9 @@ function classifyAc(bodyLines) {
   return { applicability: "manual-check-required" };
 }
 async function runArtifactCheck(index, tag, artifactPath, checkRoot) {
-  const resolved = path71.resolve(checkRoot, artifactPath);
+  const resolved = path72.resolve(checkRoot, artifactPath);
   try {
-    await fs55.access(resolved);
+    await fs56.access(resolved);
     return {
       index,
       tag,
@@ -55346,7 +55552,7 @@ function capString(s) {
 }
 function hasLocalVitest(dir) {
   try {
-    accessSync(path71.join(dir, "node_modules", ".bin", "vitest"));
+    accessSync(path72.join(dir, "node_modules", ".bin", "vitest"));
     return true;
   } catch {
     return false;
@@ -55355,7 +55561,7 @@ function hasLocalVitest(dir) {
 function findVitestInWorkspaceMembers(workspaceRoot) {
   try {
     const yaml = readFileSync4(
-      path71.join(workspaceRoot, "pnpm-workspace.yaml"),
+      path72.join(workspaceRoot, "pnpm-workspace.yaml"),
       "utf8"
     );
     const parsed = (0, import_yaml33.parse)(yaml);
@@ -55366,18 +55572,18 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
       const segments = pattern.split("/");
       const hasGlob = segments.some((s) => s === "*" || s === "**");
       if (!hasGlob) {
-        const memberDir = path71.join(workspaceRoot, pattern);
+        const memberDir = path72.join(workspaceRoot, pattern);
         if (hasLocalVitest(memberDir)) {
           return { ok: true, packageRoot: memberDir };
         }
       } else {
         const parentSegments = segments.slice(0, segments.indexOf("*"));
-        const parentDir = path71.join(workspaceRoot, ...parentSegments);
+        const parentDir = path72.join(workspaceRoot, ...parentSegments);
         try {
           const entries = readdirSync2(parentDir, { withFileTypes: true });
           for (const entry of entries) {
             if (!entry.isDirectory()) continue;
-            const memberDir = path71.join(parentDir, entry.name);
+            const memberDir = path72.join(parentDir, entry.name);
             if (hasLocalVitest(memberDir)) {
               return { ok: true, packageRoot: memberDir };
             }
@@ -55405,18 +55611,18 @@ function findWorkspaceYamlInSubtree(root, maxDepth) {
     if (!entry.isDirectory()) continue;
     const name = entry.name;
     if (name === "node_modules" || name === ".git") continue;
-    const found = findWorkspaceYamlInSubtree(path71.join(root, name), maxDepth - 1);
+    const found = findWorkspaceYamlInSubtree(path72.join(root, name), maxDepth - 1);
     if (found !== null) return found;
   }
   return null;
 }
 function findPackageRoot(opts) {
-  const checkRootAbs = path71.resolve(opts.checkRoot);
-  let dir = path71.dirname(opts.testFilePathAbs);
-  const isWithinCheckRoot = (d) => d === checkRootAbs || d.startsWith(checkRootAbs + path71.sep);
+  const checkRootAbs = path72.resolve(opts.checkRoot);
+  let dir = path72.dirname(opts.testFilePathAbs);
+  const isWithinCheckRoot = (d) => d === checkRootAbs || d.startsWith(checkRootAbs + path72.sep);
   while (isWithinCheckRoot(dir)) {
     try {
-      accessSync(path71.join(dir, "package.json"));
+      accessSync(path72.join(dir, "package.json"));
       const memberResult = findVitestInWorkspaceMembers(dir);
       if (memberResult.ok) {
         return memberResult;
@@ -55424,7 +55630,7 @@ function findPackageRoot(opts) {
       return { ok: true, packageRoot: dir };
     } catch {
     }
-    const parent = path71.dirname(dir);
+    const parent = path72.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
@@ -55449,7 +55655,7 @@ function countExecutedTests(output) {
   return (passed ? Number(passed[1]) : 0) + (failed ? Number(failed[1]) : 0);
 }
 async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoot, execaImpl) {
-  const testFilePathAbs = path71.resolve(checkRoot, testFilePath);
+  const testFilePathAbs = path72.resolve(checkRoot, testFilePath);
   const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
   if (!pkgRoot.ok) {
     return {
@@ -55464,8 +55670,8 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
       exitCode: -1
     };
   }
-  const testFilePathAbs2 = path71.resolve(checkRoot, testFilePath);
-  const relativeToPackage = path71.relative(pkgRoot.packageRoot, testFilePathAbs2);
+  const testFilePathAbs2 = path72.resolve(checkRoot, testFilePath);
+  const relativeToPackage = path72.relative(pkgRoot.packageRoot, testFilePathAbs2);
   const looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
   const vitestArgs = looksLikeFilePath ? ["vitest", "--run", relativeToPackage] : ["vitest", "--run", "-t", testNameFilter];
   const result = await execaImpl("pnpm", vitestArgs, {
@@ -55709,7 +55915,7 @@ async function runReviewerSession(opts) {
     });
   }
   const resultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
-  await fs55.mkdir(path71.dirname(resultFilePath), { recursive: true });
+  await fs56.mkdir(path72.dirname(resultFilePath), { recursive: true });
   const fileProjection = {
     sessionUlid,
     ref,
@@ -55737,7 +55943,7 @@ async function runReviewerSession(opts) {
 }
 
 // src/tools/post-reviewer-comments.ts
-import * as path72 from "node:path";
+import * as path73 from "node:path";
 
 // src/lib/compose-reviewer-summary.ts
 function composeVerdictLine(result) {
@@ -55875,7 +56081,7 @@ async function stampRiskTierOnManifest(targetRepoRoot, ref, riskTier) {
   if (riskTier === void 0) {
     return;
   }
-  const manifestPath = path72.join(
+  const manifestPath = path73.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -56245,8 +56451,8 @@ async function processReviewerYield(opts) {
 }
 
 // src/tools/compute-agreement.ts
-import * as path73 from "node:path";
-import { promises as fs56 } from "node:fs";
+import * as path74 from "node:path";
+import { promises as fs57 } from "node:fs";
 
 // src/lib/agreement.ts
 function isAgreement(verdict, mergeAction) {
@@ -56282,13 +56488,13 @@ async function computeAgreement(opts) {
       reason: "must be a positive integer"
     });
   }
-  const telemetryDir = path73.join(targetRepoRoot, ".flow", "telemetry");
+  const telemetryDir = path74.join(targetRepoRoot, ".flow", "telemetry");
   let jsonlFiles;
   try {
     if (readTelemetryDirImpl) {
       jsonlFiles = await readTelemetryDirImpl(telemetryDir);
     } else {
-      const entries = await fs56.readdir(telemetryDir, { withFileTypes: true });
+      const entries = await fs57.readdir(telemetryDir, { withFileTypes: true });
       jsonlFiles = entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name).sort();
     }
   } catch (err) {
@@ -56304,8 +56510,8 @@ async function computeAgreement(opts) {
   const mergeActions = [];
   let malformed_lines = 0;
   for (const filename of jsonlFiles) {
-    const filePath = path73.join(telemetryDir, filename);
-    const raw = readFileImpl ? await readFileImpl(filePath) : await fs56.readFile(filePath, "utf8");
+    const filePath = path74.join(telemetryDir, filename);
+    const raw = readFileImpl ? await readFileImpl(filePath) : await fs57.readFile(filePath, "utf8");
     for (const rawLine of raw.split("\n")) {
       const line = rawLine.trim();
       if (line === "") {
@@ -56422,8 +56628,8 @@ async function recordSkillInvoke(opts) {
 }
 
 // src/tools/run-auto-merge-gate.ts
-import * as path74 from "node:path";
-import { promises as fs57 } from "node:fs";
+import * as path75 from "node:path";
+import { promises as fs58 } from "node:fs";
 var import_yaml34 = __toESM(require_dist2(), 1);
 
 // src/lib/auto-merge-gate.ts
@@ -56477,10 +56683,10 @@ var AutoMergeGateResultSchema = external_exports.object({
   chatLog: external_exports.array(external_exports.string())
 }).strict();
 async function loadWorkspaceConfig(targetRepoRoot) {
-  const configPath = path74.join(targetRepoRoot, ".flow", "config.yaml");
+  const configPath = path75.join(targetRepoRoot, ".flow", "config.yaml");
   let raw;
   try {
-    raw = await fs57.readFile(configPath, "utf8");
+    raw = await fs58.readFile(configPath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") {
       return PluginSettingsSchema.parse({});
@@ -56602,7 +56808,7 @@ async function runAutoMergeGate(opts) {
     pluginSettings = pluginSettings ?? await loadWorkspaceConfigFn(opts.targetRepoRoot);
     provisional_trust = pluginSettings.provisional_trust;
   }
-  const manifestPath = path74.join(
+  const manifestPath = path75.join(
     opts.targetRepoRoot,
     ".flow",
     "state",
@@ -56773,9 +56979,9 @@ async function runAutoMergeGate(opts) {
 }
 
 // src/tools/create-smoke-scratch-repo.ts
-import { promises as fs58 } from "node:fs";
+import { promises as fs59 } from "node:fs";
 import * as os from "node:os";
-import * as path75 from "node:path";
+import * as path76 from "node:path";
 var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
   /** Short kebab-case label embedded in the scratch directory name. */
   label: external_exports.string().regex(/^[a-z0-9-]+$/, "label must be kebab-case (lowercase letters, digits, hyphens)").min(1),
@@ -56785,45 +56991,45 @@ var CreateSmokeScratchRepoOptionsSchema = external_exports.object({
 async function createSmokeScratchRepo(opts) {
   const parsed = CreateSmokeScratchRepoOptionsSchema.parse(opts);
   const { label, parentDir } = parsed;
-  const standardsTemplatePath = path75.resolve(
+  const standardsTemplatePath = path76.resolve(
     getPluginRoot(),
     "docs",
     "standards-example.md"
   );
-  const scratchRoot = await fs58.mkdtemp(
-    path75.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
+  const scratchRoot = await fs59.mkdtemp(
+    path76.join(parentDir ?? os.tmpdir(), `flow-smoke-${label}-`)
   );
   await gitInitWithEmptyCommit({ cwd: scratchRoot });
   await writeManagedFile({
-    absPath: path75.join(scratchRoot, ".flow", "config.yaml"),
+    absPath: path76.join(scratchRoot, ".flow", "config.yaml"),
     contents: "adapter: native\nstandards: {}\n",
     targetRepoRoot: scratchRoot
   });
-  const standardsContents = await fs58.readFile(standardsTemplatePath, "utf8");
+  const standardsContents = await fs59.readFile(standardsTemplatePath, "utf8");
   await writeManagedFile({
-    absPath: path75.join(scratchRoot, ".flow", "standards.md"),
+    absPath: path76.join(scratchRoot, ".flow", "standards.md"),
     contents: standardsContents,
     targetRepoRoot: scratchRoot
   });
   const cleanup = async () => {
-    await fs58.rm(scratchRoot, { recursive: true, force: true });
+    await fs59.rm(scratchRoot, { recursive: true, force: true });
   };
   return { scratchRoot, cleanup };
 }
 
 // src/tools/scan-orphaned-in-progress.ts
 var import_yaml35 = __toESM(require_dist2(), 1);
-import { promises as fs59 } from "node:fs";
-import * as path76 from "node:path";
+import { promises as fs60 } from "node:fs";
+import * as path77 from "node:path";
 async function scanOrphanedInProgress(opts) {
   const { targetRepoRoot, sessionUlid } = opts;
   const execaImpl = opts.execaImpl ?? execa;
   const aliveCheck = opts.isSessionAliveImpl ?? isSessionAlive;
-  const inProgressDir = path76.join(targetRepoRoot, ".flow", "state", "in-progress");
-  const sessionsDir = path76.join(targetRepoRoot, ".flow", "state", "sessions");
+  const inProgressDir = path77.join(targetRepoRoot, ".flow", "state", "in-progress");
+  const sessionsDir = path77.join(targetRepoRoot, ".flow", "state", "sessions");
   let entries;
   try {
-    entries = await fs59.readdir(inProgressDir);
+    entries = await fs60.readdir(inProgressDir);
   } catch (err) {
     if (isEnoent17(err)) {
       return { orphans: [] };
@@ -56833,10 +57039,10 @@ async function scanOrphanedInProgress(opts) {
   const yamlEntries = entries.filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")).sort();
   const orphans = [];
   for (const entry of yamlEntries) {
-    const absPath = path76.join(inProgressDir, entry);
+    const absPath = path77.join(inProgressDir, entry);
     let raw;
     try {
-      raw = await fs59.readFile(absPath, "utf8");
+      raw = await fs60.readFile(absPath, "utf8");
     } catch (err) {
       if (isEnoent17(err)) {
         continue;
@@ -56859,14 +57065,14 @@ async function scanOrphanedInProgress(opts) {
       continue;
     }
     const staleUlid = manifest.claimed_by;
-    const transcriptPath = path76.join(
+    const transcriptPath = path77.join(
       sessionsDir,
       staleUlid,
       "dev-transcript.txt"
     );
     let hasTranscript = false;
     try {
-      await fs59.stat(transcriptPath);
+      await fs60.stat(transcriptPath);
       hasTranscript = true;
     } catch (err) {
       if (!isEnoent17(err)) {
@@ -56924,10 +57130,10 @@ function isEnoent17(err) {
 }
 
 // src/tools/reattach-orphan.ts
-import * as path77 from "node:path";
+import * as path78 from "node:path";
 async function reattachOrphan(opts) {
   const { targetRepoRoot, ref, currentSessionUlid } = opts;
-  const absPath = path77.join(
+  const absPath = path78.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -56966,7 +57172,7 @@ async function reattachOrphan(opts) {
 }
 
 // src/tools/block-orphan-no-transcript.ts
-import * as path78 from "node:path";
+import * as path79 from "node:path";
 async function blockOrphanNoTranscript(opts) {
   const { targetRepoRoot, ref, staleUlid } = opts;
   await removeInProgressSnapshot({ targetRepoRoot, ref });
@@ -56976,7 +57182,7 @@ async function blockOrphanNoTranscript(opts) {
     from: "in-progress",
     to: "blocked"
   });
-  const absBlockedPath = path78.join(
+  const absBlockedPath = path79.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -56998,8 +57204,8 @@ async function blockOrphanNoTranscript(opts) {
 }
 
 // src/tools/quality-lead-adjudicate.ts
-import { promises as fs60 } from "node:fs";
-import * as path79 from "node:path";
+import { promises as fs61 } from "node:fs";
+import * as path80 from "node:path";
 
 // src/schemas/adjudication-verdict.ts
 var ADJUDICATION_DECISIONS = ["ready", "escalate", "rework"];
@@ -57052,7 +57258,7 @@ function synthesiseDecision(input) {
   };
 }
 function adjudicationVerdictFilePath(targetRepoRoot, sessionUlid, ref) {
-  return path79.join(
+  return path80.join(
     targetRepoRoot,
     ".flow",
     "state",
@@ -57063,7 +57269,7 @@ function adjudicationVerdictFilePath(targetRepoRoot, sessionUlid, ref) {
   );
 }
 async function adjudicateQualityLead(opts) {
-  const targetRepoRoot = path79.resolve(opts.targetRepoRoot);
+  const targetRepoRoot = path80.resolve(opts.targetRepoRoot);
   const { sessionUlid, ref } = opts;
   const round = opts.round ?? 1;
   const k = opts.k ?? DEFAULT_ADJUDICATION_K;
@@ -57098,7 +57304,7 @@ async function adjudicateQualityLead(opts) {
     round
   });
   const verdictFilePath = adjudicationVerdictFilePath(targetRepoRoot, sessionUlid, ref);
-  await fs60.mkdir(path79.dirname(verdictFilePath), { recursive: true });
+  await fs61.mkdir(path80.dirname(verdictFilePath), { recursive: true });
   await atomicWriteFile(verdictFilePath, JSON.stringify(verdict, null, 2));
   await logTelemetryEvent({
     targetRepoRoot,
@@ -57123,9 +57329,9 @@ async function adjudicateQualityLead(opts) {
 }
 
 // src/tools/review-maintainer-inbox.ts
-import { promises as fs61 } from "node:fs";
-import * as path80 from "node:path";
-var INBOX_SUBDIR2 = path80.join(".flow", "maintainer-inbox");
+import { promises as fs62 } from "node:fs";
+import * as path81 from "node:path";
+var INBOX_SUBDIR2 = path81.join(".flow", "maintainer-inbox");
 var MAX_TITLE_LENGTH = 120;
 var MAX_URL_BYTES2 = 8192;
 var SHORTENED_NOTE2 = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
@@ -57180,10 +57386,10 @@ function buildStoredItemIssueUrl(owner, repo, item) {
 }
 async function reviewMaintainerInbox(opts) {
   const { targetRepoRoot } = opts;
-  const inboxDir = path80.join(targetRepoRoot, INBOX_SUBDIR2);
+  const inboxDir = path81.join(targetRepoRoot, INBOX_SUBDIR2);
   let filenames;
   try {
-    const entries = await fs61.readdir(inboxDir);
+    const entries = await fs62.readdir(inboxDir);
     filenames = entries.filter((f) => f.endsWith(".json")).sort();
   } catch (err) {
     const nodeErr = err;
@@ -57199,10 +57405,10 @@ async function reviewMaintainerInbox(opts) {
   const items = [];
   let malformedCount = 0;
   for (const filename of filenames) {
-    const absPath = path80.join(inboxDir, filename);
+    const absPath = path81.join(inboxDir, filename);
     let raw;
     try {
-      raw = await fs61.readFile(absPath, "utf8");
+      raw = await fs62.readFile(absPath, "utf8");
     } catch {
       malformedCount++;
       continue;
@@ -57252,9 +57458,9 @@ async function reviewMaintainerInbox(opts) {
 }
 
 // src/tools/dismiss-maintainer-feedback.ts
-import { promises as fs62 } from "node:fs";
-import * as path81 from "node:path";
-var INBOX_SUBDIR3 = path81.join(".flow", "maintainer-inbox");
+import { promises as fs63 } from "node:fs";
+import * as path82 from "node:path";
+var INBOX_SUBDIR3 = path82.join(".flow", "maintainer-inbox");
 var DISMISSED_SUBDIR = "dismissed";
 var ULID_PATTERN2 = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 async function dismissMaintainerFeedback(opts) {
@@ -57262,10 +57468,10 @@ async function dismissMaintainerFeedback(opts) {
   if (typeof id !== "string" || !ULID_PATTERN2.test(id)) {
     throw new InvalidMaintainerFeedbackIdError({ id: String(id) });
   }
-  const inboxDir = path81.join(targetRepoRoot, INBOX_SUBDIR3);
+  const inboxDir = path82.join(targetRepoRoot, INBOX_SUBDIR3);
   let filenames;
   try {
-    filenames = await fs62.readdir(inboxDir);
+    filenames = await fs63.readdir(inboxDir);
   } catch (err) {
     const nodeErr = err;
     if (nodeErr.code === "ENOENT") {
@@ -57280,11 +57486,11 @@ async function dismissMaintainerFeedback(opts) {
   if (match === void 0) {
     return { ok: true, dismissed: false, id, noop: true };
   }
-  const sourcePath = path81.join(inboxDir, match);
-  const archivedPath = path81.join(inboxDir, DISMISSED_SUBDIR, match);
+  const sourcePath = path82.join(inboxDir, match);
+  const archivedPath = path82.join(inboxDir, DISMISSED_SUBDIR, match);
   let contents;
   try {
-    contents = await fs62.readFile(sourcePath, "utf8");
+    contents = await fs63.readFile(sourcePath, "utf8");
   } catch (err) {
     const nodeErr = err;
     if (nodeErr.code === "ENOENT") {
@@ -57293,19 +57499,19 @@ async function dismissMaintainerFeedback(opts) {
     throw err;
   }
   await atomicWriteFile(archivedPath, contents);
-  await fs62.rm(sourcePath, { force: true });
+  await fs63.rm(sourcePath, { force: true });
   return { ok: true, dismissed: true, id, archivedPath };
 }
 
 // src/tools/resolve-lens-roles.ts
-import { promises as fs63 } from "node:fs";
-import * as path82 from "node:path";
+import { promises as fs64 } from "node:fs";
+import * as path83 from "node:path";
 async function resolveLensRoles(opts) {
   const { targetRepoRoot } = opts;
-  const teamDir = path82.join(targetRepoRoot, "team");
+  const teamDir = path83.join(targetRepoRoot, "team");
   let dirEntries;
   try {
-    dirEntries = await fs63.readdir(teamDir);
+    dirEntries = await fs64.readdir(teamDir);
   } catch (err) {
     if (isEnoent18(err)) {
       dirEntries = [];
@@ -57321,7 +57527,7 @@ async function resolveLensRoles(opts) {
     }
     let stat2;
     try {
-      stat2 = await fs63.stat(path82.join(teamDir, entry));
+      stat2 = await fs64.stat(path83.join(teamDir, entry));
     } catch {
       continue;
     }
@@ -57329,7 +57535,7 @@ async function resolveLensRoles(opts) {
       continue;
     }
     try {
-      await fs63.access(path82.join(teamDir, entry, "PERSONA.md"));
+      await fs64.access(path83.join(teamDir, entry, "PERSONA.md"));
     } catch {
       continue;
     }
@@ -57344,8 +57550,8 @@ function isEnoent18(err) {
 }
 
 // src/tools/recall-lesson.ts
-import * as path83 from "node:path";
-import { promises as fs64 } from "node:fs";
+import * as path84 from "node:path";
+import { promises as fs65 } from "node:fs";
 var import_yaml36 = __toESM(require_dist2(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
@@ -57364,8 +57570,8 @@ async function recallLesson(opts) {
     };
     try {
       const updatedBody = updateLessonInBody(knowledgeBody, updatedLesson);
-      const personaPath = path83.join(targetRepoRoot, "team", role, "PERSONA.md");
-      const rawPersona = await fs64.readFile(personaPath, "utf8");
+      const personaPath = path84.join(targetRepoRoot, "team", role, "PERSONA.md");
+      const rawPersona = await fs65.readFile(personaPath, "utf8");
       const parsed = parsePersonaFile(rawPersona, personaPath);
       const newContents = reconstructPersonaFile4(parsed, updatedBody);
       await writeManagedFile({
@@ -57399,7 +57605,7 @@ async function recallLesson(opts) {
       };
       const relPath = `team/${role}/_archived/${id}.json`;
       await writeManagedFile({
-        absPath: path83.join(targetRepoRoot, relPath),
+        absPath: path84.join(targetRepoRoot, relPath),
         contents: JSON.stringify(updated, null, 2) + "\n",
         targetRepoRoot,
         mcpToolContext: { toolName: TOOL_NAME9, role }
@@ -57646,10 +57852,10 @@ async function resolveBuildPlan(opts) {
 
 // src/tools/summarise-retro-proposal.ts
 var import_yaml38 = __toESM(require_dist2(), 1);
-import { promises as fs65 } from "node:fs";
+import { promises as fs66 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
-  const raw = await fs65.readFile(absPath, "utf8");
+  const raw = await fs66.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
   const parsedYaml = (0, import_yaml38.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
@@ -57668,8 +57874,8 @@ async function summariseRetroProposal(opts) {
 }
 
 // src/tools/discard-draft.ts
-import { promises as fs66 } from "node:fs";
-import * as path84 from "node:path";
+import { promises as fs67 } from "node:fs";
+import * as path85 from "node:path";
 var import_yaml39 = __toESM(require_dist2(), 1);
 var DiscardDraftInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
@@ -57677,15 +57883,15 @@ var DiscardDraftInputSchema = external_exports.object({
 });
 async function discardDraft(rawInput) {
   const input = DiscardDraftInputSchema.parse(rawInput);
-  const targetRepoRoot = path84.resolve(input.targetRepoRoot);
+  const targetRepoRoot = path85.resolve(input.targetRepoRoot);
   const { ref } = input;
-  const stateRoot = path84.join(targetRepoRoot, ".flow", "state");
+  const stateRoot = path85.join(targetRepoRoot, ".flow", "state");
   let foundState = null;
   let foundAbsPath = null;
   for (const stateName of STATE_NAMES) {
-    const candidate = path84.join(stateRoot, stateName, `${ref}.yaml`);
+    const candidate = path85.join(stateRoot, stateName, `${ref}.yaml`);
     try {
-      await fs66.stat(candidate);
+      await fs67.stat(candidate);
       foundState = stateName;
       foundAbsPath = candidate;
       break;
@@ -57702,7 +57908,7 @@ async function discardDraft(rawInput) {
       reason: "not-in-to-do"
     });
   }
-  const rawText = await fs66.readFile(foundAbsPath, "utf8");
+  const rawText = await fs67.readFile(foundAbsPath, "utf8");
   const parsed = (0, import_yaml39.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
@@ -57712,16 +57918,16 @@ async function discardDraft(rawInput) {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "wrong-adapter" });
   }
   try {
-    await fs66.stat(foundAbsPath);
+    await fs67.stat(foundAbsPath);
   } catch {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "not-in-to-do" });
   }
   const ulid4 = ref.startsWith("native:") ? ref.slice("native:".length) : ref;
-  const nativeStoriesDir2 = path84.join(targetRepoRoot, ".flow", "native-stories");
-  const sourceDraftPath = path84.join(nativeStoriesDir2, `${ulid4}.md`);
-  await fs66.unlink(foundAbsPath);
+  const nativeStoriesDir2 = path85.join(targetRepoRoot, ".flow", "native-stories");
+  const sourceDraftPath = path85.join(nativeStoriesDir2, `${ulid4}.md`);
+  await fs67.unlink(foundAbsPath);
   try {
-    await fs66.unlink(sourceDraftPath);
+    await fs67.unlink(sourceDraftPath);
   } catch (err) {
     if (!isEnoent19(err)) {
       throw err;
@@ -57741,14 +57947,14 @@ function isEnoent19(err) {
 
 // src/tools/help-advisor.ts
 var import_yaml40 = __toESM(require_dist2(), 1);
-import { promises as fs67 } from "node:fs";
-import * as path85 from "node:path";
+import { promises as fs68 } from "node:fs";
+import * as path86 from "node:path";
 async function hasHiredTeam(targetRepoRoot) {
-  const teamDir = path85.join(targetRepoRoot, "team");
+  const teamDir = path86.join(targetRepoRoot, "team");
   const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
   let entries;
   try {
-    entries = await fs67.readdir(teamDir);
+    entries = await fs68.readdir(teamDir);
   } catch (err) {
     if (isEnoent20(err)) {
       return false;
@@ -57761,7 +57967,7 @@ async function hasHiredTeam(targetRepoRoot) {
     }
     let stat2;
     try {
-      stat2 = await fs67.stat(path85.join(teamDir, entry));
+      stat2 = await fs68.stat(path86.join(teamDir, entry));
     } catch {
       continue;
     }
@@ -57772,13 +57978,13 @@ async function hasHiredTeam(targetRepoRoot) {
   return false;
 }
 async function readBacklogSummary(targetRepoRoot) {
-  const stateRoot = path85.join(targetRepoRoot, ".flow", "state");
-  const todoDir = path85.join(stateRoot, "to-do");
-  const inProgressDir = path85.join(stateRoot, "in-progress");
-  const doneDir = path85.join(stateRoot, "done");
+  const stateRoot = path86.join(targetRepoRoot, ".flow", "state");
+  const todoDir = path86.join(stateRoot, "to-do");
+  const inProgressDir = path86.join(stateRoot, "in-progress");
+  const doneDir = path86.join(stateRoot, "done");
   let todoEntries;
   try {
-    todoEntries = await fs67.readdir(todoDir);
+    todoEntries = await fs68.readdir(todoDir);
   } catch (err) {
     if (isEnoent20(err)) {
       todoEntries = [];
@@ -57790,10 +57996,10 @@ async function readBacklogSummary(targetRepoRoot) {
   let readyAndClaimable = 0;
   let parkedDrafts = 0;
   for (const entry of yamlEntries) {
-    const absPath = path85.join(todoDir, entry);
+    const absPath = path86.join(todoDir, entry);
     let raw;
     try {
-      raw = await fs67.readFile(absPath, "utf8");
+      raw = await fs68.readFile(absPath, "utf8");
     } catch (err) {
       if (isEnoent20(err)) {
         continue;
@@ -57811,9 +58017,9 @@ async function readBacklogSummary(targetRepoRoot) {
     }
     let depsReady = true;
     for (const dep of manifest.depends_on) {
-      const depPath = path85.join(doneDir, `${dep}.yaml`);
+      const depPath = path86.join(doneDir, `${dep}.yaml`);
       try {
-        await fs67.stat(depPath);
+        await fs68.stat(depPath);
       } catch (err) {
         if (isEnoent20(err)) {
           depsReady = false;
@@ -57828,7 +58034,7 @@ async function readBacklogSummary(targetRepoRoot) {
   }
   let inProgressCount = 0;
   try {
-    const inProgressEntries = await fs67.readdir(inProgressDir);
+    const inProgressEntries = await fs68.readdir(inProgressDir);
     inProgressCount = inProgressEntries.filter(
       (f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml")
     ).length;
@@ -57900,206 +58106,6 @@ async function getHelpAdvice(opts) {
 }
 function isEnoent20(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-}
-
-// src/tools/analyze-team-fit.ts
-import { promises as fs68 } from "node:fs";
-import * as path86 from "node:path";
-
-// src/lib/specialist-domain-map.ts
-var DOMAIN_TO_SPECIALIST = /* @__PURE__ */ new Map([
-  ["authentication authorization and secret handling", "security-specialist"],
-  ["test design and coverage gaps", "test-specialist"],
-  ["developer-facing documentation and READMEs", "docs-specialist"],
-  ["failure-mode diagnosis and root-cause isolation", "debugger"]
-]);
-function specialistRoleForDomain(domain2) {
-  return DOMAIN_TO_SPECIALIST.get(domain2) ?? null;
-}
-var ALL_SPECIALIST_ROLES = Array.from(
-  DOMAIN_TO_SPECIALIST.values()
-);
-
-// src/tools/analyze-team-fit.ts
-var AnalyzeTeamFitInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1)
-});
-var MONTH_BUCKET_REGEX2 = /^\d{4}-\d{2}\.jsonl$/;
-async function readTelemetrySummary(targetRepoRoot) {
-  const telemetryDir = path86.join(targetRepoRoot, ".flow", "telemetry");
-  const stallsByDomain = /* @__PURE__ */ new Map();
-  const usefulWorkByRole = /* @__PURE__ */ new Map();
-  let entries;
-  try {
-    entries = await fs68.readdir(telemetryDir);
-  } catch {
-    return { stallsByDomain, usefulWorkByRole };
-  }
-  for (const entry of entries) {
-    if (!MONTH_BUCKET_REGEX2.test(entry)) continue;
-    const filePath = path86.join(telemetryDir, entry);
-    let raw;
-    try {
-      raw = await fs68.readFile(filePath, "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of raw.split("\n")) {
-      if (line.trim() === "") continue;
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const result = TelemetryEventSchema.safeParse(parsed);
-      if (!result.success) continue;
-      const event = result.data;
-      if (event.type === "agent.invoke" || event.type === "reviewer.verdict") {
-        const role = event.agent;
-        usefulWorkByRole.set(role, (usefulWorkByRole.get(role) ?? 0) + 1);
-      }
-      if (event.type === "yield.handoff") {
-        const domain2 = event.data.domain;
-        const storyId = event.story_id ?? "unknown";
-        if (!stallsByDomain.has(domain2)) {
-          stallsByDomain.set(domain2, /* @__PURE__ */ new Set());
-        }
-        stallsByDomain.get(domain2).add(storyId);
-      }
-    }
-  }
-  return { stallsByDomain, usefulWorkByRole };
-}
-async function readHiredRoles(targetRepoRoot) {
-  const teamDir = path86.join(targetRepoRoot, "team");
-  let dirEntries;
-  try {
-    dirEntries = await fs68.readdir(teamDir);
-  } catch {
-    return [];
-  }
-  const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
-  const hiredRoles = [];
-  for (const entry of dirEntries) {
-    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
-    let stat2;
-    try {
-      stat2 = await fs68.stat(path86.join(teamDir, entry));
-    } catch {
-      continue;
-    }
-    if (!stat2.isDirectory()) continue;
-    try {
-      await fs68.access(path86.join(teamDir, entry, "PERSONA.md"));
-    } catch {
-      continue;
-    }
-    hiredRoles.push(entry);
-  }
-  hiredRoles.sort();
-  return hiredRoles;
-}
-function wouldBreakPanel(role, hiredRoles) {
-  const rosterWithout = hiredRoles.filter((r) => r !== role);
-  try {
-    resolveLensRoleBinding(rosterWithout);
-    return false;
-  } catch {
-    return true;
-  }
-}
-function isTestHeavy(specText) {
-  const lower = specText.toLowerCase();
-  return /\btest[- ]?(coverage|design|suite|plan|strategy)\b/.test(lower) || /\bwrite tests?\b/.test(lower) || /\btest specialist\b/.test(lower) || /\btest[- ]?heavy\b/.test(lower) || /\btest[- ]?first\b/.test(lower);
-}
-function isDocsHeavy(specText) {
-  const lower = specText.toLowerCase();
-  return /\bdocumentation\b/.test(lower) || /\bdocs[- ]?(specialist|work|coverage|update|improve|generate|write)\b/.test(lower) || /\breadme\b/.test(lower) || /\bdocs[- ]?heavy\b/.test(lower) || /\bdocs[- ]?only\b/.test(lower);
-}
-async function analyzeTeamFit(rawInput) {
-  const input = AnalyzeTeamFitInputSchema.parse(rawInput);
-  const { targetRepoRoot } = input;
-  const [hiredRoles, backlog, telemetry] = await Promise.all([
-    readHiredRoles(targetRepoRoot),
-    readBacklogInventory({
-      targetRepoRoot,
-      includeSpecText: true
-    }),
-    readTelemetrySummary(targetRepoRoot)
-  ]);
-  const hire = [];
-  const unhire = [];
-  const gaps = [];
-  const hiredRoleSet = new Set(hiredRoles);
-  if (!hiredRoleSet.has("security-specialist")) {
-    const highRiskRefs = backlog.backlog_inventory.filter((e) => e.riskTier === "high" && !e.withdrawn && e.state !== "done").map((e) => e.ref);
-    if (highRiskRefs.length > 0) {
-      hire.push({
-        role: "security-specialist",
-        reason: `${highRiskRefs.length} high-risk stor${highRiskRefs.length === 1 ? "y" : "ies"} in the backlog require security coverage.`,
-        evidence: highRiskRefs
-      });
-    }
-  }
-  if (!hiredRoleSet.has("test-specialist")) {
-    const testHeavyRefs = backlog.backlog_inventory.filter(
-      (e) => !e.withdrawn && e.state !== "done" && e.specText !== void 0 && isTestHeavy(e.specText)
-    ).map((e) => e.ref);
-    if (testHeavyRefs.length > 0) {
-      hire.push({
-        role: "test-specialist",
-        reason: `${testHeavyRefs.length} queued stor${testHeavyRefs.length === 1 ? "y" : "ies"} contain test-heavy work that a test specialist should lead.`,
-        evidence: testHeavyRefs
-      });
-    }
-  }
-  if (!hiredRoleSet.has("docs-specialist")) {
-    const docsHeavyRefs = backlog.backlog_inventory.filter(
-      (e) => !e.withdrawn && e.state !== "done" && e.specText !== void 0 && isDocsHeavy(e.specText)
-    ).map((e) => e.ref);
-    if (docsHeavyRefs.length > 0) {
-      hire.push({
-        role: "docs-specialist",
-        reason: `${docsHeavyRefs.length} queued stor${docsHeavyRefs.length === 1 ? "y" : "ies"} contain documentation work that a docs specialist should own.`,
-        evidence: docsHeavyRefs
-      });
-    }
-  }
-  const STALL_THRESHOLD = 2;
-  for (const [domain2, storySet] of telemetry.stallsByDomain) {
-    if (storySet.size < STALL_THRESHOLD) continue;
-    const specialistRole = specialistRoleForDomain(domain2);
-    const stallCount = storySet.size;
-    gaps.push({
-      domain: domain2,
-      signal: specialistRole !== null ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". Hiring ${specialistRole} would close this gap.` : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". No specialist in the catalogue maps to this domain.`
-    });
-    if (specialistRole !== null && !hiredRoleSet.has(specialistRole)) {
-      const alreadyHireEntry = hire.find((h2) => h2.role === specialistRole);
-      if (!alreadyHireEntry) {
-        hire.push({
-          role: specialistRole,
-          reason: `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} waiting for "${domain2}" expertise that nobody on the team covers.`,
-          evidence: [`stall-count:${stallCount}`, `domain:${domain2}`]
-        });
-      } else {
-        alreadyHireEntry.evidence.push(`stall-count:${stallCount}`, `domain:${domain2}`);
-      }
-    }
-  }
-  for (const role of hiredRoles) {
-    if (!ALL_SPECIALIST_ROLES.includes(role)) continue;
-    const usefulWork = telemetry.usefulWorkByRole.get(role) ?? 0;
-    if (usefulWork > 0) continue;
-    if (wouldBreakPanel(role, hiredRoles)) continue;
-    unhire.push({
-      role,
-      reason: `${role} produced no useful work in the recent window and their absence would not prevent the grading panel from running.`,
-      evidence: ["no useful work in the recent window"]
-    });
-  }
-  return { hire, unhire, gaps };
 }
 
 // src/tools/register.ts
