@@ -553,11 +553,12 @@ describe("Story 2.4 AC3 — decline path", () => {
 // AC5(d) — permission allowlist
 // (Updated by Story 2.5 to add readCustomRole — the Story 2.4 contract was
 // "the six entries", now seven. Story 2.5's spec AC4(e) is the canonical
-// assertion. We update here to keep the suite consistent with the shipped
-// hiring-manager.yaml.)
+// assertion. Updated again by native:01KVFAAPMZWNK8838CMP4SNNC4 to add
+// unhirePersona — now eight. We update here to keep the suite consistent
+// with the shipped hiring-manager.yaml.)
 // ===========================================================================
-describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-Story-2.5: includes readCustomRole)", () => {
-  it("tools_allow contains exactly the seven expected entries", async () => {
+describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-unhire-wiring: includes readCustomRole + unhirePersona)", () => {
+  it("tools_allow contains exactly the eight expected entries", async () => {
     const perms = await loadRolePermissions({
       pluginRoot: getPluginRoot(),
       role: "hiring-manager",
@@ -571,6 +572,7 @@ describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-Story-2
         "readCustomRole",
         "readPersona",
         "readRepoSignals",
+        "unhirePersona",
       ].sort(),
     );
     expect(perms.gh_allow).toEqual([]);
@@ -599,7 +601,7 @@ describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating const
     expect(prompt).toMatch(/\.flow\/config\.yaml/);
     expect(prompt).toMatch(/fresh repo/i);
 
-    // (b) Explicit allowlist enumeration including the six tools, and an
+    // (b) Explicit allowlist enumeration including the seven tools, and an
     // explicit prohibition on calling getStatus.
     for (const tool of [
       "heartbeat",
@@ -608,6 +610,7 @@ describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating const
       "readPersona",
       "lookupRoleByDomain",
       "readRepoSignals",
+      "unhirePersona",
     ]) {
       expect(prompt).toContain(tool);
     }
