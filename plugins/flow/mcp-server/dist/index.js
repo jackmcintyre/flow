@@ -49213,6 +49213,9 @@ function computeFailureClassFireCounts(inputs, config2 = {}, windowing = SINGLE_
     const fireCount = entry?.fireCount ?? 0;
     if (windowing.isQuietEnoughForRetirement(fireCount, relaxFloor, retirementWindows)) {
       const recommendedAction = fireCount === 0 ? "retire" : "relax";
+      if (rule.level === "must" && recommendedAction === "retire") {
+        continue;
+      }
       retirementCandidates.push({
         targetRuleId: rule.id,
         failureClass: rule.target_failure_class,

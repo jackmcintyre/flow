@@ -530,3 +530,114 @@ describe("AC4 — friction events written to telemetry appear in recurringFricti
     expect(entry).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVHEYCN5W61NY67DQZC9N2FN — foundational-guardrail guard:
+// a never-triggered must-level rule must NOT appear as a retirement candidate
+// in the fireCountSignal surfaced by gatherRetroInputs.
+// ---------------------------------------------------------------------------
+
+describe("AC1+AC3 — foundational-guardrail guard: must-level rule at zero fires excluded from retirementCandidates", () => {
+  let tmpRoot: string;
+
+  /**
+   * Seed a minimal `docs/discipline-rules.yaml` with the given rules.
+   * Uses yamlStringify to ensure valid, schema-compliant YAML output.
+   */
+  async function seedRuleRegistry(rules: Array<{
+    id: string;
+    text: string;
+    target_failure_class: string;
+    introduced_at: string;
+    level?: "must" | "should" | "advisory";
+  }>): Promise<void> {
+    const docsDir = path.join(tmpRoot, "docs");
+    await fs.mkdir(docsDir, { recursive: true });
+    const registryObj = { rules: rules.map((r) => ({ ...r })) };
+    await fs.writeFile(
+      path.join(docsDir, "discipline-rules.yaml"),
+      yamlStringify(registryObj, { lineWidth: 0 }),
+      "utf8",
+    );
+  }
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gather-retro-guardrail-"));
+    await setupNativeWorkspace(tmpRoot);
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("AC1 (integration): a must-level rule with zero fires does NOT appear in fireCountSignal.retirementCandidates", async () => {
+    // Seed a must-level foundational guardrail.
+    // ULID: 26 chars, Crockford base32 (0-9 A-H J-N P-T V-Z — no I L O U).
+    await seedRuleRegistry([
+      {
+        id: "01KVHGFNDR0000000000000010",
+        text: "The dev handoff phrase must be emitted verbatim.",
+        target_failure_class: "handoff-grammar",
+        introduced_at: "2026-01-01T00:00:00.000Z",
+        level: "must",
+      },
+    ]);
+    // No done manifests with handoff-grammar failure_class — zero fires.
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    expect(bundle.fireCountSignal).not.toBeNull();
+    const retirement = bundle.fireCountSignal!.retirementCandidates;
+    // The must-level rule at zero fires must be absent from retirement candidates.
+    const found = retirement.find((c) => c.targetRuleId === "01KVHGFNDR0000000000000010");
+    expect(found).toBeUndefined();
+  });
+
+  it("AC1 (integration): a non-must rule with zero fires still appears in retirementCandidates (guard is scoped)", async () => {
+    // A should-level rule at zero fires should still be a retirement candidate.
+    await seedRuleRegistry([
+      {
+        id: "01KVHSHR000000000000000010",
+        text: "The reviewer should not rubber-stamp without evidence.",
+        target_failure_class: "rubber-stamp",
+        introduced_at: "2026-01-01T00:00:00.000Z",
+        level: "should",
+      },
+    ]);
+    // No done manifests with rubber-stamp failure_class — zero fires.
+
+    const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+
+    expect(bundle.fireCountSignal).not.toBeNull();
+    const retirement = bundle.fireCountSignal!.retirementCandidates;
+    const found = retirement.find((c) => c.targetRuleId === "01KVHSHR000000000000000010");
+    expect(found).toBeDefined();
+    expect(found!.recommendedAction).toBe("retire");
+  });
+
+  it("AC3 (integration): guard holds across two retro runs — the recommendation never recurs", async () => {
+    // A must-level guardrail at zero fires.
+    await seedRuleRegistry([
+      {
+        id: "01KVHGFNDR0000000000000020",
+        text: "The dev handoff phrase must be emitted verbatim.",
+        target_failure_class: "handoff-grammar",
+        introduced_at: "2026-01-01T00:00:00.000Z",
+        level: "must",
+      },
+    ]);
+
+    // First retro run.
+    const bundle1 = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(bundle1.fireCountSignal).not.toBeNull();
+    const retirementRun1 = bundle1.fireCountSignal!.retirementCandidates;
+    expect(retirementRun1.find((c) => c.targetRuleId === "01KVHGFNDR0000000000000020")).toBeUndefined();
+
+    // Second retro run (simulating the next cycle — still zero fires).
+    const bundle2 = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
+    expect(bundle2.fireCountSignal).not.toBeNull();
+    const retirementRun2 = bundle2.fireCountSignal!.retirementCandidates;
+    // The recommendation must NOT recur in the second cycle either.
+    expect(retirementRun2.find((c) => c.targetRuleId === "01KVHGFNDR0000000000000020")).toBeUndefined();
+  });
+});
