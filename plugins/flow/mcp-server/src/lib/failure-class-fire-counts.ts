@@ -331,6 +331,13 @@ export function computeFailureClassFireCounts(
   // Step 6: derive retirement candidates.
   // A registered rule is a retirement candidate if its class is quiet enough
   // per the windowing seam.
+  //
+  // Foundational-guardrail guard (Story native:01KVHEYCN5W61NY67DQZC9N2FN):
+  // A `must`-level rule with exactly zero fires is NEVER a retirement candidate.
+  // "Never triggered" alone is not evidence of obsolescence for a foundational
+  // guardrail — it may simply mean the guardrail is working. Only genuine
+  // evidence beyond a zero-trigger count (e.g. a relax band where the class
+  // did fire but rarely) can qualify a must-level rule for retirement.
   const retirementCandidates: RetirementCandidate[] = [];
   for (const rule of registeredRules) {
     const entry = byClass.get(rule.target_failure_class);
@@ -342,6 +349,16 @@ export function computeFailureClassFireCounts(
       // (relaxFloor default is 1, so the range [1, 1) is empty; only 0 → retire
       //  with default config. Higher relaxFloor values open a relax band.)
       const recommendedAction: "retire" | "relax" = fireCount === 0 ? "retire" : "relax";
+
+      // Foundational-guardrail guard: skip must-level rules that have NEVER fired.
+      // A must-level rule at zero fires is a foundational guardrail that is doing
+      // its job (zero violations) — not a dead rule. Only allow retirement when
+      // there is evidence beyond the zero-trigger count (i.e. fireCount > 0,
+      // which means the rule entered the relax band through actual — if rare — fires).
+      if (rule.level === "must" && recommendedAction === "retire") {
+        continue;
+      }
+
       retirementCandidates.push({
         targetRuleId: rule.id,
         failureClass: rule.target_failure_class,
