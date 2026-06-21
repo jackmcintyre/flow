@@ -234,7 +234,7 @@ The native-stories directory `<target-repo>/.crew/native-stories/` is at the tar
 - **Authoritative architecture:** `_bmad-output/planning-artifacts/architecture/planning-adapter-model.md` §Native adapter, §Story refs, §Configuration.
 - **User-surface AC convention:** `plugins/crew/docs/user-surface-acs.md` (the gate-binding rubric and tag regex).
 - **Build-output rule:** `plugins/crew/CLAUDE.md` (per project CLAUDE.md §Process notes) — `dist/` must be rebuilt and committed in the same change.
-- **Communication style:** speak to Jack in PM language per `/Users/jackmcintyre/projects/crew/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
+- **Communication style:** speak to Jack in PM language per `<repo-root>/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
 
 ---
 

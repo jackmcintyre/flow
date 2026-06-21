@@ -208,7 +208,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     ```markdown
     # crew
 
-    AI Engineering Team v1 — a Claude Code plugin that drives a continuous-flow backlog of stories through dev and review subagents.
+    flow — a Claude Code plugin that drives a continuous-flow backlog of stories through dev and review subagents.
 
     See `_bmad-output/planning-artifacts/prd-crew-v1.md` for the PRD (local-only).
 
@@ -229,7 +229,7 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     ```markdown
     # crew
 
-    crew is an experiment in replacing the product engineering team with AI tooling. The product being built here is **AI Engineering Team v1** — a Claude Code plugin that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
+    crew is an experiment in replacing the product engineering team with AI tooling. The product being built here is **flow** — a Claude Code plugin that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
 
     ## Status
 
@@ -265,9 +265,9 @@ All sub-tests pass alongside existing suites (smoke 1.1, resolver 1.2, validate-
     Expected output against the crew repo itself (Jack's same-repo case):
     ```
     crew v0.1.0
-    target repo: /Users/jackmcintyre/projects/crew
+    target repo: <repo-root>
     adapter: bmad (ok)
-    standards: missing — /Users/jackmcintyre/projects/crew/docs/standards.md
+    standards: missing — <repo-root>/docs/standards.md
     cycle: none
     ```
     (Standards is `missing` because `docs/standards.md` at the repo root does not exist yet — the install walkthrough's checkpoint 5 is what creates it. This is the v1 expected state; checkpoint 6 of the README assumes the user has just run checkpoint 5.)
@@ -359,7 +359,7 @@ If the implementation deviates from any of the four above, both the spec example
 - Skill-file shape: `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md` §8.
 - MCP tool naming: same file, §4.
 - TS code conventions: same file, §6.
-- Worktree for implementation: `/Users/jackmcintyre/projects/crew/.worktrees/1-7-status-skill-and-readme-install-path-through-the-plugin-sees-my-repo`.
+- Worktree for implementation: `<repo-root>/.worktrees/1-7-status-skill-and-readme-install-path-through-the-plugin-sees-my-repo`.
 
 ---
 

@@ -274,7 +274,7 @@ UPDATE files (exist today; story modifies):
 - **Discipline doctrine:** `_bmad-output/_archive/planning-discipline.md` — Rules 1, 2, 3 are implemented here. Rules 4–6 are out of scope per `does NOT` (j).
 - **User-surface AC convention:** `plugins/crew/docs/user-surface-acs.md` (the gate-binding rubric and tag regex).
 - **Build-output rule:** `plugins/crew/CLAUDE.md` (per project CLAUDE.md §Process notes) — `dist/` must be rebuilt and committed in the same change.
-- **Communication style:** speak to Jack in PM language per `/Users/jackmcintyre/projects/crew/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
+- **Communication style:** speak to Jack in PM language per `<repo-root>/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
 
 ---
 

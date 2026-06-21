@@ -2,7 +2,7 @@
   "name": "flow",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Engineering Team v1 plugin — scaffold (see PRD).",
+  "description": "flow - a Claude Code plugin that runs a continuous-flow backlog through an AI engineering team.",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",

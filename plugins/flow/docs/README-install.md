@@ -28,7 +28,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 2. **Clone the repo and install plugin dependencies.**
 
    ```bash
-   git clone https://github.com/jackmcintyre/crew.git && cd crew && pnpm --dir plugins/flow install
+   git clone https://github.com/jackmcintyre/flow.git && cd flow && pnpm --dir plugins/flow install
    ```
 
    Expected confirmation:
@@ -91,7 +91,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    cp plugins/flow/docs/standards-example.md <target-repo>/docs/standards.md
    ```
 
-   `<target-repo>` may be the same as the cloned `flow` repo (Jack's same-repo case) or a different repo (Maya's split-repo case) — no behavioural difference.
+   `<target-repo>` may be the same as the cloned `flow` repo (the same-repo case) or a different repo (the split-repo case) — no behavioural difference.
 
    Expected confirmation:
 

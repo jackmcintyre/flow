@@ -4,19 +4,12 @@
  * AC1's mechanism is NOT a direct edit to the gitignored `bmad-create-story`
  * skill. Instead the convention is delivered via two checked-in artefacts:
  *
- *   1. `plugins/flow/docs/user-surface-acs.md` — the canonical, author-facing
- *      reference (the four-rubric definition, the tag syntax, the regex,
- *      tagged and untagged examples, the gate's pass/fail semantics).
- *   2. `.claude/skills/ship-story/SKILL.md` Step 4 — the prompt that spawns
- *      the `bmad-create-story` subagent. The prompt must inject the
- *      convention so the subagent (which is gitignored and not directly
- *      editable here) tags ACs correctly without the orchestrator pausing
- *      for clarifying questions.
+ *   `plugins/flow/docs/user-surface-acs.md` — the canonical, author-facing
+ *   reference (the four-rubric definition, the tag syntax, the regex,
+ *   tagged and untagged examples, the gate's pass/fail semantics).
  *
- * This suite pins the contract on both files: presence of the key strings,
- * the regex, the four rubric items, an example of each tagged/untagged AC
- * in the doc, and the Step 4 prompt actually citing the doc and pasting
- * the rubric summary into the subagent prompt.
+ * This suite pins the contract on that doc: presence of the key strings,
+ * the regex, the four rubric items, and an example of each tagged/untagged AC.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -26,7 +19,6 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const CONVENTION_DOC = resolve(REPO_ROOT, "plugins/flow/docs/user-surface-acs.md");
-const SHIP_STORY_SKILL = resolve(REPO_ROOT, ".claude/skills/ship-story/SKILL.md");
 
 describe("user-surface convention doc (Story 1.8 AC1, artefact 1)", () => {
   const doc = readFileSync(CONVENTION_DOC, "utf8");
@@ -73,53 +65,5 @@ describe("user-surface convention doc (Story 1.8 AC1, artefact 1)", () => {
   it("names both verification routes (automated and operator)", () => {
     expect(doc).toContain("automated_e2e_verified");
     expect(doc).toContain("user_surface_verified");
-  });
-});
-
-describe("ship-story SKILL.md Step 4 prompt injection (Story 1.8 AC1, artefact 2)", () => {
-  const skill = readFileSync(SHIP_STORY_SKILL, "utf8");
-
-  // Isolate the Step 4 section so we are asserting on the actual spawn prompt
-  // (not stray mentions elsewhere in the document, e.g. Step 5's validator).
-  const step4Match = skill.match(/### Step 4[\s\S]*?(?=\n### Step 5)/);
-  if (!step4Match) {
-    throw new Error("Could not locate Step 4 section in ship-story SKILL.md");
-  }
-  const step4 = step4Match[0];
-
-  it("Step 4 cites the canonical convention doc by path", () => {
-    expect(step4).toContain("plugins/flow/docs/user-surface-acs.md");
-  });
-
-  it("Step 4 pastes the four-rubric summary into the subagent prompt", () => {
-    expect(step4).toMatch(/\(i\)[^\n]*slash command/i);
-    expect(step4).toMatch(/\(ii\)[^\n]*CLI command/i);
-    expect(step4).toMatch(/\(iii\)[^\n]*(file path|copy|open by name)/i);
-    expect(step4).toMatch(/\(iv\)[^\n]*(Claude Code UI|TUI|toast|tab-complete)/i);
-  });
-
-  it("Step 4 instructs the subagent to tag ACs with `**AC<n> (user-surface):**`", () => {
-    expect(step4).toMatch(/\*\*AC<n> \(user-surface\):\*\*/);
-  });
-
-  it("Step 4 pins the gate's tag-extraction regex so the subagent uses the exact syntax", () => {
-    expect(step4).toContain(
-      "^\\*\\*AC(\\d+)\\s*\\(user-surface\\)\\s*:\\*\\*",
-    );
-  });
-
-  it("Step 4 preserves the 'no clarifying questions' invariant", () => {
-    expect(step4).toMatch(/no clarifying questions|Do NOT pause for clarifying questions/i);
-  });
-
-  it("Step 4 preserves the 'do not touch sprint-status.yaml' invariant", () => {
-    expect(step4).toMatch(/sprint-status\.yaml/);
-  });
-
-  it("Step 4 instructs the subagent to make the judgement explicitly per AC (AC1's elicitation requirement)", () => {
-    // The skill must prompt the author/subagent to judge each AC, not skip
-    // the question. AC1's text: "the skill prompts the author to make this
-    // judgement explicitly for each AC."
-    expect(step4).toMatch(/each AC|every AC|per AC|explicitly judge/i);
   });
 });

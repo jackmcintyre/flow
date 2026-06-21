@@ -223,7 +223,7 @@ Covered structurally by AC3(vi). Called out separately because this is the load-
 - [Epic 1 § Story 1.13](/_bmad-output/planning-artifacts/epics/epic-1-plugin-foundation-target-repo-bootstrap.md) — story block with AC1–AC6 source-of-truth.
 - [PR #146 diff](https://github.com/jackmcintyre/crew/pull/146) (closed unmerged 2026-05-25) — structural template for tool + SKILL.md + tests. Pull via `gh pr diff 146`.
 - [Story 4.6 retrospective](/_bmad-output/implementation-artifacts/epic-4-retrospective.md) — the seven-trial smoke that motivated this story.
-- [Memory: project_smoke_harness_wrapper](/Users/jackmcintyre/.claude/projects/-Users-jackmcintyre-projects-crew/memory/project_smoke_harness_wrapper.md) — "overdue" flag.
+- [Memory: project_smoke_harness_wrapper](<home>/.claude/projects/<project>/memory/project_smoke_harness_wrapper.md) — "overdue" flag.
 - [`start-skill-content.test.ts`](/plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts) — structural-anchor test template to mirror.
 - [`canonical-fs-guard.test.ts`](/plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts) — static guard requiring all `git` spawns in `lib/git.ts`.
 - [`docs/standards-example.md`](/plugins/crew/docs/standards-example.md) — the shipped standards template (copied to `.crew/standards.md` in step 1).

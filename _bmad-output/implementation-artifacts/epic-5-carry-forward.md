@@ -110,7 +110,7 @@
 ### 15. Calibration loop validation status (meta-observation)
 
 **Surface:** 2026-05-28, bmad:5.24 re-roll. Cumulative finding across entries 7, 13, 14: the reviewer toolchain's verdict path has **three structural gaps** (marker classifier, artifact-fs, vitest-cwd) that combine to make a clean tool-driven READY-FOR-MERGE verdict **structurally impossible** on any code-changing story today. Every shipped story to date has reached `done/` via operator override of a BLOCKED verdict (proximate cause: marker classifier; root cause: cumulative gaps that compound). The "calibration loop returns clean READY-FOR-MERGE without human override" proof point doesn't exist in v1 of this codebase yet.
-**Implication for proof-point story:** the eventual writeup must either (a) acknowledge that v1 ships via human override on every story, with substrate fixes promised in the next iteration, or (b) wait until entries 7+13+14 are addressed before claiming the loop closes cleanly. Option (b) is the honest framing for a portfolio artifact.
+**Implication for proof-point story:** the eventual writeup must either (a) acknowledge that v1 ships via human override on every story, with substrate fixes promised in the next iteration, or (b) wait until entries 7+13+14 are addressed before claiming the loop closes cleanly. Option (b) is the honest framing for a clean v1 claim.
 **Fold into:** sequencing decision for next planning round. Entries 13 + 14 should land before any further Epic 6 stories ship via /crew:start. Entry 7 (marker classifier) is partially mitigated by spec authoring discipline (the 6.1/6.2/6.3 specs already use clean markers); a permanent fix is its own substrate story.
 
 ### 16. `build:watch` doesn't chain the 5.24 normaliser (Folded into 5.28)

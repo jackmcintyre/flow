@@ -1,23 +1,23 @@
 # flow
 
-AI Engineering Team v1 — a Claude Code plugin that drives a continuous-flow backlog of stories through dev and review subagents.
+flow is a Claude Code plugin that drives a continuous-flow backlog through dev and review agents, each story judged against a written standard. Plan and spec your backlog with a tool built for it (I use BMAD); flow runs it.
 
-See `_bmad-output/planning-artifacts/prd-crew-v1/index.md` for the PRD.
+It's an experiment, in active development. It runs end to end on its own repo but isn't a finished product, so expect rough edges. The why behind it is in the [repository README](../../README.md).
 
 ## Install
 
 Six checkpoints from clone to "the plugin sees my repo": [`docs/README-install.md`](docs/README-install.md).
 
-Full first-run walkthrough (running the bundled example sprint, scanning sources, opening your first PR) lands in Epic 7 Story 7.2.
-
 ## Available skills
 
-- `/flow:plan` — open a planning conversation. On native repos, spawns the planner subagent to author stories under `.flow/native-stories/`; on BMad repos, points you at BMad's authoring skills.
-- `/flow:scan` — project your planning tool's source stories into per-story execution manifests under `.flow/state/to-do/`. Idempotent on re-run.
-- `/flow:status` — print the current plugin version, target repo, adapter, and standards-doc state.
-- `/flow:hire` — open a hiring conversation; the hiring manager reads your repo and proposes a starting team.
-- `/flow:team` — print a one-shot snapshot of your hired team.
-- `/flow:ask` — ask a single question to a hired role and get one answer.
+- `/flow:hire` - open a hiring conversation; the hiring manager reads your repo and proposes a starting team (or `/flow:hire default` for the default roster).
+- `/flow:plan` - open a planning conversation, or draft a single story in one shot with `/flow:plan <feature>`.
+- `/flow:ready` - the intake cockpit: list backlog items with readiness and dependency state, grade one with the diverse-lens judge panel, then admit it to the run.
+- `/flow:run` - the stateless per-story run loop (claim, dev, review, verdict, auto-merge gate) with per-dev worktree isolation.
+- `/flow:retro` - run the cycle-level retro-analyst over the cycle's done manifests and telemetry, then apply or queue each recommendation.
+- `/flow:dashboard` - one-shot cockpit: plugin/repo status, the outstanding backlog grouped by epic, and your hired team.
+- `/flow:help` - context-aware next-action advisor, grounded in the live state of your project.
+- `/flow:ask` - ask a single question to a hired role and get one answer (non-mutating side-session).
 
 ## Standards doc
 

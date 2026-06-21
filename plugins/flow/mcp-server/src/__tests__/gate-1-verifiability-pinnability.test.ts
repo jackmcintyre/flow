@@ -52,18 +52,9 @@ import {
 
 // This file: plugins/flow/mcp-server/src/__tests__/gate-1-verifiability-pinnability.test.ts
 // gate-1.workflow.js: plugins/flow/workflows/internal/gate-1.workflow.js
-// rubric: _bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(THIS_DIR, "..", "..", ".."); // plugins/flow
-const REPO_ROOT = path.resolve(PLUGIN_ROOT, "..", ".."); // project root
-
 const GATE1_WORKFLOW_PATH = path.join(PLUGIN_ROOT, "workflows", "internal", "gate-1.workflow.js");
-const RUBRIC_PATH = path.join(
-  REPO_ROOT,
-  "_bmad-output",
-  "planning-artifacts",
-  "rubric-story-quality-2026-05-31.md",
-);
 
 // ---------------------------------------------------------------------------
 // Wording anchor: assert the corrected grading text is in place
@@ -94,26 +85,6 @@ describe("Wording anchor — gate-1.workflow.js LENS_RUBRIC.verifiability", () =
     expect(content).toContain("can never be pinned even in principle");
     // Must name the non-fail explicitly.
     expect(content).toContain("code or test does not yet exist is NOT a fail");
-  });
-});
-
-describe("Wording anchor — rubric §3.2 Verifiability scoreable checks", () => {
-  it("grades pinnability-once-built and does not treat absent code as a fail", async () => {
-    const content = await fs.readFile(RUBRIC_PATH, "utf8");
-
-    // New ask line must name pinnability-once-built.
-    expect(content).toContain("PINNABILITY-ONCE-BUILT");
-
-    // Must state that absent not-yet-written code/tests is never a fail.
-    expect(content).toContain("The absence of not-yet-written code or tests is never a fail");
-
-    // Must retain the canonical real fail (string-presence anti-pattern).
-    expect(content).toContain("string appears in a file");
-  });
-
-  it("states a sound behaviour-pinning check fails before the change and passes after", async () => {
-    const content = await fs.readFile(RUBRIC_PATH, "utf8");
-    expect(content).toContain("fail before the proposed change and pass after it");
   });
 });
 

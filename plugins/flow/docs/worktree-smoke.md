@@ -33,9 +33,8 @@ skips installation because Claude Code sees the plugin as already installed — 
 **no-op** — even when the source on disk has changed. **Uninstall first** or the
 worktree's updated code never loads.
 
-This trap was first recorded at
-`~/.claude/projects/-Users-jackmcintyre-projects-crew/memory/project_smoke_test_install.md`
-during the Story 2.7 ship-story smoke gate.
+This trap was first recorded in maintainer notes during the Story 2.7 ship-story
+smoke gate.
 
 ## Recipe
 
@@ -104,5 +103,4 @@ reports the expected version.
 - Story 1.8 user-surface gate: [`plugins/flow/docs/user-surface-acs.md`](user-surface-acs.md)
 - Story 2.7 `/flow:ask` skill: [`plugins/flow/skills/ask/SKILL.md`](../skills/ask/SKILL.md)
 - `_meta.role` enforcement record: [`plugins/flow/docs/ask-mode-enforcement.md`](ask-mode-enforcement.md)
-- Original trap discovery record:
-  `~/.claude/projects/-Users-jackmcintyre-projects-crew/memory/project_smoke_test_install.md`
+- Original trap discovery record: maintainer notes from the Story 2.7 smoke gate

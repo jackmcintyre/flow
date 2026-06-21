@@ -27,8 +27,8 @@ Can the flow plugin be installed into Claude Code as a symlink to its source wor
 1. `~/.claude/plugins/known_marketplaces.json` registers the flow marketplace as:
    ```json
    "flow": {
-     "source": { "source": "directory", "path": "/Users/jackmcintyre/projects/crew" },
-     "installLocation": "/Users/jackmcintyre/projects/crew"
+     "source": { "source": "directory", "path": "<repo-root>" },
+     "installLocation": "<repo-root>"
    }
    ```
 
@@ -38,11 +38,11 @@ Can the flow plugin be installed into Claude Code as a symlink to its source wor
    ```json
    "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"]
    ```
-   For a directory-sourced marketplace, `CLAUDE_PLUGIN_ROOT` resolves to `<installLocation>/<source>` = `/Users/jackmcintyre/projects/crew/plugins/flow`.
+   For a directory-sourced marketplace, `CLAUDE_PLUGIN_ROOT` resolves to `<installLocation>/<source>` = `<repo-root>/plugins/flow`.
 
 4. `ps` output at spike time confirms the live process:
    ```
-   node /Users/jackmcintyre/projects/crew/plugins/flow/mcp-server/dist/index.js
+   node <repo-root>/plugins/flow/mcp-server/dist/index.js
    ```
    — the source tree, not the cache copy.
 
@@ -126,7 +126,7 @@ Run these steps in a live Claude Code session with the flow repo open, to valida
 
 **Test 1 — Confirm live-source MCP path**
 1. Run `ps aux | grep flow` in a terminal. Note the full path of the node process. Confirm it points to `plugins/flow/mcp-server/dist/index.js` inside the repo, not `~/.claude/plugins/cache/`.
-2. Expected: path matches `/Users/<you>/projects/crew/plugins/flow/mcp-server/dist/index.js`.
+2. Expected: path matches `<repo-root>/plugins/flow/mcp-server/dist/index.js`.
 
 **Test 2 — MCP change picked up without reinstall**
 1. In a terminal: `cd plugins/flow/mcp-server && npx tsc -p tsconfig.json` (one-shot build).

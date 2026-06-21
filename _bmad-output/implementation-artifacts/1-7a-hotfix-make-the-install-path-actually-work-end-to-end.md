@@ -17,7 +17,7 @@ Story 1.7 shipped under green ACs but the install path was broken in two ways no
 1. **Wrong install command syntax.** Step 3 of `plugins/crew/docs/README-install.md` instructs the user to run `/plugin install plugins/crew`. Claude Code's `/plugin install` command does NOT take a path; it takes a `plugin-name@marketplace-name` reference that resolves against a marketplace previously registered via `/plugin marketplace add <path>`. (Verified against Claude Code docs — `/discover-plugins` and `/plugins-reference` pages.) A marketplace is a directory containing `.claude-plugin/marketplace.json` listing one or more plugins.
 2. **`plugin.json` has `"skills": []`.** Even after a correct install, the new `plugins/crew/skills/status.md` is invisible to Claude Code because the plugin manifest's `skills` array doesn't register it. The `/crew:status` slash command never appears in tab-complete.
 
-There IS a `.claude-plugin/marketplace.json` at the repo root today (`/Users/jackmcintyre/projects/crew/.claude-plugin/marketplace.json`) but it is **stale** — it still references the removed `sprint-orchestrator` plugin from before the rename. It must be rewritten in this story; it cannot be reused as-is.
+There IS a `.claude-plugin/marketplace.json` at the repo root today (`<repo-root>/.claude-plugin/marketplace.json`) but it is **stale** — it still references the removed `sprint-orchestrator` plugin from before the rename. It must be rewritten in this story; it cannot be reused as-is.
 
 Story 1.7's AC4f verified the README *contains* the expected checkpoint strings via regex — it did not verify the commands actually run. This story adds the missing static-contract acceptance gate (AC4 below) and acknowledges honestly that the runtime "Claude Code reports the plugin as installed" check cannot be automated in vitest (vitest can't drive Claude Code itself) — that piece becomes a one-shot manual smoke step Jack performs once after merge.
 
@@ -128,18 +128,18 @@ The dev MUST pick one and make the README and the AC4c assertion match. **Option
 ## Tasks / Subtasks
 
 - [ ] **Task 1 — Rewrite `<repo-root>/.claude-plugin/marketplace.json`** (AC: 1, 4a)
-  - [ ] Open `/Users/jackmcintyre/projects/crew/.claude-plugin/marketplace.json` (which currently lists the removed `sprint-orchestrator` plugin — stale carry-over from the rename).
+  - [ ] Open `<repo-root>/.claude-plugin/marketplace.json` (which currently lists the removed `sprint-orchestrator` plugin — stale carry-over from the rename).
   - [ ] Replace the entire file contents with the JSON in "Sample artifacts → marketplace.json" below. The file's `name` is `crew`, `owner.name` is `Jack McIntyre` (matches the existing stale file's owner — no change needed there), and `plugins` has exactly one entry pointing at `./plugins/crew`.
   - [ ] Do NOT add a `version` field on the plugin entry — `plugin.json`'s `version` is the single source of truth, and Claude Code resolves it from there. (The stale file had `"version": "0.0.1"` on the sprint-orchestrator entry; we drop it on the new entry to avoid drift.)
   - [ ] Verify by hand: open the file in your editor, paste the JSON, save, and run `node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/marketplace.json', 'utf8'))"` from the repo root — exit code 0 means valid JSON.
 
 - [ ] **Task 2 — Update `plugins/crew/.claude-plugin/plugin.json` to register `skills/status.md`** (AC: 2, 4b)
-  - [ ] Open `/Users/jackmcintyre/projects/crew/plugins/crew/.claude-plugin/plugin.json`. Today's contents:
+  - [ ] Open `<repo-root>/plugins/crew/.claude-plugin/plugin.json`. Today's contents:
     ```json
     {
       "name": "crew",
       "version": "0.1.0",
-      "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
+      "description": "flow — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
       "mcpServers": {
         "crew": {
           "command": "node",
@@ -155,7 +155,7 @@ The dev MUST pick one and make the README and the AC4c assertion match. **Option
   - [ ] When future stories add new skill files, they extend this array. Story 1.7a does NOT add other skills.
 
 - [ ] **Task 3 — Fix `plugins/crew/docs/README-install.md` checkpoint 3** (AC: 1, 4c)
-  - [ ] Open `/Users/jackmcintyre/projects/crew/plugins/crew/docs/README-install.md`. Today's checkpoint 3 (lines 33–47) instructs `/plugin install plugins/crew` — this is the broken command.
+  - [ ] Open `<repo-root>/plugins/crew/docs/README-install.md`. Today's checkpoint 3 (lines 33–47) instructs `/plugin install plugins/crew` — this is the broken command.
   - [ ] Replace the body of checkpoint 3 (everything between the `3. **Load the plugin into Claude Code.**` heading and the `4. **Restart Claude Code.**` heading) with the copy in "Sample artifacts → README checkpoint 3" below. The replacement keeps a single `3.` heading (Option A in "Checkpoint count" above) and uses two sub-bullets `3a.` and `3b.` for the two commands.
   - [ ] Do NOT renumber checkpoints 1, 2, 4, 5, 6. Do NOT touch the forward-reference line at the end of the file.
   - [ ] Preserve the "Expected confirmation" fenced code block convention: each expected line goes in a code block tagged `text`. The semver-on-install confirmation line stays in 3b's expected block.
@@ -217,9 +217,9 @@ The dev MUST pick one and make the README and the AC4c assertion match. **Option
 
 ### Files to modify
 
-- `/Users/jackmcintyre/projects/crew/.claude-plugin/marketplace.json` (REWRITE — currently stale, references removed sprint-orchestrator plugin)
-- `/Users/jackmcintyre/projects/crew/plugins/crew/.claude-plugin/plugin.json` (UPDATE — `skills: []` → `skills: ["skills/status.md"]`; no other field changes)
-- `/Users/jackmcintyre/projects/crew/plugins/crew/docs/README-install.md` (UPDATE — checkpoint 3 only; checkpoints 1, 2, 4, 5, 6 unchanged; forward-reference line unchanged)
+- `<repo-root>/.claude-plugin/marketplace.json` (REWRITE — currently stale, references removed sprint-orchestrator plugin)
+- `<repo-root>/plugins/crew/.claude-plugin/plugin.json` (UPDATE — `skills: []` → `skills: ["skills/status.md"]`; no other field changes)
+- `<repo-root>/plugins/crew/docs/README-install.md` (UPDATE — checkpoint 3 only; checkpoints 1, 2, 4, 5, 6 unchanged; forward-reference line unchanged)
 
 ### Files NOT to modify (read-only context — touching them is a regression)
 
@@ -249,7 +249,7 @@ These are the literal contents the implementation must produce. Examples are **s
     {
       "name": "crew",
       "source": "./plugins/crew",
-      "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog."
+      "description": "flow — a project-shaped team of long-lived AI agents driving a continuous-flow backlog."
     }
   ]
 }
@@ -266,7 +266,7 @@ These are the literal contents the implementation must produce. Examples are **s
 {
   "name": "crew",
   "version": "0.1.0",
-  "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
+  "description": "flow — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
   "mcpServers": {
     "crew": {
       "command": "node",
@@ -418,7 +418,7 @@ If Jack runs the post-merge smoke step (Task 6) and any of the five sub-steps fa
 - Previous story spec: `_bmad-output/implementation-artifacts/1-7-status-skill-and-readme-install-path-through-the-plugin-sees-my-repo.md` — read for context on what's frozen and where the gaps are.
 - Architecture project structure: `_bmad-output/planning-artifacts/architecture/project-structure-boundaries.md`.
 - Skill-file shape, MCP tool naming, TS code conventions: `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md` §§4, 6, 8.
-- Worktree for implementation: `/Users/jackmcintyre/projects/crew/.worktrees/1-7a-hotfix-make-the-install-path-actually-work-end-to-end`.
+- Worktree for implementation: `<repo-root>/.worktrees/1-7a-hotfix-make-the-install-path-actually-work-end-to-end`.
 
 ---
 

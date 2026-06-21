@@ -120,7 +120,7 @@ After this story's PR merges to `dev` (and `dev` → `main` if promoting), run f
 ```bash
 SCRATCH=$(cat /tmp/crew-canary-scratch-path)
 cd "$SCRATCH"
-claude --plugin-dir /Users/jackmcintyre/projects/crew/plugins/crew
+claude --plugin-dir <repo-root>/plugins/crew
 # Inside Claude Code:
 #   /crew:start
 ```
