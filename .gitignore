@@ -10,7 +10,7 @@ coverage/
 __pycache__/
 *.pyc
 
-# BMad tooling and planning/implementation artifacts — kept locally, not published.
+# BMad tooling and the PRD/design docs — kept locally, not published.
 _bmad/
 _bmad-output/
 # Exception: the BMad adapter's test fixtures contain a fake `_bmad-output/`
@@ -18,6 +18,14 @@ _bmad-output/
 !plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/
 !plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/**
 .claude/skills/bmad-*/
+
+# Track implementation-artifacts only: the story specs double as the BMad
+# parser's regression corpus (parse-bmad-story-corpus integration test).
+# planning-artifacts (PRD, epics, architecture) stays local-only.
+!_bmad-output/
+_bmad-output/*
+!_bmad-output/implementation-artifacts/
+!_bmad-output/implementation-artifacts/**
 
 # Claude Code runtime — generated per-session/per-machine, not source
 .claude/scheduled_tasks.lock

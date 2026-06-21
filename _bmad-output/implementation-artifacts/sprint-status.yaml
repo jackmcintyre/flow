@@ -1,0 +1,167 @@
+generated: 2026-05-19
+last_updated: '2026-06-01'
+project: crew
+project_key: NOKEY
+tracking_system: file-system
+story_location: '{project-root}/_bmad-output/implementation-artifacts'
+development_status:
+  epic-1: in-progress
+  1-1-scaffold-the-plugin-skeleton: done
+  1-2-workspace-resolver-and-per-target-repo-config: done
+  1-2b-stale-config-detection-on-every-skill-invocation: done
+  1-3-standards-doc-lookup-parser-and-shipped-example-template: done
+  1-4-permission-allowlist-scaffolding-and-tool-layer-enforcement: done
+  1-5-jsonl-telemetry-plumbing-via-pino: done
+  1-6-atomic-fs-rename-state-machine-primitive: done
+  1-7-status-skill-and-readme-install-path-through-the-plugin-sees-my-repo: done
+  1-7a-hotfix-make-the-install-path-actually-work-end-to-end: done
+  1-8-user-surface-ac-type-and-smoke-gate-in-ship-story: done
+  1-9-ship-a-pre-built-dist-with-the-plugin: done
+  1-10-readme-rewrite-match-observed-claude-code-ui-reality: done
+  1-11-dev-install-loop-make-plugin-changes-visible-without-daemon-restart: done
+  1-12-ship-story-base-branch-override-and-worktree-spec-fallback: done
+  1-13-crew-smoke-harness-wrapper-skill: done
+  epic-1-retrospective: done
+  epic-2: in-progress
+  2-1-catalogue-file-format-and-shipped-role-templates: done
+  2-2-per-role-permission-spec-files: done
+  2-3-persona-file-machinery-and-persona-mcp-tools: done
+  2-4-hiring-manager-agent-and-hire-skill: done
+  2-5-skip-hiring-fast-path-and-custom-escape-hatch: done
+  2-6-team-snapshot-skill: done
+  2-7-ask-role-side-session-skill: done
+  2-8-worktree-smoke-workflow-and-2-7-task-meta-role-verification: done
+  epic-2-retrospective: optional
+  epic-3: in-progress
+  3-1-planningadapter-interface-and-adapter-registry: done
+  3-2-execution-manifest-schema-scan-sources-mcp-tool-and-source-hash-capture: done
+  3-3-bmad-adapter-v1-reference-implementation: done
+  3-3b-adapter-config-seam-move-configurebmadadapter-into-resolveworkspace: done
+  3-4-native-adapter-planner-subagent-and-plan-skill: done
+  3-5-planning-discipline-validation-at-authoring-and-scan-time: done
+  3-6-re-open-planning-mid-cycle-and-discard-a-feature-flow: done
+  3-7-plain-language-guideline-and-direct-edit-allowance: done
+  epic-3-retrospective: done
+  epic-4: backlog
+  4-1-claim-story-dependency-check-and-complete-story-mcp-tools: done
+  4-2-start-skill-and-per-story-dev-subagent-spawn: done
+  4-3-dev-reviewer-handoff-reviewer-spawn-and-rework-signal: done
+  4-3b-harness-task-spawn-seam-for-rundevsession: done
+  4-3c-call-completestory-after-ready-for-merge: done
+  4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action: done
+  4-5-gh-error-map-yaml-and-recoverable-error-classification: done
+  4-6-reviewer-subagent-read-sources-and-run-acs: done
+  4-6b-reviewer-posts-inline-comments-and-summary-verdict: done
+  4-7-verdict-version-stamping-and-footer-marker-idempotent-rerun: done
+  4-8-reviewer-labels-and-negative-capability-enforcement: done
+  4-8b-deterministic-seam-hardening-handoff-parser-and-pr-url-extraction: done
+  4-9-risk-tiering-spec-format-and-override-resolution: done
+  4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: done
+  4-10-agreement-metric-helper-compute-agreement: done
+  4-10b-auto-merge-gate-medium-high-pause-and-user-override: done
+  4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: done
+  4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: done
+  epic-4-retrospective: done
+  epic-5: backlog
+  5-1-block-story-mcp-tool-and-blocked-by-taxonomy: cancelled  # /crew:start retired (#210); blocked_by enum shipped in 5.13
+  5-2-heartbeat-based-session-liveness: cancelled  # drain is one workflow, not polled long-lived sessions
+  5-3-watch-skill-and-orchestration-polling-loop: cancelled  # the drain IS the orchestration; nothing to poll
+  5-4-stuck-story-and-stale-claim-detection: cancelled  # crash-recovery + orphan-reattach shipped (#209)
+  5-4b-paused-for-human-surface: cancelled  # pausedForHuman bucket + 8.19 pause-to-ping cover this
+  5-5-one-line-terminal-surface-and-user-resolved-blocker-move-back: cancelled  # assumed the retired watch loop
+  5-6-fault-injection-vitest-harness-and-session-death-recovery: backlog
+  5-7-back-to-back-idempotency-integration-test: backlog
+  5-8-no-silent-failures-ci-pairing-assertion: cancelled  # drain result-bucket guarantee (exactly-one-bucket + reason) covers this
+  5-9-telemetry-as-files-and-session-death-recovery-guide: cancelled  # superseded by 8.12 runbook + 8.14 exit-reasons docs
+  5-10-persist-dev-transcript-to-disk-before-any-mcp-call: done
+  5-11-orphan-recovery-branch-in-crew-start: done
+  5-12-mcp-child-resilient-to-parent-stdin-close: done
+  5-13-planner-validator-prose-vs-manifest-deps-at-scan-time: done
+  5-14-bmad-parser-vocabulary-widening: done
+  5-15-fix-gh-pr-view-base-repository-non-field: done
+  5-16-scan-sources-drift-on-refresh: done
+  5-17-bmad-parser-ac-heading-regex-widening: done
+  5-18-structural-story-parser: cancelled  # native re-foundation §10: strict generated format leaves nothing sloppy to parse; charter absorbed by Epic 10 (10.3 Tier-0). See sprint-change-proposal-2026-05-31-native-refoundation-correct-course.md
+  5-19-scan-sources-readfile-resilience: done
+  5-20-orphan-recovery-reviewer-only-respawn: done
+  5-21-reviewer-first-call-deterministic-seam: done
+  5-22-render-scan-result-leading-whitespace-assertion: done
+  5-23-mark-story-shipped: backlog
+  5-24-zod-determinism-dts-fix: done
+  5-25-always-on-mcp-lifecycle-logging: done
+  5-26-reviewer-session-artifact-check-against-pr-branch: done
+  5-27-reviewer-vitest-workspace-aware-cwd: done
+  5-28-build-watch-normaliser-chaining: done
+  5-29-hand-edit-check-manifest-only-baseline: done
+  5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics: done
+  5-31-d2-feasibility-spike: done
+  5-32-d2-build-detached-proxy-and-parent-owned-daemon: cancelled  # daemon retired in #210; D2 obsolete
+  5-34-auto-merge-gate-gh-allowlist-repo-view-api: done
+  epic-5-retrospective: optional
+  epic-6: in-progress
+  6-1-story-level-retro-entries-via-record-story-retro: done
+  6-2-retro-skill-and-retro-analyst-subagent: done
+  6-3-retro-proposal-markdown-with-seven-proposal-types: done
+  6-4-accept-proposal-id-skill-diff-then-confirm-gate: done
+  6-5-rule-registry-parser-and-apply-rule-proposal: done
+  6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: done
+  6-6-promotion-threshold-and-rule-retirement: done
+  6-7-skill-proposal-application-create-revise-supersede-retire: done
+  6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: done
+  6-14-hand-editable-persona-files-defaults-template-minimal-valid: backlog  # tracked 2026-05-31 (operator decision); usability prereq for 6.9 — author + slot before 6.9; sequence: persona/team cluster waits behind native cutover (Epic 10/10.6), decision #5 HARMONIZE. See SCP 2026-05-31 native-refoundation.
+  6-9-persona-knowledge-append-via-proposed-md-and-accept-proposal: backlog  # sequence: persona/team cluster waits behind native cutover (Epic 10/10.6); QL/reviewer HARMONIZE (decision #5) shares one standards registry. See SCP 2026-05-31 native-refoundation.
+  6-10-team-change-proposals-and-apply-team-change: backlog  # sequence: behind native cutover (10.6), decision #5 HARMONIZE. See SCP 2026-05-31 native-refoundation.
+  6-11-outcome-stats-and-constructive-to-defensive-ratio: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
+  6-12-archive-cycle-and-cycle-boundaries: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
+  6-13-persona-files-version-controlled-and-bad-append-recovery: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
+  epic-6-retrospective: optional
+  epic-7: backlog
+  7-1-bundled-bmad-shaped-example-target-repo: backlog  # rescope: native-shaped example (BMad -> ingest-only); re-author post-cutover. See sprint-change-proposal-2026-05-31-native-refoundation-correct-course.md
+  7-2-readme-install-path-with-verifiable-checkpoints: backlog  # rescope: /start+/watch retired -> drain + intake cockpit. See SCP 2026-05-31 native-refoundation.
+  7-3-e2e-canary-vitest-drive-of-the-canonical-scenario: backlog  # rescope: drive the drain (author->judge->QL->ready->drain->merge). See SCP 2026-05-31 native-refoundation.
+  7-4-first-run-polish-and-plain-language-pass: backlog
+  7-4b-plain-language-pass-over-orchestration-surfaces: backlog  # rescope: Story 5.5 surfaces cancelled -> re-anchor to drain/result-bucket surfaces. See SCP 2026-05-31 native-refoundation.
+  7-5-authoritative-troubleshooting-guide: backlog  # rescope: 5.4/5.5/5.8 failure paths cancelled -> re-anchor to drain exit-reason taxonomy. See SCP 2026-05-31 native-refoundation.
+  7-6-telemetry-summary-doc-generator: backlog
+  7-7-maya-archetype-validation-paper-test: backlog
+  epic-7-retrospective: optional
+  epic-8: in-progress
+  8-1-commit-scope-regex-real-refs: done
+  8-2-reviewer-ac-heading-regex-alignment: done
+  8-3-agent-discipline-evidence-only: done
+  8-4-cli-shim-productionise-and-wire: done
+  8-5-drain-workflow-stateless: done
+  8-6-bootstrap-story-and-dogfood-run: done
+  8-7-summarise-drain-result: done
+  8-8-native-scan-classify-unmatched-files: done
+  8-9-document-provisional-trust-flag: done
+  8-10-explain-gate-reason-helper: done
+  8-11-summarise-gate-outcome-helper: done
+  8-12-unattended-drain-runbook: done
+  8-13-risk-tiering-worked-examples: done
+  8-14-drain-result-and-exit-reasons: done
+  8-15-per-story-reviewer-result-isolation: done
+  8-16-per-dev-worktree-on-the-drain-path: done
+  8-17-dev-runs-full-build-before-opening-pr: done
+  8-18-drain-progress-heartbeat: done
+  8-19-drain-pause-to-ping-on-genuine-ambiguity: done
+  8-20-true-drain-parallelism-dev-edits-in-own-worktree: done
+  8-21-drain-observability-seams-non-fatal: done
+  8-22-drain-dispatches-concurrent-workers: done
+  epic-8-retrospective: optional
+  epic-9: in-progress
+  9-1-readiness-brake-and-minimal-intake-cockpit: done
+  9-2-author-seam-feature-to-drafted-story: done
+  9-3-judge-panel-rubric-grading: done
+  9-4-quality-lead-adjudication-and-escalation: done
+  9-5-generated-backlog-dashboard: done
+  epic-9-retrospective: optional
+  epic-10: in-progress
+  10-1-enrich-native-ac-verification-block: ready-for-dev
+  10-2-native-tasks-ac-refs-cited-sources-and-narrative: ready-for-dev
+  10-3-complete-tier-0-discipline-validator: ready-for-dev
+  10-4-plumb-risk-tier-into-native-draft: ready-for-dev
+  10-5-bmad-to-native-ingest-seam: ready-for-dev
+  10-6-cutover-native-primary-bmad-ingest-only: ready-for-dev
+  10-7-prove-pipeline-end-to-end: ready-for-dev
+  epic-10-retrospective: optional
