@@ -21,6 +21,35 @@ flow runs through a handful of commands:
 
 `/flow:plan` is there for drafting a story in a pinch, and on a BMAD repo it hands you to BMAD's authoring skills and pulls the result back into the backlog. Plus `/flow:dashboard` for a status read, `/flow:help` for the next sensible move, and `/flow:ask` to put a single question to a hired role.
 
+## How it works
+
+You keep the backlog good. flow turns it into merged PRs, and sharpens itself each cycle.
+
+```mermaid
+flowchart TB
+    hire["/flow:hire<br/>a team forms around your repo"]
+
+    subgraph product["You - keep the backlog good"]
+        plan["plan & write specs<br/>(BMAD, or /flow:plan)"]
+        ready["/flow:ready<br/>a judge panel grades a story,<br/>you admit it to the run"]
+    end
+
+    subgraph engine["flow - run each story (/flow:run)"]
+        direction LR
+        claim["claim"] --> dev["dev<br/>writes code, opens a PR"] --> review["review<br/>against your standard"] --> verdict["verdict"] --> gate{"auto-merge<br/>gate"}
+    end
+
+    merged(["merged PRs"])
+    retro["/flow:retro<br/>turns lessons into<br/>proposals & new stories"]
+
+    hire --> plan
+    plan --> ready --> claim
+    gate -->|low risk| merged
+    gate -->|needs a human| human["you review & merge"] --> merged
+    merged --> retro
+    retro -.->|sharpens the team & the standard| plan
+```
+
 ## Status
 
 This is in active development and it is not finished. The plan-to-merge loop works end to end, and flow has shipped real pull requests into this repo by running on itself. What's still moving: the command surface, the learning loop that lets the team get sharper cycle over cycle, and the cold install path for someone who isn't me. Treat it as a working experiment, not a product.
