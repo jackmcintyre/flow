@@ -43,6 +43,15 @@ const PREFLIGHT_CHECK_LINE =
   'test -f "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/cli.js" && echo "ok" || echo "missing"';
 const ENGINE_MISSING_ERROR =
   "Error: the run engine file could not be found at ${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/cli.js.";
+// Git pre-flight contract: the run cuts a per-story worktree, which needs a git
+// repo with at least one commit. The skill must check this BEFORE invoking the
+// run and emit a distinct, actionable message for each failure mode.
+const GIT_PREFLIGHT_CHECK_LINE =
+  'git -C "<targetRepoRoot>" rev-parse --is-inside-work-tree';
+const GIT_NOT_A_REPO_ERROR =
+  "Error: the run target <targetRepoRoot> is not a git repository.";
+const GIT_NO_COMMITS_ERROR =
+  "Error: the run target <targetRepoRoot> is a git repository but has no commits yet.";
 
 describe("plugins/flow/skills/run/SKILL.md structural assertions", () => {
   let skillContent: string;
@@ -85,6 +94,30 @@ describe("plugins/flow/skills/run/SKILL.md structural assertions", () => {
   it("AC2: instructs to NOT attempt to start the run on missing engine file", async () => {
     const content = await fs.readFile(SKILL_PATH, "utf8");
     expect(content).toContain("Do NOT attempt to start the run");
+  });
+
+  // Git pre-flight contract: fail fast before any story is claimed when the
+  // target is not a usable git repo (defect: worktree creation fails deep in the
+  // run, mislabelling the burned story as a content failure).
+  it("git pre-flight: checks the target is inside a git work tree", async () => {
+    const content = await fs.readFile(SKILL_PATH, "utf8");
+    expect(content).toContain(GIT_PREFLIGHT_CHECK_LINE);
+  });
+
+  it("git pre-flight: checks HEAD exists (at least one commit) so a worktree can be cut", async () => {
+    const content = await fs.readFile(SKILL_PATH, "utf8");
+    expect(content).toContain('git -C "<targetRepoRoot>" rev-parse HEAD');
+  });
+
+  it("git pre-flight: emits a distinct actionable message when the target is not a repo", async () => {
+    const content = await fs.readFile(SKILL_PATH, "utf8");
+    expect(content).toContain(GIT_NOT_A_REPO_ERROR);
+    expect(content).toContain("git init");
+  });
+
+  it("git pre-flight: emits a distinct actionable message when the repo has no commits", async () => {
+    const content = await fs.readFile(SKILL_PATH, "utf8");
+    expect(content).toContain(GIT_NO_COMMITS_ERROR);
   });
 
   // AC3: run-knob forwarding contract
