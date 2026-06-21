@@ -4,7 +4,7 @@ flow is an experiment. This is me testing a hypothesis in the open.
 
 The hypothesis: someone with broad technology experience, who isn't a software engineer by trade but knows enough to be dangerous, can run the work of a whole product engineering team using AI agents, without giving up the rigour a good scrum team enforces.
 
-I spent years as a scrum master and delivery lead. I sat next to engineers, testers, analysts and designers for a long time without doing any of those jobs myself. The bet here is that the next iteration of agile is one person performing all of those roles, with the strength of an AI behind each of them. flow is that bet, built.
+I spent years as a scrum master and delivery lead. I sat next to engineers, testers, analysts and designers for a long time without doing any of those jobs myself. The bet here is that the next iteration of agile is fewer people performing multiple roles, with the strength of an AI behind each of them. flow is that bet, built.
 
 ## What it is
 
@@ -20,6 +20,35 @@ flow runs through a handful of commands:
 - `/flow:retro` looks back over a cycle and turns what it learned into proposals or new backlog stories.
 
 `/flow:plan` is there for drafting a story in a pinch, and on a BMAD repo it hands you to BMAD's authoring skills and pulls the result back into the backlog. Plus `/flow:dashboard` for a status read, `/flow:help` for the next sensible move, and `/flow:ask` to put a single question to a hired role.
+
+## How it works
+
+You keep the backlog primed. flow turns it into merged PRs, and sharpens itself each cycle.
+
+```mermaid
+flowchart TB
+    hire["/flow:hire<br/>a team forms around your repo"]
+
+    subgraph product["You - keep the backlog primed"]
+        plan["plan & write specs<br/>(BMAD, or /flow:plan)"]
+        ready["/flow:ready<br/>a judge panel grades a story,<br/>you admit it to the run"]
+    end
+
+    subgraph engine["flow - run each story (/flow:run)"]
+        direction LR
+        claim["claim"] --> dev["dev<br/>writes code, opens a PR"] --> review["review<br/>against your standard"] --> verdict["verdict"] --> gate{"auto-merge<br/>gate"}
+    end
+
+    merged(["merged PRs"])
+    retro["/flow:retro<br/>turns lessons into<br/>proposals & new stories"]
+
+    hire --> plan
+    plan --> ready --> claim
+    gate -->|low risk| merged
+    gate -->|needs a human| human["you review & merge"] --> merged
+    merged --> retro
+    retro -.->|sharpens the team & the standard| plan
+```
 
 ## Status
 
