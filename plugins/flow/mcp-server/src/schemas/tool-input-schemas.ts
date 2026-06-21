@@ -269,6 +269,15 @@ export const getStatusInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot"],
 };
 
+export const initWorkspaceInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    adapter: { type: "string" },
+  },
+  required: ["targetRepoRoot"],
+};
+
 export const getTeamSnapshotInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -863,6 +872,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   getHelpAdvice: getHelpAdviceInputSchema,
   getStatus: getStatusInputSchema,
   getTeamSnapshot: getTeamSnapshotInputSchema,
+  initWorkspace: initWorkspaceInputSchema,
   instantiatePersona: instantiatePersonaInputSchema,
   listClaimableTodos: listClaimableTodosInputSchema,
   lookupRoleByDomain: lookupRoleByDomainInputSchema,

@@ -470,7 +470,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KVEHE5XNBHKVVZ624GPAW9FF added getHelpAdvice (context-aware next-action advisor) = 58 total.
       // Story native:01KVFAF2T7DPJ5T18PQ534D7XM added analyzeTeamFit (team-fit analysis) = 59 total.
       // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
-      expect(result.tools.length, "expected exactly 60 tools").toBe(60);
+      // /flow:init added initWorkspace (first-run workspace scaffolder) = 61 total.
+      expect(result.tools.length, "expected exactly 61 tools").toBe(61);
     } finally {
       await client.close();
       await server.close();

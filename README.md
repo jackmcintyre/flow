@@ -14,6 +14,7 @@ The split is deliberate. I plan with BMAD, which is genuinely good at shaping a 
 
 flow runs through a handful of commands:
 
+- `/flow:init` scaffolds a fresh repo into a Flow workspace and shows you how everything fits together. Run it first.
 - `/flow:hire` reads your repo and proposes a starting team of roles.
 - `/flow:ready` grades a backlog item with a panel of judges and admits it to the run.
 - `/flow:run` claims a story and takes it through dev, review, a verdict and an auto-merge gate, with each developer working in its own isolated copy.
@@ -27,6 +28,7 @@ You keep the backlog primed. flow turns it into merged PRs, and sharpens itself 
 
 ```mermaid
 flowchart TB
+    init["/flow:init<br/>scaffold a fresh repo"]
     hire["/flow:hire<br/>a team forms around your repo"]
 
     subgraph product["You - keep the backlog primed"]
@@ -42,6 +44,7 @@ flowchart TB
     merged(["merged PRs"])
     retro["/flow:retro<br/>turns lessons into<br/>proposals & new stories"]
 
+    init --> hire
     hire --> plan
     plan --> ready --> claim
     gate -->|low risk| merged

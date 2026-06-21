@@ -11,6 +11,8 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
 > Heads-up: steps 3a, 3b, 4, and 6 are **slash commands you type inside a running Claude Code session**, not shell commands. Each one prints a single-line toast back into the transcript — there's no separate TUI panel to confirm in.
 
+> **New target repo?** Once the plugin is installed, run `/flow:init` inside any repo to scaffold it as a Flow workspace — it writes `.flow/config.yaml`, the state directories, and a starter `docs/standards.md`, then prints a how-it-works overview. The checkpoints below verify the plugin install itself.
+
 1. **Install Claude Code.**
 
    ```bash

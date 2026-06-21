@@ -10810,6 +10810,14 @@ var getStatusInputSchema = {
   },
   required: ["targetRepoRoot"]
 };
+var initWorkspaceInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    adapter: { type: "string" }
+  },
+  required: ["targetRepoRoot"]
+};
 var getTeamSnapshotInputSchema = {
   type: "object",
   properties: {
@@ -11340,6 +11348,7 @@ var TOOL_INPUT_SCHEMAS = {
   getHelpAdvice: getHelpAdviceInputSchema,
   getStatus: getStatusInputSchema,
   getTeamSnapshot: getTeamSnapshotInputSchema,
+  initWorkspace: initWorkspaceInputSchema,
   instantiatePersona: instantiatePersonaInputSchema,
   listClaimableTodos: listClaimableTodosInputSchema,
   lookupRoleByDomain: lookupRoleByDomainInputSchema,

@@ -10,6 +10,7 @@ Six checkpoints from clone to "the plugin sees my repo": [`docs/README-install.m
 
 ## Available skills
 
+- `/flow:init` - scaffold a fresh repo into a Flow workspace (`.flow/config.yaml`, state dirs, `docs/standards.md`) and print a how-it-works orientation. Run it first in a new repo.
 - `/flow:hire` - open a hiring conversation; the hiring manager reads your repo and proposes a starting team (or `/flow:hire default` for the default roster).
 - `/flow:plan` - open a planning conversation, or draft a single story in one shot with `/flow:plan <feature>`.
 - `/flow:ready` - the intake cockpit: list backlog items with readiness and dependency state, grade one with the diverse-lens judge panel, then admit it to the run.

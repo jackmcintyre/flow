@@ -637,7 +637,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("analyzeTeamFit");
       // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire). 59 → 60.
       expect(toolNames).toContain("unhirePersona");
-      expect(toolNames.length).toBe(60);
+      // /flow:init added initWorkspace (first-run workspace scaffolder). 60 → 61.
+      expect(toolNames).toContain("initWorkspace");
+      expect(toolNames.length).toBe(61);
     } finally {
       await client.close();
       await server.close();
