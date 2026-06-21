@@ -25,7 +25,7 @@ import { writeManagedFile } from "../lib/managed-fs.js";
  */
 
 const SUPPORTED_ADAPTERS = ["native", "bmad"] as const;
-export type InitAdapter = (typeof SUPPORTED_ADAPTERS)[number];
+type InitAdapter = (typeof SUPPORTED_ADAPTERS)[number];
 
 const STATE_DIRS = ["to-do", "in-progress", "blocked", "done"] as const;
 
