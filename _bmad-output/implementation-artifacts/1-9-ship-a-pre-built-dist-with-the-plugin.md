@@ -72,7 +72,7 @@ vitest harness covers: (a) the dist-vs-source-rebuild equivalence check that CI 
     # If you add another package with a dist/, ignore it explicitly here.
     ```
     The previous `**/dist/` line is removed entirely. Rationale: there is currently only one `dist/` in the workspace (`mcp-server/dist/`); a future package adding its own `dist/` will need an explicit ignore added at that time, with a comment explaining why mcp-server's is different.
-  - [ ] 1.2 Edit the repo-root `/Users/jackmcintyre/projects/crew/.gitignore`: remove the bare `dist/` line (line 2). Leave every other rule (`node_modules/`, `coverage/`, `*.log`, `.DS_Store`, `.sprint-orchestrator/`, the BMad block, the Claude Code runtime block, `.worktrees/`) untouched. Verify with `git check-ignore -v plugins/crew/mcp-server/dist/index.js` — the file MUST NOT appear ignored after the edit.
+  - [ ] 1.2 Edit the repo-root `<repo-root>/.gitignore`: remove the bare `dist/` line (line 2). Leave every other rule (`node_modules/`, `coverage/`, `*.log`, `.DS_Store`, `.sprint-orchestrator/`, the BMad block, the Claude Code runtime block, `.worktrees/`) untouched. Verify with `git check-ignore -v plugins/crew/mcp-server/dist/index.js` — the file MUST NOT appear ignored after the edit.
   - [ ] 1.3 Confirm no `.gitignore` further down the tree (e.g. inside `plugins/crew/mcp-server/`) ignores `dist/`. None exists today; verify by `find plugins/crew/mcp-server -name .gitignore`. If one appears in a future change, that's a regression Task 5's documentation note must call out.
 
 - [ ] **Task 2 — Produce a clean `dist/` and commit it (AC: 1, 2)**
@@ -140,7 +140,7 @@ Do not, in implementing this story, introduce a `prepare` script, a `postinstall
 
 ### What the dev needs to know about gitignore precedence
 
-- The repo-root `/Users/jackmcintyre/projects/crew/.gitignore` line 2 currently reads `dist/`. This catches `plugins/crew/mcp-server/dist/` because gitignore patterns without leading `/` match at any depth. Removing the line is necessary.
+- The repo-root `<repo-root>/.gitignore` line 2 currently reads `dist/`. This catches `plugins/crew/mcp-server/dist/` because gitignore patterns without leading `/` match at any depth. Removing the line is necessary.
 - `plugins/crew/.gitignore` line 2 currently reads `**/dist/`. Same effect, more explicit. Must be replaced — see Task 1.1.
 - After both edits, run `git check-ignore -v plugins/crew/mcp-server/dist/index.js`. If the file is reported as ignored, name the rule that's still matching and remove or override it. A negation pattern (`!plugins/crew/mcp-server/dist/`) is a fallback if removing rules cleanly proves impossible, but **prefer removing** for clarity.
 
@@ -199,7 +199,7 @@ Do not, in implementing this story, introduce a `prepare` script, a `postinstall
 - MCP server entry point: [Source: plugins/crew/mcp-server/src/index.ts]
 - Build config: [Source: plugins/crew/mcp-server/tsconfig.json, plugins/crew/tsconfig.base.json]
 - Existing vitest suites: [Source: plugins/crew/mcp-server/tests/*.test.ts]
-- Top-level gitignore: [Source: /Users/jackmcintyre/projects/crew/.gitignore]
+- Top-level gitignore: [Source: <repo-root>/.gitignore]
 - Plugin-level gitignore: [Source: plugins/crew/.gitignore]
 
 ---

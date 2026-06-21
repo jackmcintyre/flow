@@ -1,0 +1,4 @@
+sprintStatusPath: sprint-status.yaml
+autoDetected: true
+layout: bmad-v6
+pr_per_story: true

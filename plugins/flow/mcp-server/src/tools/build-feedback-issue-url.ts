@@ -84,9 +84,9 @@ export function composeFeedbackIssueBody(item: MaintainerFeedbackInput): string 
 // ---------------------------------------------------------------------------
 
 export interface FeedbackIssueUrlOptions {
-  /** Resolved GitHub repo owner login (e.g. `"jackmcintyre"`). */
+  /** Resolved GitHub repo owner login (e.g. `"octocat"`). */
   owner: string;
-  /** Resolved GitHub repo name (e.g. `"crew"`). */
+  /** Resolved GitHub repo name (e.g. `"my-repo"`). */
   repo: string;
   /** The validated feedback-item payload (before provenance stamping). */
   item: MaintainerFeedbackInput;

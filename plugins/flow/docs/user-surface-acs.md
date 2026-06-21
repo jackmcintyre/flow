@@ -12,7 +12,7 @@ reasons from artefacts (epic, spec, diff, AC table) — none of them is the
 end user. Stories 1.7 and 1.7a each shipped under 4/4 green ACs and approved
 code review; both contained user-facing surfaces (a slash command, an install
 path) that no agent ever actually ran against real Claude Code. Eight bugs
-surfaced the moment Jack tried the install live.
+surfaced the moment the operator tried the install live.
 
 The fix is structural: ACs that name a user-invocable surface are tagged
 `(user-surface)`, and the pre-PR gate refuses to open a PR until evidence

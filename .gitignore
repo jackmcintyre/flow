@@ -3,7 +3,6 @@ node_modules
 coverage/
 *.log
 .DS_Store
-.sprint-orchestrator/
 # .flow runtime state — project-specific local state, not source.
 # The plugin recreates these directories at runtime in any target repo.
 .flow/

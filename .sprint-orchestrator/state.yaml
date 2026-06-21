@@ -1,0 +1,266 @@
+sprint_id: shipgate-followups
+schema_version: 1
+stories:
+  - id: "1"
+    title: Orchestrator calls markDevReturned after dev Task returns (deadlock fix)
+    status: done
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: grep -q "markDevReturned" plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "orchestrator marks dev returned even when
+            dev subagent forgot"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStoryFailure succeeds when dev
+            produced zero output"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+    orchestrator:
+      claimed_by: dev-shipgate-followups-s1
+      claimed_at: 2026-05-15T00:02:44.196Z
+      completed_at: 2026-05-15T00:10:16.200Z
+      summary: Orchestrator now calls markDevReturned itself after every dev Task return, eliminating the
+        deadlock where a silently-died dev subagent left the state machine unrecoverable; all 134
+        e2e assertions pass.
+      rework_count: 0
+      base_branch: main
+      dev_returned_at: 2026-05-15T00:08:17.635Z
+      branch: 1-orchestrator-calls-markdevreturned-after
+      branch_prepared_by: dev-shipgate-followups-s1
+      branch_prepared_at: 2026-05-15T00:02:47.463Z
+      artefacts:
+        - git:0e55e405a6ce978391f0c720af10ae4bc39caebd
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/agents/dev.md
+    notes: >
+      Problem: dev subagent is contractually required to call markDevReturned before returning, but
+      in practice forgets — every reviewer call (recordStorySuccess / recordStoryFailure /
+      recordStoryRework) is then refused by the AC-guard ("dev_returned_at is not set"), producing a
+      hard deadlock with no API recovery path. We have hit this at least 3 times across separate
+      sprint runs. The workaround (manually edit state.yaml) is unsafe and defeats the audit trail.
+
+
+      Concrete actions:
+
+      - process-backlog skill: after the dev Task returns (regardless of summary content), the
+      orchestrator itself calls `markDevReturned(storyId, agentId)` BEFORE spawning the reviewer.
+      The Task tool returning IS the "dev returned" signal — that is what the field is named after.
+      The dev calling it themselves becomes belt-and-braces.
+
+      - Update skill prose at plugins/sprint-orchestrator/skills/process-backlog/SKILL.md step 5 to
+      add this call explicitly. Update dev agent prose to note that the orchestrator now handles
+      this so the dev's own call is redundant but harmless.
+
+      - New e2e mini-run: spawn a "dev" that produces zero output and does NOT call markDevReturned.
+      The orchestrator's call should still let the reviewer fail the story cleanly via
+      recordStoryFailure. No deadlock.
+
+      - New e2e mini-run: even when dev did its own markDevReturned, the orchestrator's second call
+      is idempotent — pick and document the contract (no-op vs. refresh timestamp).
+
+
+      Definition of done: a sprint where the dev subagent silently dies mid-run can still have its
+      story recorded as `failed` and the next ready story picked up. No manual state edits required.
+  - id: "2"
+    title: B8 empty-commit helper fires in the live reviewer path (base_branch fix)
+    status: done
+    depends_on:
+      - "1"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "ship gate zero-diff story drains end-to-end
+            under pr_per_story"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "maybeLayDownShipGateEmptyCommit reads base
+            from config not story state"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+    orchestrator:
+      claimed_by: dev-shipgate-followups-s2
+      claimed_at: 2026-05-15T00:10:25.865Z
+      completed_at: 2026-05-15T01:28:42.804Z
+      summary: Fixed maybeLayDownShipGateEmptyCommit to read base from config.default_base instead of
+        story.orchestrator.base_branch, eliminating the read-miss that caused ship-gate to
+        short-circuit; added two targeted e2e mini-runs (end-to-end drain + config-read assertion)
+        and a full 141/141 e2e suite pass.
+      rework_count: 0
+      base_branch: 1-orchestrator-calls-markdevreturned-after
+      dev_returned_at: 2026-05-15T01:26:48.743Z
+      branch: 2-b8-empty-commit-helper-fires-in-the-live
+      branch_prepared_by: dev-shipgate-followups-s2
+      branch_prepared_at: 2026-05-15T00:10:29.511Z
+      artefacts:
+        - git:5fad815e264dd62a3e2d3b8a844fbe20743ae23c
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/ship-gate-phrases.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - https://github.com/jackmcintyre/sprint-orchestrator/pull/47
+    notes: >
+      Problem: Story 2 of the prior sprint shipped a `maybeLayDownShipGateEmptyCommit` helper
+      guarded on `story.orchestrator.base_branch`. All unit tests and the targeted e2e mini-run
+      passed. In the live reviewer flow at ship gate (prior sprint's story 4) the helper
+      short-circuited to `sha: null` and the ship gate failed because the field was not visible to
+      the helper at read time — even though state.yaml shows it WAS persisted by prepareStoryBranch.
+      Reviewer reported: "state.yaml does not carry orchestrator.base_branch for story 4 — only the
+      MCP server's runtime state does." Either the helper reads from a stale snapshot, the field is
+      named differently in the two places, or there is a read-after-write timing issue.
+
+
+      Concrete actions:
+
+      - Root-cause the read miss: compare the path that writes base_branch (prepare-story-branch.ts)
+      against the path that reads it (commit-story-artefacts.ts → maybeLayDownShipGateEmptyCommit).
+      If there is a state-snapshot staleness issue, fix it.
+
+      - Simplify by removing the state-field dependency entirely: compute the base from
+      `config.default_base` (already loaded for other purposes in this helper), not from
+      `story.orchestrator.base_branch`. Two reasons: (a) it is the same value in every case the
+      helper would fire, (b) it removes one piece of implicit coupling between prepareStoryBranch
+      and commitStoryArtefacts. The state field can remain on the story for forensic/audit purposes
+      but should not be load-bearing for runtime logic.
+
+      - New e2e mini-run "ship gate zero-diff story drains end-to-end under pr_per_story": spawn a
+      real orchestrator-style flow (NOT a unit fixture) where a story has no code changes, dev
+      returns cleanly, reviewer calls commitStoryArtefacts, and an empty commit IS produced + pushed
+      + a PR is opened + recordStorySuccess accepts it. This is the test the prior sprint's B8 AC
+      should have been.
+
+      - New e2e mini-run "maybeLayDownShipGateEmptyCommit reads base from config not story state":
+      assert the helper uses config.default_base regardless of whether
+      story.orchestrator.base_branch is set, missing, or stale.
+
+
+      Definition of done: a ship-gate story with zero diff drains to `done` under pr_per_story=true
+      with NO manual intervention. Test asserts the live path, not just the helper's internals.
+  - id: "3"
+    title: Exempt gitignored paths from background-session worktree-isolation gate
+    status: done
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "background-session can write to gitignored
+            path without worktree"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "background-session still blocks writes to
+            tracked paths outside a worktree"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+    orchestrator:
+      claimed_by: dev-shipgate-followups-s3
+      claimed_at: 2026-05-15T01:28:48.716Z
+      completed_at: 2026-05-15T01:37:28.602Z
+      summary: "Gitignored paths are now exempt from the background-session worktree-isolation gate:
+        decideWrite consults `git check-ignore` before refusing an escaping path, allowing planning
+        artifacts under `_bmad-output/` to be written from the main checkout without a worktree
+        dance, while tracked files outside the project root remain refused."
+      rework_count: 0
+      base_branch: main
+      dev_returned_at: 2026-05-15T01:35:33.335Z
+      branch: 3-exempt-gitignored-paths-from-background
+      branch_prepared_by: dev-shipgate-followups-s3
+      branch_prepared_at: 2026-05-15T01:28:52.362Z
+      artefacts:
+        - git:1e2e7dc09a3bc59ed587dab4d8a33fbf1a6d22ee
+        - plugins/sprint-orchestrator/packages/hooks/src/lib/deny-patterns.ts
+        - plugins/sprint-orchestrator/packages/hooks/src/pre-tool-use.ts
+        - plugins/sprint-orchestrator/packages/hooks/__tests__/deny-patterns.test.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+    notes: >
+      Problem: background-session safety blocks Edit/Write outside a worktree, which protects
+      against accidental pollution of the shared checkout. But it fires equally on files that cannot
+      pollute git history by definition — anything matched by `.gitignore`, including every planning
+      artifact under `_bmad-output/`. Today the workaround is to write into a worktree and then `cp`
+      back to the main checkout by hand. The PM hits this every time they ask for a planning doc,
+      retro, or local-only spec.
+
+
+      Same root cause as memory note `orchestrator-hygiene` H1 (worktree-isolation vs
+      prepareStoryBranch) — both stem from the gate treating all paths the same.
+
+
+      Concrete actions:
+
+      - Locate the hook/check that emits the `path-escape:` / "background session hasn't isolated
+      its changes yet" message. Likely lives in `plugins/sprint-orchestrator/packages/hooks/`
+      (PreToolUse for Edit/Write) or the claude-dev-loop harness — confirm during implementation.
+
+      - Before refusing, consult `.gitignore` (and any nested .gitignore files) using `git
+      check-ignore --quiet <path>`. If the path is gitignored, allow the write.
+
+      - The exemption is narrow: ONLY gitignored paths under the project root. Tracked files outside
+      a worktree are still refused. Paths outside the project tree entirely are still refused
+      (existing path-escape behaviour preserved).
+
+      - New e2e mini-run "background-session can write to gitignored path without worktree": fixture
+      repo with `.gitignore` containing `_bmad-output/`, simulate a background session, assert Write
+      to `_bmad-output/foo.md` succeeds.
+
+      - New e2e mini-run "background-session still blocks writes to tracked paths outside a
+      worktree": same fixture, assert Write to a tracked file (e.g. `README.md`) is still refused.
+
+
+      Definition of done: from a background-session orchestrator run, I can write a planning
+      artifact directly into `_bmad-output/planning-artifacts/` in the main checkout with no
+      worktree dance, and tracked files are still protected.
+  - id: "4"
+    title: Ship gate
+    status: done
+    depends_on:
+      - "1"
+      - "2"
+      - "3"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator:
+      claimed_by: dev-shipgate-followups-s4
+      claimed_at: 2026-05-15T01:37:33.954Z
+      rework_count: 0
+      base_branch: 3-exempt-gitignored-paths-from-background
+      dev_returned_at: 2026-05-15T01:40:38.281Z
+      branch: 4-ship-gate
+      branch_prepared_by: dev-shipgate-followups-s4
+      branch_prepared_at: 2026-05-15T01:39:49.649Z
+      completed_at: 2026-05-15T01:41:53.451Z
+      summary: "Ship gate passed: all 134 e2e assertions and 130 unit tests green under pr_per_story=true,
+        confirming story 2's empty-commit fix works in the live flow."
+      artefacts:
+        - git:388fe558020a8dc443062c83b53d211003bece57
+        - https://github.com/jackmcintyre/sprint-orchestrator/pull/49
+    notes: >
+      Verification-only. By being zero-diff under pr_per_story=true, this story proves that story
+      2's fix actually works in the live flow — the very thing the prior sprint's ship gate failed
+      to do.
+
+
+      If this fails for the same reason the prior one did, story 2 is incomplete and must be
+      reworked.

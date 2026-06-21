@@ -10,7 +10,7 @@ As a **plugin maintainer**,
 I want **a load-bearing-but-empty plugin skeleton committed at `plugins/crew/`**,
 so that **every later story has a stable place to land its files, schemas, and imports**.
 
-This story is the foundation for the entire AI Engineering Team v1 plugin. It establishes every path, schema seam, and import the rest of the work depends on — but ships **zero behaviour**. No tools registered, no adapters with real logic, no skills wired up. Just the skeleton, a parseable plugin manifest, a startable (empty) MCP server, an empty `BmadAdapter`, a version-stamping helper used by later stories (2.3, 4.7, 4.9), and a vitest smoke suite that proves it all works.
+This story is the foundation for the entire flow plugin. It establishes every path, schema seam, and import the rest of the work depends on — but ships **zero behaviour**. No tools registered, no adapters with real logic, no skills wired up. Just the skeleton, a parseable plugin manifest, a startable (empty) MCP server, an empty `BmadAdapter`, a version-stamping helper used by later stories (2.3, 4.7, 4.9), and a vitest smoke suite that proves it all works.
 
 ## Acceptance Criteria
 
@@ -209,7 +209,7 @@ Copy this verbatim. Story 3.1 builds the registry. Story 3.3 implements the real
 {
   "name": "crew",
   "version": "0.1.0",
-  "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
+  "description": "flow — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
   "mcpServers": {
     "crew": {
       "command": "node",

@@ -253,7 +253,7 @@ UPDATE files (exist today; story modifies):
 - **Authoritative architecture:** `_bmad-output/planning-artifacts/architecture/planning-adapter-model.md` (esp. §FR78 row in the Implications table, §Two-layer model), `project-structure-boundaries.md` (line 86 names `mark-withdrawn.ts`), `architecture-validation-results.md` (Gap 3, line 69).
 - **User-surface AC convention:** `plugins/crew/docs/user-surface-acs.md` (the gate-binding rubric and tag regex `^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`).
 - **Build-output rule:** `plugins/crew/CLAUDE.md` (per project CLAUDE.md §Process notes) — `dist/` must be rebuilt and committed in the same change.
-- **Communication style:** speak to Jack in PM language per `/Users/jackmcintyre/projects/crew/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
+- **Communication style:** speak to Jack in PM language per `<repo-root>/CLAUDE.md` §How to talk to Jack. Recommend defaults; do not pause for engineering judgement.
 - **Negative-capability anchor:** `sprint-status.yaml` and everything under `_bmad-output/implementation-artifacts/` is owned by the orchestrator. This story MUST NOT touch any of it.
 
 ---

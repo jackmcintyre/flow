@@ -85,7 +85,7 @@ The workflow `args` are delivered as a JSON string. A typical launch passes:
 >
 > When you point the Workflow tool at the run script, the `scriptPath` you
 > pass **must be an absolute path** (e.g.
-> `/Users/you/projects/crew/plugins/flow/workflows/internal/run.workflow.js`).
+> `<repo-root>/plugins/flow/workflows/internal/run.workflow.js`).
 >
 > A **relative** path is resolved against the plugin directory, which **doubles
 > the prefix** — the runtime looks for the script under the plugin dir *plus*

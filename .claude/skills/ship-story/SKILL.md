@@ -11,7 +11,7 @@ Drive a single story from `backlog` → open PR using sequential BMad subagents 
 - `/ship-story` — picks the next eligible `backlog` story
 - `/ship-story 1-1` — works that story (prefix-matched against story keys)
 
-**Post-merge cleanup is conversational, not a slash command.** When Jack says any of "merged", "I merged it", "PR merged", "shipped", "it's in", etc., treat it as the single-story cleanup trigger. When he says "reconcile" or "fix the sprint status", run the batch sweeper. Both are in [Step 12](#step-12--post-merge-cleanup-conversational-trigger) below.
+**Post-merge cleanup is conversational, not a slash command.** When the operator says any of "merged", "I merged it", "PR merged", "shipped", "it's in", etc., treat it as the single-story cleanup trigger. When they say "reconcile" or "fix the sprint status", run the batch sweeper. Both are in [Step 12](#step-12--post-merge-cleanup-conversational-trigger) below.
 
 ## Architecture
 
@@ -42,7 +42,7 @@ Notes:
 
 Let `SH=python3 .claude/skills/ship-story/scripts/ship.py` for brevity below.
 
-**Worktree-relative paths (read this once).** From Step 3 onward, every file path passed to a subagent — spec, sprint-status, anything under `_bmad-output/` — MUST be the **worktree-absolute** form: `<worktree_path>/<rel>`. Concretely: `ship.py resolve` returns `spec_path` as `_bmad-output/implementation-artifacts/<story_key>.md` (repo-relative); your prompts should pass `<worktree_path>/<spec_path>`. The same applies to every `$SH set-status` invocation during the in-flight phases — pass `--worktree <worktree_path>` so the flip lands inside the story branch and ships in the PR rather than as uncommitted drift on main. Bookkeeping committed in the story branch ships with the PR; bookkeeping written to the main repo's working tree does not, and turns into a "chore: mark X done" follow-up PR (the chore-PR pattern Jack flagged).
+**Worktree-relative paths (read this once).** From Step 3 onward, every file path passed to a subagent — spec, sprint-status, anything under `_bmad-output/` — MUST be the **worktree-absolute** form: `<worktree_path>/<rel>`. Concretely: `ship.py resolve` returns `spec_path` as `_bmad-output/implementation-artifacts/<story_key>.md` (repo-relative); your prompts should pass `<worktree_path>/<spec_path>`. The same applies to every `$SH set-status` invocation during the in-flight phases — pass `--worktree <worktree_path>` so the flip lands inside the story branch and ships in the PR rather than as uncommitted drift on main. Bookkeeping committed in the story branch ships with the PR; bookkeeping written to the main repo's working tree does not, and turns into a "chore: mark X done" follow-up PR (the chore-PR pattern the operator flagged).
 
 ### Step 1 — Preflight
 
@@ -291,7 +291,7 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
    ```bash
    $SH record-verification <story_key> --type automated_e2e_verified --data '{"ac_refs":[<n>,...],"test_path":"<path>","test_command":"<cmd>"}'
    ```
-2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, you (orchestrator) MUST set up the smoke environment for Jack — do not just ask him to "run it somewhere." The setup is small but specific:
+2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, you (orchestrator) MUST set up the smoke environment for the operator — do not just ask them to "run it somewhere." The setup is small but specific:
 
    **a. Mint a scratch target repo** with whatever `.flow/config.yaml` the AC needs. Example for `adapter: native`:
    ```bash
@@ -304,23 +304,23 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
    echo "$SCRATCH"
    ```
 
-   **b. Launch Claude Code against the worktree's plugin via `--plugin-dir`** — NOT via the dev-install symlink, NOT via `/plugin install`. The `--plugin-dir` flag is Anthropic's officially-blessed dev workflow (`Load a plugin from a directory or .zip for this session only`); it bypasses the marketplace cache that gets nuked on Claude Code restart. Give Jack the exact invocation:
+   **b. Launch Claude Code against the worktree's plugin via `--plugin-dir`** — NOT via the dev-install symlink, NOT via `/plugin install`. The `--plugin-dir` flag is Anthropic's officially-blessed dev workflow (`Load a plugin from a directory or .zip for this session only`); it bypasses the marketplace cache that gets nuked on Claude Code restart. Give the operator the exact invocation:
    ```sh
    cd $SCRATCH
-   claude --plugin-dir /Users/jackmcintyre/projects/crew/.worktrees/<story_key>/plugins/flow
+   claude --plugin-dir <repo-root>/.worktrees/<story_key>/plugins/flow
    ```
 
    **Do NOT recommend `pnpm dev:install` or symlink dancing here.** Story 1.11's symlink approach works once but gets deleted on every Claude Code restart by the plugin healer (it sees a symlink where it expects a directory-copy install and removes it). See `anthropics/claude-code` issues [#17361](https://github.com/anthropics/claude-code/issues/17361) and [#23819](https://github.com/anthropics/claude-code/issues/23819) for the underlying mechanism, and PR #94's retro comment for the trace.
 
-   **c. Tell Jack what to run and what to paste back.** Be specific about which slash command, what input, and what verbatim output to capture (planner messages, file contents, error text, etc.). One paragraph max.
+   **c. Tell the operator what to run and what to paste back.** Be specific about which slash command, what input, and what verbatim output to capture (planner messages, file contents, error text, etc.). One paragraph max.
 
-   **d. After Jack pastes back, record:**
+   **d. After the operator pastes back, record:**
    ```bash
    $SH record-verification <story_key> --type user_surface_verified --data '{"ac_refs":[<n>,...],"operator":"jack","observations":[{"ac_ref":<n>,"pasted_output":"<verbatim>"},...]}'
    ```
    `record-verification` schema-validates the payload at write time; on schema failure it exits 2 and refuses to append. After a successful write, re-run `$SH pre-pr-gate <story_key>`.
 
-   **e. Tear down the scratch repo as part of cleanup messaging:** include `rm -rf $SCRATCH` in your end-of-story summary so Jack can wipe it after merge. `ship.py cleanup` does not touch scratch dirs.
+   **e. Tear down the scratch repo as part of cleanup messaging:** include `rm -rf $SCRATCH` in your end-of-story summary so the operator can wipe it after merge. `ship.py cleanup` does not touch scratch dirs.
 
 **Dog-fooding clause for Story 1.8 itself.** Story 1.8 introduces this gate AND has one `user-surface` AC (AC1 — it touches `bmad-create-story`). The orchestrator (not the dev agent) is responsible for: invoking `bmad-create-story` in a real Claude Code session against a throwaway story idea after dev sign-off, confirming the skill prompts for `user-surface` tagging per AC, capturing the verbatim output, and writing it via `record-verification` against story key `1-8-user-surface-ac-type-and-smoke-gate-in-ship-story`. Story 1.10 is the first non-self-referential production user.
 
@@ -356,7 +356,7 @@ Capture the PR URL **and PR number** (extract from the URL — Step 10 needs `<p
 $SH record <story_key> pr_opened --data '{"url":"...","number":N}'
 ```
 
-Note: status stays at `review` — Jack gates the merge, not this skill.
+Note: status stays at `review` — the operator gates the merge, not this skill.
 
 ### Step 10 — CI watch ↔ resolve cycle (max 3 passes)
 
@@ -367,7 +367,7 @@ Mirrors Step 7's review/rework structure. Maintain a local counter `ci_passes = 
    ```bash
    gh pr checks <pr_number> --watch
    ```
-   If the command itself exits non-zero because checks are still queued/running past the cap, halt with `CI_TIMEOUT` (not `CI_BLOCKED` — Jack can resume manually).
+   If the command itself exits non-zero because checks are still queued/running past the cap, halt with `CI_TIMEOUT` (not `CI_BLOCKED` — the operator can resume manually).
 3. `$SH record <story_key> ci_pass --data '{"pass":N,"conclusion":"success|failure|timeout"}'`
 4. If all required checks are `success` → break; continue to Step 11.
 5. If any required check is `failure`:
@@ -407,7 +407,7 @@ $SH record <story_key> ci_green
    $SH record <story_key> retro_posted --data '{"comment_url":"..."}'
    ```
 
-If `gh pr comment` fails (network, auth, etc.), halt with `RETRO_POST_FAILED`, surface stderr, and do NOT proceed to the chat summary — the retro is the audit trail; a quiet skip undermines its whole purpose. Jack can retry the post after fixing the underlying issue.
+If `gh pr comment` fails (network, auth, etc.), halt with `RETRO_POST_FAILED`, surface stderr, and do NOT proceed to the chat summary — the retro is the audit trail; a quiet skip undermines its whole purpose. The operator can retry the post after fixing the underlying issue.
 
 **Step 11b — Summarise to the user.** 2-3 sentences max:
 - which story shipped + PR URL
@@ -419,7 +419,7 @@ Do NOT re-render the reviewer notes block in the chat summary — they're now in
 
 ### Step 12 — Post-merge cleanup (conversational trigger)
 
-This step is **not** auto-run at the end of Step 11 — merge timing is unbounded (could be minutes, could be days). Instead, it fires when Jack signals the merge in conversation. Two flavours: **single-story cleanup** (the normal path) and **batch reconcile** (drift sweeper).
+This step is **not** auto-run at the end of Step 11 — merge timing is unbounded (could be minutes, could be days). Instead, it fires when the operator signals the merge in conversation. Two flavours: **single-story cleanup** (the normal path) and **batch reconcile** (drift sweeper).
 
 **Trigger phrases for single-story cleanup** (case-insensitive, fuzzy): "merged", "I merged", "I've merged", "PR merged", "it's merged", "shipped", "it's in", "landed". Use judgment; if ambiguous, ask "which story?" rather than guess.
 
@@ -432,7 +432,7 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    $SH pending-cleanup
    ```
    - Zero entries → may be drift from a manual merge or pre-skill history. Offer to run `reconcile` (below) instead of guessing.
-   - One entry → that's the target. Confirm to Jack in one line before proceeding ("Cleaning up `<story_key>` (PR #<n>)").
+   - One entry → that's the target. Confirm to the operator in one line before proceeding ("Cleaning up `<story_key>` (PR #<n>)").
    - Multiple entries → list them and ask which (or "all").
 
 2. **Run cleanup:**
@@ -453,14 +453,14 @@ $SH reconcile
 
 This scans `sprint-status.yaml` for every story in `review`, looks up its PR via `gh pr list --head story/<key>`, and runs the full `cleanup` flow on each merged one. Stories with no PR, with an open PR, or with a closed-not-merged PR are reported in `skipped` with a reason — none of them are touched.
 
-Report the JSON summary: number reconciled, any skipped with reasons. Do NOT re-run reconcile in a loop if some skipped — surface those to Jack and let him decide.
+Report the JSON summary: number reconciled, any skipped with reasons. Do NOT re-run reconcile in a loop if some skipped — surface those to the operator and let them decide.
 
 **Halt codes (script exit codes for `cleanup`):**
 
 | Code | Exit | Meaning | Suggested next step |
 |------|------|---------|---------------------|
-| `NOT_MERGED` | 10 | `gh pr view` says PR is open or closed-without-merge | Tell Jack — likely a false trigger |
-| `MAIN_NOT_FAST_FORWARD` | 11 | Local `main` has diverged from `origin/main` | Surface to Jack — needs a manual rebase/merge call |
+| `NOT_MERGED` | 10 | `gh pr view` says PR is open or closed-without-merge | Tell the operator — likely a false trigger |
+| `MAIN_NOT_FAST_FORWARD` | 11 | Local `main` has diverged from `origin/main` | Surface to the operator — needs a manual rebase/merge call |
 | `WORKTREE_DIRTY` | 12 | Worktree has uncommitted changes | Surface paths; do NOT silently `--force` |
 
 `reconcile` collects these per-story under `skipped` rather than halting the whole sweep.
@@ -478,9 +478,9 @@ The skill halts (no PR) on any of these. Each is recorded in the run log before 
 | `MISSING_ACS` | Story has no Acceptance Criteria section | Author the epic before shipping |
 | `WORKTREE_CONFLICT` | Path or branch already exists | Clean up old run before retry |
 | `SPEC_VALIDATION_FAILED` | Step 5 caught spec issues before any code burned | Re-run `bmad-create-story` and re-author, then retry |
-| `REVIEW_BLOCKED` | Reviewer said `block` or budget passes elapsed without `approve` (3 for substrate, 5 for user-surface) | Jack decides: iterate manually or `/bmad-correct-course` |
+| `REVIEW_BLOCKED` | Reviewer said `block` or budget passes elapsed without `approve` (3 for substrate, 5 for user-surface) | The operator decides: iterate manually or `/bmad-correct-course` |
 | `AC_VERIFICATION_FAILED` | One or more ACs not green, or QA left uncommitted files | Fix the failing AC's code/test (or commit the QA artefact); rerun from Step 8 |
-| `CI_BLOCKED` | 3 CI-fix passes elapsed and required checks still failing | Jack decides: iterate manually on the PR, or `/bmad-correct-course` |
+| `CI_BLOCKED` | 3 CI-fix passes elapsed and required checks still failing | The operator decides: iterate manually on the PR, or `/bmad-correct-course` |
 | `CI_TIMEOUT` | CI didn't settle within 15min poll cap | Re-run Step 10 once checks complete |
 | `RETRO_POST_FAILED` | `gh pr comment` failed in Step 11a (network / auth / etc.) | Fix the underlying issue and re-run Step 11a manually; the retro body is at `/tmp/ship-<story_key>.retro.md` |
 
@@ -490,7 +490,7 @@ The skill halts (no PR) on any of these. Each is recorded in the run log before 
 $SH state <story_key>
 ```
 
-Returns the JSONL event history. The latest event tells you which step succeeded last — pick up at the next one. (Full automatic resume is out of scope for v1; this surface is for Jack and the orchestrator to decide what to do.)
+Returns the JSONL event history. The latest event tells you which step succeeded last — pick up at the next one. (Full automatic resume is out of scope for v1; this surface is for the operator and the orchestrator to decide what to do.)
 
 ## Why scripts and not pure prose
 
