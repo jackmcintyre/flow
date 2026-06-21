@@ -1,7 +1,7 @@
 {
   "name": "flow",
   "version": "0.1.0",
-  "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
+  "description": "A project-shaped team of long-lived AI agents that drives a continuous-flow backlog through dev, review and merge.",
   "mcpServers": {
     "flow": {
       "command": "node",

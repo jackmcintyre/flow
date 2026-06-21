@@ -4,23 +4,13 @@ coverage/
 *.log
 .DS_Store
 .sprint-orchestrator/
-# .flow runtime state — project-specific, not source.
-# We ignore all content but track the empty state-directory scaffolding
-# (.flow/state/to-do/ and .flow/state/in-progress/) via .gitkeep so that
-# fresh review worktrees have the expected directory structure for AC checks.
-.flow/*
-!.flow/state/
-.flow/state/*
-!.flow/state/to-do/
-!.flow/state/in-progress/
-.flow/state/to-do/*
-.flow/state/in-progress/*
-!.flow/state/to-do/.gitkeep
-!.flow/state/in-progress/.gitkeep
+# .flow runtime state — project-specific local state, not source.
+# The plugin recreates these directories at runtime in any target repo.
+.flow/
 __pycache__/
 *.pyc
 
-# BMad tooling — installed/generated, not source
+# BMad tooling and planning/implementation artifacts — kept locally, not published.
 _bmad/
 _bmad-output/
 # Exception: the BMad adapter's test fixtures contain a fake `_bmad-output/`
@@ -28,18 +18,6 @@ _bmad-output/
 !plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/
 !plugins/flow/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/**
 .claude/skills/bmad-*/
-
-# ...but track the active planning artifacts (PRD, epics, architecture, etc.)
-# so remote agents and future readers can ground in them. Everything else
-# under _bmad-output/ — including the internal archive/ subfolder — stays
-# ignored.
-!_bmad-output/
-_bmad-output/*
-!_bmad-output/planning-artifacts/
-!_bmad-output/planning-artifacts/**
-_bmad-output/planning-artifacts/archive/
-!_bmad-output/implementation-artifacts/
-!_bmad-output/implementation-artifacts/**
 
 # Claude Code runtime — generated per-session/per-machine, not source
 .claude/scheduled_tasks.lock
@@ -50,3 +28,6 @@ _bmad-output/planning-artifacts/archive/
 .worktrees/
 .claude/worktrees/
 .claude/workflows/
+
+# Local-only operating notes (private working context, not source)
+internal/
