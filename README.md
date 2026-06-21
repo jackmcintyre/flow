@@ -4,7 +4,7 @@ flow is an experiment. This is me testing a hypothesis in the open.
 
 The hypothesis: someone with broad technology experience, who isn't a software engineer by trade but knows enough to be dangerous, can run the work of a whole product engineering team using AI agents, without giving up the rigour a good scrum team enforces.
 
-I spent years as a scrum master and delivery lead. I sat next to engineers, testers, analysts and designers for a long time without doing any of those jobs myself. The bet here is that the next iteration of agile is one person performing all of those roles, with the strength of an AI behind each of them. flow is that bet, built.
+I spent years as a scrum master and delivery lead. I sat next to engineers, testers, analysts and designers for a long time without doing any of those jobs myself. The bet here is that the next iteration of agile is fewer people performing multiple roles, with the strength of an AI behind each of them. flow is that bet, built.
 
 ## What it is
 
@@ -23,13 +23,13 @@ flow runs through a handful of commands:
 
 ## How it works
 
-You keep the backlog good. flow turns it into merged PRs, and sharpens itself each cycle.
+You keep the backlog primed. flow turns it into merged PRs, and sharpens itself each cycle.
 
 ```mermaid
 flowchart TB
     hire["/flow:hire<br/>a team forms around your repo"]
 
-    subgraph product["You - keep the backlog good"]
+    subgraph product["You - keep the backlog primed"]
         plan["plan & write specs<br/>(BMAD, or /flow:plan)"]
         ready["/flow:ready<br/>a judge panel grades a story,<br/>you admit it to the run"]
     end
