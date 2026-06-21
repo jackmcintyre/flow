@@ -24,6 +24,7 @@ import {
   getHelpAdviceInputSchema,
   getStatusInputSchema,
   getTeamSnapshotInputSchema,
+  initWorkspaceInputSchema,
   instantiatePersonaInputSchema,
   listClaimableTodosInputSchema,
   lookupRoleByDomainInputSchema,
@@ -79,6 +80,7 @@ import {
   renderBacklogDashboard,
 } from "./render-backlog-dashboard.js";
 import { getStatus, renderStatus } from "./get-status.js";
+import { initWorkspace, renderInitWorkspace } from "./init-workspace.js";
 import { openCycle } from "./open-cycle.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
@@ -159,6 +161,42 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       const report = await getStatus({ targetRepoRoot: root });
       return {
         content: [{ type: "text" as const, text: renderStatus(report) }],
+      };
+    },
+  });
+
+  // Story native:flow-init — initWorkspace: first-run scaffolder for /flow:init.
+  // Idempotently writes an explicit .flow/config.yaml (default adapter: native),
+  // the .flow/state/ lanes, .flow/native-stories/ (native), and seeds
+  // docs/standards.md from the shipped template. The explicit config is what
+  // makes a story-less fresh repo resolvable (no adapter can auto-detect one).
+  // Never overwrites existing files. Runs at operator authority (no role gate).
+  server.registerTool({
+    name: "initWorkspace",
+    description:
+      "Scaffold a fresh target repo into a Flow workspace (idempotent). Writes an " +
+      "explicit .flow/config.yaml (default adapter: native) — which breaks the fresh-repo " +
+      "deadlock where no adapter can auto-detect without existing stories — creates the " +
+      ".flow/state/{to-do,in-progress,blocked,done}/ lanes (and .flow/native-stories/ on " +
+      "native), and seeds docs/standards.md from the shipped template when absent. Never " +
+      "overwrites existing files. Returns a rendered scaffold summary plus a how-it-works " +
+      "orientation and the recommended next step. Used by /flow:init.",
+    inputSchema: initWorkspaceInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          adapter: z.enum(["native", "bmad"]).default("native"),
+        })
+        .parse(args);
+      const result = await initWorkspace({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: parsed.targetRepoRoot,
+        adapter: parsed.adapter,
+        mcpToolContext: { toolName: "initWorkspace", role: "operator" },
+      });
+      return {
+        content: [{ type: "text" as const, text: renderInitWorkspace(result) }],
       };
     },
   });

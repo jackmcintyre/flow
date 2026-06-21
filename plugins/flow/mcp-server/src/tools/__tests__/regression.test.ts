@@ -114,6 +114,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot", "knowledgeLimit"],
   },
+  initWorkspace: {
+    required: ["targetRepoRoot"],
+    properties: ["targetRepoRoot", "adapter"],
+  },
   instantiatePersona: {
     required: ["targetRepoRoot", "role"],
     properties: ["targetRepoRoot", "role"],
