@@ -7,11 +7,11 @@
  * the bmad variant omits the native-stories dir.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, access } from "node:fs/promises";
+import { mkdtemp, rm, readFile, access, mkdir } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { initWorkspace } from "../init-workspace.js";
+import { initWorkspace, renderInitWorkspace } from "../init-workspace.js";
 import { getStatus } from "../get-status.js";
 
 // __tests__ -> tools -> src -> mcp-server -> flow (the plugin root).
@@ -115,5 +115,54 @@ describe("initWorkspace", () => {
     expect(config).toContain("adapter: bmad");
     expect(result.adapter).toBe("bmad");
     expect(await exists(path.join(root, ".flow", "native-stories"))).toBe(false);
+  });
+
+  it("detects an existing git repo and team roster", async () => {
+    await mkdir(path.join(root, ".git"), { recursive: true });
+    await mkdir(path.join(root, "team", "planner"), { recursive: true });
+
+    const result = await initWorkspace({
+      targetRepoRoot: root,
+      pluginRoot: PLUGIN_ROOT,
+      mcpToolContext: CTX,
+    });
+
+    expect(result.gitPresent).toBe(true);
+    expect(result.teamPresent).toBe(true);
+  });
+});
+
+describe("renderInitWorkspace", () => {
+  it("renders a fresh scaffold with the hire next-step and a git note", () => {
+    const out = renderInitWorkspace({
+      adapter: "native",
+      created: [".flow/config.yaml", "docs/standards.md"],
+      skipped: [],
+      gitPresent: false,
+      teamPresent: false,
+      configPath: "/repo/.flow/config.yaml",
+    });
+
+    expect(out).toContain("Flow workspace initialised (adapter: native).");
+    expect(out).toContain("Created:");
+    expect(out).toContain("How flow works");
+    expect(out).toContain("Next: /flow:hire default");
+    expect(out).toContain("not a git repo");
+  });
+
+  it("renders an idempotent re-run with the plan next-step and no git note", () => {
+    const out = renderInitWorkspace({
+      adapter: "native",
+      created: [],
+      skipped: [".flow/config.yaml", "docs/standards.md"],
+      gitPresent: true,
+      teamPresent: true,
+      configPath: "/repo/.flow/config.yaml",
+    });
+
+    expect(out).toContain("already initialised");
+    expect(out).toContain("Already present (left as-is):");
+    expect(out).toContain("Next: /flow:plan");
+    expect(out).not.toContain("not a git repo");
   });
 });
