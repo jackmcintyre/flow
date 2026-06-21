@@ -52,6 +52,35 @@ Do NOT attempt to start the run.
 
 Also verify `targetRepoRoot` is an absolute path that exists on disk (`test -d "<targetRepoRoot>"`). If it does not exist, stop with a clear message.
 
+**Git pre-flight check (load-bearing):** the run cuts a fresh git **worktree** per story (Story 8.20) — that is how parallel dev workers stay isolated. Worktree creation requires `targetRepoRoot` to be a git repository with **at least one commit** (there must be a `HEAD` to cut from). If it is not, the failure surfaces only *after* a story has been claimed and handed to a dev worker, which then throws `"Cannot create agent worktree: not in a git repository"` — the story lands in `blocked/` mislabelled as a content failure, and recovering it means hand-editing a manifest (which the rules forbid). So check the git precondition here, before anything is claimed:
+
+```bash
+if ! git -C "<targetRepoRoot>" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "not-a-repo"
+elif ! git -C "<targetRepoRoot>" rev-parse HEAD >/dev/null 2>&1; then
+  echo "no-commits"
+else
+  echo "git-ok"
+fi
+```
+
+If the check prints anything other than `git-ok`, **stop immediately** — do NOT invoke the run — and emit the matching message:
+
+- `not-a-repo`:
+  ```
+  Error: the run target <targetRepoRoot> is not a git repository.
+  /flow:run builds each story in an isolated git worktree, which requires a git repo with at least one commit.
+  Initialise it first: `git init && git add -A && git commit -m "initial commit"`, then re-run /flow:run.
+  ```
+- `no-commits`:
+  ```
+  Error: the run target <targetRepoRoot> is a git repository but has no commits yet.
+  /flow:run cuts a per-story worktree from HEAD, which does not exist until the first commit.
+  Make an initial commit (`git add -A && git commit -m "initial commit"`), then re-run /flow:run.
+  ```
+
+> Note: this check must pass on disk *before* the session that runs `/flow:run` — git-initialising mid-session is not enough, because the harness's git detection is established at session start. If you `git init` to fix this, restart the session before re-running.
+
 ## Step 3 — Collect optional run knobs
 
 Accepted optional arguments (from the operator's invocation or conversational context):
@@ -149,5 +178,6 @@ The run result carries `maintainerFindings` — an array of structural tool-limi
 
 - **`CLAUDE_PLUGIN_ROOT` unset or empty:** this variable is set by Claude Code when loading a plugin skill. If it is missing, the plugin is not loaded correctly — run `echo $CLAUDE_PLUGIN_ROOT` to confirm and restart Claude Code with `--plugin-dir <path-to-plugins/flow>` or reinstall via `/plugin install flow@flow`.
 - **Engine file missing (`cli.js` not found):** the pre-flight check in Step 2 catches this and stops before the run starts. Rebuild the plugin and reinstall.
+- **Target is not a git repo / has no commits:** the git pre-flight in Step 2 catches this and stops before any story is claimed. The run cuts a per-story worktree (Story 8.20), which needs a git repo with a `HEAD`. Run `git init && git add -A && git commit -m "initial commit"` in the target, then restart the session (git detection is fixed at session start) and re-run. Without this gate the failure would otherwise surface only after a story is claimed, as a dev worker throwing `"Cannot create agent worktree: not in a git repository"`, leaving the story stranded in `blocked/` mislabelled `worker-threw`.
 - **Run exits immediately with `runReason: "queue-emptied"` and zero stories claimed:** the queue was empty or no story had `ready: true`. Run `/flow:plan` to author and materialise stories, then `/flow:ready` to approve them before launching.
 - **Workflow tool not available:** the `Workflow` tool is a Claude Code built-in. If it is not available in this session, the plugin environment is incomplete — restart Claude Code.
