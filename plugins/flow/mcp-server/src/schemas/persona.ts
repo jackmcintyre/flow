@@ -3,6 +3,7 @@ import {
   CatalogueRoleSchema,
   LockedPhrasesSchema,
   ModelTierSchema,
+  RoleCapabilitiesSchema,
 } from "./catalogue.js";
 
 /**
@@ -31,6 +32,10 @@ export const PersonaFrontmatterSchema = z
     tools_allow: z.array(z.string().min(1)).min(1),
     gh_allow: z.array(z.string().min(1)).default([]),
     locked_phrases: LockedPhrasesSchema,
+    // Optional capabilities declaration — mirrors CatalogueRoleSchema.
+    // Absence is fully back-compatible: personas without capabilities load
+    // identically to today.
+    capabilities: RoleCapabilitiesSchema.optional(),
     // Persona-only fields.
     hired_at: z
       .string()

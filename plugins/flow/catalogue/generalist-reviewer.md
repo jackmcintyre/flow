@@ -19,6 +19,12 @@ locked_phrases:
   verdict: "**Verdict: <SENTINEL>**"
   # enforcement: deprecated — see Story 4.6 revision 2 (the binding verdict is the recommendedVerdict field
   # of the file written by runReviewerSession). The locked phrase is retained as authoring guidance only.
+capabilities:
+  review_lenses:
+    - verifiability
+    - discipline
+  run_jobs:
+    - review
 ---
 
 # Generalist Reviewer

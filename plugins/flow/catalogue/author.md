@@ -13,6 +13,9 @@ locked_phrases:
   handoff: "Handoff — draft <ref> authored, not-ready, awaiting judgment"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses: []
+  run_jobs: []
 ---
 
 # Author

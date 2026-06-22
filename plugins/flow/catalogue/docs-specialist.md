@@ -13,6 +13,9 @@ locked_phrases:
   handoff: "Handoff to generalist-reviewer — docs updated"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses: []
+  run_jobs: []
 ---
 
 # Docs Specialist

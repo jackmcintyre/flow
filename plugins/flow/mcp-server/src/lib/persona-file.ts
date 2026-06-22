@@ -131,6 +131,14 @@ export function renderPersonaFile(opts: {
     tools_allow: [...catalogue.tools_allow],
     gh_allow: [...catalogue.gh_allow],
     locked_phrases: { ...catalogue.locked_phrases },
+    // Copy capabilities declaration when present — back-compat: absence
+    // means `undefined` (the optional key is omitted from the YAML output).
+    ...(catalogue.capabilities !== undefined && {
+      capabilities: {
+        review_lenses: [...catalogue.capabilities.review_lenses],
+        run_jobs: [...catalogue.capabilities.run_jobs],
+      },
+    }),
     hired_at: hiredAt,
     catalogue_version: catalogueVersion,
   };
