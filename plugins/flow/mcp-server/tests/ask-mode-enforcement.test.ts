@@ -36,6 +36,7 @@ import { RolePermissionsSchema } from "../src/schemas/role-permissions.js";
 import {
   assembleAskModeAllowedTools,
   ASK_MODE_TASK_ALLOWED_TOOLS,
+  isReadShapedTool,
 } from "../src/lib/ask-mode-allowed-tools.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,7 @@ const SCRIPT_PATH = path.resolve(PLUGIN_ROOT, "scripts", "worktree-smoke.sh");
 const DOC_PATH = path.resolve(PLUGIN_ROOT, "docs", "worktree-smoke.md");
 const ENFORCEMENT_DOC_PATH = path.resolve(PLUGIN_ROOT, "docs", "ask-mode-enforcement.md");
 const PERMISSIONS_DIR = path.resolve(PLUGIN_ROOT, "permissions");
+const FIXTURE_PERMISSIONS_DIR = path.resolve(HERE, "fixtures", "permissions");
 
 /** Verbatim three-line slash-command block (AC3, AC4, AC6(e)). */
 const VERBATIM_RECIPE_LINES = [
@@ -525,6 +527,235 @@ describe("AC6(h) — ask-mode.yaml content stability", () => {
       result.success,
       `RolePermissionsSchema parse failed: ${result.success ? "" : JSON.stringify((result as { error: unknown }).error)}`,
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPR1REEC5Y90FKFDCKNNADC AC1/AC2/AC3 — role-union allowlist
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a temporary plugin-root directory that contains a `permissions/`
+ * subdirectory with:
+ *   - `ask-mode.yaml` copied from the real plugin root, and
+ *   - `<extraRole>.yaml` copied from the test fixtures dir.
+ *
+ * This lets `assembleAskModeAllowedTools(tmpRoot, role)` run against a
+ * controlled fixture without touching the real permissions directory.
+ */
+async function makeFixturePluginRoot(extraRole: string): Promise<string> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), `flow-askmod-union-`));
+  tmpDirs.push(tmp);
+  const tmpPerms = path.join(tmp, "permissions");
+  await fs.mkdir(tmpPerms, { recursive: true });
+
+  // Copy the real ask-mode.yaml (shared set) into the temp root.
+  await fs.copyFile(
+    path.join(PERMISSIONS_DIR, "ask-mode.yaml"),
+    path.join(tmpPerms, "ask-mode.yaml"),
+  );
+
+  // Copy the fixture role permissions file.
+  const fixtureSrc = path.join(FIXTURE_PERMISSIONS_DIR, `${extraRole}.yaml`);
+  await fs.copyFile(fixtureSrc, path.join(tmpPerms, `${extraRole}.yaml`));
+
+  return tmp;
+}
+
+/**
+ * The read-shaped tools declared by the platform-specialist fixture that are
+ * NOT in the shared ask-mode set — i.e., the tools that should appear in the
+ * union but not in the base set.
+ *
+ * Must stay in sync with `tests/fixtures/permissions/platform-specialist.yaml`.
+ */
+const PLATFORM_SPECIALIST_EXTRA_READ_TOOLS = [
+  "readPlatformDocs",
+  "lookupPlatformService",
+] as const;
+
+/**
+ * The write-capable tools declared by the platform-specialist fixture that
+ * MUST NOT be admitted to the union allowlist.
+ *
+ * Must stay in sync with `tests/fixtures/permissions/platform-specialist.yaml`.
+ */
+const PLATFORM_SPECIALIST_WRITE_TOOLS = [
+  "writePlatformEntry",
+  "recordPlatformEvent",
+] as const;
+
+describe("AC1 — platform-specialist consult: union includes role-declared read-only tools", () => {
+  it("union allowlist contains the shared set plus the specialist's read-shaped tools", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    // All shared tools must be present.
+    for (const tool of ASK_MODE_TASK_ALLOWED_TOOLS) {
+      expect(allowedTools, `must still contain shared tool '${tool}'`).toContain(tool);
+    }
+
+    // The specialist's read-shaped tools must be present in the union.
+    for (const tool of PLATFORM_SPECIALIST_EXTRA_READ_TOOLS) {
+      expect(
+        allowedTools,
+        `union must include specialist's read-shaped tool '${tool}'`,
+      ).toContain(tool);
+    }
+  });
+
+  it("union allowlist contains 'Read' (Claude Code built-in)", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+    expect(allowedTools, "must include 'Read' built-in").toContain("Read");
+  });
+
+  it("the union set is strictly larger than the shared-only set when the role declares extra read tools", async () => {
+    const sharedOnly = await assembleAskModeAllowedTools(PLUGIN_ROOT);
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const withRole = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    // The union must be strictly larger (the specialist added read tools not in the shared set).
+    expect(
+      withRole.length,
+      "union set must be larger than the shared-only set",
+    ).toBeGreaterThan(sharedOnly.length);
+  });
+});
+
+describe("AC2 — mutation refusal is absolute regardless of extra role tools in the consult", () => {
+  it("write-capable tools from the platform-specialist fixture are NOT in the union allowlist", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    for (const writeTool of PLATFORM_SPECIALIST_WRITE_TOOLS) {
+      expect(
+        allowedTools,
+        `write-capable tool '${writeTool}' must NOT be admitted to the union allowlist`,
+      ).not.toContain(writeTool);
+    }
+  });
+
+  it("known canonical-state mutators are not admitted even when a role declares extra read tools", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    const MUTATORS = [
+      "instantiatePersona",
+      "appendPersonaKnowledge",
+      "claimStory",
+      "recordVerdict",
+      "applyRetroProposal",
+      "unhireRole",
+    ];
+    for (const mutator of MUTATORS) {
+      expect(
+        allowedTools,
+        `canonical-state mutator '${mutator}' must not be in the union allowlist`,
+      ).not.toContain(mutator);
+    }
+  });
+
+  it("MCP server still refuses a state-mutating call with _meta.role=ask-mode when extra role tools are present", async () => {
+    // This asserts the server-side boundary is independent of the allowed-tools assembly.
+    // The MCP dispatcher refuses based on _meta.role, not the assembled tool list.
+    const { client, cleanup } = await makeServerAndClient();
+    try {
+      const result = await client.callTool({
+        name: "instantiatePersona",
+        arguments: {
+          targetRepoRoot: "/tmp/fake-for-union-test",
+          role: "planner",
+        },
+        _meta: { role: "ask-mode" },
+      });
+
+      expect(result.isError).toBe(true);
+      const content = result.content as Array<{ type: string; text: string }>;
+      const text = content[0]!.text;
+      expect(text, "refusal must mention ask-mode").toContain("ask-mode");
+      expect(text, "refusal must mention the attempted tool").toContain("instantiatePersona");
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("AC3 — assembled tool set is exactly the union of shared + role read-shaped tools, no others", () => {
+  it("every tool in the union allowlist is either from the shared set or a read-shaped role tool", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    // Load both permission files to compute the expected union explicitly.
+    const sharedPerms = await loadRolePermissions({ role: "ask-mode", pluginRoot: fixtureRoot });
+    const rolePerms = await loadRolePermissions({ role: "platform-specialist", pluginRoot: fixtureRoot });
+
+    const expectedUnion = new Set([
+      ...sharedPerms.tools_allow,
+      "Read",
+      ...rolePerms.tools_allow.filter(isReadShapedTool),
+    ]);
+
+    // Every tool in the assembled set must be in the expected union.
+    for (const tool of allowedTools) {
+      expect(
+        expectedUnion.has(tool),
+        `assembled tool '${tool}' is not in the expected union (shared + role read-shaped)`,
+      ).toBe(true);
+    }
+
+    // Every tool in the expected union must be in the assembled set.
+    for (const tool of expectedUnion) {
+      expect(
+        allowedTools,
+        `expected union tool '${tool}' is missing from the assembled set`,
+      ).toContain(tool);
+    }
+  });
+
+  it("no write-capable tool from the role's declaration appears in the assembled set", async () => {
+    const fixtureRoot = await makeFixturePluginRoot("platform-specialist");
+    const rolePerms = await loadRolePermissions({ role: "platform-specialist", pluginRoot: fixtureRoot });
+    const allowedTools = await assembleAskModeAllowedTools(fixtureRoot, "platform-specialist");
+
+    // Find all write-capable tools in the role's declaration.
+    const writeCapable = rolePerms.tools_allow.filter((t) => !isReadShapedTool(t));
+    for (const writeTool of writeCapable) {
+      expect(
+        allowedTools,
+        `write-capable role tool '${writeTool}' must not appear in the assembled set`,
+      ).not.toContain(writeTool);
+    }
+  });
+
+  it("isReadShapedTool correctly classifies known prefixes and exact names", () => {
+    // True: read-shaped
+    expect(isReadShapedTool("readPlatformDocs")).toBe(true);
+    expect(isReadShapedTool("readPersona")).toBe(true);
+    expect(isReadShapedTool("lookupPlatformService")).toBe(true);
+    expect(isReadShapedTool("lookupRoleByDomain")).toBe(true);
+    expect(isReadShapedTool("getStatus")).toBe(true);
+    expect(isReadShapedTool("getTeamSnapshot")).toBe(true);
+    expect(isReadShapedTool("heartbeat")).toBe(true);
+
+    // False: write-capable / state-mutating
+    expect(isReadShapedTool("writePlatformEntry")).toBe(false);
+    expect(isReadShapedTool("recordPlatformEvent")).toBe(false);
+    expect(isReadShapedTool("instantiatePersona")).toBe(false);
+    expect(isReadShapedTool("claimStory")).toBe(false);
+    expect(isReadShapedTool("completeStory")).toBe(false);
+    expect(isReadShapedTool("recordYield")).toBe(false);
+    expect(isReadShapedTool("blockStory")).toBe(false);
+    expect(isReadShapedTool("runDevTerminalAction")).toBe(false);
+  });
+
+  it("fallback: when the role has no permissions file, returns only the shared set", async () => {
+    // PLUGIN_ROOT has ask-mode.yaml but no 'nonexistent-role.yaml'.
+    const allowedTools = await assembleAskModeAllowedTools(PLUGIN_ROOT, "nonexistent-role");
+    const sharedOnly = await assembleAskModeAllowedTools(PLUGIN_ROOT);
+
+    // With a missing role file, the result must equal the shared-only set (order-insensitive).
+    expect([...allowedTools].sort()).toEqual([...sharedOnly].sort());
   });
 });
 

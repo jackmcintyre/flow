@@ -1,0 +1,12 @@
+role: platform-specialist
+tools_allow:
+  # Read-shaped tools — safe to admit to ask-mode union allowlist
+  - readPlatformDocs
+  - lookupPlatformService
+  - heartbeat
+  # Write-capable / state-mutating tools — must NOT be admitted
+  - writePlatformEntry
+  - recordPlatformEvent
+gh_allow:
+  - pr-view
+gh_allow_args: {}

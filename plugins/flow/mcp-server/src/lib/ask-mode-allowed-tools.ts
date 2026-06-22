@@ -4,6 +4,8 @@
  * for passing to a Claude Code `Task` invocation's `allowed_tools` argument.
  *
  * Story 2.8 AC2, AC5, AC6(c) — option (a) `allowed_tools` Task argument.
+ * Story native:01KVPR1REEC5Y90FKFDCKNNADC — union with the consulted role's
+ *   own declared read-only tools.
  *
  * **Enforcement rationale (ask-mode-enforcement.md):**
  * Claude Code's `Task` tool propagation of `_meta.role` through to spawned
@@ -15,12 +17,22 @@
  * independently of whether `_meta.role` propagates.
  *
  * This helper exports:
- *   - `assembleAskModeAllowedTools(pluginRoot)` — reads `permissions/ask-mode.yaml`
- *     and returns `[...tools_allow, "Read"]` (Read is always included so the
- *     subagent can read files; it is not a registered MCP tool so it does not
- *     appear in tools_allow but IS a Claude Code built-in tool name).
- *   - `ASK_MODE_TASK_ALLOWED_TOOLS` — a static snapshot of the expected array,
- *     used by tests that need a synchronous reference without IO.
+ *   - `assembleAskModeAllowedTools(pluginRoot, role?)` — reads
+ *     `permissions/ask-mode.yaml`, optionally unions with the consulted
+ *     role's own declared read-only tools, and always appends `"Read"`.
+ *     When `role` is provided and a permissions file exists for it at
+ *     `pluginRoot/permissions/<role>.yaml`, the helper reads that file,
+ *     filters its `tools_allow` to read-shaped tools only (names that
+ *     start with `get`, `read`, or `lookup`, or equal `heartbeat`), and
+ *     merges the result into the shared ask-mode set (de-duped). If the
+ *     role's permissions file does not exist or cannot be loaded the
+ *     helper silently falls back to the shared set alone — the non-
+ *     mutation boundary is never widened by a load failure.
+ *   - `ASK_MODE_TASK_ALLOWED_TOOLS` — a static snapshot of the shared-
+ *     only expected array, used by tests that need a synchronous
+ *     reference without IO (no role unioned in).
+ *   - `isReadShapedTool(name)` — predicate exported for tests to assert
+ *     the read-shape classification without coupling to the implementation.
  *
  * (FR109, NFR12)
  */
@@ -34,6 +46,8 @@ import { loadRolePermissions } from "../state/load-role-permissions.js";
  *
  * IMPORTANT: keep in sync with `plugins/flow/permissions/ask-mode.yaml`.
  * The AC6(h) test asserts the YAML file's content against this constant.
+ *
+ * This constant reflects the SHARED set only (no role-specific additions).
  */
 export const ASK_MODE_TASK_ALLOWED_TOOLS: readonly string[] = [
   // MCP tools from ask-mode.yaml tools_allow (read-shaped)
@@ -50,6 +64,30 @@ export const ASK_MODE_TASK_ALLOWED_TOOLS: readonly string[] = [
 ] as const;
 
 /**
+ * The name prefixes and exact names that qualify a tool as "read-shaped" for
+ * the purposes of the ask-mode union allowlist.
+ *
+ * A tool is read-shaped if:
+ *   - Its name starts with "get", "read", or "lookup" (case-sensitive), OR
+ *   - Its name is exactly "heartbeat".
+ *
+ * This classification is the gating predicate used when unioning a consulted
+ * role's declared tools into the ask-mode allowlist. Write-capable or state-
+ * mutating tools that do not match this predicate are NEVER admitted.
+ */
+const READ_SHAPED_PREFIXES = ["get", "read", "lookup"] as const;
+const READ_SHAPED_EXACT = new Set(["heartbeat"]);
+
+/**
+ * Returns `true` when `name` is read-shaped (safe to include in the ask-mode
+ * union allowlist). Exported so tests can assert the classification directly.
+ */
+export function isReadShapedTool(name: string): boolean {
+  if (READ_SHAPED_EXACT.has(name)) return true;
+  return READ_SHAPED_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
  * Assemble the `allowed_tools` array for a Claude Code `Task` invocation
  * that opens a `/flow:ask` side-session.
  *
@@ -58,13 +96,40 @@ export const ASK_MODE_TASK_ALLOWED_TOOLS: readonly string[] = [
  * that is not an MCP tool but must be in the Task allowlist so the subagent
  * can read files during its response).
  *
+ * When `role` is supplied, the helper additionally loads
+ * `permissions/<role>.yaml` (from the same `pluginRoot`), filters
+ * `tools_allow` to read-shaped tools only, and merges those into the result
+ * (de-duped). If the role's permissions file is missing or malformed the
+ * helper silently returns the shared set — a load error MUST NOT widen the
+ * mutation boundary.
+ *
  * @param pluginRoot - Absolute path to the plugin root (e.g. the value of
  *   `getPluginRoot()` in production, or a fixture path in tests).
- * @returns Mutable copy of the allowed-tools array.
+ * @param role - Optional. The consulted role's id. When provided, its
+ *   declared read-only tools are unioned into the result.
+ * @returns Mutable copy of the allowed-tools array (shared set, plus the
+ *   role's read-shaped tools when `role` is provided, de-duped).
  */
 export async function assembleAskModeAllowedTools(
   pluginRoot: string,
+  role?: string,
 ): Promise<string[]> {
-  const perms = await loadRolePermissions({ role: "ask-mode", pluginRoot });
-  return [...perms.tools_allow, "Read"];
+  const sharedPerms = await loadRolePermissions({ role: "ask-mode", pluginRoot });
+  const sharedSet = new Set([...sharedPerms.tools_allow, "Read"]);
+
+  if (role !== undefined) {
+    try {
+      const rolePerms = await loadRolePermissions({ role, pluginRoot });
+      for (const tool of rolePerms.tools_allow) {
+        if (isReadShapedTool(tool)) {
+          sharedSet.add(tool);
+        }
+      }
+    } catch {
+      // Role permissions file missing or malformed — fall back to shared set.
+      // Fail-safe: a load error must NEVER widen the mutation boundary.
+    }
+  }
+
+  return [...sharedSet];
 }
