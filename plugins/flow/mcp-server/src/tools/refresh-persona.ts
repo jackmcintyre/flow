@@ -170,10 +170,8 @@ export async function refreshPersona(
  *   `## Knowledge\n\n`
  * (an empty knowledge section). When `preservedKnowledge` is non-empty, we
  * append it after that trailing blank line.
- *
- * Exported for unit testing.
  */
-export function injectKnowledge(rendered: string, knowledge: string): string {
+function injectKnowledge(rendered: string, knowledge: string): string {
   if (!knowledge) {
     return rendered;
   }
