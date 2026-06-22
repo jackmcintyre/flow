@@ -50,6 +50,7 @@
   "resolveBuildPlan",
   "resolveJudgePlan",
   "resolveLensRoles",
+  "resolveRunSlot",
   "runAutoMergeGate",
   "runDevTerminalAction",
   "runReviewerSession",

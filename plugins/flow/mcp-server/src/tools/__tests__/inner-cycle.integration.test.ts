@@ -641,7 +641,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("initWorkspace");
       // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story). 61 → 62.
       expect(toolNames).toContain("requeueBlockedStory");
-      expect(toolNames.length).toBe(62);
+      // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic builder/reviewer selection). 62 → 63.
+      expect(toolNames).toContain("resolveRunSlot");
+      expect(toolNames.length).toBe(63);
     } finally {
       await client.close();
       await server.close();

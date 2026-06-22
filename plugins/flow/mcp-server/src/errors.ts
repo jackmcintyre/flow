@@ -2656,3 +2656,33 @@ export class NotABlockedStoryError extends DomainError {
     this.foundState = opts.foundState;
   }
 }
+
+/**
+ * No hired role declares it can fill the requested run job slot.
+ *
+ * The run loop requires exactly one qualified role for each slot (build and
+ * review). When the resolver finds no qualified role it throws this error rather
+ * than falling back to a hard-coded name or silently proceeding — guessing who
+ * builds a story is the rubber-stamp failure in disguise.
+ *
+ * To resolve: hire a role that declares `run_jobs: [build]` or
+ * `run_jobs: [review]` in its capabilities block, or re-hire the default
+ * generalist builder (generalist-dev) or reviewer (generalist-reviewer).
+ *
+ * Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/reviewer selection.
+ */
+export class RunSlotUnstaffedError extends DomainError {
+  readonly job: string;
+
+  constructor(opts: { job: string }) {
+    super(
+      `Run slot '${opts.job}' is unstaffed: no hired role declares it can fill ` +
+        `this run job. The run cannot proceed without a qualified role for every ` +
+        `slot — hire a role that declares 'run_jobs: [${opts.job}]' in its ` +
+        `capabilities block, or re-hire the default generalist ` +
+        `(${opts.job === "build" ? "generalist-dev" : "generalist-reviewer"}). ` +
+        `(Story native:01KVPQS1DVJE41KNG065D6X1X7)`,
+    );
+    this.job = opts.job;
+  }
+}

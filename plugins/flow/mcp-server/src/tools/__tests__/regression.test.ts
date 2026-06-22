@@ -234,6 +234,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot"],
   },
+  resolveRunSlot: {
+    required: ["targetRepoRoot", "job"],
+    properties: ["targetRepoRoot", "job"],
+  },
   runAutoMergeGate: {
     required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"],
     properties: [

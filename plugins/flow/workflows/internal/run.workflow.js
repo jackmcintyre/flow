@@ -287,6 +287,23 @@ const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', t
 if (!SU) return { error: 'no-session-ulid' }
 log(`run session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME} maxConcurrency=${MAX_CONCURRENCY}`)
 
+// SLOT RESOLUTION (Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/reviewer
+// selection). Before fetching persona prompts, resolve the role that fills each run slot
+// from the live hired team's declared run-job capabilities. The generalist defaults
+// (generalist-dev / generalist-reviewer) win when present and qualified; a different
+// qualified hired role wins when the generalists are absent. If no qualified role exists
+// for a slot the run stops immediately with a clear operator-facing message naming the
+// unstaffed slot — never silently proceeding or falling back to a hard-coded name.
+// Read-only / idempotent → retryable. Fail-loud: a garbled relay (missing role field)
+// also stops the run, matching the behaviour of the 'fail loud on empty persona' guard.
+const devSlot = await seam(`node ${CLI} resolveRunSlot --json '${J({ targetRepoRoot: REPO, job: 'build' })}'`, 'slot:build', true)
+if (!devSlot || devSlot._parseError || !devSlot.role) throw new Error(`run: resolveRunSlot failed for the build slot — cannot determine who builds stories${devSlot?._parseError ? ` (${devSlot._parseError})` : devSlot?.message ? `: ${devSlot.message}` : ''}`)
+const devRole = devSlot.role
+const reviewerSlot = await seam(`node ${CLI} resolveRunSlot --json '${J({ targetRepoRoot: REPO, job: 'review' })}'`, 'slot:review', true)
+if (!reviewerSlot || reviewerSlot._parseError || !reviewerSlot.role) throw new Error(`run: resolveRunSlot failed for the review slot — cannot determine who reviews stories${reviewerSlot?._parseError ? ` (${reviewerSlot._parseError})` : reviewerSlot?.message ? `: ${reviewerSlot.message}` : ''}`)
+const reviewerRole = reviewerSlot.role
+log(`run slots resolved: build=${devRole}${devSlot.isDefault ? ' (default)' : ' (non-default)'} review=${reviewerRole}${reviewerSlot.isDefault ? ' (default)' : ' (non-default)'}`)
+
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
 // The reviewer persona is fetched up-front too so a crash-resume that skips dev
@@ -296,15 +313,15 @@ log(`run session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' 
 // system prompt, which grows as the team accrues knowledge entries). Haiku could not
 // reliably hand it back through StructuredOutput (it degraded to plain text and threw,
 // killing the run at startup), so these two seams force Opus — see the seam() doc.
-const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true, false, 'opus'))?.systemPrompt || ''
-const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:reviewer', true, false, 'opus'))?.systemPrompt || ''
+const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: devRole })}'`, 'persona:dev', true, false, 'opus'))?.systemPrompt || ''
+const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: reviewerRole })}'`, 'persona:reviewer', true, false, 'opus'))?.systemPrompt || ''
 // FAIL LOUD on an empty persona (finding D5). A seam error or a missing
 // systemPrompt would otherwise let every story spawn dev/reviewer with NO
 // discipline rules — silently dropping the evidence-only contract these prompts
 // carry. The persona is a structural prerequisite for the whole run, so stop now
 // with a clear message rather than build/review unguarded.
-if (!devPersona.trim()) throw new Error('run: empty generalist-dev persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn dev without its discipline rules')
-if (!reviewerPersona.trim()) throw new Error('run: empty generalist-reviewer persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn reviewer without its discipline rules')
+if (!devPersona.trim()) throw new Error(`run: empty ${devRole} persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn dev without its discipline rules`)
+if (!reviewerPersona.trim()) throw new Error(`run: empty ${reviewerRole} persona — buildPersonaSpawnPrompt returned no systemPrompt; refusing to spawn reviewer without its discipline rules`)
 
 const completed = [], merged = [], pausedForHuman = [], blocked = [], resumed = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
@@ -503,7 +520,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     await agent(
       `${reviewerPrompt}\n\n## How to run the review in this stateless run\n` +
         `Your FIRST and only mandatory action is to run EXACTLY this command (do not alter the path); it performs the three mandatory reads and writes the binding verdict to reviewer-result.json:\n` +
-        `  node ${CLI} runReviewerSession --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, prNumber, role: 'generalist-reviewer' })}'\n` +
+        `  node ${CLI} runReviewerSession --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, prNumber, role: reviewerRole })}'\n` +
         `Then summarise the result it prints for the operator.\n\n` +
         `## Optional: record ONE reusable lesson (learning loop)\n` +
         `If — and ONLY if — this review surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runReviewerSession call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
@@ -596,7 +613,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   const lessonRead = await seam(`node ${CLI} readReviewerLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `lesson-read:${ref}`, true, true)
   const lesson = lessonRead && !lessonRead._parseError ? lessonRead.lesson : null
   if (lesson) {
-    const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: 'generalist-reviewer' })}'`, `lesson-forward:${ref}`, true, true)
+    const fwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: [lesson] }, role: reviewerRole })}'`, `lesson-forward:${ref}`, true, true)
     if (fwd && !fwd._parseError) log(`${ref} forwarded reviewer lesson onto done manifest`)
     else log(`${ref} lesson-forward did not confirm (swallowed) — merge proceeds`)
   }
@@ -614,7 +631,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     // recordStoryRetro shallow-overwrites lessons[] — passing the full union here
     // ensures the builder lesson APPENDS rather than replaces the reviewer lesson.
     const unionLessons = [...(lesson ? [lesson] : []), capturedDevLesson]
-    const devFwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: unionLessons }, role: 'generalist-dev' })}'`, `lesson-forward:${ref}`, true, true)
+    const devFwd = await seam(`node ${CLI} recordStoryRetro --json '${J({ targetRepoRoot: REPO, ref, payload: { lessons: unionLessons }, role: devRole })}'`, `lesson-forward:${ref}`, true, true)
     if (devFwd && !devFwd._parseError) log(`${ref} forwarded builder lesson onto done manifest`)
     else log(`${ref} builder lesson-forward did not confirm (swallowed) — merge proceeds`)
   }

@@ -651,7 +651,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
     // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
     // /flow:init added initWorkspace (first-run workspace scaffolder) = 61 total.
     // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story) = 62 total.
-    expect(result.tools.length).toBe(62);
+    // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic builder/reviewer selection) = 63 total.
+    expect(result.tools.length).toBe(63);
 
     await client.close();
     await server.close();
