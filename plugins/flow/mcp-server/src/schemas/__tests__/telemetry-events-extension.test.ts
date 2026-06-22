@@ -1,21 +1,30 @@
 /**
- * Schema extension tests for the three new telemetry event types — Story 4.12 Task 8.4.
+ * Schema extension tests for the telemetry event types.
  *
- * AC5 coverage:
+ * Story 4.12 Task 8.4 — original three event types:
  *   (f) Schema-strict assertions: unknown extra key in data fails (5f)
  *   (g) Round-trip parseability: all new event types parse cleanly (5g)
  *
- * Tests the new schemas independently of the logger and tool layer.
+ * Story native:01KVP72SR857S3RY7CMQ8E2BK6 AC2 — `story.blocked` event:
+ *   Asserts the event validates AND persists (a real entry is readable back
+ *   from the JSONL file after a block), proving the non-fatal backstop guard
+ *   cannot silently swallow a schema-validation failure from an unregistered
+ *   type.
  */
 
-import { describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   TelemetryEventSchema,
   ReviewerVerdictEventSchema,
   ReviewerVerdictMergeActionEventSchema,
   DevBudgetExceededEventSchema,
   YieldHandoffEventSchema,
+  StoryBlockedEventSchema,
 } from "../telemetry-events.js";
+import { logTelemetryEvent } from "../../lib/logger.js";
 
 const BASE_TS = "2026-05-26T12:00:00.000Z";
 const BASE_FIELDS = {
@@ -402,5 +411,182 @@ describe("YieldHandoffEventSchema", () => {
       },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StoryBlockedEventSchema — Story native:01KVP72SR857S3RY7CMQ8E2BK6 AC2
+// ---------------------------------------------------------------------------
+
+describe("StoryBlockedEventSchema", () => {
+  it("accepts a valid story.blocked event", () => {
+    const result = StoryBlockedEventSchema.safeParse({
+      ...BASE_FIELDS,
+      agent: "orchestrator",
+      type: "story.blocked",
+      story_id: "native:01KTEST0000000000000000000",
+      data: {
+        ref: "native:01KTEST0000000000000000000",
+        blocked_by: "worker-threw",
+        block_detail: "Cannot read properties of undefined (reading 'prUrl')",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects unknown extra key in data (.strict())", () => {
+    const result = StoryBlockedEventSchema.safeParse({
+      ...BASE_FIELDS,
+      agent: "orchestrator",
+      type: "story.blocked",
+      data: {
+        ref: "native:01KTEST0000000000000000000",
+        blocked_by: "worker-threw",
+        block_detail: "some error",
+        extra_field: "bad",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty string for ref", () => {
+    const result = StoryBlockedEventSchema.safeParse({
+      ...BASE_FIELDS,
+      agent: "orchestrator",
+      type: "story.blocked",
+      data: {
+        ref: "",
+        blocked_by: "worker-threw",
+        block_detail: "some error",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty string for block_detail", () => {
+    const result = StoryBlockedEventSchema.safeParse({
+      ...BASE_FIELDS,
+      agent: "orchestrator",
+      type: "story.blocked",
+      data: {
+        ref: "native:01KTEST0000000000000000000",
+        blocked_by: "worker-threw",
+        block_detail: "",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("routes story.blocked through TelemetryEventSchema discriminated union", () => {
+    const result = TelemetryEventSchema.safeParse({
+      ...BASE_FIELDS,
+      agent: "orchestrator",
+      type: "story.blocked",
+      story_id: "native:01KTEST0000000000000000000",
+      data: {
+        ref: "native:01KTEST0000000000000000000",
+        blocked_by: "worker-threw",
+        block_detail: "some error detail",
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.type).toBe("story.blocked");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC2 durable-persist integration — story.blocked event writes to JSONL and
+// reads back, proving the non-fatal guard cannot silently swallow a missing
+// registration (Story native:01KVP72SR857S3RY7CMQ8E2BK6 AC2).
+// ---------------------------------------------------------------------------
+
+describe("story.blocked — validate-and-persist (AC2)", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "flow-story-blocked-ac2-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("AC2 — story.blocked event validates and persists in the JSONL activity history", async () => {
+    const ref = "native:01KAC2TEST00000000000000000";
+    const sessionId = "01TESTAC2SESSION000000000000";
+    const blockedBy = "worker-threw";
+    const blockDetail = "Unexpected error: Cannot read properties of undefined";
+
+    // Emit via logTelemetryEvent (the same path emitStoryBlocked uses).
+    await logTelemetryEvent({
+      targetRepoRoot: tmpRoot,
+      event: {
+        type: "story.blocked",
+        session_id: sessionId,
+        agent: "orchestrator",
+        story_id: ref,
+        data: { ref, blocked_by: blockedBy, block_detail: blockDetail },
+      },
+    });
+
+    // Read the JSONL file back — must contain a valid, parseable entry.
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    const files = await fs.readdir(telemetryDir);
+    expect(files.length).toBe(1);
+
+    const jsonlPath = path.join(telemetryDir, files[0]!);
+    const raw = await fs.readFile(jsonlPath, "utf8");
+    const lines = raw.trim().split("\n").filter(Boolean);
+    expect(lines.length).toBe(1);
+
+    // The persisted line must parse back as a valid story.blocked event.
+    const parsed = JSON.parse(lines[0]!) as unknown;
+    const validated = TelemetryEventSchema.safeParse(parsed);
+    expect(validated.success).toBe(true);
+    if (validated.success) {
+      expect(validated.data.type).toBe("story.blocked");
+      if (validated.data.type === "story.blocked") {
+        expect(validated.data.data.ref).toBe(ref);
+        expect(validated.data.data.blocked_by).toBe(blockedBy);
+        expect(validated.data.data.block_detail).toBe(blockDetail);
+        expect(validated.data.story_id).toBe(ref);
+      }
+    }
+  });
+
+  it("AC2 — a telemetry.invalid entry (not story.blocked) is written when type is unregistered, exposing silent-swallow failure mode", async () => {
+    // This test documents the failure mode the implementation must close:
+    // if story.blocked were NOT registered in the union, logTelemetryEvent
+    // would write a telemetry.invalid event (not the intended entry) and throw
+    // TelemetryEventInvalidError — which emitStoryBlocked's catch block swallows,
+    // leaving the activity history with a failure marker instead of the real entry.
+    // The AC2 test above proves we are on the SUCCESS path (real entry present).
+    // This companion test proves the FAILURE path so the distinction is explicit.
+    const sessionId = "01TESTFAILPATH000000000000";
+
+    // Intentionally emit an unregistered type to trigger the failure path.
+    await expect(
+      logTelemetryEvent({
+        targetRepoRoot: tmpRoot,
+        event: {
+          type: "unknown.unregistered.type" as "story.blocked", // force the wrong type
+          session_id: sessionId,
+          agent: "orchestrator",
+          data: { ref: "native:x", blocked_by: "worker-threw", block_detail: "detail" },
+        },
+      }),
+    ).rejects.toThrow();
+
+    // The JSONL file exists and holds a telemetry.invalid entry, not the intended type.
+    const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
+    const files = await fs.readdir(telemetryDir);
+    expect(files.length).toBe(1);
+    const raw = await fs.readFile(path.join(telemetryDir, files[0]!), "utf8");
+    const lines = raw.trim().split("\n").filter(Boolean);
+    expect(lines.length).toBe(1);
+    const parsed = JSON.parse(lines[0]!) as { type: string };
+    expect(parsed.type).toBe("telemetry.invalid");
   });
 });

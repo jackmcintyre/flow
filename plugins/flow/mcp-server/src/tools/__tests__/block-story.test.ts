@@ -1,11 +1,15 @@
 /**
- * `blockStory` unit test — fix/run-isolation-coordination-honesty.
+ * `blockStory` unit test — fix/run-isolation-coordination-honesty + AC1 (worker-threw detail).
  *
  * blockStory is the live run's "give up on this story" primitive: it moves a
  * story THIS session owns from in-progress/ to blocked/ as a clean state change.
  * This is the non-termination fix's load-bearing seam — without moving an
  * abandoned story OUT of in-progress/, claimNextStory keeps reporting
  * waiting-on-in-progress and the run spins forever.
+ *
+ * AC1 (Story native:01KVP72SR857S3RY7CMQ8E2BK6): when a build worker throws and
+ * the caller supplies `blockDetail`, that human-readable reason is persisted onto
+ * the blocked manifest as `block_detail` and reads back after the session ends.
  */
 
 import { promises as fs } from "node:fs";
@@ -156,5 +160,69 @@ describe("blockStory — clean in-progress → blocked move", () => {
         blockedBy: "worker-threw",
       }),
     ).rejects.toBeInstanceOf(ManifestNotFoundError);
+  });
+
+  // ── AC1 (Story native:01KVP72SR857S3RY7CMQ8E2BK6) ────────────────────────
+  // Given a build worker throws and the run calls blockStory with blockDetail,
+  // the human-readable reason is persisted onto the blocked manifest and reads
+  // back from disk after the session ends.
+
+  it("AC1 — persists blockDetail onto the blocked manifest and reads back", async () => {
+    await seedInProgress({ claimed_by: SESSION_ULID });
+
+    const errorDetail = "Cannot read properties of undefined (reading 'prUrl')";
+    await blockStory({
+      targetRepoRoot: tmpRoot,
+      ref: STORY_REF,
+      sessionUlid: SESSION_ULID,
+      blockedBy: "worker-threw",
+      blockDetail: errorDetail,
+    });
+
+    // Read back from disk — must survive the call (i.e. be written, not in-memory).
+    const blockedRaw = await fs.readFile(path.join(blockedDir, `${STORY_REF}.yaml`), "utf8");
+    const blocked = parseExecutionManifest(yamlParse(blockedRaw) as unknown, {
+      absPath: path.join(blockedDir, `${STORY_REF}.yaml`),
+    });
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.blocked_by).toBe("worker-threw");
+    expect(blocked.block_detail).toBe(errorDetail);
+  });
+
+  it("AC1 — truncates blockDetail to 500 chars before persisting", async () => {
+    await seedInProgress({ claimed_by: SESSION_ULID });
+
+    const longDetail = "x".repeat(600);
+    await blockStory({
+      targetRepoRoot: tmpRoot,
+      ref: STORY_REF,
+      sessionUlid: SESSION_ULID,
+      blockedBy: "worker-threw",
+      blockDetail: longDetail,
+    });
+
+    const blockedRaw = await fs.readFile(path.join(blockedDir, `${STORY_REF}.yaml`), "utf8");
+    const blocked = parseExecutionManifest(yamlParse(blockedRaw) as unknown, {
+      absPath: path.join(blockedDir, `${STORY_REF}.yaml`),
+    });
+    expect(blocked.block_detail).toBe("x".repeat(500));
+  });
+
+  it("AC1 — block_detail absent on blocked manifest when not supplied (backward compat)", async () => {
+    await seedInProgress({ claimed_by: SESSION_ULID });
+
+    await blockStory({
+      targetRepoRoot: tmpRoot,
+      ref: STORY_REF,
+      sessionUlid: SESSION_ULID,
+      blockedBy: "rework-exhausted",
+      // no blockDetail
+    });
+
+    const blockedRaw = await fs.readFile(path.join(blockedDir, `${STORY_REF}.yaml`), "utf8");
+    const blocked = parseExecutionManifest(yamlParse(blockedRaw) as unknown, {
+      absPath: path.join(blockedDir, `${STORY_REF}.yaml`),
+    });
+    expect(blocked.block_detail).toBeUndefined();
   });
 });

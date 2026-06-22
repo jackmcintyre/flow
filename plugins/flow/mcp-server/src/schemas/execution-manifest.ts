@@ -449,6 +449,19 @@ export const ExecutionManifestSchema = z
      * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
      */
     source_issue: z.string().regex(/^\d+$/).optional(),
+
+    /**
+     * Human-readable detail of why a story was blocked — the worker's error
+     * message at the worker-threw block point, captured alongside `blocked_by`
+     * so an operator can diagnose the failure without inspecting run logs.
+     *
+     * Present only on `blocked/` manifests whose `blocked_by === "worker-threw"`;
+     * absent on all other manifests. Persisted so it survives the session that
+     * produced it (the no-silent-failures guarantee).
+     *
+     * Added in Story native:01KVP72SR857S3RY7CMQ8E2BK6 (AC1).
+     */
+    block_detail: z.string().min(1).optional(),
   })
   .strict();
 

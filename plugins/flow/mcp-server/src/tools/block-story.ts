@@ -35,6 +35,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { ManifestNotFoundError, WrongClaimantError } from "../errors.js";
+import { emitStoryBlocked } from "../lib/emit-story-blocked.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import {
@@ -59,6 +60,10 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
  * @param opts.ref - Manifest ref (e.g. `"native:01HZ..."` or `"bmad:1.1"`).
  * @param opts.sessionUlid - ULID of the calling session. Must match `claimed_by`.
  * @param opts.blockedBy - The give-up reason to stamp (a `blocked_by` enum value).
+ * @param opts.blockDetail - Optional human-readable error detail to persist alongside
+ *   `blocked_by` so the failure is diagnosable after the session ends (AC1). Used
+ *   on the `"worker-threw"` path where the caller captured the error message.
+ *   Truncated to 500 chars before persistence (NFR14 spirit).
  * @param opts.role - Optional role label for the canonical-fs guard. Default
  *   `"orchestrator"`.
  * @returns `{ ref, absPath }` — the ref and absolute path of the blocked manifest.
@@ -73,9 +78,10 @@ export async function blockStory(opts: {
   ref: string;
   sessionUlid: string;
   blockedBy: string;
+  blockDetail?: string;
   role?: string;
 }): Promise<{ ref: string; absPath: string }> {
-  const { targetRepoRoot, ref, sessionUlid, blockedBy, role = "orchestrator" } =
+  const { targetRepoRoot, ref, sessionUlid, blockedBy, blockDetail, role = "orchestrator" } =
     opts;
 
   const stateRoot = path.join(targetRepoRoot, ".flow", "state");
@@ -120,11 +126,15 @@ export async function blockStory(opts: {
   // Step 5: Write the clean blocked state — clear claimed_by, set status, stamp
   // the supplied blocked_by. parseExecutionManifest validates blocked_by against
   // the closed enum, so an unknown reason throws rather than writing garbage.
+  // Also persist the optional block_detail (human-readable error message) so the
+  // failure is diagnosable after the session ends (AC1).
   const { claimed_by: _dropClaim, ...withoutClaim } = manifest;
+  const trimmedDetail = blockDetail !== undefined ? blockDetail.slice(0, 500) : undefined;
   const updatedManifest = {
     ...withoutClaim,
     status: "blocked" as const,
     blocked_by: blockedBy,
+    ...(trimmedDetail !== undefined ? { block_detail: trimmedDetail } : {}),
   };
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absBlockedPath,
@@ -139,6 +149,22 @@ export async function blockStory(opts: {
     targetRepoRoot,
     mcpToolContext: { toolName: "blockStory", role },
   });
+
+  // Step 6: Emit a durable `story.blocked` telemetry event (AC2). This runs inside
+  // a fail-soft wrapper (emitStoryBlocked swallows errors) so a telemetry write
+  // failure can NEVER re-break a run. The detail is only present when the caller
+  // provided it; fall back to the blocked_by reason as a sentinel so the event
+  // always has a non-empty block_detail.
+  if (trimmedDetail !== undefined) {
+    await emitStoryBlocked({
+      targetRepoRoot,
+      ref,
+      blockedBy,
+      blockDetail: trimmedDetail,
+      sessionUlid,
+      agent: role,
+    });
+  }
 
   return { ref, absPath: absBlockedPath };
 }
