@@ -643,7 +643,10 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("requeueBlockedStory");
       // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic builder/reviewer selection). 62 → 63.
       expect(toolNames).toContain("resolveRunSlot");
-      expect(toolNames.length).toBe(63);
+      // Story native:01KVPSZ14HH48J9NEH7N6S6QDR added matchStorySpecialist + recordSpecialistEngagement (specialist auto-engage). 63 → 65.
+      expect(toolNames).toContain("matchStorySpecialist");
+      expect(toolNames).toContain("recordSpecialistEngagement");
+      expect(toolNames.length).toBe(65);
     } finally {
       await client.close();
       await server.close();

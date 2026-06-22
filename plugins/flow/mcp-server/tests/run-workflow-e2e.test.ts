@@ -146,6 +146,11 @@ async function callCli(toolName: string, toolArgs: object): Promise<unknown> {
 /**
  * Labels that call the REAL CLI (pure-state tools that don't need AI or GitHub).
  * Everything else is stubbed deterministically.
+ *
+ * specialist-match: and record-specialist: are included so the e2e AC1 test
+ * (Story native:01KVPSZ14HH48J9NEH7N6S6QDR) can verify real specialist matching.
+ * In tests without a team/ directory the specialist seams return null (fail-soft),
+ * which is safe for all pre-existing test cases.
  */
 const REAL_CLI_LABEL_PREFIXES = [
   "mint",
@@ -158,6 +163,8 @@ const REAL_CLI_LABEL_PREFIXES = [
   "progress-start:",
   "progress-done:",
   "clean-root-guard:",
+  "specialist-match:",
+  "record-specialist:",
 ];
 
 function isRealCliLabel(label: string): boolean {
@@ -549,5 +556,224 @@ describe("AC2 — harness can detect a real orchestration regression (structural
       // result and a broken-seam result are observably different.
     },
     240_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC1
+//
+// Integration smoke: the specialist auto-engage path in the run.
+//
+// Story A — cited sources match a hired specialist's path_patterns:
+//   → the run logs show the specialist was engaged.
+//   → the story still completes normally (specialist engagement is additive).
+//
+// Story B — cited sources match NO hired specialist's path_patterns:
+//   → the run logs do NOT show a specialist match.
+//   → the story still ships exactly as it does today (generalists-only path).
+//
+// Both stories run against a scratch repo that has a team/ directory with one
+// specialist persona. specialist-match: and record-specialist: are in the
+// REAL_CLI_LABEL_PREFIXES set so the seams call the real CLI tools.
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a minimal PERSONA.md for a specialist role into the scratch repo's
+ * team/ directory. The `path_patterns` glob(s) determine which cited sources
+ * trigger auto-engagement of this role.
+ */
+async function seedSpecialistPersona(opts: {
+  repo: string;
+  role: string;
+  domain: string;
+  pathPatterns: string[];
+}): Promise<void> {
+  const { repo, role, domain, pathPatterns } = opts;
+  const roleDir = path.join(repo, "team", role);
+  await fs.mkdir(roleDir, { recursive: true });
+
+  const patternsYaml =
+    pathPatterns.length > 0
+      ? ["  path_patterns:", ...pathPatterns.map((p) => `    - '${p}'`)].join("\n")
+      : "  path_patterns: []";
+
+  const capBlock = [
+    "capabilities:",
+    "  review_lenses: []",
+    "  run_jobs: []",
+    patternsYaml,
+  ].join("\n");
+
+  const persona = [
+    "---",
+    `role: ${role}`,
+    `domain: ${domain}`,
+    `model_tier: medium`,
+    `tools_allow: []`,
+    `gh_allow: []`,
+    `locked_phrases:`,
+    `  handoff: "Handoff to reviewer"`,
+    `  verdict: "Verdict:"`,
+    capBlock,
+    `hired_at: "2026-06-01T00:00:00.000Z"`,
+    `catalogue_version: "1.0.0"`,
+    "---",
+    "",
+    `# ${role}`,
+    "",
+    "## Domain",
+    "",
+    domain,
+    "",
+    "## Mandate",
+    "",
+    "Specialist mandate.",
+    "",
+    "## Out of mandate",
+    "",
+    "Nothing excluded.",
+    "",
+    "## Prompt",
+    "",
+    "You are a specialist.",
+    "",
+    "## Knowledge",
+    "",
+  ].join("\n");
+
+  await fs.writeFile(path.join(roleDir, "PERSONA.md"), persona, "utf8");
+}
+
+/** Seed a claimable story whose cited_sources include `citedSources`. */
+async function seedStoryWithCitedSources(
+  repo: string,
+  ref: string,
+  citedSources: string[],
+): Promise<void> {
+  const manifest = {
+    ref,
+    status: "to-do",
+    adapter: "native",
+    source_path: `.flow/native-stories/${ref.replace("native:", "")}.md`,
+    source_hash: "b".repeat(64),
+    depends_on: [],
+    acceptance_criteria: [
+      {
+        text: "**Given** a specialist team, **When** the run claims this story, **Then** the specialist is engaged.",
+        kind: "integration",
+        verification: { type: "vitest", target: "tests/run-workflow-e2e.test.ts" },
+      },
+    ],
+    title: "Specialist engagement smoke story",
+    narrative: "As a smoke harness, I want a story whose cited sources trigger specialist engagement.",
+    narrative_struct: {
+      role: "smoke harness",
+      want: "specialist auto-engagement",
+      so_that: "the right expert weighs in",
+    },
+    tasks: [{ text: "Verify specialist engagement.", ac_refs: ["AC1"] }],
+    cited_sources: citedSources,
+    implementation_notes: "Specialist smoke fixture.",
+    withdrawn: false,
+    ready: true,
+    risk_tier: "medium" as const,
+    risk_tier_evidence: { matched_rule: "fallback", paths: [], change_types: [], diff_size: 0 },
+  };
+
+  const dir = path.join(repo, ".flow", "state", "to-do");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, `${ref}.yaml`), yamlStringify(manifest, { lineWidth: 0 }), "utf8");
+}
+
+describe("Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC1: specialist auto-engage in the run", () => {
+  it(
+    "story A (run-loop cited sources): logs show the run-loop specialist was engaged",
+    async () => {
+      const REF_A = "native:01KVPSZ1SMOKE0SPECALIST001";
+
+      // Seed the specialist persona with a pattern that matches run.workflow.js.
+      await seedSpecialistPersona({
+        repo: scratchRoot,
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      });
+
+      // Story A's cited sources are run-loop files → should match the specialist.
+      await seedStoryWithCitedSources(scratchRoot, REF_A, [
+        "plugins/flow/workflows/internal/run.workflow.js",
+        "plugins/flow/mcp-server/src/tools/classify-story-lane.ts",
+      ]);
+
+      const { result, thrown, logs } = await runRunE2e();
+
+      // The run completed without throwing.
+      expect(thrown, `run threw: ${thrown}`).toBeUndefined();
+      expect(result).toBeDefined();
+
+      // The specialist was identified and logged.
+      const logStr = logs.join("\n");
+      expect(logStr, "expected specialist match log line").toMatch(/specialist match: run-loop-specialist/);
+
+      // The story still reached a terminal state (engagement is additive — the
+      // story still ships via the normal claim→dev→review→verdict→gate path).
+      const allTerminal = [
+        ...result.completed,
+        ...result.pausedForHuman.map((p: any) => p.ref),
+        ...result.merged.map((m: any) => m.ref),
+        ...result.blocked.map((b: any) => b.ref),
+      ];
+      expect(
+        allTerminal.some((r: string) => r.includes("01KVPSZ1SMOKE0SPECALIST001")),
+        "story A should reach a terminal state after specialist engagement",
+      ).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
+    "story B (unowned cited sources): no specialist match logged — generalists-only path unchanged",
+    async () => {
+      const REF_B = "native:01KVPSZ1SMOKE0NOGENER0002";
+
+      // Seed the specialist — its patterns only match run.workflow paths.
+      await seedSpecialistPersona({
+        repo: scratchRoot,
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      });
+
+      // Story B's cited sources are NOT in the specialist's declared area.
+      await seedStoryWithCitedSources(scratchRoot, REF_B, [
+        "plugins/flow/mcp-server/src/tools/classify-story-lane.ts",
+        "plugins/flow/mcp-server/src/tools/lookup-role-by-domain.ts",
+      ]);
+
+      const { result, thrown, logs } = await runRunE2e();
+
+      // The run completed without throwing.
+      expect(thrown, `run threw: ${thrown}`).toBeUndefined();
+      expect(result).toBeDefined();
+
+      // No specialist match was logged for this story.
+      const logStr = logs.join("\n");
+      expect(logStr, "expected NO specialist match log for unowned-path story").not.toMatch(
+        /specialist match: run-loop-specialist/,
+      );
+
+      // The story still reached a terminal state (generalists-only path is unchanged).
+      const allTerminal = [
+        ...result.completed,
+        ...result.pausedForHuman.map((p: any) => p.ref),
+        ...result.merged.map((m: any) => m.ref),
+        ...result.blocked.map((b: any) => b.ref),
+      ];
+      expect(
+        allTerminal.some((r: string) => r.includes("01KVPSZ1SMOKE0NOGENER0002")),
+        "story B should reach a terminal state on the generalists-only path",
+      ).toBe(true);
+    },
+    120_000,
   );
 });

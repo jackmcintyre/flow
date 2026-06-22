@@ -8,6 +8,9 @@
  * - AC2: full lane — schema/migration/security path or non-low risk_tier.
  * - AC3: full lane — absent/ambiguous signals default to full.
  * - AC4 (integration): author 'fast' hint with full-lane signals → manifest
+ *
+ * Also covers AC2 of Story native:01KVPSZ14HH48J9NEH7N6S6QDR:
+ * - matchSpecialistByCitedSources: path→specialist matching and no-match path.
  *   persisted lane is 'full' (downgrade-only via scanSources).
  *
  * AC4 integration test uses a full scan harness (scratch workspace) so it
@@ -20,7 +23,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-import { classifyStoryLane, StoryLaneResultSchema } from "../classify-story-lane.js";
+import { classifyStoryLane, matchSpecialistByCitedSources, StoryLaneResultSchema } from "../classify-story-lane.js";
 import { scanSources } from "../scan-sources.js";
 
 // ---------------------------------------------------------------------------
@@ -475,5 +478,311 @@ describe("AC4 (integration): scanSources persists lane field; hint downgrade-onl
 
     // medium risk_tier → lane=full regardless of how few sources there are.
     expect(manifest["lane"]).toBe("full");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC2
+//
+// matchSpecialistByCitedSources: path→specialist matching.
+//
+// - When a story's cited-source paths match a hired specialist's declared
+//   path_patterns, that specialist is returned.
+// - When no hired specialist's path_patterns match any cited source, null is
+//   returned (generalist-only no-match).
+// - Custom (authored) and built-in roles are treated identically.
+// - Backbone generalists (generalist-dev, generalist-reviewer) are never
+//   auto-engaged as a specialist even if they have path_patterns.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a minimal PERSONA.md frontmatter block for a role.
+ * path_patterns is written as a YAML block list under capabilities.
+ */
+function makePersonaMd(opts: {
+  role: string;
+  domain: string;
+  pathPatterns?: string[];
+}): string {
+  const { role, domain, pathPatterns } = opts;
+  const patterns = pathPatterns ?? [];
+  const capBlock =
+    patterns.length > 0
+      ? [
+          "capabilities:",
+          "  review_lenses: []",
+          "  run_jobs: []",
+          `  path_patterns:`,
+          ...patterns.map((p) => `    - '${p}'`),
+        ].join("\n")
+      : "capabilities:\n  review_lenses: []\n  run_jobs: []\n  path_patterns: []";
+
+  return [
+    "---",
+    `role: ${role}`,
+    `domain: ${domain}`,
+    `model_tier: medium`,
+    `tools_allow: []`,
+    `gh_allow: []`,
+    `locked_phrases:`,
+    `  handoff: "Handoff to reviewer"`,
+    `  verdict: "Verdict:"`,
+    capBlock,
+    `hired_at: "2026-06-01T00:00:00.000Z"`,
+    `catalogue_version: "1.0.0"`,
+    "---",
+    "",
+    `# ${role}`,
+    "",
+    "## Domain",
+    "",
+    domain,
+    "",
+    "## Mandate",
+    "",
+    "Specialist mandate.",
+    "",
+    "## Out of mandate",
+    "",
+    "Out of mandate.",
+    "",
+    "## Prompt",
+    "",
+    "You are a specialist.",
+    "",
+    "## Knowledge",
+    "",
+  ].join("\n");
+}
+
+let matchScratch: string;
+
+beforeEach(async () => {
+  matchScratch = await fs.mkdtemp(path.join(os.tmpdir(), "flow-match-specialist-"));
+});
+
+afterEach(async () => {
+  await fs.rm(matchScratch, { recursive: true, force: true });
+});
+
+describe("Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC2: matchSpecialistByCitedSources", () => {
+  it("returns null when there is no team directory (no specialists hired)", async () => {
+    const root = path.join(matchScratch, "no-team");
+    await fs.mkdir(root);
+    // No team/ directory — behave as no specialists.
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the team directory is empty", async () => {
+    const root = path.join(matchScratch, "empty-team");
+    await fs.mkdir(root);
+    await fs.mkdir(path.join(root, "team"), { recursive: true });
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when no hired specialist declares path_patterns", async () => {
+    const root = path.join(matchScratch, "no-patterns");
+    await fs.mkdir(root);
+    const roleDir = path.join(root, "team", "run-loop-specialist");
+    await fs.mkdir(roleDir, { recursive: true });
+    // Persona with empty path_patterns.
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      makePersonaMd({ role: "run-loop-specialist", domain: "Run loop", pathPatterns: [] }),
+    );
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("matches a specialist whose path_patterns cover a cited source (glob)", async () => {
+    const root = path.join(matchScratch, "glob-match");
+    await fs.mkdir(root);
+    const roleDir = path.join(root, "team", "run-loop-specialist");
+    await fs.mkdir(roleDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      }),
+    );
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.role).toBe("run-loop-specialist");
+    expect(result!.domain).toBe("Run loop");
+  });
+
+  it("matches when only one of several cited sources matches (partial match is a match)", async () => {
+    const root = path.join(matchScratch, "partial-match");
+    await fs.mkdir(root);
+    const roleDir = path.join(root, "team", "run-loop-specialist");
+    await fs.mkdir(roleDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      }),
+    );
+    // Three cited sources, only the last matches.
+    const result = await matchSpecialistByCitedSources(
+      [
+        "plugins/flow/mcp-server/src/tools/classify-story-lane.ts",
+        "plugins/flow/mcp-server/src/tools/lookup-role-by-domain.ts",
+        "plugins/flow/workflows/internal/run.workflow.js",
+      ],
+      root,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.role).toBe("run-loop-specialist");
+  });
+
+  it("returns null when no cited source matches any specialist's path_patterns", async () => {
+    const root = path.join(matchScratch, "no-match");
+    await fs.mkdir(root);
+    const roleDir = path.join(root, "team", "run-loop-specialist");
+    await fs.mkdir(roleDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      }),
+    );
+    // Cited sources do NOT match the specialist's patterns.
+    const result = await matchSpecialistByCitedSources(
+      [
+        "plugins/flow/mcp-server/src/tools/classify-story-lane.ts",
+        "plugins/flow/mcp-server/src/tools/lookup-role-by-domain.ts",
+      ],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("skips backbone generalist-dev even if it has path_patterns", async () => {
+    const root = path.join(matchScratch, "backbone-skip");
+    await fs.mkdir(root);
+    // Plant generalist-dev with matching path_patterns — it must be skipped.
+    const gDevDir = path.join(root, "team", "generalist-dev");
+    await fs.mkdir(gDevDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(gDevDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "generalist-dev",
+        domain: "Everything",
+        pathPatterns: ["**"],
+      }),
+    );
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("skips backbone generalist-reviewer even if it has path_patterns", async () => {
+    const root = path.join(matchScratch, "reviewer-backbone-skip");
+    await fs.mkdir(root);
+    const gRevDir = path.join(root, "team", "generalist-reviewer");
+    await fs.mkdir(gRevDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(gRevDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "generalist-reviewer",
+        domain: "Everything",
+        pathPatterns: ["**"],
+      }),
+    );
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("skips the custom/ subdirectory (custom/ is not a role, it is a subfolder convention)", async () => {
+    const root = path.join(matchScratch, "custom-skip");
+    await fs.mkdir(root);
+    // Anything placed directly in team/custom/ is skipped — it's not a role dir.
+    const customDir = path.join(root, "team", "custom", "some-role");
+    await fs.mkdir(customDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(customDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "some-role",
+        domain: "Some area",
+        pathPatterns: ["**"],
+      }),
+    );
+    // The team/custom entry is skipped, but team/custom/some-role is inside it.
+    // The walker only goes one level deep (readdir of team/), so it sees 'custom'
+    // as an entry and skips it — the nested role is invisible.
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("treats a custom authored role identically to a built-in role (AC3)", async () => {
+    const root = path.join(matchScratch, "custom-vs-builtin");
+    await fs.mkdir(root);
+
+    // Authored (custom-origin) role — placed directly under team/ (not inside custom/).
+    const customRoleDir = path.join(root, "team", "workflow-engine-specialist");
+    await fs.mkdir(customRoleDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(customRoleDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "workflow-engine-specialist",
+        domain: "Workflow engine",
+        pathPatterns: ["plugins/flow/workflows/**"],
+      }),
+    );
+
+    const result = await matchSpecialistByCitedSources(
+      ["plugins/flow/workflows/internal/run.workflow.js"],
+      root,
+    );
+    // The custom-origin specialist is matched exactly as a built-in would be.
+    expect(result).not.toBeNull();
+    expect(result!.role).toBe("workflow-engine-specialist");
+    expect(result!.domain).toBe("Workflow engine");
+  });
+
+  it("returns empty cited_sources as null immediately (no team scan)", async () => {
+    const root = path.join(matchScratch, "empty-cited");
+    await fs.mkdir(root);
+    const roleDir = path.join(root, "team", "run-loop-specialist");
+    await fs.mkdir(roleDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      makePersonaMd({
+        role: "run-loop-specialist",
+        domain: "Run loop",
+        pathPatterns: ["**"],
+      }),
+    );
+    // Empty cited sources → null without touching team/.
+    const result = await matchSpecialistByCitedSources([], root);
+    expect(result).toBeNull();
   });
 });
