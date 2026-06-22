@@ -52122,15 +52122,6 @@ import { promises as fs39 } from "node:fs";
 import * as path49 from "node:path";
 
 // src/lib/specialist-domain-map.ts
-var DOMAIN_TO_SPECIALIST = /* @__PURE__ */ new Map([
-  ["authentication authorization and secret handling", "security-specialist"],
-  ["test design and coverage gaps", "test-specialist"],
-  ["developer-facing documentation and READMEs", "docs-specialist"],
-  ["failure-mode diagnosis and root-cause isolation", "debugger"]
-]);
-var ALL_SPECIALIST_ROLES = Array.from(
-  DOMAIN_TO_SPECIALIST.values()
-);
 var GENERALIST_BACKBONE_ROLES = /* @__PURE__ */ new Set([
   "generalist-dev",
   "generalist-reviewer",
