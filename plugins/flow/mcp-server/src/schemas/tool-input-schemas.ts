@@ -237,6 +237,15 @@ export const discardDraftInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot", "ref"],
 };
 
+export const requeueBlockedStoryInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+  },
+  required: ["targetRepoRoot", "ref"],
+};
+
 export const gatherRetroInputsInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -891,6 +900,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   readRepoSignals: readRepoSignalsInputSchema,
   reattachOrphan: reattachOrphanInputSchema,
   recallLesson: recallLessonInputSchema,
+  requeueBlockedStory: requeueBlockedStoryInputSchema,
   recordAgentFriction: recordAgentFrictionInputSchema,
   recordMaintainerFeedback: recordMaintainerFeedbackInputSchema,
   reviewMaintainerInbox: reviewMaintainerInboxInputSchema,

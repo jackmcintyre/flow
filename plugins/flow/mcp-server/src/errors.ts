@@ -2624,3 +2624,35 @@ export class UnhireBelowJudgeMinimumError extends DomainError {
     this.unstaffedLens = opts.unstaffedLens;
   }
 }
+
+/**
+ * `requeueBlockedStory` was called on a ref that is not in the `blocked/`
+ * state. Only manifests that are genuinely blocked can be requeued — the
+ * operation is a one-way inverse of `blockStory` and must not touch any
+ * story that is still in the normal flow (to-do, in-progress, done).
+ *
+ * The `foundState` field carries the actual state in which the ref was found
+ * (one of "to-do" | "in-progress" | "done"), or `null` when the ref does
+ * not exist in any state directory at all.
+ *
+ * (Story native:01KVN6ASCWXAHZ0FF7YRFKJECC)
+ */
+export class NotABlockedStoryError extends DomainError {
+  readonly ref: string;
+  readonly foundState: string | null;
+
+  constructor(opts: { ref: string; foundState: string | null }) {
+    const detail =
+      opts.foundState === null
+        ? `no manifest for '${opts.ref}' exists in any state directory`
+        : `'${opts.ref}' is in state '${opts.foundState}', not 'blocked'`;
+    super(
+      `requeueBlockedStory refused: ${detail}. ` +
+        `Only stories in the blocked/ lane can be requeued — run /flow:dashboard to check ` +
+        `the current state of '${opts.ref}'. ` +
+        `(Story native:01KVN6ASCWXAHZ0FF7YRFKJECC)`,
+    );
+    this.ref = opts.ref;
+    this.foundState = opts.foundState;
+  }
+}

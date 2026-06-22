@@ -190,6 +190,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot", "role", "id"],
     properties: ["targetRepoRoot", "role", "id"],
   },
+  requeueBlockedStory: {
+    required: ["targetRepoRoot", "ref"],
+    properties: ["targetRepoRoot", "ref"],
+  },
   recordAgentFriction: {
     required: ["targetRepoRoot", "agent", "session_id", "kind", "expected", "observed"],
     properties: ["targetRepoRoot", "agent", "story_id", "session_id", "kind", "expected", "observed", "role"],

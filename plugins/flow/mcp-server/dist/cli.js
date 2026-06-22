@@ -10782,6 +10782,14 @@ var discardDraftInputSchema = {
   },
   required: ["targetRepoRoot", "ref"]
 };
+var requeueBlockedStoryInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" }
+  },
+  required: ["targetRepoRoot", "ref"]
+};
 var gatherRetroInputsInputSchema = {
   type: "object",
   properties: {
@@ -11367,6 +11375,7 @@ var TOOL_INPUT_SCHEMAS = {
   readRepoSignals: readRepoSignalsInputSchema,
   reattachOrphan: reattachOrphanInputSchema,
   recallLesson: recallLessonInputSchema,
+  requeueBlockedStory: requeueBlockedStoryInputSchema,
   recordAgentFriction: recordAgentFrictionInputSchema,
   recordMaintainerFeedback: recordMaintainerFeedbackInputSchema,
   reviewMaintainerInbox: reviewMaintainerInboxInputSchema,
