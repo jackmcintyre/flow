@@ -30624,13 +30624,35 @@ var LockedPhrasesSchema = external_exports.object({
   yield: external_exports.string().min(1),
   verdict: external_exports.string().min(1)
 }).strict();
+var REVIEW_LENS_VALUES = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered"
+];
+var ReviewLensSchema = external_exports.enum(REVIEW_LENS_VALUES);
+var RUN_JOB_VALUES = ["build", "review"];
+var RunJobSchema = external_exports.enum(RUN_JOB_VALUES);
+var RoleCapabilitiesSchema = external_exports.object({
+  review_lenses: external_exports.array(ReviewLensSchema).default([]),
+  run_jobs: external_exports.array(RunJobSchema).default([])
+}).strict();
 var CatalogueRoleSchema = external_exports.object({
   role: external_exports.string().min(1).regex(/^[a-z0-9-]+$/),
   domain: external_exports.string().min(1),
   model_tier: ModelTierSchema,
   tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
   gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
-  locked_phrases: LockedPhrasesSchema
+  locked_phrases: LockedPhrasesSchema,
+  /**
+   * Optional capabilities declaration. Absence is fully back-compatible.
+   * When absent, `capabilities` is `undefined` on the parsed object; no
+   * default is injected so that callers can distinguish "not declared" from
+   * "declared empty". Downstream consumers that act on capabilities are
+   * separate stories; this story only surfaces the declaration.
+   */
+  capabilities: RoleCapabilitiesSchema.optional()
 }).strict();
 var REQUIRED_CATALOGUE_SECTIONS = [
   "Domain",
@@ -30676,6 +30698,10 @@ var PersonaFrontmatterSchema = external_exports.object({
   tools_allow: external_exports.array(external_exports.string().min(1)).min(1),
   gh_allow: external_exports.array(external_exports.string().min(1)).default([]),
   locked_phrases: LockedPhrasesSchema,
+  // Optional capabilities declaration — mirrors CatalogueRoleSchema.
+  // Absence is fully back-compatible: personas without capabilities load
+  // identically to today.
+  capabilities: RoleCapabilitiesSchema.optional(),
   // Persona-only fields.
   hired_at: external_exports.string().regex(
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
@@ -30847,6 +30873,14 @@ function renderPersonaFile(opts) {
     tools_allow: [...catalogue.tools_allow],
     gh_allow: [...catalogue.gh_allow],
     locked_phrases: { ...catalogue.locked_phrases },
+    // Copy capabilities declaration when present — back-compat: absence
+    // means `undefined` (the optional key is omitted from the YAML output).
+    ...catalogue.capabilities !== void 0 && {
+      capabilities: {
+        review_lenses: [...catalogue.capabilities.review_lenses],
+        run_jobs: [...catalogue.capabilities.run_jobs]
+      }
+    },
     hired_at: hiredAt,
     catalogue_version: catalogueVersion
   };

@@ -13,6 +13,10 @@ locked_phrases:
   handoff: "Handoff to generalist-reviewer — security review complete"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - discipline
+  run_jobs: []
 ---
 
 # Security Specialist

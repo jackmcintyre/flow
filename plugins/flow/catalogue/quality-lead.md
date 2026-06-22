@@ -14,6 +14,10 @@ locked_phrases:
   # enforcement: the binding verdict is the AdjudicationVerdict written by
   # `adjudicateQualityLead` (the deterministic seam). The locked phrase is
   # retained as authoring guidance only — the synthesis rule, not prose, decides.
+capabilities:
+  review_lenses:
+    - considered
+  run_jobs: []
 ---
 
 # Quality Lead

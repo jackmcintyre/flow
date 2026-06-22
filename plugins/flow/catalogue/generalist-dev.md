@@ -19,6 +19,11 @@ locked_phrases:
   handoff: "Handoff to reviewer — story <story-id> ready for review."
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - domain
+  run_jobs:
+    - build
 ---
 
 # Generalist Dev

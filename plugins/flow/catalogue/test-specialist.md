@@ -14,6 +14,10 @@ locked_phrases:
   handoff: "Handoff to generalist-dev — tests scaffolded"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - verifiability
+  run_jobs: []
 ---
 
 # Test Specialist

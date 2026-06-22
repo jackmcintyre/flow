@@ -1,5 +1,6 @@
 /**
  * Story 2.3 AC1–AC5 — persona-file machinery and persona MCP tools.
+ * Story native:01KVPQDTW1J4JD0DAQAFYPTH2J (AC2, AC3) — capabilities declaration.
  *
  * See `plugins/flow/docs/user-surface-acs.md` for the user-surface AC
  * rubric (Story 1.8 convention). Story 2.3 has zero user-surface ACs —
@@ -16,6 +17,10 @@
  *    (plain-Markdown round-trip, no sidecar state).
  *  - AC5(f): unknown role / re-instantiation surface typed errors.
  *  - Lookup edge cases: stray dirs skipped; malformed personas surface.
+ *  - (capabilities AC2) A custom role with a declared capabilities block is
+ *    recognised as qualifying for exactly those lenses and jobs.
+ *  - (capabilities AC3) A role with no capabilities block still loads and
+ *    behaves exactly as today — back-compat is preserved.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
@@ -717,6 +722,201 @@ Custom prompt body for the operator's planner override.
         expect(reparsed.role).toBe(catalogue.role);
         expect(reparsed.domain).toBe(catalogue.domain);
       }
+    });
+  });
+
+  /**
+   * Story native:01KVPQDTW1J4JD0DAQAFYPTH2J AC2 — authored capabilities are
+   * recognised when the team reads the role.
+   *
+   * A custom role definition that declares specific review lenses and run jobs is
+   * hired into a team, then read back. The read result must carry those exact
+   * capabilities, proving the declaration round-trips through the persona machinery.
+   */
+  describe("(capabilities AC2) authored capabilities block is recognised on readPersona", () => {
+    const CUSTOM_ROLE_WITH_CAPABILITIES = `---
+role: ml-analyst
+domain: "ml pipeline and model evaluation"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — analysis complete"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - domain
+    - considered
+  run_jobs:
+    - build
+---
+
+# Ml Analyst
+
+## Domain
+
+Owns ML pipeline evaluation and model quality checks.
+
+## Mandate
+
+- Analyse model metrics and surface regressions.
+- Review pipeline changes against the domain model.
+
+## Out of mandate
+
+- Production deploys.
+
+## Prompt
+
+You are the ML analyst. Read the model output, surface regressions, evaluate pipeline changes.
+`;
+
+    it("instantiates a custom role with capabilities and reads them back exactly", async () => {
+      const tmp = await makeTmp("cap-ac2");
+      tmpDirs.push(tmp);
+
+      // Write the custom role file into team/custom/.
+      const customDir = path.join(tmp, "team", "custom");
+      await fs.mkdir(customDir, { recursive: true });
+      await fs.writeFile(
+        path.join(customDir, "ml-analyst.md"),
+        CUSTOM_ROLE_WITH_CAPABILITIES,
+        "utf8",
+      );
+
+      // Hire the role.
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "ml-analyst",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      // Read the persona back.
+      const persona = await readPersona({ targetRepoRoot: tmp, role: "ml-analyst" });
+
+      // The capabilities block must be present and exactly match what was declared.
+      expect(
+        persona.capabilities,
+        "capabilities should be present on the hired persona",
+      ).toBeDefined();
+      expect([...(persona.capabilities?.review_lenses ?? [])].sort()).toEqual(
+        ["considered", "domain"],
+      );
+      expect([...(persona.capabilities?.run_jobs ?? [])].sort()).toEqual(["build"]);
+
+      // The persona path is where the contract promises.
+      expect(personaPath).toBe(path.join(tmp, "team", "ml-analyst", "PERSONA.md"));
+    });
+  });
+
+  /**
+   * Story native:01KVPQDTW1J4JD0DAQAFYPTH2J AC3 — a capabilities-free role
+   * definition still loads and behaves identically to today.
+   *
+   * A custom role with NO capabilities block is hired and read back. The persona
+   * must load successfully, all existing fields must be intact, and `capabilities`
+   * must be `undefined` — nothing is injected or implied by the absence.
+   */
+  describe("(capabilities AC3) capabilities-free role loads and behaves exactly as today", () => {
+    const CUSTOM_ROLE_WITHOUT_CAPABILITIES = `---
+role: data-engineer
+domain: "data pipeline and ETL design"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — pipeline designed"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+---
+
+# Data Engineer
+
+## Domain
+
+Designs and reviews ETL pipelines and data infrastructure.
+
+## Mandate
+
+- Author pipeline specs and transformation logic.
+- Review data-adjacent PRs for correctness.
+
+## Out of mandate
+
+- ML model training.
+
+## Prompt
+
+You are the data engineer. Design pipelines, review data-adjacent code, keep the ETL clean.
+`;
+
+    it("loads a capabilities-free custom role with no capabilities field on the parsed result", async () => {
+      const tmp = await makeTmp("cap-ac3-load");
+      tmpDirs.push(tmp);
+
+      const customDir = path.join(tmp, "team", "custom");
+      await fs.mkdir(customDir, { recursive: true });
+      await fs.writeFile(
+        path.join(customDir, "data-engineer.md"),
+        CUSTOM_ROLE_WITHOUT_CAPABILITIES,
+        "utf8",
+      );
+
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "data-engineer",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      const persona = await readPersona({
+        targetRepoRoot: tmp,
+        role: "data-engineer",
+      });
+
+      // Existing fields load correctly.
+      expect(persona.role).toBe("data-engineer");
+      expect(persona.domain).toBe("data pipeline and ETL design");
+      expect(persona.model_tier).toBe("sonnet");
+      expect(persona.hired_at).toBe(FIXED_HIRED_AT);
+      expect(persona.catalogue_version).toBe(FIXED_VERSION);
+      expect(persona.sections.Domain.length).toBeGreaterThan(0);
+      expect(persona.sections.Mandate.length).toBeGreaterThan(0);
+      expect(persona.sections["Out of mandate"].length).toBeGreaterThan(0);
+      expect(persona.sections.Prompt.length).toBeGreaterThan(0);
+
+      // capabilities is absent — undefined, never an empty default.
+      expect(persona.capabilities).toBeUndefined();
+
+      // sourcePath is stamped correctly.
+      expect(personaPath).toBe(path.join(tmp, "team", "data-engineer", "PERSONA.md"));
+    });
+
+    it("parseCatalogueRole accepts a capabilities-free role file without change", () => {
+      // This guards the back-compat contract for future roles that may omit capabilities.
+      // The schema change must not break any existing role loader that has no capabilities block.
+      const parsed = parseCatalogueRole(
+        CUSTOM_ROLE_WITHOUT_CAPABILITIES,
+        "/fake/data-engineer.md",
+      );
+
+      expect(parsed.role).toBe("data-engineer");
+      expect(parsed.domain).toBe("data pipeline and ETL design");
+      expect(parsed.capabilities).toBeUndefined();
+      // All four sections present and non-empty — behaviour identical to before.
+      expect(parsed.sections.Domain.length).toBeGreaterThan(0);
+      expect(parsed.sections.Mandate.length).toBeGreaterThan(0);
+      expect(parsed.sections["Out of mandate"].length).toBeGreaterThan(0);
+      expect(parsed.sections.Prompt.length).toBeGreaterThan(0);
     });
   });
 

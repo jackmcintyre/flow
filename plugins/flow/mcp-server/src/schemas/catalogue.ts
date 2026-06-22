@@ -24,6 +24,13 @@ import { CatalogueShapeError } from "../errors.js";
  * `locked_phrases` carries the three load-bearing template strings
  * (handoff / yield / verdict) that the dev/reviewer loops grep
  * against. Missing any of the three is a contract violation.
+ *
+ * `capabilities` is an OPTIONAL block that declares which review lenses
+ * a role can serve on and which run jobs it can fill. Absence is fully
+ * back-compatible — a role without capabilities loads identically to
+ * today. Consumers that act on capabilities (lens staffing, run-job
+ * assignment) are separate downstream stories; this story only adds the
+ * declaration.
  */
 export const ModelTierSchema = z.enum(["opus", "sonnet", "haiku"]);
 
@@ -32,6 +39,56 @@ export const LockedPhrasesSchema = z
     handoff: z.string().min(1),
     yield: z.string().min(1),
     verdict: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * The fixed set of review lenses (rubric §3 Tier-1 panel).
+ * A role may declare itself qualified for any subset of these.
+ *
+ * Exported as a type alias (`ReviewLens`) for use in tests and consumers
+ * that need to name the lens union. The const array and Zod schema are
+ * module-internal — only `RoleCapabilitiesSchema` (which builds on them)
+ * is exported for use in persona.ts.
+ */
+const REVIEW_LENS_VALUES = [
+  "structure",
+  "verifiability",
+  "discipline",
+  "domain",
+  "considered",
+] as const;
+
+const ReviewLensSchema = z.enum(REVIEW_LENS_VALUES);
+export type ReviewLens = z.infer<typeof ReviewLensSchema>;
+
+/**
+ * The fixed set of run jobs in the continuous-flow loop.
+ * A role may declare itself qualified to fill any subset of these.
+ *
+ * Exported as a type alias (`RunJob`) for use in tests and consumers.
+ * The const array and Zod schema are module-internal.
+ */
+const RUN_JOB_VALUES = ["build", "review"] as const;
+
+const RunJobSchema = z.enum(RUN_JOB_VALUES);
+export type RunJob = z.infer<typeof RunJobSchema>;
+
+/**
+ * Optional capabilities declaration for a catalogue role.
+ *
+ * `review_lenses`: which Tier-1 review lenses this role can serve on.
+ *   From the fixed set: structure, verifiability, discipline, domain, considered.
+ * `run_jobs`: which run-loop jobs this role can fill.
+ *   From the fixed set: build, review.
+ *
+ * Both arrays default to empty when the field is absent, which preserves
+ * the current fixed-list behaviour unchanged for all roles that omit it.
+ */
+export const RoleCapabilitiesSchema = z
+  .object({
+    review_lenses: z.array(ReviewLensSchema).default([]),
+    run_jobs: z.array(RunJobSchema).default([]),
   })
   .strict();
 
@@ -46,6 +103,14 @@ export const CatalogueRoleSchema = z
     tools_allow: z.array(z.string().min(1)).min(1),
     gh_allow: z.array(z.string().min(1)).default([]),
     locked_phrases: LockedPhrasesSchema,
+    /**
+     * Optional capabilities declaration. Absence is fully back-compatible.
+     * When absent, `capabilities` is `undefined` on the parsed object; no
+     * default is injected so that callers can distinguish "not declared" from
+     * "declared empty". Downstream consumers that act on capabilities are
+     * separate stories; this story only surfaces the declaration.
+     */
+    capabilities: RoleCapabilitiesSchema.optional(),
   })
   .strict();
 

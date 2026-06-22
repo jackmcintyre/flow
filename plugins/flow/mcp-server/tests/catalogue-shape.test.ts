@@ -1,5 +1,6 @@
 /**
  * Story 2.1 AC1–AC4 — catalogue file format and shipped role templates.
+ * Story native:01KVPQDTW1J4JD0DAQAFYPTH2J (AC1) — capabilities backfill.
  *
  * See `_bmad-output/planning-artifacts/architecture/implementation-patterns-consistency-rules.md` §3
  * for the canonical catalogue file skeleton (frontmatter + four required
@@ -13,6 +14,8 @@
  *  - AC4(a–e): a single harness that discovers, parses, asserts file-set
  *    equality, asserts domain uniqueness, and asserts the four required
  *    `##` headers appear in canonical order in each file.
+ *  - (capabilities AC1) Every shipped default role declares capabilities that
+ *    exactly match what it does for the team today.
  */
 import { describe, it, expect } from "vitest";
 import { promises as fs } from "node:fs";
@@ -22,7 +25,11 @@ import {
   parseCatalogueRole,
   splitFrontmatter,
 } from "../src/lib/markdown-frontmatter.js";
-import { assertCatalogueBodySections } from "../src/schemas/catalogue.js";
+import {
+  assertCatalogueBodySections,
+  type ReviewLens,
+  type RunJob,
+} from "../src/schemas/catalogue.js";
 import { CatalogueShapeError } from "../src/errors.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -307,5 +314,86 @@ describe("Story 2.1 — catalogue file format and shipped role templates", () =>
         expect((err as CatalogueShapeError).code).toBe("CATALOGUE_SHAPE_ERROR");
       }
     });
+  });
+
+  /**
+   * Story native:01KVPQDTW1J4JD0DAQAFYPTH2J AC1 — capabilities backfill.
+   *
+   * The expected capabilities table mirrors the current fixed-list behaviour
+   * exactly: the lens candidates list in judge-panel.ts for review lenses, and
+   * the hardwired dev/reviewer run-job assignment for run jobs. Net behaviour
+   * for existing teams is unchanged — this test is the contract gate ensuring
+   * the declarations reflect reality.
+   */
+  describe("(capabilities AC1) shipped roles declare capabilities matching current behaviour", () => {
+    // The expected capabilities for every shipped role.
+    // Source of truth: LENS_CANDIDATES in judge-panel.ts (review lenses) and
+    // the hardwired dev/reviewer loop (run jobs).
+    const EXPECTED_CAPABILITIES: Record<
+      string,
+      { review_lenses: ReviewLens[]; run_jobs: RunJob[] }
+    > = {
+      "generalist-dev": { review_lenses: ["domain"], run_jobs: ["build"] },
+      "generalist-reviewer": {
+        review_lenses: ["verifiability", "discipline"],
+        run_jobs: ["review"],
+      },
+      planner: {
+        review_lenses: ["structure", "discipline", "domain", "considered"],
+        run_jobs: [],
+      },
+      orchestrator: {
+        review_lenses: [
+          "structure",
+          "verifiability",
+          "discipline",
+          "domain",
+          "considered",
+        ],
+        run_jobs: [],
+      },
+      "retro-analyst": { review_lenses: ["considered"], run_jobs: [] },
+      "test-specialist": { review_lenses: ["verifiability"], run_jobs: [] },
+      "security-specialist": { review_lenses: ["discipline"], run_jobs: [] },
+      "quality-lead": { review_lenses: ["considered"], run_jobs: [] },
+      "hiring-manager": { review_lenses: [], run_jobs: [] },
+      debugger: { review_lenses: [], run_jobs: [] },
+      "docs-specialist": { review_lenses: [], run_jobs: [] },
+      author: { review_lenses: [], run_jobs: [] },
+    };
+
+    for (const filename of CATALOGUE_FILES) {
+      const role = filename.replace(/\.md$/, "");
+      const expected = EXPECTED_CAPABILITIES[role];
+
+      it(`${filename} declares capabilities matching current behaviour`, async () => {
+        expect(
+          expected,
+          `EXPECTED_CAPABILITIES table is missing an entry for '${role}' — add it when backfilling a new role`,
+        ).toBeDefined();
+
+        const abs = path.join(CATALOGUE_DIR, filename);
+        const raw = await fs.readFile(abs, "utf8");
+        const parsed = parseCatalogueRole(raw, abs);
+
+        // The capabilities block must be present on every shipped role.
+        expect(
+          parsed.capabilities,
+          `'${role}' is missing a capabilities block — backfill it in the catalogue file`,
+        ).toBeDefined();
+
+        // Exact-match review lenses (order-insensitive).
+        expect(
+          [...(parsed.capabilities?.review_lenses ?? [])].sort(),
+          `'${role}' review_lenses mismatch`,
+        ).toEqual([...expected.review_lenses].sort());
+
+        // Exact-match run jobs (order-insensitive).
+        expect(
+          [...(parsed.capabilities?.run_jobs ?? [])].sort(),
+          `'${role}' run_jobs mismatch`,
+        ).toEqual([...expected.run_jobs].sort());
+      });
+    }
   });
 });

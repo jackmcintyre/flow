@@ -15,6 +15,10 @@ locked_phrases:
   handoff: "Handoff to <next role> — retro proposal ready for review"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - considered
+  run_jobs: []
 ---
 
 # Retro Analyst

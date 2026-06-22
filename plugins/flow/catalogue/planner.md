@@ -17,6 +17,13 @@ locked_phrases:
   handoff: "Handoff to generalist-dev — story <story-id> ready to claim"
   yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - structure
+    - discipline
+    - domain
+    - considered
+  run_jobs: []
 ---
 
 # Planner
