@@ -593,3 +593,250 @@ ${skillRefBlock}
     expect(reviewerPrompt).not.toContain("Always write the test before implementing the feature.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQS1DVJE41KNG065D6X1X7 — AC4 and AC5
+// resolveRunSlot unit tests: generalist-wins-when-present default, non-default
+// qualified-role selection, unstaffed-slot clean stop.
+// ---------------------------------------------------------------------------
+import { resolveRunSlot, RUN_JOB_GENERALISTS } from "../resolve-run-slot.js";
+import { RunSlotUnstaffedError } from "../../errors.js";
+
+// Minimal persona file with capabilities.
+function buildPersonaMd(role: string, runJobs: string[]): string {
+  const caps = runJobs.length > 0
+    ? `capabilities:\n  review_lenses: []\n  run_jobs:\n${runJobs.map((j) => `    - ${j}`).join("\n")}`
+    : "";
+  return `---
+role: ${role}
+domain: "test domain"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to reviewer — story <story-id> ready for review."
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "2026-01-01T00:00:00.000Z"
+catalogue_version: "0.1.0"
+${caps}
+---
+
+# ${role}
+
+## Domain
+
+${role} domain.
+
+## Mandate
+
+- Mandate.
+
+## Out of mandate
+
+- Nothing.
+
+## Prompt
+
+You are ${role}.
+
+## Knowledge
+
+`;
+}
+
+async function seedPersona(root: string, role: string, runJobs: string[]): Promise<void> {
+  const dir = path.join(root, "team", role);
+  await fs.mkdir(dir, { recursive: true });
+  await atomicWriteFile(path.join(dir, "PERSONA.md"), buildPersonaMd(role, runJobs));
+}
+
+describe("resolveRunSlot — AC4: generalist default wins when present alongside another qualified role", () => {
+  it("(AC4) returns generalist-dev for the build slot when both generalist-dev and another build-qualified role are present", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      await seedPersona(tmpDir, "generalist-dev", ["build"]);
+      await seedPersona(tmpDir, "specialist-dev", ["build"]);
+
+      const result = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" });
+
+      expect(result.role).toBe("generalist-dev");
+      expect(result.isDefault).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("(AC4) returns generalist-reviewer for the review slot when both generalist-reviewer and another review-qualified role are present", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      await seedPersona(tmpDir, "generalist-reviewer", ["review"]);
+      await seedPersona(tmpDir, "specialist-reviewer", ["review"]);
+
+      const result = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "review" });
+
+      expect(result.role).toBe("generalist-reviewer");
+      expect(result.isDefault).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveRunSlot — AC5: non-default qualified role used when generalist is absent", () => {
+  it("(AC5) returns a non-default build-qualified role when generalist-dev is absent", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      // Only a specialist-dev — no generalist-dev.
+      await seedPersona(tmpDir, "specialist-dev", ["build"]);
+
+      const result = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" });
+
+      expect(result.role).toBe("specialist-dev");
+      expect(result.isDefault).toBe(false);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("(AC5) returns a non-default review-qualified role when generalist-reviewer is absent", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      // Only a specialist-reviewer — no generalist-reviewer.
+      await seedPersona(tmpDir, "specialist-reviewer", ["review"]);
+
+      const result = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "review" });
+
+      expect(result.role).toBe("specialist-reviewer");
+      expect(result.isDefault).toBe(false);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("(AC5 build) the spawned prompt comes from the non-default qualified role's persona, not the generalist", async () => {
+    // When a non-default role wins the build slot, buildPersonaSpawnPrompt
+    // briefed with that role returns its persona, not the generalist's.
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-persona-"));
+    try {
+      // Write a custom-dev persona with a distinctive domain string.
+      const customPersona = buildPersonaMd("custom-dev", ["build"]).replace(
+        "custom-dev domain.",
+        "CUSTOM_DEV_DOMAIN_MARKER",
+      );
+      const dir = path.join(tmpDir, "team", "custom-dev");
+      await fs.mkdir(dir, { recursive: true });
+      await atomicWriteFile(path.join(dir, "PERSONA.md"), customPersona);
+
+      // Resolve the build slot — should pick custom-dev.
+      const slot = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" });
+      expect(slot.role).toBe("custom-dev");
+      expect(slot.isDefault).toBe(false);
+
+      // Fetch the persona for the resolved role.
+      const { systemPrompt } = await buildPersonaSpawnPrompt({
+        targetRepoRoot: tmpDir,
+        role: slot.role,
+      });
+      // The prompt should contain the custom role's distinctive content.
+      expect(systemPrompt).toContain("CUSTOM_DEV_DOMAIN_MARKER");
+      // It must NOT contain the generalist-dev marker (generalist is absent, so
+      // we verify by checking what the prompt actually came from).
+      expect(systemPrompt).toContain("Custom Dev — Persona");
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveRunSlot — unstaffed slot clean stop", () => {
+  it("throws RunSlotUnstaffedError when no role qualifies for the build slot", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      // A role without capabilities cannot fill any run job.
+      await seedPersona(tmpDir, "some-role", []);
+
+      await expect(
+        resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" }),
+      ).rejects.toThrow(RunSlotUnstaffedError);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("throws RunSlotUnstaffedError when no role qualifies for the review slot", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      // A role only qualified for build, not review.
+      await seedPersona(tmpDir, "build-only-role", ["build"]);
+
+      await expect(
+        resolveRunSlot({ targetRepoRoot: tmpDir, job: "review" }),
+      ).rejects.toThrow(RunSlotUnstaffedError);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("error message names the unstaffed slot clearly (build)", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      await seedPersona(tmpDir, "some-role", []);
+      await expect(
+        resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" }),
+      ).rejects.toThrow(/Run slot 'build' is unstaffed/);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("error message names the unstaffed slot clearly (review)", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      await seedPersona(tmpDir, "some-role", ["build"]);
+      await expect(
+        resolveRunSlot({ targetRepoRoot: tmpDir, job: "review" }),
+      ).rejects.toThrow(/Run slot 'review' is unstaffed/);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("throws RunSlotUnstaffedError when no team directory exists at all", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      // Do NOT create team/ — simulate a completely empty repo.
+      await expect(
+        resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" }),
+      ).rejects.toThrow(RunSlotUnstaffedError);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveRunSlot — default team parity (AC1 unit-level check)", () => {
+  it("returns generalist-dev for build on a default team (both generalists only)", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flow-run-slot-"));
+    try {
+      await seedPersona(tmpDir, "generalist-dev", ["build"]);
+      await seedPersona(tmpDir, "generalist-reviewer", ["review"]);
+
+      const buildResult = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "build" });
+      const reviewResult = await resolveRunSlot({ targetRepoRoot: tmpDir, job: "review" });
+
+      expect(buildResult.role).toBe("generalist-dev");
+      expect(buildResult.isDefault).toBe(true);
+      expect(reviewResult.role).toBe("generalist-reviewer");
+      expect(reviewResult.isDefault).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("RUN_JOB_GENERALISTS exports the correct default role names", () => {
+    expect(RUN_JOB_GENERALISTS.build).toBe("generalist-dev");
+    expect(RUN_JOB_GENERALISTS.review).toBe("generalist-reviewer");
+  });
+});

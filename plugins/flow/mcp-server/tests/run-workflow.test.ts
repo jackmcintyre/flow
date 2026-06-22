@@ -137,8 +137,11 @@ describe("review fix-now batch — run workflow anchors", () => {
   it("D5: spawning with an empty persona fails loud (no unguarded agent)", () => {
     // An empty dev/reviewer persona would drop the evidence-only discipline; the
     // run must throw rather than spawn an unguarded agent.
-    expect(SRC).toContain("empty generalist-dev persona");
-    expect(SRC).toContain("empty generalist-reviewer persona");
+    // Story native:01KVPQS1DVJE41KNG065D6X1X7: the role name is now dynamic (devRole /
+    // reviewerRole) so the error text uses a template literal — check the pattern rather
+    // than a literal role name.
+    expect(SRC).toContain("refusing to spawn dev without its discipline rules");
+    expect(SRC).toContain("refusing to spawn reviewer without its discipline rules");
     expect(SRC).toMatch(/if \(!devPersona\.trim\(\)\) throw/);
     expect(SRC).toMatch(/if \(!reviewerPersona\.trim\(\)\) throw/);
   });
@@ -249,5 +252,80 @@ describe("Story native:01KTKK3HQYNFS1M1ZR9TG02G1F — AC3: hard gates unchanged 
     expect(rpIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(rpIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQS1DVJE41KNG065D6X1X7 — AC1, AC2, AC3: dynamic slot resolution.
+//
+// AC1: the run calls resolveRunSlot for BOTH slots at startup, before fetching
+//      persona prompts; the resolved roles are used for buildPersonaSpawnPrompt.
+//      On a default team this is always generalist-dev + generalist-reviewer.
+//
+// AC2: the resolved role is threaded into buildPersonaSpawnPrompt so a non-default
+//      qualified role's persona is briefed instead of the generalist.
+//
+// AC3: when resolveRunSlot returns an error or no role, the run throws with a
+//      clear message naming the unstaffed slot.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVPQS1DVJE41KNG065D6X1X7 — AC1/AC2/AC3: dynamic run slot resolution", () => {
+  it("AC1: calls resolveRunSlot for both the build and review slots before fetching persona prompts", () => {
+    // The run must invoke resolveRunSlot via the CLI seam for each slot.
+    // The 'slot:build' and 'slot:review' labels are structural anchors.
+    expect(SRC).toContain("resolveRunSlot");
+    expect(SRC).toContain("'slot:build'");
+    expect(SRC).toContain("'slot:review'");
+  });
+
+  it("AC1: resolveRunSlot for build is called with job:'build' and review with job:'review'", () => {
+    // The CLI args must pass the correct job to each seam call.
+    expect(SRC).toContain("job: 'build'");
+    expect(SRC).toContain("job: 'review'");
+  });
+
+  it("AC1/AC2: buildPersonaSpawnPrompt for dev uses the resolved devRole (not a literal 'generalist-dev')", () => {
+    // The run must thread the resolved role into buildPersonaSpawnPrompt.
+    // devRole is used, NOT the literal 'generalist-dev'.
+    expect(SRC).toContain("role: devRole");
+    // The literal 'generalist-dev' must NOT appear as a hardcoded role arg in
+    // buildPersonaSpawnPrompt calls (it is still fine in error messages, but NOT
+    // in the seam call that selects the persona).
+    // We check by looking for the pattern that would hard-wire the persona:
+    // buildPersonaSpawnPrompt --json '...role: 'generalist-dev''
+    // The seam call template uses J() which serialises an object — so we look
+    // for the literal JSON key-value that would hard-code it.
+    expect(SRC).not.toContain(`role: 'generalist-dev'`);
+  });
+
+  it("AC1/AC2: buildPersonaSpawnPrompt for reviewer uses the resolved reviewerRole (not a literal 'generalist-reviewer')", () => {
+    // The resolved role is used, NOT the literal 'generalist-reviewer'.
+    expect(SRC).toContain("role: reviewerRole");
+    expect(SRC).not.toContain(`role: 'generalist-reviewer'`);
+  });
+
+  it("AC1: resolveRunSlot for build slot is called before the persona seams (structural order)", () => {
+    // The slot resolver must precede persona assembly — it determines WHICH persona to fetch.
+    const slotIdx = SRC.indexOf("'slot:build'");
+    const personaIdx = SRC.indexOf("'persona:dev'");
+    expect(slotIdx).toBeGreaterThan(-1);
+    expect(personaIdx).toBeGreaterThan(-1);
+    expect(personaIdx).toBeGreaterThan(slotIdx);
+  });
+
+  it("AC3: the run throws when resolveRunSlot returns no role for the build slot", () => {
+    // The run must fail loud on a missing/garbled resolveRunSlot result — naming
+    // the build slot — instead of silently falling back or guessing.
+    expect(SRC).toContain("resolveRunSlot failed for the build slot");
+  });
+
+  it("AC3: the run throws when resolveRunSlot returns no role for the review slot", () => {
+    // Same guard for the review slot.
+    expect(SRC).toContain("resolveRunSlot failed for the review slot");
+  });
+
+  it("AC2: runReviewerSession uses reviewerRole (not a literal 'generalist-reviewer')", () => {
+    // The reviewer session seam must pass the resolved role, not a hard-coded string.
+    expect(SRC).toContain("role: reviewerRole");
   });
 });

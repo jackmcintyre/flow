@@ -210,6 +210,9 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
       // orphan-scan, worktree-reap — no orphans / nothing to reap
       if (label === "orphan-scan") return { stdout: JSON.stringify({ orphans: [] }) };
       if (label === "worktree-reap") return { stdout: JSON.stringify({ reaped: [] }) };
+      // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
+      if (label === "slot:build") return { stdout: JSON.stringify({ role: "generalist-dev", isDefault: true }) };
+      if (label === "slot:review") return { stdout: JSON.stringify({ role: "generalist-reviewer", isDefault: true }) };
       // persona seams — stub lightweight prompts
       if (label.startsWith("persona:dev")) return { stdout: JSON.stringify({ systemPrompt: "STUB-DEV-PERSONA" }) };
       if (label.startsWith("persona:reviewer")) return { stdout: JSON.stringify({ systemPrompt: "STUB-REV-PERSONA" }) };

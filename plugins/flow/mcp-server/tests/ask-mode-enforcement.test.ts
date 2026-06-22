@@ -472,7 +472,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire) = 60 total.
       // /flow:init added initWorkspace (first-run workspace scaffolder) = 61 total.
       // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story) = 62 total.
-      expect(result.tools.length, "expected exactly 62 tools").toBe(62);
+      // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic run slot resolution) = 63 total.
+      expect(result.tools.length, "expected exactly 63 tools").toBe(63);
     } finally {
       await client.close();
       await server.close();

@@ -597,6 +597,15 @@ export const resolveLensRolesInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot"],
 };
 
+export const resolveRunSlotInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    job: { type: "string", enum: ["build", "review"] },
+  },
+  required: ["targetRepoRoot", "job"],
+};
+
 export const runAutoMergeGateInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -911,6 +920,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   resolveBuildPlan: resolveBuildPlanInputSchema,
   resolveJudgePlan: resolveJudgePlanInputSchema,
   resolveLensRoles: resolveLensRolesInputSchema,
+  resolveRunSlot: resolveRunSlotInputSchema,
   runAutoMergeGate: runAutoMergeGateInputSchema,
   runDevTerminalAction: runDevTerminalActionInputSchema,
   runReviewerSession: runReviewerSessionInputSchema,

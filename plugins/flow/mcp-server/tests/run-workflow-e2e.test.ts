@@ -176,6 +176,9 @@ function prNumberForRef(ref?: string): number {
  * Returns the JSON the CLI tool would print on a clean call.
  */
 function stubSeamResult(label: string, refFromLabel: (l: string) => string | undefined): unknown {
+  // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
+  if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
+  if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };
   // Persona seams
   if (label.startsWith("persona:dev")) {
     return { systemPrompt: "SMOKE-DEV-PERSONA: you are a deterministic smoke dev." };

@@ -629,7 +629,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KVF66HWKXCM7GYNRR9YJFKB2 added unhirePersona (safe reversible unhire). 59 → 60.
     // /flow:init added initWorkspace (first-run workspace scaffolder). 60 → 61.
     // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story). 61 → 62.
-    expect(registeredTools.length).toBe(62);
+    // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic run slot resolution). 62 → 63.
+    expect(registeredTools.length).toBe(63);
   });
 });
 

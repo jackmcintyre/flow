@@ -63,6 +63,7 @@ import { recordMaintainerFeedback } from "./tools/record-maintainer-feedback.js"
 import { reviewMaintainerInbox } from "./tools/review-maintainer-inbox.js";
 import { dismissMaintainerFeedback } from "./tools/dismiss-maintainer-feedback.js";
 import { resolveLensRoles } from "./tools/resolve-lens-roles.js";
+import { resolveRunSlot } from "./tools/resolve-run-slot.js";
 import { recordReviewerLesson } from "./tools/record-reviewer-lesson.js";
 import { readReviewerLesson } from "./tools/read-reviewer-lesson.js";
 import { recordStoryRetro } from "./tools/record-story-retro.js";
@@ -168,6 +169,14 @@ const TOOLS: Record<string, ToolFn> = {
   // '{"targetRepoRoot":"..."}'. Returns { lensRoles, hiredRoles }. gate-1.workflow.js
   // calls this instead of the previously hard-coded lensRoles block.
   resolveLensRoles,
+  // Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/reviewer slot resolver.
+  // Reads the live hired roster and returns the role that fills the requested run job
+  // slot (build or review). The generalist default wins when present and qualified;
+  // otherwise the single other qualified role wins. Throws RunSlotUnstaffedError when
+  // no qualified role exists — the run halts cleanly instead of guessing.
+  // Callable on the no-MCP run path:
+  //   node dist/cli.js resolveRunSlot --json '{"targetRepoRoot":"...","job":"build"}'
+  resolveRunSlot,
   // Story native:01KT6GSV8KTTKKHPRGEJWJAGZV — learning-loop producer.
   // recordReviewerLesson is the CAPTURE seam: the reviewer (a no-MCP run-path
   // seam-agent) calls it via `node dist/cli.js recordReviewerLesson --json` to

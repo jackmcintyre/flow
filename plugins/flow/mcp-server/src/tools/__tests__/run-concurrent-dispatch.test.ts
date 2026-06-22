@@ -150,6 +150,10 @@ async function runRun(opts: {
 
   const seamResult = (label: string): unknown => {
     if (label === "mint") return { sessionUlid: "01TESTULID0000000000000000" };
+    // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution: return the default
+    // generalist roles so the harness behaves identically to a default team.
+    if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
+    if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };
     if (label.startsWith("persona:dev")) return { systemPrompt: "DEV-PERSONA" };
     if (label.startsWith("persona:reviewer")) return { systemPrompt: "REV-PERSONA" };
     if (label === "worktree-reap") return { reaped: [] };

@@ -400,15 +400,16 @@ describe("builder-lesson AC4 — run workflow wires the capture+forward seams in
     const src = await fs.readFile(RUN, "utf8");
     // The builder forward must run AFTER completeStory (which moves the story to
     // done/) and AFTER the reviewer lesson forward. We anchor on the recordStoryRetro
-    // --json seam lines by their unique lesson-forward labels and role context.
-    // The reviewer forward seam: recordStoryRetro --json ... role: 'generalist-reviewer'
-    // The builder forward seam:  recordStoryRetro --json ... role: 'generalist-dev'
+    // --json seam lines by position: the first recordStoryRetro after completeStory
+    // is the reviewer's, the second is the builder's (dev). Story
+    // native:01KVPQS1DVJE41KNG065D6X1X7 made these dynamic (role: reviewerRole /
+    // role: devRole) so we find the builder forward by seeking the second
+    // recordStoryRetro occurrence after completeStory rather than a literal role string.
     const completeSeamIdx = src.indexOf("completeStory --json");
-    // Use the unique lesson-forward label to find the reviewer forward seam. The
-    // label `lesson-forward` first appears INSIDE the green-verdict block (after
-    // completeStory), not in early reviewer-session call setup.
+    // First recordStoryRetro after completeStory = reviewer forward.
     const reviewerForwardIdx = src.indexOf("recordStoryRetro --json", completeSeamIdx);
-    const builderForwardIdx = src.indexOf("role: 'generalist-dev'", reviewerForwardIdx);
+    // Second recordStoryRetro after reviewer forward = builder forward.
+    const builderForwardIdx = src.indexOf("recordStoryRetro --json", reviewerForwardIdx + 1);
     expect(completeSeamIdx).toBeGreaterThan(-1);
     expect(reviewerForwardIdx).toBeGreaterThan(-1);
     expect(builderForwardIdx).toBeGreaterThan(-1);
@@ -421,9 +422,10 @@ describe("builder-lesson AC4 — run workflow wires the capture+forward seams in
     const src = await fs.readFile(RUN, "utf8");
     // readDevLesson --json must use retryable=true AND swallow=true (4th arg).
     expect(src).toMatch(/readDevLesson --json[^\n]*`,\s*`dev-lesson-read:\$\{ref\}`,\s*true,\s*true/);
-    // The builder recordStoryRetro forward (identified by role: 'generalist-dev')
+    // The builder recordStoryRetro forward (identified by role: devRole since
+    // story native:01KVPQS1DVJE41KNG065D6X1X7 made the role dynamic)
     // must also use the retryable+swallow variant.
-    expect(src).toMatch(/recordStoryRetro --json[^\n]*role: 'generalist-dev'[^\n]*`,\s*`lesson-forward:\$\{ref\}`,\s*true,\s*true/);
+    expect(src).toMatch(/recordStoryRetro --json[^\n]*role: devRole[^\n]*`,\s*`lesson-forward:\$\{ref\}`,\s*true,\s*true/);
   });
 }); // end describe: builder-lesson AC4
 

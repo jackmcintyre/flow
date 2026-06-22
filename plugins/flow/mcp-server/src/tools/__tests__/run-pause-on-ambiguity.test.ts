@@ -81,6 +81,9 @@ async function runRun(): Promise<{
 
   const seamResult = (label: string): unknown => {
     if (label === "mint") return { sessionUlid: "01TESTULID0000000000000000" };
+    // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
+    if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
+    if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };
     if (label.startsWith("persona:dev")) return { systemPrompt: "DEV-PERSONA" };
     if (label.startsWith("persona:reviewer")) return { systemPrompt: "REV-PERSONA" };
     if (label === "orphan-scan") return { orphans: [] };
@@ -261,6 +264,9 @@ describe("run pause-on-ambiguity (Story 8.19 AC2 + AC3)", () => {
     const logs: string[] = [];
     const seamResult = (label: string): unknown => {
       if (label === "mint") return { sessionUlid: "01TESTULID0000000000000000" };
+      // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
+      if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
+      if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };
       if (label.startsWith("persona:dev")) return { systemPrompt: "DEV-PERSONA" };
       if (label.startsWith("persona:reviewer")) return { systemPrompt: "REV-PERSONA" };
       if (label === "orphan-scan") return { orphans: [] };

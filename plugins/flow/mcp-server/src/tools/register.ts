@@ -54,6 +54,7 @@ import {
   resolveBuildPlanInputSchema,
   resolveJudgePlanInputSchema,
   resolveLensRolesInputSchema,
+  resolveRunSlotInputSchema,
   runAutoMergeGateInputSchema,
   runDevTerminalActionInputSchema,
   runReviewerSessionInputSchema,
@@ -131,6 +132,7 @@ import {
 } from "./review-maintainer-inbox.js";
 import { dismissMaintainerFeedback } from "./dismiss-maintainer-feedback.js";
 import { resolveLensRoles } from "./resolve-lens-roles.js";
+import { resolveRunSlot } from "./resolve-run-slot.js";
 import { recallLesson } from "./recall-lesson.js";
 import { classifyStoryLane } from "./classify-story-lane.js";
 import { resolveJudgePlan } from "./resolve-judge-plan.js";
@@ -2245,6 +2247,49 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await resolveLensRoles({ targetRepoRoot: parsed.targetRepoRoot });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KVPQS1DVJE41KNG065D6X1X7 — resolveRunSlot: deterministic run-slot
+  // resolver. Enumerates the live hired roster, reads each role's declared
+  // `capabilities.run_jobs`, and returns the role that should fill the requested
+  // slot (build or review). The generalist default (generalist-dev / generalist-reviewer)
+  // wins when present and qualified; otherwise the single other qualified role wins.
+  // Throws RunSlotUnstaffedError (naming the slot) when no qualified role exists.
+  // Registered here (MCP) AND in the CLI TOOLS map so it is callable on the no-MCP
+  // run path: node dist/cli.js resolveRunSlot --json '{"targetRepoRoot":"...","job":"build"}'.
+  server.registerTool({
+    name: "resolveRunSlot",
+    description:
+      "Resolve the role that fills a run job slot (build or review) from the live hired roster " +
+      "(Story native:01KVPQS1DVJE41KNG065D6X1X7). Reads <targetRepoRoot>/team/ to enumerate " +
+      "hired roles, checks each role's declared capabilities.run_jobs, and returns the qualified " +
+      "role for the slot. The generalist default (generalist-dev for build, generalist-reviewer " +
+      "for review) wins whenever it is present and qualified. Returns { role, isDefault }. " +
+      "Throws RunSlotUnstaffedError (naming the slot) when no hired role qualifies. " +
+      "Read-only: does NOT mutate state.",
+    inputSchema: resolveRunSlotInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          job: z.enum(["build", "review"]),
+        })
+        .parse(args);
+      try {
+        const result = await resolveRunSlot(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
