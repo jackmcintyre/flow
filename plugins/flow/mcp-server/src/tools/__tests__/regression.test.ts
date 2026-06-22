@@ -293,6 +293,14 @@ const BASELINE: Record<string, Baseline> = {
       "definition_of_done", "risk_reasoning", "depends_on", "sessionUlid",
     ],
   },
+  matchStorySpecialist: {
+    required: ["targetRepoRoot", "manifestPath"],
+    properties: ["targetRepoRoot", "manifestPath"],
+  },
+  recordSpecialistEngagement: {
+    required: ["targetRepoRoot", "ref", "sessionUlid", "specialistRole"],
+    properties: ["targetRepoRoot", "ref", "sessionUlid", "specialistRole"],
+  },
   unhirePersona: {
     required: ["targetRepoRoot", "role"],
     properties: ["targetRepoRoot", "role", "clock"],

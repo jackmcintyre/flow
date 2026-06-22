@@ -137,6 +137,7 @@ export function renderPersonaFile(opts: {
       capabilities: {
         review_lenses: [...catalogue.capabilities.review_lenses],
         run_jobs: [...catalogue.capabilities.run_jobs],
+        path_patterns: [...catalogue.capabilities.path_patterns],
       },
     }),
     hired_at: hiredAt,

@@ -37,3 +37,5 @@ _bmad-output/*
 
 # Local-only operating notes (private working context, not source)
 internal/
+# Exception: the run workflow scripts live in plugins/flow/workflows/internal/ and are tracked.
+!plugins/flow/workflows/internal/

@@ -329,3 +329,60 @@ describe("Story native:01KVPQS1DVJE41KNG065D6X1X7 — AC1/AC2/AC3: dynamic run s
     expect(SRC).toContain("role: reviewerRole");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC3: custom specialist treated
+// identically to a built-in specialist.
+//
+// The run's specialist auto-engage path calls matchStorySpecialist and
+// recordSpecialistEngagement via CLI seams. The seam call is the same
+// regardless of whether the matched role is a built-in or custom-authored one
+// (there is no special-casing of role origin in the workflow). This suite
+// asserts the structural tokens that prove identical treatment.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC3: custom specialist treated as built-in", () => {
+  it("matchStorySpecialist is called via a retryable CLI seam (same for all roles)", () => {
+    // The seam call passes targetRepoRoot + manifestPath. The read-only nature
+    // (retryable=true) is the ONLY routing parameter — no role-origin check.
+    expect(SRC).toContain("matchStorySpecialist");
+    // retryable=true is the third argument to seam() — confirmed by 'true' appearing
+    // right after the specialist-match label.
+    expect(SRC).toMatch(/specialist-match.*`,\s*true/);
+  });
+
+  it("recordSpecialistEngagement is called with the matched role id (no built-in guard)", () => {
+    // The workflow uses specialistRole directly from matchStorySpecialist's result
+    // to call recordSpecialistEngagement — no filter on role origin.
+    expect(SRC).toContain("recordSpecialistEngagement");
+    expect(SRC).toContain("specialistRole");
+    // The record call passes specialistRole as the value — no special-case check.
+    expect(SRC).toMatch(/recordSpecialistEngagement.*specialistRole/s);
+  });
+
+  it("the no-match path (null specialist) skips recordSpecialistEngagement — generalists-only unchanged", () => {
+    // When matchStorySpecialist returns no role (null/falsy specialistRole), the
+    // record seam is not called. The guard checks specialistRole truthiness.
+    // The conditional 'if (specialistRole)' is the proof.
+    expect(SRC).toMatch(/if\s*\(\s*specialistRole\s*\)/);
+  });
+
+  it("specialist engagement is recorded on both the normal and orphan-resume paths", () => {
+    // Both the main runWorker loop and the orphan-resume branch record specialist
+    // engagement — crash-recovery is unchanged whether or not a specialist was engaged.
+    // The resume seam uses a ':resume' label suffix to distinguish it.
+    expect(SRC).toContain("specialist-match:${ref}:resume");
+    expect(SRC).toContain("record-specialist:${ref}:resume");
+    // And the normal path (without :resume).
+    expect(SRC).toContain("specialist-match:${ref}`");
+    expect(SRC).toContain("record-specialist:${ref}`");
+  });
+
+  it("recordSpecialistEngagement failures are swallowed (fail-soft does not block the run)", () => {
+    // The record call is wrapped in try/catch and logged — a write failure must
+    // not block the story from being built.
+    expect(SRC).toMatch(/recordSpecialistEngagement.*\n.*catch/s);
+    // The swallowed error is logged, not silently dropped.
+    expect(SRC).toContain("recordSpecialistEngagement failed (swallowed):");
+  });
+});

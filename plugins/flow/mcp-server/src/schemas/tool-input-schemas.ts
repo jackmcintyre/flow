@@ -865,6 +865,28 @@ export const writeRetroProposalInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot", "isoTimestamp", "proposals"],
 };
 
+// Story native:01KVPSZ14HH48J9NEH7N6S6QDR — specialist auto-engage seams.
+
+export const matchStorySpecialistInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    manifestPath: { type: "string" },
+  },
+  required: ["targetRepoRoot", "manifestPath"],
+};
+
+export const recordSpecialistEngagementInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    ref: { type: "string" },
+    sessionUlid: { type: "string" },
+    specialistRole: { type: "string" },
+  },
+  required: ["targetRepoRoot", "ref", "sessionUlid", "specialistRole"],
+};
+
 // ---------------------------------------------------------------------------
 // Convenience map — keyed by tool name, used by both transports
 // ---------------------------------------------------------------------------
@@ -903,6 +925,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   lookupRoleByDomain: lookupRoleByDomainInputSchema,
   markStoryReady: markStoryReadyInputSchema,
   markWithdrawn: markWithdrawnInputSchema,
+  matchStorySpecialist: matchStorySpecialistInputSchema,
   mintSessionUlid: mintSessionUlidInputSchema,
   openCycle: openCycleInputSchema,
   postReviewerComments: postReviewerCommentsInputSchema,
@@ -919,6 +942,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   requeueBlockedStory: requeueBlockedStoryInputSchema,
   recordAgentFriction: recordAgentFrictionInputSchema,
   recordMaintainerFeedback: recordMaintainerFeedbackInputSchema,
+  recordSpecialistEngagement: recordSpecialistEngagementInputSchema,
   reviewMaintainerInbox: reviewMaintainerInboxInputSchema,
   dismissMaintainerFeedback: dismissMaintainerFeedbackInputSchema,
   recordReviewerLesson: recordReviewerLessonInputSchema,

@@ -691,6 +691,21 @@ for (const o of orphans) {
       orphanInlineAcs = orphanAcsResult.acs
     }
   }
+  // SPECIALIST AUTO-ENGAGE for orphan resumes (Story native:01KVPSZ14HH48J9NEH7N6S6QDR):
+  // Re-derive the specialist match on resume in case a previous run crashed before
+  // recording it. Fail-soft (same pattern as the main run loop above).
+  {
+    const orphanSpecialistMatch = await seam(`node ${CLI} matchStorySpecialist --json '${J({ targetRepoRoot: REPO, manifestPath })}'`, `specialist-match:${ref}:resume`, true)
+    const orphanSpecialistRole = (orphanSpecialistMatch && !orphanSpecialistMatch._parseError && typeof orphanSpecialistMatch.role === 'string' && orphanSpecialistMatch.role) ? orphanSpecialistMatch.role : null
+    if (orphanSpecialistRole) {
+      log(`${ref} (resume) specialist match: ${orphanSpecialistRole}`)
+      try {
+        await seam(`node ${CLI} recordSpecialistEngagement --json '${J({ targetRepoRoot: REPO, ref, sessionUlid: SU, specialistRole: orphanSpecialistRole })}'`, `record-specialist:${ref}:resume`)
+      } catch (e) {
+        log(`${ref} (resume) recordSpecialistEngagement failed (swallowed): ${String((e && e.message) || e)}`)
+      }
+    }
+  }
   await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume', storyModel: orphanModel, reviewDepth: orphanReviewDepth, inlineAcs: orphanInlineAcs })
   await guardRoot(ref)
 }
@@ -849,6 +864,26 @@ async function runWorker(workerId) {
       if (acsResult && !acsResult._parseError && Array.isArray(acsResult.acs) && acsResult.acs.length > 0) {
         storyInlineAcs = acsResult.acs
         log(`${ref} extracted ${storyInlineAcs.length} AC(s) inline for builder worktree`)
+      }
+    }
+    // SPECIALIST AUTO-ENGAGE (Story native:01KVPSZ14HH48J9NEH7N6S6QDR): derive the
+    // specialist to engage for this story from its cited-source paths, matched against
+    // hired specialists' declared capabilities.path_patterns. Fail-soft: a garbled relay
+    // or missing team directory is treated as no-match (generalists-only, unchanged from
+    // today). Read-only / idempotent → retryable. When a specialist is matched, record
+    // their engagement on the in-progress manifest via recordSpecialistEngagement (a
+    // mutating seam — retryable=false, one-shot). Recording failure is swallowed (best-
+    // effort observability); it never blocks the dev build or the run.
+    {
+      const specialistMatch = await seam(`node ${CLI} matchStorySpecialist --json '${J({ targetRepoRoot: REPO, manifestPath })}'`, `specialist-match:${ref}`, true)
+      const specialistRole = (specialistMatch && !specialistMatch._parseError && typeof specialistMatch.role === 'string' && specialistMatch.role) ? specialistMatch.role : null
+      if (specialistRole) {
+        log(`${ref} specialist match: ${specialistRole} (domain: ${specialistMatch.domain || '?'})`)
+        try {
+          await seam(`node ${CLI} recordSpecialistEngagement --json '${J({ targetRepoRoot: REPO, ref, sessionUlid: SU, specialistRole })}'`, `record-specialist:${ref}`)
+        } catch (e) {
+          log(`${ref} recordSpecialistEngagement failed (swallowed): ${String((e && e.message) || e)}`)
+        }
       }
     }
     // PER-WORKER ISOLATION: a throw inside processStory (a seam hard-rejection, a

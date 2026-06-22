@@ -66,6 +66,8 @@ import {
   writeLensVerdictInputSchema,
   writeNativeStoryInputSchema,
   writeRetroProposalInputSchema,
+  matchStorySpecialistInputSchema,
+  recordSpecialistEngagementInputSchema,
 } from "../schemas/tool-input-schemas.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
@@ -143,6 +145,8 @@ import { requeueBlockedStory } from "./requeue-blocked-story.js";
 import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 import { analyzeTeamFit } from "./analyze-team-fit.js";
 import { unhirePersona } from "./unhire-persona.js";
+import { matchStorySpecialist } from "./match-story-specialist.js";
+import { recordSpecialistEngagement } from "./record-specialist-engagement.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -2591,6 +2595,81 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           })
           .parse(args);
         const result = await requeueBlockedStory(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KVPSZ14HH48J9NEH7N6S6QDR — matchStorySpecialist: derive the
+  // specialist to auto-engage for a story from its cited-source paths matched
+  // against hired specialists' declared path_patterns. Returns { role, domain }
+  // for the matched specialist, or { role: null, domain: null } when no specialist's
+  // patterns match (generalists-only, unchanged from today). Read-only / fail-soft.
+  server.registerTool({
+    name: "matchStorySpecialist",
+    description:
+      "Derive the specialist to auto-engage for a story by matching its cited-source " +
+      "paths against hired specialists' declared capabilities.path_patterns. " +
+      "Returns { role, domain } when a match is found, or { role: null, domain: null } " +
+      "when no specialist's patterns match (generalists-only). Read-only / fail-soft. " +
+      "Story native:01KVPSZ14HH48J9NEH7N6S6QDR.",
+    inputSchema: matchStorySpecialistInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          manifestPath: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await matchStorySpecialist(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KVPSZ14HH48J9NEH7N6S6QDR — recordSpecialistEngagement: write
+  // engaged_specialist onto the in-progress execution manifest, recording that the
+  // named specialist was auto-engaged for this story alongside the generalists.
+  server.registerTool({
+    name: "recordSpecialistEngagement",
+    description:
+      "Write engaged_specialist: <roleId> onto the in-progress execution manifest " +
+      "to record that the named specialist was auto-engaged for this story alongside " +
+      "the generalists. Idempotent on repeat. Not a state-machine transition — " +
+      "the manifest stays in in-progress/. Story native:01KVPSZ14HH48J9NEH7N6S6QDR.",
+    inputSchema: recordSpecialistEngagementInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          ref: z.string().min(1),
+          sessionUlid: z.string().min(1),
+          specialistRole: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await recordSpecialistEngagement(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

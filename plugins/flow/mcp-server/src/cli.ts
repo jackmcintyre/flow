@@ -82,6 +82,8 @@ import { readCatalogue } from "./tools/read-catalogue.js";
 import { summariseRetroProposal } from "./tools/summarise-retro-proposal.js";
 import { analyzeTeamFit } from "./tools/analyze-team-fit.js";
 import { unhirePersona } from "./tools/unhire-persona.js";
+import { matchStorySpecialist } from "./tools/match-story-specialist.js";
+import { recordSpecialistEngagement } from "./tools/record-specialist-engagement.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -285,6 +287,18 @@ const TOOLS: Record<string, ToolFn> = {
   // (uses the bipartite matcher — not a head-count). Idempotent on already-archived.
   //   node dist/cli.js unhirePersona --json '{"targetRepoRoot":"...","role":"<role>"}'
   unhirePersona,
+  // Story native:01KVPSZ14HH48J9NEH7N6S6QDR — matchStorySpecialist: derive the
+  // specialist to auto-engage for a story from its cited-source paths matched against
+  // hired specialists' declared capabilities.path_patterns. Returns { role, domain }
+  // on match, { role: null, domain: null } on no-match (generalists-only). Read-only.
+  //   node dist/cli.js matchStorySpecialist \
+  //     --json '{"targetRepoRoot":"...","manifestPath":"..."}'
+  matchStorySpecialist,
+  // Story native:01KVPSZ14HH48J9NEH7N6S6QDR — recordSpecialistEngagement: write
+  // engaged_specialist onto the in-progress manifest to record participation.
+  //   node dist/cli.js recordSpecialistEngagement \
+  //     --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","specialistRole":"<role>"}'
+  recordSpecialistEngagement,
 };
 
 function emit(obj: unknown): void {

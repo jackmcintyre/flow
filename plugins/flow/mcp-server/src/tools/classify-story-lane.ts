@@ -23,6 +23,9 @@
  */
 
 import { z } from "zod";
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
+import pm from "picomatch";
 
 // ---------------------------------------------------------------------------
 // Constants: paths / change-types that force full scrutiny
@@ -322,4 +325,202 @@ function applyHint(
   if (classified.lane === "full") return classified; // already full — hint irrelevant
   if (authorHint === "full") return fullResultFn("full.hint-override");
   return classified;
+}
+
+// ---------------------------------------------------------------------------
+// Specialist auto-engage: path→area matching
+// (Story native:01KVPSZ14HH48J9NEH7N6S6QDR)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a specialist match against a story's cited-source paths.
+ */
+export interface SpecialistMatchResult {
+  /** The role id of the matched specialist. */
+  role: string;
+  /** The domain string declared on the specialist's persona. */
+  domain: string;
+}
+
+/**
+ * Match a story's cited-source paths against hired specialists' declared
+ * `capabilities.path_patterns` to find the specialist whose area covers
+ * the story's work.
+ *
+ * Algorithm:
+ *  1. Walk `<targetRepoRoot>/team/`. Skip `custom` and `_archived` (mirrors
+ *     lookupRoleByDomain's exclusion list).
+ *  2. For each hired role, read its PERSONA.md frontmatter. Skip roles that
+ *     lack a `capabilities.path_patterns` declaration (back-compat) or whose
+ *     pattern list is empty.
+ *  3. For each cited source, test it against every pattern in the role's
+ *     `path_patterns` using picomatch. picomatch is already a project
+ *     dependency (package.json) used elsewhere in the codebase.
+ *  4. Return the FIRST role whose patterns match any cited source.
+ *     A story whose cited paths match no hired specialist returns `null`
+ *     (generalists-only; the existing no-match path is unchanged).
+ *  5. Backbone generalist roles (generalist-dev, generalist-reviewer) are
+ *     NEVER auto-engaged as a specialist — they handle all stories already.
+ *     Any match against one of them is treated as no-match.
+ *
+ * Custom and built-in roles are treated identically — no special-casing of
+ * role origin (Story native:01KVPSZ14HH48J9NEH7N6S6QDR AC3).
+ *
+ * @param citedSources - Repo-relative source paths from the story manifest.
+ * @param targetRepoRoot - Absolute path to the target repository root.
+ * @returns The first specialist whose path_patterns match, or `null` when no
+ *          hired specialist's patterns match any cited source.
+ */
+export async function matchSpecialistByCitedSources(
+  citedSources: string[],
+  targetRepoRoot: string,
+): Promise<SpecialistMatchResult | null> {
+  if (citedSources.length === 0) return null;
+
+  const teamDir = path.join(targetRepoRoot, "team");
+
+  let entries: string[];
+  try {
+    entries = await fs.readdir(teamDir);
+  } catch (err) {
+    // No team directory — no specialists hired.
+    if (isEnoentError(err)) return null;
+    throw err;
+  }
+
+  const SKIP_DIRS = new Set(["custom", "_archived"]);
+  // Backbone generalists are never auto-engaged as a specialist.
+  const BACKBONE_ROLES = new Set(["generalist-dev", "generalist-reviewer"]);
+
+  for (const entry of entries.sort()) {
+    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    if (BACKBONE_ROLES.has(entry)) continue;
+
+    const personaPath = path.join(teamDir, entry, "PERSONA.md");
+    let raw: string;
+    try {
+      raw = await fs.readFile(personaPath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const frontmatter = extractFrontmatter(raw);
+    if (!frontmatter) continue;
+
+    const { capabilities, domain } = frontmatter;
+    if (!domain) continue;
+
+    const pathPatterns: string[] =
+      capabilities?.path_patterns ?? [];
+
+    if (pathPatterns.length === 0) continue;
+
+    // picomatch: test each cited source against each pattern.
+    // pm.isMatch handles both glob and plain-prefix patterns.
+    for (const src of citedSources) {
+      for (const pattern of pathPatterns) {
+        if (pm.isMatch(src, pattern, { dot: true })) {
+          return { role: entry, domain };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse YAML frontmatter (between the opening and closing `---` fences)
+ * from a PERSONA.md string. Returns the `domain` and `capabilities` fields
+ * if present, otherwise `null` on any parse failure.
+ */
+function extractFrontmatter(raw: string): {
+  domain: string | undefined;
+  capabilities?: { path_patterns?: string[] };
+} | null {
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) return null;
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) return null;
+  const fmRaw = normalised.slice(4, closeIdx);
+
+  // Minimal YAML extraction — only pull `domain:` and `capabilities:` block.
+  // Using a simple line-by-line parse to avoid adding a parse dependency.
+  let domain: string | undefined;
+  let pathPatterns: string[] | undefined;
+  let inCapabilities = false;
+  let inPathPatterns = false;
+
+  for (const line of fmRaw.split("\n")) {
+    // Top-level domain field.
+    const domainMatch = line.match(/^domain:\s*["']?([^"'\n]+?)["']?\s*$/);
+    if (domainMatch) {
+      domain = domainMatch[1]!.trim();
+      inCapabilities = false;
+      inPathPatterns = false;
+      continue;
+    }
+
+    // Capabilities block start.
+    if (line.match(/^capabilities:\s*$/)) {
+      inCapabilities = true;
+      inPathPatterns = false;
+      continue;
+    }
+
+    if (inCapabilities) {
+      // path_patterns list start.
+      if (line.match(/^\s{2}path_patterns:\s*(?:\[\s*\])?\s*$/)) {
+        inPathPatterns = true;
+        pathPatterns = [];
+        continue;
+      }
+
+      // path_patterns inline list.
+      const inlineListMatch = line.match(/^\s{2}path_patterns:\s*\[(.+)\]\s*$/);
+      if (inlineListMatch) {
+        inPathPatterns = false;
+        const items = inlineListMatch[1]!
+          .split(",")
+          .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+          .filter(Boolean);
+        pathPatterns = items;
+        continue;
+      }
+
+      if (inPathPatterns) {
+        // Dash-prefixed list item.
+        const itemMatch = line.match(/^\s{4}-\s+["']?(.+?)["']?\s*$/);
+        if (itemMatch) {
+          if (!pathPatterns) pathPatterns = [];
+          pathPatterns.push(itemMatch[1]!.trim());
+          continue;
+        }
+        // Non-matching line exits the path_patterns sub-block.
+        if (line.trim() !== "") {
+          inPathPatterns = false;
+        }
+      }
+
+      // Any other top-level key exits capabilities block.
+      if (line.match(/^[a-z_]/i)) {
+        inCapabilities = false;
+        inPathPatterns = false;
+      }
+    }
+  }
+
+  return {
+    domain,
+    capabilities: pathPatterns !== undefined ? { path_patterns: pathPatterns } : undefined,
+  };
+}
+
+function isEnoentError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: string }).code === "ENOENT"
+  );
 }

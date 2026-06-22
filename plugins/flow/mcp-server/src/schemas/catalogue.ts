@@ -81,14 +81,29 @@ export type RunJob = z.infer<typeof RunJobSchema>;
  *   From the fixed set: structure, verifiability, discipline, domain, considered.
  * `run_jobs`: which run-loop jobs this role can fill.
  *   From the fixed set: build, review.
+ * `path_patterns`: glob/path-prefix patterns declaring which source-file paths
+ *   fall within this specialist's declared area. Used by the run to
+ *   auto-engage the specialist when a story's cited sources match. An absent
+ *   or empty array means the specialist is never auto-engaged from path
+ *   matching alone (back-compat: existing personas without this field behave
+ *   exactly as they do today).
+ *   Pattern matching uses picomatch (same as the build toolchain). Each
+ *   pattern is matched against each cited-source path; a match on any
+ *   path/pattern pair is sufficient to select the specialist.
  *
- * Both arrays default to empty when the field is absent, which preserves
+ * All arrays default to empty when the field is absent, which preserves
  * the current fixed-list behaviour unchanged for all roles that omit it.
  */
 export const RoleCapabilitiesSchema = z
   .object({
     review_lenses: z.array(ReviewLensSchema).default([]),
     run_jobs: z.array(RunJobSchema).default([]),
+    /**
+     * Source-path glob/prefix patterns this specialist's domain covers.
+     * Absence is back-compatible: the specialist is never auto-engaged
+     * from path matching when this field is absent or empty.
+     */
+    path_patterns: z.array(z.string().min(1)).default([]),
   })
   .strict();
 

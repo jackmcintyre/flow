@@ -462,6 +462,17 @@ export const ExecutionManifestSchema = z
      * Added in Story native:01KVP72SR857S3RY7CMQ8E2BK6 (AC1).
      */
     block_detail: z.string().min(1).optional(),
+
+    /**
+     * Role id of the specialist auto-engaged by the run for this story, based on
+     * the path→area match of the story's cited sources against hired specialists'
+     * declared path_patterns (Story native:01KVPSZ14HH48J9NEH7N6S6QDR).
+     *
+     * Present only on in-progress and done manifests where a specialist was
+     * matched and engaged; absent when the story was handled by generalists alone.
+     * Additive and strict-compatible — old manifests parse unchanged.
+     */
+    engaged_specialist: z.string().min(1).optional(),
   })
   .strict();
 
