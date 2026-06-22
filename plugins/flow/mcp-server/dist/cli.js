@@ -27634,6 +27634,14 @@ var CycleOpenedEventSchema = TelemetryEventBase.extend({
     archived: external_exports.boolean()
   }).strict()
 }).strict();
+var StoryBlockedEventSchema = TelemetryEventBase.extend({
+  type: external_exports.literal("story.blocked"),
+  data: external_exports.object({
+    ref: external_exports.string().min(1),
+    blocked_by: external_exports.string().min(1),
+    block_detail: external_exports.string().min(1)
+  }).strict()
+}).strict();
 var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -27648,7 +27656,8 @@ var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   QualityAdjudicatedEventSchema,
   SkillInvokeEventSchema,
   AgentFrictionEventSchema,
-  CycleOpenedEventSchema
+  CycleOpenedEventSchema,
+  StoryBlockedEventSchema
 ]);
 
 // src/lib/logger.ts
@@ -28224,7 +28233,19 @@ var ExecutionManifestSchema = external_exports.object({
    * GitHub automatically. Normalised from a full URL at write time.
    * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
    */
-  source_issue: external_exports.string().regex(/^\d+$/).optional()
+  source_issue: external_exports.string().regex(/^\d+$/).optional(),
+  /**
+   * Human-readable detail of why a story was blocked — the worker's error
+   * message at the worker-threw block point, captured alongside `blocked_by`
+   * so an operator can diagnose the failure without inspecting run logs.
+   *
+   * Present only on `blocked/` manifests whose `blocked_by === "worker-threw"`;
+   * absent on all other manifests. Persisted so it survives the session that
+   * produced it (the no-silent-failures guarantee).
+   *
+   * Added in Story native:01KVP72SR857S3RY7CMQ8E2BK6 (AC1).
+   */
+  block_detail: external_exports.string().min(1).optional()
 }).strict();
 function parseExecutionManifest(input, opts) {
   const result = ExecutionManifestSchema.safeParse(input);
@@ -44878,13 +44899,42 @@ function isEnoent13(err) {
 var import_yaml32 = __toESM(require_dist(), 1);
 import { promises as fs55 } from "node:fs";
 import * as path74 from "node:path";
+
+// src/lib/emit-story-blocked.ts
+async function emitStoryBlocked(opts) {
+  try {
+    await logTelemetryEvent({
+      targetRepoRoot: opts.targetRepoRoot,
+      event: {
+        type: "story.blocked",
+        session_id: opts.sessionUlid,
+        agent: opts.agent,
+        story_id: opts.ref,
+        data: {
+          ref: opts.ref,
+          blocked_by: opts.blockedBy,
+          // Truncate to 500 chars to stay within NFR14's spirit (no long
+          // body/diff/contents strings in telemetry).
+          block_detail: opts.blockDetail.slice(0, 500)
+        }
+      }
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[emitStoryBlocked] suppressed error emitting story.blocked (ref=${opts.ref}): ${String(err)}
+`
+    );
+  }
+}
+
+// src/tools/block-story.ts
 function stripUndefined6(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== void 0)
   );
 }
 async function blockStory(opts) {
-  const { targetRepoRoot, ref, sessionUlid, blockedBy, role = "orchestrator" } = opts;
+  const { targetRepoRoot, ref, sessionUlid, blockedBy, blockDetail, role = "orchestrator" } = opts;
   const stateRoot = path74.join(targetRepoRoot, ".flow", "state");
   const absInProgressPath = path74.join(stateRoot, "in-progress", `${ref}.yaml`);
   const absBlockedPath = path74.join(stateRoot, "blocked", `${ref}.yaml`);
@@ -44914,10 +44964,12 @@ async function blockStory(opts) {
   await removeInProgressSnapshot({ targetRepoRoot, ref });
   await moveBetweenStates({ targetRepoRoot, ref, from: "in-progress", to: "blocked" });
   const { claimed_by: _dropClaim, ...withoutClaim } = manifest;
+  const trimmedDetail = blockDetail !== void 0 ? blockDetail.slice(0, 500) : void 0;
   const updatedManifest = {
     ...withoutClaim,
     status: "blocked",
-    blocked_by: blockedBy
+    blocked_by: blockedBy,
+    ...trimmedDetail !== void 0 ? { block_detail: trimmedDetail } : {}
   };
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absBlockedPath
@@ -44932,6 +44984,16 @@ async function blockStory(opts) {
     targetRepoRoot,
     mcpToolContext: { toolName: "blockStory", role }
   });
+  if (trimmedDetail !== void 0) {
+    await emitStoryBlocked({
+      targetRepoRoot,
+      ref,
+      blockedBy,
+      blockDetail: trimmedDetail,
+      sessionUlid,
+      agent: role
+    });
+  }
   return { ref, absPath: absBlockedPath };
 }
 

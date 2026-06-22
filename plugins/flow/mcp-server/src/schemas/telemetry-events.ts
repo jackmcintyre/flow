@@ -418,6 +418,44 @@ const CycleOpenedEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `story.blocked` — emitted at the worker-threw block point when the run's
+ * non-fatal backstop guard catches an unexpected error and moves the story to
+ * `blocked/` (Story native:01KVP72SR857S3RY7CMQ8E2BK6, AC2).
+ *
+ * This event makes the block durable in the activity history so an operator who
+ * returns after the run has ended can read WHAT was blocked and WHY, rather than
+ * finding only a blocked manifest with a one-word `blocked_by` reason and no
+ * trace of the human-readable error detail.
+ *
+ * - `ref`           — the story reference (`<adapter>:<source-id>`). Mirrored
+ *                     into the envelope `story_id` so consumers reading only the
+ *                     envelope can join.
+ * - `blocked_by`    — the one-word closed-enum reason (`"worker-threw"` for the
+ *                     unexpected-throw path; other `blocked_by` values are
+ *                     possible if `blockStory` is called for other reasons).
+ * - `block_detail`  — the human-readable error message captured at the throw
+ *                     point; short (truncated to 500 chars at the call site to
+ *                     stay within NFR14's "no body/diff/contents strings" spirit).
+ *
+ * Emitted inside the non-fatal backstop guard (swallowed on error) — so this
+ * event can NEVER re-break the run. The AC2 test asserts the event validates AND
+ * persists (a real entry is readable back from the JSONL file), proving the guard
+ * cannot silently swallow a schema-validation failure from an unregistered type.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export const StoryBlockedEventSchema = TelemetryEventBase.extend({
+  type: z.literal("story.blocked"),
+  data: z
+    .object({
+      ref: z.string().min(1),
+      blocked_by: z.string().min(1),
+      block_detail: z.string().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -433,6 +471,7 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   SkillInvokeEventSchema,
   AgentFrictionEventSchema,
   CycleOpenedEventSchema,
+  StoryBlockedEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

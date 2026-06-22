@@ -38175,7 +38175,19 @@ var ExecutionManifestSchema = external_exports.object({
    * GitHub automatically. Normalised from a full URL at write time.
    * (Story native:01KVC6N2K6AEEGYHG98N2WJQ8M)
    */
-  source_issue: external_exports.string().regex(/^\d+$/).optional()
+  source_issue: external_exports.string().regex(/^\d+$/).optional(),
+  /**
+   * Human-readable detail of why a story was blocked — the worker's error
+   * message at the worker-threw block point, captured alongside `blocked_by`
+   * so an operator can diagnose the failure without inspecting run logs.
+   *
+   * Present only on `blocked/` manifests whose `blocked_by === "worker-threw"`;
+   * absent on all other manifests. Persisted so it survives the session that
+   * produced it (the no-silent-failures guarantee).
+   *
+   * Added in Story native:01KVP72SR857S3RY7CMQ8E2BK6 (AC1).
+   */
+  block_detail: external_exports.string().min(1).optional()
 }).strict();
 function parseExecutionManifest(input, opts) {
   const result = ExecutionManifestSchema.safeParse(input);
@@ -46941,6 +46953,14 @@ var CycleOpenedEventSchema = TelemetryEventBase.extend({
     archived: external_exports.boolean()
   }).strict()
 }).strict();
+var StoryBlockedEventSchema = TelemetryEventBase.extend({
+  type: external_exports.literal("story.blocked"),
+  data: external_exports.object({
+    ref: external_exports.string().min(1),
+    blocked_by: external_exports.string().min(1),
+    block_detail: external_exports.string().min(1)
+  }).strict()
+}).strict();
 var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -46955,7 +46975,8 @@ var TelemetryEventSchema = external_exports.discriminatedUnion("type", [
   QualityAdjudicatedEventSchema,
   SkillInvokeEventSchema,
   AgentFrictionEventSchema,
-  CycleOpenedEventSchema
+  CycleOpenedEventSchema,
+  StoryBlockedEventSchema
 ]);
 
 // src/lib/logger.ts
