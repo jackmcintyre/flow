@@ -39680,7 +39680,7 @@ function renderProposalFields(proposal) {
 }
 
 // src/tools/accept-proposal.ts
-var import_yaml20 = __toESM(require_dist2(), 1);
+var import_yaml21 = __toESM(require_dist2(), 1);
 import { promises as fs30 } from "node:fs";
 
 // src/lib/git.ts
@@ -48048,6 +48048,7 @@ function isEnoent7(err) {
 }
 
 // src/tools/unhire-persona.ts
+var import_yaml18 = __toESM(require_dist2(), 1);
 import { promises as fs26 } from "node:fs";
 import * as path34 from "node:path";
 
@@ -48320,12 +48321,31 @@ var LENS_CANDIDATES = {
   domain: ["generalist-dev", "planner", "orchestrator"],
   considered: ["retro-analyst", "quality-lead", "orchestrator", "planner"]
 };
-function resolveLensRoleBinding(hiredRoles) {
-  const hiredSet = new Set(hiredRoles);
+function buildAdjacency(roles) {
+  const roleMap = new Map(roles.map((r) => [r.id, r]));
+  function isQualified(role, lens) {
+    if (role.reviewLenses === void 0) {
+      return LENS_CANDIDATES[lens].includes(role.id);
+    }
+    return role.reviewLenses.includes(lens);
+  }
   const adjacency = {};
   for (const lens of LENS_NAMES) {
-    adjacency[lens] = LENS_CANDIDATES[lens].filter((r) => hiredSet.has(r));
+    const preferenceOrdered = LENS_CANDIDATES[lens].filter((id) => {
+      const r = roleMap.get(id);
+      return r !== void 0 && isQualified(r, lens);
+    });
+    const preferenceSet = new Set(LENS_CANDIDATES[lens]);
+    const customQualified = roles.filter((r) => !preferenceSet.has(r.id) && isQualified(r, lens)).map((r) => r.id);
+    adjacency[lens] = [...preferenceOrdered, ...customQualified];
   }
+  return adjacency;
+}
+function resolveLensRoleBinding(hiredRoles) {
+  const roles = hiredRoles.map(
+    (r) => typeof r === "string" ? { id: r, reviewLenses: void 0 } : r
+  );
+  const adjacency = buildAdjacency(roles);
   const matchRole = /* @__PURE__ */ new Map();
   const matchLens = /* @__PURE__ */ new Map();
   function tryAugment(lens, visited) {
@@ -48377,7 +48397,40 @@ async function aggregateJudgePanel(opts) {
 }
 
 // src/tools/unhire-persona.ts
-async function enumerateHiredRoles(targetRepoRoot) {
+async function readPersonaCapabilities(personaPath) {
+  let raw;
+  try {
+    raw = await fs26.readFile(personaPath, "utf8");
+  } catch {
+    return void 0;
+  }
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) {
+    return void 0;
+  }
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    return void 0;
+  }
+  const frontmatterRaw = normalised.slice(4, closeIdx);
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml18.parse)(frontmatterRaw);
+  } catch {
+    return void 0;
+  }
+  if (typeof parsedYaml !== "object" || parsedYaml === null || !("capabilities" in parsedYaml)) {
+    return void 0;
+  }
+  const capResult = RoleCapabilitiesSchema.safeParse(
+    parsedYaml["capabilities"]
+  );
+  if (!capResult.success) {
+    return void 0;
+  }
+  return capResult.data.review_lenses;
+}
+async function enumerateHiredRolesWithCapabilities(targetRepoRoot) {
   const teamDir = path34.join(targetRepoRoot, "team");
   let dirEntries;
   try {
@@ -48389,7 +48442,7 @@ async function enumerateHiredRoles(targetRepoRoot) {
     throw err;
   }
   const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
-  const hiredRoles = [];
+  const roleIds = [];
   for (const entry of dirEntries) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) {
       continue;
@@ -48408,10 +48461,18 @@ async function enumerateHiredRoles(targetRepoRoot) {
     } catch {
       continue;
     }
-    hiredRoles.push(entry);
+    roleIds.push(entry);
   }
-  hiredRoles.sort();
-  return hiredRoles;
+  roleIds.sort();
+  const roles = await Promise.all(
+    roleIds.map(async (id) => {
+      const reviewLenses = await readPersonaCapabilities(
+        path34.join(teamDir, id, "PERSONA.md")
+      );
+      return { id, reviewLenses };
+    })
+  );
+  return roles;
 }
 async function unhirePersona(opts) {
   const { targetRepoRoot, role } = opts;
@@ -48424,8 +48485,8 @@ async function unhirePersona(opts) {
     role,
     "PERSONA.md"
   );
-  const hiredRoles = await enumerateHiredRoles(targetRepoRoot);
-  const isHired = hiredRoles.includes(role);
+  const hiredRolesWithCaps = await enumerateHiredRolesWithCapabilities(targetRepoRoot);
+  const isHired = hiredRolesWithCaps.some((r) => r.id === role);
   if (!isHired) {
     let alreadyArchived = false;
     try {
@@ -48438,7 +48499,7 @@ async function unhirePersona(opts) {
     }
     throw new RoleNotHiredError({ role });
   }
-  const postUnhireRoster = hiredRoles.filter((r) => r !== role);
+  const postUnhireRoster = hiredRolesWithCaps.filter((r) => r.id !== role);
   let unstaffedLens = null;
   try {
     resolveLensRoleBinding(postUnhireRoster);
@@ -48500,7 +48561,7 @@ function isEnoent8(err) {
 }
 
 // src/lib/apply-team-change.ts
-async function enumerateHiredRoles2(targetRepoRoot) {
+async function enumerateHiredRoles(targetRepoRoot) {
   const teamDir = path35.join(targetRepoRoot, "team");
   let dirEntries;
   try {
@@ -48553,7 +48614,7 @@ function makeTeamChangeHandler(opts = {}) {
         lines.push(``);
         lines.push(`Only team records under team/ would change.`);
       } else {
-        const hiredRoles = await enumerateHiredRoles2(ctx.targetRepoRoot);
+        const hiredRoles = await enumerateHiredRoles(ctx.targetRepoRoot);
         const postUnhireRoster = hiredRoles.filter((r) => r !== targetRole);
         let wouldBreakGrading = null;
         try {
@@ -48641,7 +48702,7 @@ function isEnoent9(err) {
 // src/lib/apply-lesson-consolidation.ts
 import * as path36 from "node:path";
 import { promises as fs28 } from "node:fs";
-var import_yaml18 = __toESM(require_dist2(), 1);
+var import_yaml19 = __toESM(require_dist2(), 1);
 var TOOL_NAME6 = "acceptProposal";
 function personaRelPath3(targetRole) {
   return `team/${targetRole}/PERSONA.md`;
@@ -48668,7 +48729,7 @@ function reconstructPersonaFile2(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml18.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml19.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -48809,7 +48870,7 @@ function assertLessonConsolidationProposal(proposal) {
 }
 
 // src/lib/apply-lesson-retirement.ts
-var import_yaml19 = __toESM(require_dist2(), 1);
+var import_yaml20 = __toESM(require_dist2(), 1);
 import * as path37 from "node:path";
 import { promises as fs29 } from "node:fs";
 var TOOL_NAME7 = "acceptProposal";
@@ -48838,7 +48899,7 @@ function reconstructPersonaFile3(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml19.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml20.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -49184,7 +49245,7 @@ function stampProposalApplied(rawFile, located, appliedAt, idempotencyKey, appli
       (p, i2) => i2 === located.index ? { ...p, applied: appliedBlock } : p
     )
   };
-  const fm = (0, import_yaml20.stringify)(
+  const fm = (0, import_yaml21.stringify)(
     {
       iso_timestamp: file2.iso_timestamp,
       cycle_window: file2.cycle_window,
@@ -49202,7 +49263,7 @@ function dedupePaths(paths) {
 }
 
 // src/tools/gather-retro-inputs.ts
-var import_yaml24 = __toESM(require_dist2(), 1);
+var import_yaml25 = __toESM(require_dist2(), 1);
 import { promises as fs40 } from "node:fs";
 import * as path50 from "node:path";
 
@@ -49810,7 +49871,7 @@ function deriveUlidFromPath(absPath) {
 }
 
 // src/state/workspace-resolver.ts
-var import_yaml21 = __toESM(require_dist2(), 1);
+var import_yaml22 = __toESM(require_dist2(), 1);
 import { promises as fs35 } from "node:fs";
 import * as path43 from "node:path";
 
@@ -50584,14 +50645,14 @@ async function resolveWorkspace(opts) {
     });
     await writeManagedFile({
       absPath: configPath,
-      contents: (0, import_yaml21.stringify)(synthesised),
+      contents: (0, import_yaml22.stringify)(synthesised),
       targetRepoRoot
     });
   }
   const raw = await fs35.readFile(configPath, "utf8");
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml21.parse)(raw);
+    parsedYaml = (0, import_yaml22.parse)(raw);
   } catch (err) {
     throw new InvalidWorkspaceConfigError({
       configPath,
@@ -50742,7 +50803,7 @@ async function resolveDisciplinePaths(story, targetRepoRoot) {
 }
 
 // src/tools/scan-sources.ts
-var import_yaml22 = __toESM(require_dist2(), 1);
+var import_yaml23 = __toESM(require_dist2(), 1);
 import { promises as fs37 } from "node:fs";
 import * as path45 from "node:path";
 
@@ -51080,7 +51141,7 @@ async function writeDepsDriftBlockedManifest(story, driftDetail, absBlockedPath,
     ]
   });
   const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-  const yamlText = (0, import_yaml22.stringify)(blockedManifest, { lineWidth: 0 });
+  const yamlText = (0, import_yaml23.stringify)(blockedManifest, { lineWidth: 0 });
   await writeManagedFile({
     absPath: absBlockedPath,
     contents: yamlText,
@@ -51217,7 +51278,7 @@ async function scanSources(opts) {
     if (currentState === "blocked") {
       const absBlockedPath = path45.join(stateRoot, "blocked", `${story.ref}.yaml`);
       const rawBlocked = await fs37.readFile(absBlockedPath, "utf8");
-      const parsedBlocked = (0, import_yaml22.parse)(rawBlocked);
+      const parsedBlocked = (0, import_yaml23.parse)(rawBlocked);
       const existingBlockedHash = parsedBlocked["source_hash"];
       if (existingBlockedHash === story.source_hash) {
         result.skippedRefs.push({ ref: story.ref, reason: "not-in-to-do" });
@@ -51250,7 +51311,7 @@ async function scanSources(opts) {
         const absToDoPathNew = path45.join(stateRoot, "to-do", `${story.ref}.yaml`);
         const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
         const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-        const yamlText = (0, import_yaml22.stringify)(manifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml23.stringify)(manifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absToDoPathNew,
           contents: yamlText,
@@ -51284,7 +51345,7 @@ async function scanSources(opts) {
           }))
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
-        const yamlText = (0, import_yaml22.stringify)(blockedManifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml23.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -51358,7 +51419,7 @@ async function scanSources(opts) {
         });
         const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
         const absBlockedPath = path45.join(stateRoot, "blocked", `${story.ref}.yaml`);
-        const yamlText = (0, import_yaml22.stringify)(blockedManifest, { lineWidth: 0 });
+        const yamlText = (0, import_yaml23.stringify)(blockedManifest, { lineWidth: 0 });
         await writeManagedFile({
           absPath: absBlockedPath,
           contents: yamlText,
@@ -51373,7 +51434,7 @@ async function scanSources(opts) {
     if (currentState === null) {
       const riskFields = await computeAuthorTimeRiskFields(story, targetRepoRoot, pluginRoot);
       const manifest = composeManifest(story, activeAdapterName, targetRepoRoot, riskFields);
-      const yamlText = (0, import_yaml22.stringify)(manifest, { lineWidth: 0 });
+      const yamlText = (0, import_yaml23.stringify)(manifest, { lineWidth: 0 });
       await writeManagedFile({
         absPath: absToDoPath,
         contents: yamlText,
@@ -51396,7 +51457,7 @@ async function scanSources(opts) {
       }
       let existingManifest;
       try {
-        const parsed = (0, import_yaml22.parse)(rawText);
+        const parsed = (0, import_yaml23.parse)(rawText);
         existingManifest = parseExecutionManifest(parsed, { absPath: absToDoPath });
       } catch (err) {
         const detailMessage = err instanceof Error ? err.message : String(err);
@@ -51437,7 +51498,7 @@ async function scanSources(opts) {
           source_hash: story.source_hash,
           source_path: repoRelativePath(story.raw_path, targetRepoRoot)
         };
-        const yamlText = (0, import_yaml22.stringify)(stripUndefined4(updatedManifest), {
+        const yamlText = (0, import_yaml23.stringify)(stripUndefined4(updatedManifest), {
           lineWidth: 0
         });
         await writeManagedFile({
@@ -51836,7 +51897,7 @@ function inputToSourceStory(input, ref, absPath, resolvedDod = FLOW_DEFINITION_O
 }
 
 // src/tools/read-backlog-inventory.ts
-var import_yaml23 = __toESM(require_dist2(), 1);
+var import_yaml24 = __toESM(require_dist2(), 1);
 import { promises as fs38 } from "node:fs";
 import * as path47 from "node:path";
 var ReadBacklogInventoryInputSchema = external_exports.object({
@@ -51883,7 +51944,7 @@ async function readBacklogInventory(rawInput) {
       if (!filename.endsWith(".yaml") || filename.endsWith(".snapshot.yaml")) continue;
       const absPath = path47.join(stateDir, filename);
       const rawText = await fs38.readFile(absPath, "utf8");
-      const parsed = (0, import_yaml23.parse)(rawText);
+      const parsed = (0, import_yaml24.parse)(rawText);
       const manifest = parseExecutionManifest(parsed, { absPath });
       let depsReady = true;
       for (const dep of manifest.depends_on) {
@@ -52304,7 +52365,7 @@ async function gatherDoneManifests(targetRepoRoot, windowStartMs) {
       }
     }
     const raw = await fs40.readFile(absPath, "utf8");
-    const parsed = (0, import_yaml24.parse)(raw);
+    const parsed = (0, import_yaml25.parse)(raw);
     manifests.push(parseExecutionManifest(parsed, { absPath }));
   }
   return manifests;
@@ -52840,7 +52901,7 @@ function isEnoent10(err) {
 }
 
 // src/tools/list-claimable-todos.ts
-var import_yaml25 = __toESM(require_dist2(), 1);
+var import_yaml26 = __toESM(require_dist2(), 1);
 import { promises as fs41 } from "node:fs";
 import * as path51 from "node:path";
 
@@ -52884,7 +52945,7 @@ async function listClaimableTodos(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml25.parse)(raw);
+    const parsed = (0, import_yaml26.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!isClaimable(manifest)) {
       continue;
@@ -53253,7 +53314,7 @@ function renderInitWorkspace(result) {
 }
 
 // src/tools/open-cycle.ts
-var import_yaml26 = __toESM(require_dist2(), 1);
+var import_yaml27 = __toESM(require_dist2(), 1);
 import * as path54 from "node:path";
 function isoForFilename(iso) {
   return iso.replace(/[:.]/g, "-");
@@ -53316,7 +53377,7 @@ async function archivePriorCycle(targetRepoRoot, priorCycle, openedAt) {
   };
   const fileName = `${priorCycle.cycle_ulid}-${isoForFilename(openedAt)}.yaml`;
   const absPath = path54.join(targetRepoRoot, ".flow", "cycle-archive", fileName);
-  await atomicWriteFile(absPath, (0, import_yaml26.stringify)(archiveRecord, { lineWidth: 0 }));
+  await atomicWriteFile(absPath, (0, import_yaml27.stringify)(archiveRecord, { lineWidth: 0 }));
   return absPath;
 }
 
@@ -53618,7 +53679,7 @@ function isEnoent14(err) {
 }
 
 // src/tools/mark-withdrawn.ts
-var import_yaml27 = __toESM(require_dist2(), 1);
+var import_yaml28 = __toESM(require_dist2(), 1);
 import { promises as fs45 } from "node:fs";
 import * as path58 from "node:path";
 var MarkWithdrawnInputSchema = external_exports.object({
@@ -53631,7 +53692,7 @@ function stripUndefined5(obj) {
   );
 }
 function serialiseManifest(manifest) {
-  return (0, import_yaml27.stringify)(
+  return (0, import_yaml28.stringify)(
     stripUndefined5(manifest),
     { lineWidth: 0 }
   );
@@ -53670,7 +53731,7 @@ async function markWithdrawn(rawInput) {
     });
   }
   const rawText = await fs45.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml27.parse)(rawText);
+  const parsed = (0, import_yaml28.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     return {
@@ -53691,7 +53752,7 @@ async function markWithdrawn(rawInput) {
 }
 
 // src/tools/mark-story-ready.ts
-var import_yaml28 = __toESM(require_dist2(), 1);
+var import_yaml29 = __toESM(require_dist2(), 1);
 import { promises as fs46 } from "node:fs";
 import * as path59 from "node:path";
 var MarkStoryReadyInputSchema = external_exports.object({
@@ -53730,7 +53791,7 @@ async function markStoryReady(rawInput) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
   }
   const rawText = await fs46.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml28.parse)(rawText);
+  const parsed = (0, import_yaml29.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "withdrawn" });
@@ -54079,7 +54140,7 @@ import * as path65 from "node:path";
 // src/lib/dep-merge-check.ts
 import { promises as fs48 } from "node:fs";
 import * as path62 from "node:path";
-var import_yaml29 = __toESM(require_dist2(), 1);
+var import_yaml30 = __toESM(require_dist2(), 1);
 
 // src/lib/pr-body.ts
 function buildBranchSlug(opts) {
@@ -54284,7 +54345,7 @@ async function areDependenciesMerged(opts) {
     let title;
     let prNumber;
     try {
-      const manifest = parseExecutionManifest((0, import_yaml29.parse)(raw), { absPath: depPath });
+      const manifest = parseExecutionManifest((0, import_yaml30.parse)(raw), { absPath: depPath });
       title = manifest.title;
       prNumber = manifest.pr_number;
     } catch {
@@ -54334,7 +54395,7 @@ async function anyOverlapBlockerInFlight(opts) {
     }
     let prNumber;
     try {
-      const manifest = parseExecutionManifest((0, import_yaml29.parse)(raw), {
+      const manifest = parseExecutionManifest((0, import_yaml30.parse)(raw), {
         absPath: depPath
       });
       prNumber = manifest.pr_number;
@@ -54357,7 +54418,7 @@ async function anyOverlapBlockerInFlight(opts) {
 }
 
 // src/lib/cited-source-overlap.ts
-var import_yaml30 = __toESM(require_dist2(), 1);
+var import_yaml31 = __toESM(require_dist2(), 1);
 import { promises as fs49 } from "node:fs";
 import * as path63 from "node:path";
 var STATE_DIRS2 = ["to-do", "in-progress", "done"];
@@ -54383,7 +54444,7 @@ async function loadOverlapUniverse(targetRepoRoot) {
       }
       let doc;
       try {
-        doc = (0, import_yaml30.parse)(raw);
+        doc = (0, import_yaml31.parse)(raw);
       } catch {
         continue;
       }
@@ -54998,7 +55059,7 @@ async function extractAcsFromSpec(specPath) {
 }
 
 // src/lib/gh-error-map.ts
-var import_yaml31 = __toESM(require_dist2(), 1);
+var import_yaml32 = __toESM(require_dist2(), 1);
 import { promises as fs53 } from "node:fs";
 import * as path68 from "node:path";
 
@@ -55016,7 +55077,7 @@ var GhErrorMapSchema = external_exports.object({
 var cache = /* @__PURE__ */ new Map();
 async function parseGhErrorMap(filePath) {
   const raw = await fs53.readFile(filePath, "utf8");
-  const parsed = (0, import_yaml31.parse)(raw);
+  const parsed = (0, import_yaml32.parse)(raw);
   const result = GhErrorMapSchema.safeParse(parsed);
   if (!result.success) {
     const firstIssue = result.error.issues[0];
@@ -55141,7 +55202,7 @@ async function gh(opts) {
 }
 
 // src/state/load-role-permissions.ts
-var import_yaml32 = __toESM(require_dist2(), 1);
+var import_yaml33 = __toESM(require_dist2(), 1);
 import { promises as fs54 } from "node:fs";
 import * as path69 from "node:path";
 
@@ -55173,7 +55234,7 @@ async function loadRolePermissions(opts) {
   }
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml32.parse)(raw);
+    parsedYaml = (0, import_yaml33.parse)(raw);
   } catch (err) {
     throw new RolePermissionsMalformedError({
       specPath,
@@ -55569,7 +55630,7 @@ async function runDevTerminalAction(opts) {
 import * as path73 from "node:path";
 import * as fs56 from "node:fs/promises";
 import { accessSync, readFileSync as readFileSync4, readdirSync as readdirSync2 } from "node:fs";
-var import_yaml33 = __toESM(require_dist2(), 1);
+var import_yaml34 = __toESM(require_dist2(), 1);
 
 // src/lib/materialise-pr-branch-worktree.ts
 import * as path72 from "node:path";
@@ -55806,7 +55867,7 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
       path73.join(workspaceRoot, "pnpm-workspace.yaml"),
       "utf8"
     );
-    const parsed = (0, import_yaml33.parse)(yaml);
+    const parsed = (0, import_yaml34.parse)(yaml);
     const packages = parsed?.packages;
     if (!Array.isArray(packages)) return { ok: false };
     for (const pattern of packages) {
@@ -56872,7 +56933,7 @@ async function recordSkillInvoke(opts) {
 // src/tools/run-auto-merge-gate.ts
 import * as path76 from "node:path";
 import { promises as fs58 } from "node:fs";
-var import_yaml34 = __toESM(require_dist2(), 1);
+var import_yaml35 = __toESM(require_dist2(), 1);
 
 // src/lib/auto-merge-gate.ts
 function decideAutoMerge(input) {
@@ -56935,7 +56996,7 @@ async function loadWorkspaceConfig(targetRepoRoot) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml34.parse)(raw);
+  const parsed = (0, import_yaml35.parse)(raw);
   if (parsed === null || parsed === void 0 || typeof parsed !== "object" || !("plugin" in parsed)) {
     return PluginSettingsSchema.parse({});
   }
@@ -57260,7 +57321,7 @@ async function createSmokeScratchRepo(opts) {
 }
 
 // src/tools/scan-orphaned-in-progress.ts
-var import_yaml35 = __toESM(require_dist2(), 1);
+var import_yaml36 = __toESM(require_dist2(), 1);
 import { promises as fs60 } from "node:fs";
 import * as path78 from "node:path";
 async function scanOrphanedInProgress(opts) {
@@ -57291,7 +57352,7 @@ async function scanOrphanedInProgress(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml35.parse)(raw);
+    const parsed = (0, import_yaml36.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!manifest.claimed_by) {
       continue;
@@ -57746,6 +57807,7 @@ async function dismissMaintainerFeedback(opts) {
 }
 
 // src/tools/resolve-lens-roles.ts
+var import_yaml37 = __toESM(require_dist2(), 1);
 import { promises as fs64 } from "node:fs";
 import * as path84 from "node:path";
 async function resolveLensRoles(opts) {
@@ -57784,8 +57846,48 @@ async function resolveLensRoles(opts) {
     hiredRoles.push(entry);
   }
   hiredRoles.sort();
-  const lensRoles = resolveLensRoleBinding(hiredRoles);
+  const rolesWithCapabilities = await Promise.all(
+    hiredRoles.map((roleId) => readRoleCapabilities(teamDir, roleId))
+  );
+  const lensRoles = resolveLensRoleBinding(rolesWithCapabilities);
   return { lensRoles, hiredRoles };
+}
+async function readRoleCapabilities(teamDir, roleId) {
+  const personaPath = path84.join(teamDir, roleId, "PERSONA.md");
+  let raw;
+  try {
+    raw = await fs64.readFile(personaPath, "utf8");
+  } catch {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const frontmatterRaw = normalised.slice(4, closeIdx);
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml37.parse)(frontmatterRaw);
+  } catch {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  if (typeof parsedYaml !== "object" || parsedYaml === null || !("capabilities" in parsedYaml)) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const capResult = RoleCapabilitiesSchema.safeParse(
+    parsedYaml["capabilities"]
+  );
+  if (!capResult.success) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  return {
+    id: roleId,
+    reviewLenses: capResult.data.review_lenses
+  };
 }
 function isEnoent18(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
@@ -57794,7 +57896,7 @@ function isEnoent18(err) {
 // src/tools/recall-lesson.ts
 import * as path85 from "node:path";
 import { promises as fs65 } from "node:fs";
-var import_yaml36 = __toESM(require_dist2(), 1);
+var import_yaml38 = __toESM(require_dist2(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
 var TOOL_NAME9 = "recallLesson";
@@ -57946,7 +58048,7 @@ function reconstructPersonaFile4(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml36.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml38.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -58041,7 +58143,7 @@ function resolveJudgePlan(opts) {
 }
 
 // src/tools/resolve-build-plan.ts
-var import_yaml37 = __toESM(require_dist2(), 1);
+var import_yaml39 = __toESM(require_dist2(), 1);
 import { readFile as readFile3 } from "node:fs/promises";
 var FAST_LANE_MODEL = "haiku";
 var FULL_LANE_MODEL = "sonnet";
@@ -58064,7 +58166,7 @@ var BuildPlanSchema = external_exports.object({
 async function readLaneFromManifest(manifestPath) {
   try {
     const raw = await readFile3(manifestPath, "utf8");
-    const parsed = (0, import_yaml37.parse)(raw);
+    const parsed = (0, import_yaml39.parse)(raw);
     const lane = parsed?.lane;
     if (lane === "fast" || lane === "full") return lane;
     return void 0;
@@ -58093,13 +58195,13 @@ async function resolveBuildPlan(opts) {
 }
 
 // src/tools/summarise-retro-proposal.ts
-var import_yaml38 = __toESM(require_dist2(), 1);
+var import_yaml40 = __toESM(require_dist2(), 1);
 import { promises as fs66 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
   const raw = await fs66.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml38.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml40.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
@@ -58118,7 +58220,7 @@ async function summariseRetroProposal(opts) {
 // src/tools/discard-draft.ts
 import { promises as fs67 } from "node:fs";
 import * as path86 from "node:path";
-var import_yaml39 = __toESM(require_dist2(), 1);
+var import_yaml41 = __toESM(require_dist2(), 1);
 var DiscardDraftInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -58151,7 +58253,7 @@ async function discardDraft(rawInput) {
     });
   }
   const rawText = await fs67.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml39.parse)(rawText);
+  const parsed = (0, import_yaml41.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "withdrawn" });
@@ -58190,7 +58292,7 @@ function isEnoent19(err) {
 // src/tools/requeue-blocked-story.ts
 import { promises as fs68 } from "node:fs";
 import * as path87 from "node:path";
-var import_yaml40 = __toESM(require_dist2(), 1);
+var import_yaml42 = __toESM(require_dist2(), 1);
 var RequeueBlockedStoryInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -58221,7 +58323,7 @@ async function requeueBlockedStory(rawInput) {
     throw new NotABlockedStoryError({ ref, foundState });
   }
   const rawText = await fs68.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml40.parse)(rawText);
+  const parsed = (0, import_yaml42.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   const moveResult = await moveBetweenStates({
     targetRepoRoot,
@@ -58242,7 +58344,7 @@ async function requeueBlockedStory(rawInput) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: moveResult.absToPath
   });
-  const yamlText = (0, import_yaml40.stringify)(
+  const yamlText = (0, import_yaml42.stringify)(
     stripUndefined6(reparsed),
     { lineWidth: 0 }
   );
@@ -58256,7 +58358,7 @@ async function requeueBlockedStory(rawInput) {
 }
 
 // src/tools/help-advisor.ts
-var import_yaml41 = __toESM(require_dist2(), 1);
+var import_yaml43 = __toESM(require_dist2(), 1);
 import { promises as fs69 } from "node:fs";
 import * as path88 from "node:path";
 async function hasHiredTeam(targetRepoRoot) {
@@ -58316,7 +58418,7 @@ async function readBacklogSummary(targetRepoRoot) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml41.parse)(raw);
+    const parsed = (0, import_yaml43.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!isClaimable(manifest)) {
       continue;
