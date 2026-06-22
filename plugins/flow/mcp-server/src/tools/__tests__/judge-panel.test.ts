@@ -25,10 +25,12 @@ import {
   lensVerdictFilePath,
   validateLensRoleBinding,
   writeLensVerdict,
+  resolveLensRoleBinding,
   DEFAULT_LENS_ROLES,
   type JudgeRunner,
   type JudgeDraft,
   type LensRoleBinding,
+  type RoleWithCapabilities,
 } from "../judge-panel.js";
 import { PanelVerdictSchema, LENS_NAMES, type LensName } from "../../schemas/lens-verdict.js";
 import {
@@ -769,5 +771,137 @@ describe("Gate-1 AC3: missing verdict file → LensVerdictFileMalformedError (no
         pluginRootOverride: pluginRoot,
       }),
     ).rejects.toBeInstanceOf(LensVerdictFileMalformedError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQHYMMQEM56RH59YGZFCKB AC2 —
+// Grading refuses with a named lens when no qualified teammate exists for it
+// ---------------------------------------------------------------------------
+
+describe("AC2 (Story native:01KVPQHYMMQEM56RH59YGZFCKB): grading refuses when no qualified teammate exists for a lens", () => {
+  it("resolveLensRoleBinding with RoleWithCapabilities[]: throws LensJudgeUnavailableError naming the uncovered lens", () => {
+    // Roster where 'considered' has no candidate (no role declares it).
+    const roster: RoleWithCapabilities[] = [
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+      { id: "planner", reviewLenses: ["structure", "discipline", "domain"] }, // no considered
+      { id: "test-specialist", reviewLenses: ["verifiability"] },
+    ];
+
+    let err: unknown;
+    try {
+      resolveLensRoleBinding(roster);
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(LensJudgeUnavailableError);
+    expect((err as LensJudgeUnavailableError).lens).toBe("considered");
+    // Plain-language message names the lens.
+    expect((err as LensJudgeUnavailableError).message).toMatch(/considered/);
+  });
+
+  it("resolveLensRoleBinding: names the FIRST uncovered lens in LENS_NAMES order when multiple lenses are uncovered", () => {
+    // Only generalist-dev is hired and declares only 'domain' — structure is the first uncovered lens.
+    const roster: RoleWithCapabilities[] = [
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+    ];
+
+    let err: unknown;
+    try {
+      resolveLensRoleBinding(roster);
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(LensJudgeUnavailableError);
+    // structure is first in LENS_NAMES order and no one covers it.
+    expect((err as LensJudgeUnavailableError).lens).toBe("structure");
+  });
+
+  it("resolveLensRoleBinding: empty roster throws for the first lens (structure)", () => {
+    let err: unknown;
+    try {
+      resolveLensRoleBinding([] as RoleWithCapabilities[]);
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(LensJudgeUnavailableError);
+    expect((err as LensJudgeUnavailableError).lens).toBe("structure");
+  });
+
+  it("validateLensRoleBinding still throws LensJudgeUnavailableError for a binding with a missing lens (direct path)", () => {
+    const broken = { ...DEFAULT_LENS_ROLES } as Record<string, string>;
+    delete broken["considered"];
+    expect(() => validateLensRoleBinding(broken as LensRoleBinding)).toThrow(
+      LensJudgeUnavailableError,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQHYMMQEM56RH59YGZFCKB AC4 —
+// Standard starting team with no custom roles: panel staffed as today
+// ---------------------------------------------------------------------------
+
+describe("AC4 (Story native:01KVPQHYMMQEM56RH59YGZFCKB): standard team with capability declarations staffs the panel as today", () => {
+  /**
+   * The default roster with capabilities declared exactly as in the backfilled catalogue files.
+   * This represents a team that was hired after the keystone capability-declaration story shipped.
+   */
+  const DEFAULT_ROSTER_WITH_CAPABILITIES: RoleWithCapabilities[] = [
+    { id: "planner", reviewLenses: ["structure", "discipline", "domain", "considered"] },
+    { id: "generalist-dev", reviewLenses: ["domain"] },
+    { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+    { id: "retro-analyst", reviewLenses: ["considered"] },
+    { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+  ];
+
+  it("capabilities-declared default team produces the same binding as the legacy string[] path", () => {
+    const legacyBinding = resolveLensRoleBinding([
+      "planner",
+      "generalist-dev",
+      "generalist-reviewer",
+      "retro-analyst",
+      "orchestrator",
+    ]);
+
+    const capBinding = resolveLensRoleBinding(DEFAULT_ROSTER_WITH_CAPABILITIES);
+
+    for (const lens of LENS_NAMES) {
+      expect(capBinding[lens]).toBe(legacyBinding[lens]);
+    }
+  });
+
+  it("capabilities-declared default team: panel assigns one distinct role per lens, same as today", () => {
+    const binding = resolveLensRoleBinding(DEFAULT_ROSTER_WITH_CAPABILITIES);
+
+    // Same assignments as today's default team (from the existing AC(a) test).
+    expect(binding.structure).toBe("planner");
+    expect(binding.verifiability).toBe("orchestrator");
+    expect(binding.discipline).toBe("generalist-reviewer");
+    expect(binding.domain).toBe("generalist-dev");
+    expect(binding.considered).toBe("retro-analyst");
+    expect(() => validateLensRoleBinding(binding)).not.toThrow();
+  });
+
+  it("adding test-specialist with its declared capability still routes verifiability to test-specialist as today", () => {
+    const rosterWithSpecialist: RoleWithCapabilities[] = [
+      ...DEFAULT_ROSTER_WITH_CAPABILITIES,
+      { id: "test-specialist", reviewLenses: ["verifiability"] },
+    ];
+
+    const binding = resolveLensRoleBinding(rosterWithSpecialist);
+
+    expect(binding.verifiability).toBe("test-specialist");
+    // Other assignments are unchanged.
+    expect(binding.structure).toBe("planner");
+    expect(binding.discipline).toBe("generalist-reviewer");
+    expect(binding.domain).toBe("generalist-dev");
+    expect(binding.considered).toBe("retro-analyst");
+    expect(() => validateLensRoleBinding(binding)).not.toThrow();
   });
 });

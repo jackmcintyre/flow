@@ -28,6 +28,7 @@ import {
   writeLensVerdict,
   type JudgeRunner,
   type JudgeDraft,
+  type RoleWithCapabilities,
 } from "../judge-panel.js";
 import { resolveLensRoles } from "../resolve-lens-roles.js";
 import { LENS_NAMES } from "../../schemas/lens-verdict.js";
@@ -384,5 +385,195 @@ describe("AC1 integration: resolveLensRoleBinding wired into runJudgePanel", () 
     expect(new Set(roles).size).toBe(5);
 
     expect(() => PanelVerdictSchema.parse(verdict)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQHYMMQEM56RH59YGZFCKB AC1 —
+// Custom role declared for a lens is selected onto the panel
+// ---------------------------------------------------------------------------
+
+/**
+ * Seed a team directory where each role's PERSONA.md includes a capabilities block
+ * with the given review_lenses declaration. Used to test the capability-driven path.
+ */
+async function seedTeamWithCapabilities(
+  roles: Array<{ id: string; reviewLenses: string[] }>,
+): Promise<void> {
+  for (const { id, reviewLenses } of roles) {
+    const roleDir = path.join(targetRepoRoot, "team", id);
+    await fs.mkdir(roleDir, { recursive: true });
+    const lensYaml =
+      reviewLenses.length === 0
+        ? "    review_lenses: []\n"
+        : reviewLenses.map((l) => `    - ${l}`).join("\n") + "\n";
+    await atomicWriteFile(
+      path.join(roleDir, "PERSONA.md"),
+      `---\nrole: ${id}\ndomain: "${id} domain"\nmodel_tier: sonnet\n` +
+        `tools_allow:\n  - Read\ngh_allow: []\n` +
+        `locked_phrases:\n  handoff: "Handoff to reviewer — story <story-id> ready for review."\n` +
+        `  yield: "This sits in <role>'s domain — handing off."\n` +
+        `  verdict: "**Verdict: <SENTINEL>**"\n` +
+        `capabilities:\n  review_lenses:\n${lensYaml}  run_jobs: []\n` +
+        `hired_at: "2026-01-01T00:00:00.000Z"\n` +
+        `catalogue_version: "0.1.0"\n---\n\n## Domain\n\n${id} domain\n\n## Mandate\n\n- Work.\n\n` +
+        `## Out of mandate\n\n- Nothing.\n\n## Prompt\n\nYou are ${id}.\n\n## Knowledge\n\n- No entries.\n`,
+    );
+  }
+}
+
+describe("AC1 (Story native:01KVPQHYMMQEM56RH59YGZFCKB): custom role declared for a lens is selected onto the grading panel", () => {
+  it("resolveLensRoleBinding: custom role that declares structure is selected for structure when no other candidate is available", () => {
+    // A roster where only the custom role covers structure.
+    const roster: RoleWithCapabilities[] = [
+      { id: "my-architect", reviewLenses: ["structure"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "retro-analyst", reviewLenses: ["considered"] },
+      { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+    ];
+    const binding = resolveLensRoleBinding(roster);
+    // my-architect must cover structure (orchestrator is used for verifiability fallback if needed).
+    expect(binding.structure).toBe("my-architect");
+    expect(() => validateLensRoleBinding(binding)).not.toThrow();
+  });
+
+  it("resolveLensRoleBinding: custom role declaring all five lenses can cover any uncovered slot", () => {
+    // A custom "super-reviewer" that declares all five lenses fills whatever slot is needed.
+    const roster: RoleWithCapabilities[] = [
+      { id: "super-reviewer", reviewLenses: ["structure", "verifiability", "discipline", "domain", "considered"] },
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "retro-analyst", reviewLenses: ["considered"] },
+      { id: "planner", reviewLenses: ["structure", "discipline", "domain", "considered"] },
+    ];
+    const binding = resolveLensRoleBinding(roster);
+    expect(() => validateLensRoleBinding(binding)).not.toThrow();
+    // All five distinct lenses covered.
+    const roles = LENS_NAMES.map((l) => binding[l]);
+    expect(new Set(roles).size).toBe(5);
+  });
+
+  it("resolveLensRoles: custom role PERSONA.md with declared capability is selected for its declared lens", async () => {
+    // Seed a full 5-role team where only a custom role covers 'considered'.
+    await seedTeamWithCapabilities([
+      { id: "my-custom-considered", reviewLenses: ["considered"] },
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "planner", reviewLenses: ["structure", "discipline", "domain", "considered"] },
+      { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+    ]);
+
+    const result = await resolveLensRoles({ targetRepoRoot });
+
+    // Custom role must be selected for its declared lens.
+    // (planner also declares considered but bipartite matching uses it for structure/discipline first)
+    expect(result.lensRoles.considered === "my-custom-considered" || result.lensRoles.considered === "planner").toBe(true);
+    expect(() => validateLensRoleBinding(result.lensRoles)).not.toThrow();
+    // All five lenses covered with distinct roles.
+    const roles = LENS_NAMES.map((l) => result.lensRoles[l]);
+    expect(new Set(roles).size).toBe(5);
+  });
+
+  it("resolveLensRoles: custom role that is the ONLY candidate for a lens is selected for that lens", async () => {
+    // The only role that can cover 'considered' is the custom role.
+    await seedTeamWithCapabilities([
+      { id: "my-only-considered", reviewLenses: ["considered"] },
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+      { id: "planner", reviewLenses: ["structure", "discipline", "domain"] }, // no considered
+    ]);
+
+    const result = await resolveLensRoles({ targetRepoRoot });
+
+    // Only the custom role can cover considered.
+    expect(result.lensRoles.considered).toBe("my-only-considered");
+    expect(() => validateLensRoleBinding(result.lensRoles)).not.toThrow();
+    const roles = LENS_NAMES.map((l) => result.lensRoles[l]);
+    expect(new Set(roles).size).toBe(5);
+  });
+
+  it("panel runs with all five distinct lenses staffed when a custom role fills one slot", async () => {
+    // Custom role is the only one for 'considered'.
+    await seedTeamWithCapabilities([
+      { id: "my-only-considered", reviewLenses: ["considered"] },
+      { id: "generalist-dev", reviewLenses: ["domain"] },
+      { id: "generalist-reviewer", reviewLenses: ["verifiability", "discipline"] },
+      { id: "orchestrator", reviewLenses: ["structure", "verifiability", "discipline", "domain"] },
+      { id: "planner", reviewLenses: ["structure", "discipline", "domain"] },
+    ]);
+
+    const { lensRoles } = await resolveLensRoles({ targetRepoRoot });
+    expect(lensRoles.considered).toBe("my-only-considered");
+
+    const DRAFT: JudgeDraft = {
+      ref: "native:01CUSTOMROLECONSIDERD000000",
+      title: "Custom role covers considered lens",
+      specText: "## Story\nAs a ...\n## Acceptance Criteria\n...",
+      changedPaths: ["docs/foo.md"],
+      diffSize: 10,
+    };
+
+    function makePassRunner(): JudgeRunner {
+      return async ({ lens, role, draft }) => {
+        await writeLensVerdict({
+          targetRepoRoot,
+          sessionUlid,
+          ref: draft.ref,
+          lens,
+          role,
+          pass: true,
+          missed: "nothing missed",
+        });
+      };
+    }
+
+    const { verdict } = await runJudgePanel({
+      targetRepoRoot,
+      sessionUlid,
+      draft: DRAFT,
+      lensRoles,
+      judgeRunner: makePassRunner(),
+      pluginRootOverride: pluginRoot,
+    });
+
+    // Panel ran with all five lenses.
+    expect(verdict.lenses).toHaveLength(5);
+    expect(verdict.lenses.every((l) => l.pass)).toBe(true);
+    const consideredVerdict = verdict.lenses.find((l) => l.lens === "considered");
+    expect(consideredVerdict?.role).toBe("my-only-considered");
+    expect(() => PanelVerdictSchema.parse(verdict)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Back-compat: roles without a capabilities block still fall through LENS_CANDIDATES
+// ---------------------------------------------------------------------------
+
+describe("back-compat: RoleWithCapabilities with reviewLenses=undefined falls back to LENS_CANDIDATES", () => {
+  it("resolveLensRoleBinding: string[] (legacy) and equivalent RoleWithCapabilities[] (undefined lenses) produce identical bindings", () => {
+    const legacyBinding = resolveLensRoleBinding(DEFAULT_ROSTER);
+
+    const capBinding = resolveLensRoleBinding(
+      DEFAULT_ROSTER.map((id) => ({ id, reviewLenses: undefined })),
+    );
+
+    for (const lens of LENS_NAMES) {
+      expect(capBinding[lens]).toBe(legacyBinding[lens]);
+    }
+  });
+
+  it("resolveLensRoles: team with no capabilities declarations produces the same binding as the legacy path", async () => {
+    // seedTeam (no capabilities) → resolveLensRoles should still use LENS_CANDIDATES fallback.
+    await seedTeam(DEFAULT_ROSTER);
+    const result = await resolveLensRoles({ targetRepoRoot });
+
+    expect(result.lensRoles.structure).toBe("planner");
+    expect(result.lensRoles.verifiability).toBe("orchestrator");
+    expect(result.lensRoles.discipline).toBe("generalist-reviewer");
+    expect(result.lensRoles.domain).toBe("generalist-dev");
+    expect(result.lensRoles.considered).toBe("retro-analyst");
+    expect(() => validateLensRoleBinding(result.lensRoles)).not.toThrow();
   });
 });

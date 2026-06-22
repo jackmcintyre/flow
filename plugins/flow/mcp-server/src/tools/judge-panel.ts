@@ -51,6 +51,7 @@ import {
   type LensVerdict,
   type PanelVerdict,
 } from "../schemas/lens-verdict.js";
+import type { ReviewLens } from "../schemas/catalogue.js";
 import {
   DuplicateLensJudgeError,
   LensJudgeUnavailableError,
@@ -450,14 +451,40 @@ export const DEFAULT_LENS_ROLES: LensRoleBinding = {
 // ---------------------------------------------------------------------------
 
 /**
- * Per-lens ordered candidate preference lists.
+ * A hired role paired with its declared review-lens capabilities.
  *
- * The first candidate in each list is the preferred specialist; subsequent
- * entries are fallbacks in priority order. The resolver intersects this list
- * with the ACTUALLY HIRED roles at match time — roles absent from the team are
- * silently skipped. `architect` is kept at the head of `structure` for
- * forward-compat with the rubric §3 intent; it never matches today (no
- * `architect` in the default catalogue) but costs nothing.
+ * `reviewLenses`:
+ *  - `undefined` — the role's PERSONA.md has no `capabilities` block (pre-keystone
+ *    format). The resolver falls back to `LENS_CANDIDATES` to determine which lenses
+ *    this role is a candidate for, preserving existing behaviour for un-upgraded
+ *    teams.
+ *  - `LensName[]` (possibly empty) — the role's declared capabilities from the
+ *    `capabilities.review_lenses` frontmatter field. An empty array means the role
+ *    explicitly declares it cannot judge any lens; a non-empty array lists exactly
+ *    the lenses it can judge.
+ *
+ * Pass `RoleWithCapabilities[]` to `resolveLensRoleBinding` when capabilities are
+ * available (e.g. freshly read from PERSONA.md). Callers that only have role-name
+ * strings (legacy code paths) may still pass `string[]`; the resolver normalises
+ * them to `{ id, reviewLenses: undefined }` and falls back to `LENS_CANDIDATES`.
+ */
+export interface RoleWithCapabilities {
+  id: string;
+  /** Declared review lenses from the role's capabilities block, or `undefined` when absent. */
+  reviewLenses: LensName[] | undefined;
+}
+
+/**
+ * Per-lens ordered candidate preference lists (the original built-in list).
+ *
+ * Used as a preference ordering AND as a fallback for roles whose PERSONA.md
+ * pre-dates the capability-declaration keystone (i.e. no `capabilities` block).
+ * Roles with a declared capabilities block no longer need to appear here — their
+ * declared lenses determine candidacy — but they still get their position in the
+ * preference order from this list when they do appear.
+ *
+ * `architect` is kept at the head of `structure` for forward-compat with the
+ * rubric §3 intent.
  */
 const LENS_CANDIDATES: Record<LensName, readonly string[]> = {
   structure: ["architect", "planner", "generalist-dev", "orchestrator"],
@@ -468,12 +495,64 @@ const LENS_CANDIDATES: Record<LensName, readonly string[]> = {
 };
 
 /**
+ * Build the per-lens adjacency from a roster of `RoleWithCapabilities`.
+ *
+ * For each lens the candidate list is built as follows:
+ *  1. Roles that appear in `LENS_CANDIDATES[lens]` AND are qualified for the lens
+ *     (either by declaration or by LENS_CANDIDATES fallback), in preference order.
+ *  2. Roles that declared the lens capability but are NOT in `LENS_CANDIDATES[lens]`
+ *     (operator-authored custom roles), appended in the order they appear in `roles`.
+ *
+ * A role is "qualified for lens L" when:
+ *  - Its `reviewLenses` is `undefined` (no declaration) AND it appears in
+ *    `LENS_CANDIDATES[L]` (backward-compat fallback), OR
+ *  - Its `reviewLenses` array contains L (explicit declaration).
+ */
+function buildAdjacency(roles: RoleWithCapabilities[]): Record<LensName, string[]> {
+  // Index roles by id for quick lookup.
+  const roleMap = new Map<string, RoleWithCapabilities>(roles.map((r) => [r.id, r]));
+
+  function isQualified(role: RoleWithCapabilities, lens: LensName): boolean {
+    if (role.reviewLenses === undefined) {
+      // No declaration — fall back to LENS_CANDIDATES membership.
+      return LENS_CANDIDATES[lens].includes(role.id);
+    }
+    return role.reviewLenses.includes(lens as ReviewLens);
+  }
+
+  const adjacency: Record<LensName, string[]> = {} as Record<LensName, string[]>;
+  for (const lens of LENS_NAMES) {
+    // Step 1: roles that appear in the preference list AND are qualified.
+    const preferenceOrdered = LENS_CANDIDATES[lens]
+      .filter((id) => {
+        const r = roleMap.get(id);
+        return r !== undefined && isQualified(r, lens);
+      });
+
+    // Step 2: custom roles (not in LENS_CANDIDATES) that declared the lens.
+    const preferenceSet = new Set(LENS_CANDIDATES[lens]);
+    const customQualified = roles
+      .filter((r) => !preferenceSet.has(r.id) && isQualified(r, lens))
+      .map((r) => r.id);
+
+    adjacency[lens] = [...preferenceOrdered, ...customQualified];
+  }
+  return adjacency;
+}
+
+/**
  * Resolve the lens→role binding from a live hired roster using maximum bipartite
  * matching (augmenting paths / Kuhn's algorithm).
  *
+ * Accepts either:
+ *  - `RoleWithCapabilities[]` — roles with declared capabilities (preferred path;
+ *    candidacy is sourced from each role's declared `reviewLenses`).
+ *  - `string[]` — bare role-name strings (legacy back-compat; treated as roles
+ *    with `reviewLenses: undefined`, falling back to `LENS_CANDIDATES`).
+ *
  * Algorithm:
- *  1. For each lens, compute its candidate list = preference list ∩ hiredRoles
- *     (filtered in preference order so the preferred specialist is tried first).
+ *  1. For each lens, compute its candidate list from declared capabilities +
+ *     LENS_CANDIDATES preference ordering (see `buildAdjacency`).
  *  2. Run Kuhn's augmenting-path matching: iterate lenses in LENS_NAMES order;
  *     for each lens, DFS through candidates (in preference order) looking for a
  *     free role or an augmenting path through an already-matched lens.
@@ -490,14 +569,16 @@ const LENS_CANDIDATES: Record<LensName, readonly string[]> = {
  *
  * Exported for unit testing.
  */
-export function resolveLensRoleBinding(hiredRoles: string[]): LensRoleBinding {
-  const hiredSet = new Set(hiredRoles);
+export function resolveLensRoleBinding(
+  hiredRoles: RoleWithCapabilities[] | string[],
+): LensRoleBinding {
+  // Normalise string[] (legacy callers) to RoleWithCapabilities[].
+  const roles: RoleWithCapabilities[] = hiredRoles.map((r) =>
+    typeof r === "string" ? { id: r, reviewLenses: undefined } : r,
+  );
 
-  // Build adjacency: per-lens candidate list filtered to hired roles.
-  const adjacency: Record<LensName, string[]> = {} as Record<LensName, string[]>;
-  for (const lens of LENS_NAMES) {
-    adjacency[lens] = LENS_CANDIDATES[lens].filter((r) => hiredSet.has(r));
-  }
+  // Build adjacency: per-lens candidate list from declared capabilities.
+  const adjacency = buildAdjacency(roles);
 
   // matchRole: role → the lens currently assigned to it (or null).
   const matchRole = new Map<string, LensName>();

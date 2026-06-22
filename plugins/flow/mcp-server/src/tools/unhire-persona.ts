@@ -25,10 +25,13 @@
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { parse as yamlParse } from "yaml";
 import { RoleNotHiredError, UnhireBelowJudgeMinimumError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
-import { resolveLensRoleBinding } from "./judge-panel.js";
+import { resolveLensRoleBinding, type RoleWithCapabilities } from "./judge-panel.js";
 import { LensJudgeUnavailableError } from "../errors.js";
+import { RoleCapabilitiesSchema } from "../schemas/catalogue.js";
+import type { LensName } from "../schemas/lens-verdict.js";
 
 export interface UnhirePersonaOptions {
   targetRepoRoot: string;
@@ -46,10 +49,65 @@ export type UnhirePersonaResult =
   | { status: "already-archived"; archivedPath: string };
 
 /**
- * Enumerate live hired roles from `<targetRepoRoot>/team/`.
- * Mirrors the enumeration logic in `resolveLensRoles` and `getTeamSnapshot`.
+ * Read declared review-lens capabilities from a PERSONA.md frontmatter.
+ *
+ * Returns `undefined` when the file cannot be read, the frontmatter cannot be
+ * parsed, or the capabilities block is absent — signalling the matcher to fall
+ * back to LENS_CANDIDATES for this role (backward compatibility).
  */
-async function enumerateHiredRoles(targetRepoRoot: string): Promise<string[]> {
+async function readPersonaCapabilities(personaPath: string): Promise<LensName[] | undefined> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(personaPath, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) {
+    return undefined;
+  }
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    return undefined;
+  }
+  const frontmatterRaw = normalised.slice(4, closeIdx);
+
+  let parsedYaml: unknown;
+  try {
+    parsedYaml = yamlParse(frontmatterRaw);
+  } catch {
+    return undefined;
+  }
+
+  if (
+    typeof parsedYaml !== "object" ||
+    parsedYaml === null ||
+    !("capabilities" in parsedYaml)
+  ) {
+    return undefined;
+  }
+
+  const capResult = RoleCapabilitiesSchema.safeParse(
+    (parsedYaml as Record<string, unknown>)["capabilities"],
+  );
+  if (!capResult.success) {
+    return undefined;
+  }
+
+  return capResult.data.review_lenses as LensName[];
+}
+
+/**
+ * Enumerate live hired roles from `<targetRepoRoot>/team/`, including their
+ * declared capabilities read from each PERSONA.md frontmatter.
+ *
+ * Mirrors the enumeration logic in `resolveLensRoles` and `getTeamSnapshot`,
+ * extended to also read capabilities for the guard check.
+ */
+async function enumerateHiredRolesWithCapabilities(
+  targetRepoRoot: string,
+): Promise<RoleWithCapabilities[]> {
   const teamDir = path.join(targetRepoRoot, "team");
 
   let dirEntries: string[];
@@ -63,7 +121,7 @@ async function enumerateHiredRoles(targetRepoRoot: string): Promise<string[]> {
   }
 
   const SKIP_DIRS = new Set(["custom", "_archived"]);
-  const hiredRoles: string[] = [];
+  const roleIds: string[] = [];
 
   for (const entry of dirEntries) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) {
@@ -86,23 +144,34 @@ async function enumerateHiredRoles(targetRepoRoot: string): Promise<string[]> {
       continue;
     }
 
-    hiredRoles.push(entry);
+    roleIds.push(entry);
   }
 
-  hiredRoles.sort();
-  return hiredRoles;
+  roleIds.sort();
+
+  // Read capabilities for each role.
+  const roles: RoleWithCapabilities[] = await Promise.all(
+    roleIds.map(async (id) => {
+      const reviewLenses = await readPersonaCapabilities(
+        path.join(teamDir, id, "PERSONA.md"),
+      );
+      return { id, reviewLenses };
+    }),
+  );
+
+  return roles;
 }
 
 /**
  * Safely set aside a teammate reversibly.
  *
  * Steps:
- *  1. Enumerate the live roster from `team/`.
+ *  1. Enumerate the live roster from `team/`, reading each role's capabilities.
  *  2. Check if the role is in the live roster.
  *     - If absent and archived → no-op result.
  *     - If absent in both → `RoleNotHiredError`.
  *  3. Compute the post-unhire roster (live roster minus the target role).
- *  4. Run `resolveLensRoleBinding` over the post-unhire roster.
+ *  4. Run `resolveLensRoleBinding` over the post-unhire roster (with capabilities).
  *     - If any lens goes uncovered → `UnhireBelowJudgeMinimumError` naming the lens.
  *  5. Read the live `PERSONA.md`.
  *  6. Write the file to `team/_archived/<role>/PERSONA.md` with `archived_at`
@@ -124,9 +193,9 @@ export async function unhirePersona(
     "PERSONA.md",
   );
 
-  // --- Step 1: enumerate live roster ---
-  const hiredRoles = await enumerateHiredRoles(targetRepoRoot);
-  const isHired = hiredRoles.includes(role);
+  // --- Step 1: enumerate live roster with capabilities ---
+  const hiredRolesWithCaps = await enumerateHiredRolesWithCapabilities(targetRepoRoot);
+  const isHired = hiredRolesWithCaps.some((r) => r.id === role);
 
   // --- Step 2: handle absent cases ---
   if (!isHired) {
@@ -147,9 +216,9 @@ export async function unhirePersona(
   }
 
   // --- Step 3: compute post-unhire roster ---
-  const postUnhireRoster = hiredRoles.filter((r) => r !== role);
+  const postUnhireRoster = hiredRolesWithCaps.filter((r) => r.id !== role);
 
-  // --- Step 4: judge-panel guard (bipartite matching) ---
+  // --- Step 4: judge-panel guard (bipartite matching with capabilities) ---
   let unstaffedLens: string | null = null;
   try {
     resolveLensRoleBinding(postUnhireRoster);

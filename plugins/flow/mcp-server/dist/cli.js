@@ -31326,12 +31326,31 @@ var LENS_CANDIDATES = {
   domain: ["generalist-dev", "planner", "orchestrator"],
   considered: ["retro-analyst", "quality-lead", "orchestrator", "planner"]
 };
-function resolveLensRoleBinding(hiredRoles) {
-  const hiredSet = new Set(hiredRoles);
+function buildAdjacency(roles) {
+  const roleMap = new Map(roles.map((r) => [r.id, r]));
+  function isQualified(role, lens) {
+    if (role.reviewLenses === void 0) {
+      return LENS_CANDIDATES[lens].includes(role.id);
+    }
+    return role.reviewLenses.includes(lens);
+  }
   const adjacency = {};
   for (const lens of LENS_NAMES) {
-    adjacency[lens] = LENS_CANDIDATES[lens].filter((r) => hiredSet.has(r));
+    const preferenceOrdered = LENS_CANDIDATES[lens].filter((id) => {
+      const r = roleMap.get(id);
+      return r !== void 0 && isQualified(r, lens);
+    });
+    const preferenceSet = new Set(LENS_CANDIDATES[lens]);
+    const customQualified = roles.filter((r) => !preferenceSet.has(r.id) && isQualified(r, lens)).map((r) => r.id);
+    adjacency[lens] = [...preferenceOrdered, ...customQualified];
   }
+  return adjacency;
+}
+function resolveLensRoleBinding(hiredRoles) {
+  const roles = hiredRoles.map(
+    (r) => typeof r === "string" ? { id: r, reviewLenses: void 0 } : r
+  );
+  const adjacency = buildAdjacency(roles);
   const matchRole = /* @__PURE__ */ new Map();
   const matchLens = /* @__PURE__ */ new Map();
   function tryAugment(lens, visited) {
@@ -44329,6 +44348,7 @@ async function dismissMaintainerFeedback(opts) {
 }
 
 // src/tools/resolve-lens-roles.ts
+var import_yaml28 = __toESM(require_dist(), 1);
 import { promises as fs49 } from "node:fs";
 import * as path68 from "node:path";
 async function resolveLensRoles(opts) {
@@ -44367,8 +44387,48 @@ async function resolveLensRoles(opts) {
     hiredRoles.push(entry);
   }
   hiredRoles.sort();
-  const lensRoles = resolveLensRoleBinding(hiredRoles);
+  const rolesWithCapabilities = await Promise.all(
+    hiredRoles.map((roleId) => readRoleCapabilities(teamDir, roleId))
+  );
+  const lensRoles = resolveLensRoleBinding(rolesWithCapabilities);
   return { lensRoles, hiredRoles };
+}
+async function readRoleCapabilities(teamDir, roleId) {
+  const personaPath = path68.join(teamDir, roleId, "PERSONA.md");
+  let raw;
+  try {
+    raw = await fs49.readFile(personaPath, "utf8");
+  } catch {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const frontmatterRaw = normalised.slice(4, closeIdx);
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml28.parse)(frontmatterRaw);
+  } catch {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  if (typeof parsedYaml !== "object" || parsedYaml === null || !("capabilities" in parsedYaml)) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  const capResult = RoleCapabilitiesSchema.safeParse(
+    parsedYaml["capabilities"]
+  );
+  if (!capResult.success) {
+    return { id: roleId, reviewLenses: void 0 };
+  }
+  return {
+    id: roleId,
+    reviewLenses: capResult.data.review_lenses
+  };
 }
 function isEnoent12(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
@@ -44413,7 +44473,7 @@ async function readReviewerLesson(opts) {
 }
 
 // src/tools/record-story-retro.ts
-var import_yaml28 = __toESM(require_dist(), 1);
+var import_yaml29 = __toESM(require_dist(), 1);
 import { promises as fs50 } from "node:fs";
 import * as path69 from "node:path";
 var NON_DONE_STATES = ["in-progress", "to-do", "blocked"];
@@ -44468,7 +44528,7 @@ async function recordStoryRetro(opts) {
     duration_seconds: retro.duration_seconds
   };
   const reparsed = parseExecutionManifest(merged, { absPath: absDonePath });
-  const yamlText = (0, import_yaml28.stringify)(
+  const yamlText = (0, import_yaml29.stringify)(
     stripUndefined5(reparsed),
     { lineWidth: 0 }
   );
@@ -44559,7 +44619,7 @@ async function readDevLesson(opts) {
 // src/tools/recall-lesson.ts
 import * as path72 from "node:path";
 import { promises as fs53 } from "node:fs";
-var import_yaml29 = __toESM(require_dist(), 1);
+var import_yaml30 = __toESM(require_dist(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
 var TOOL_NAME2 = "recallLesson";
@@ -44711,7 +44771,7 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml29.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml30.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -44806,7 +44866,7 @@ function resolveJudgePlan(opts) {
 }
 
 // src/tools/resolve-build-plan.ts
-var import_yaml30 = __toESM(require_dist(), 1);
+var import_yaml31 = __toESM(require_dist(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
 var FAST_LANE_MODEL = "haiku";
 var FULL_LANE_MODEL = "sonnet";
@@ -44829,7 +44889,7 @@ var BuildPlanSchema = external_exports.object({
 async function readLaneFromManifest(manifestPath) {
   try {
     const raw = await readFile2(manifestPath, "utf8");
-    const parsed = (0, import_yaml30.parse)(raw);
+    const parsed = (0, import_yaml31.parse)(raw);
     const lane = parsed?.lane;
     if (lane === "fast" || lane === "full") return lane;
     return void 0;
@@ -44860,7 +44920,7 @@ async function resolveBuildPlan(opts) {
 // src/tools/discard-draft.ts
 import { promises as fs54 } from "node:fs";
 import * as path73 from "node:path";
-var import_yaml31 = __toESM(require_dist(), 1);
+var import_yaml32 = __toESM(require_dist(), 1);
 var DiscardDraftInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -44893,7 +44953,7 @@ async function discardDraft(rawInput) {
     });
   }
   const rawText = await fs54.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml31.parse)(rawText);
+  const parsed = (0, import_yaml32.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "withdrawn" });
@@ -44930,7 +44990,7 @@ function isEnoent13(err) {
 }
 
 // src/tools/block-story.ts
-var import_yaml32 = __toESM(require_dist(), 1);
+var import_yaml33 = __toESM(require_dist(), 1);
 import { promises as fs55 } from "node:fs";
 import * as path74 from "node:path";
 
@@ -44986,7 +45046,7 @@ async function blockStory(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml32.parse)(rawText);
+  const parsed = (0, import_yaml33.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: absInProgressPath });
   if (manifest.claimed_by !== sessionUlid) {
     throw new WrongClaimantError({
@@ -45008,7 +45068,7 @@ async function blockStory(opts) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absBlockedPath
   });
-  const yamlText = (0, import_yaml32.stringify)(
+  const yamlText = (0, import_yaml33.stringify)(
     stripUndefined6(reparsed),
     { lineWidth: 0 }
   );
@@ -45046,7 +45106,7 @@ async function extractNativeStoryAcs(opts) {
 }
 
 // src/tools/capture-skill-invoke.ts
-var import_yaml33 = __toESM(require_dist(), 1);
+var import_yaml34 = __toESM(require_dist(), 1);
 import * as path76 from "node:path";
 import { promises as fs56 } from "node:fs";
 
@@ -45124,7 +45184,7 @@ async function resolveActiveStoryRef(targetRepoRoot, readInProgressDirImpl, read
       let parsed;
       try {
         const raw = await readFileImpl(path76.join(inProgressDir, file2));
-        parsed = (0, import_yaml33.parse)(raw);
+        parsed = (0, import_yaml34.parse)(raw);
       } catch {
         continue;
       }
@@ -45182,12 +45242,12 @@ async function captureSkillInvoke(rawHookPayload, deps = {}) {
 }
 
 // src/tools/auto-absorb-retro-proposals.ts
-var import_yaml36 = __toESM(require_dist(), 1);
+var import_yaml37 = __toESM(require_dist(), 1);
 import { promises as fs59 } from "node:fs";
 import * as path79 from "node:path";
 
 // src/lib/locate-proposal.ts
-var import_yaml34 = __toESM(require_dist(), 1);
+var import_yaml35 = __toESM(require_dist(), 1);
 import { promises as fs57 } from "node:fs";
 import * as path77 from "node:path";
 
@@ -45376,7 +45436,7 @@ async function locateProposal(opts) {
     const absPath = path77.join(proposalsDir, file2);
     const raw = await fs57.readFile(absPath, "utf8");
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml34.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml35.parse)(frontmatterRaw);
     const parsedFile = parseRetroProposalFile(parsedYaml);
     parsedFile.proposals.forEach((proposal, index) => {
       if (proposal.id === proposalId) {
@@ -45412,7 +45472,7 @@ function isEnoent14(err) {
 // src/lib/apply-persona-append.ts
 import { promises as fs58 } from "node:fs";
 import * as path78 from "node:path";
-var import_yaml35 = __toESM(require_dist(), 1);
+var import_yaml36 = __toESM(require_dist(), 1);
 var TOOL_NAME3 = "acceptProposal";
 function personaRelPath(targetRole) {
   return `team/${targetRole}/PERSONA.md`;
@@ -45439,7 +45499,7 @@ function reconstructPersonaFile2(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml35.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml36.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -45607,7 +45667,7 @@ function stampProposalAutoAbsorbed(rawFile, located, appliedAt, idempotencyKey, 
       (p, i2) => i2 === located.index ? { ...p, applied: appliedBlock } : p
     )
   };
-  const fm = (0, import_yaml36.stringify)(
+  const fm = (0, import_yaml37.stringify)(
     {
       iso_timestamp: file2.iso_timestamp,
       cycle_window: file2.cycle_window,
@@ -45784,7 +45844,7 @@ async function autoAbsorbProposalFile(opts) {
   let proposals;
   try {
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml37.parse)(frontmatterRaw);
     const file2 = parseRetroProposalFile(parsedYaml);
     proposals = file2.proposals;
   } catch (err) {
@@ -45805,13 +45865,13 @@ async function autoAbsorbProposalFile(opts) {
 }
 
 // src/tools/summarise-retro-proposal.ts
-var import_yaml37 = __toESM(require_dist(), 1);
+var import_yaml38 = __toESM(require_dist(), 1);
 import { promises as fs60 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
   const raw = await fs60.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml37.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml38.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
@@ -45828,9 +45888,43 @@ async function summariseRetroProposal(opts) {
 }
 
 // src/tools/unhire-persona.ts
+var import_yaml39 = __toESM(require_dist(), 1);
 import { promises as fs61 } from "node:fs";
 import * as path80 from "node:path";
-async function enumerateHiredRoles(targetRepoRoot) {
+async function readPersonaCapabilities(personaPath) {
+  let raw;
+  try {
+    raw = await fs61.readFile(personaPath, "utf8");
+  } catch {
+    return void 0;
+  }
+  const normalised = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  if (!normalised.startsWith("---\n")) {
+    return void 0;
+  }
+  const closeIdx = normalised.indexOf("\n---", 4);
+  if (closeIdx === -1) {
+    return void 0;
+  }
+  const frontmatterRaw = normalised.slice(4, closeIdx);
+  let parsedYaml;
+  try {
+    parsedYaml = (0, import_yaml39.parse)(frontmatterRaw);
+  } catch {
+    return void 0;
+  }
+  if (typeof parsedYaml !== "object" || parsedYaml === null || !("capabilities" in parsedYaml)) {
+    return void 0;
+  }
+  const capResult = RoleCapabilitiesSchema.safeParse(
+    parsedYaml["capabilities"]
+  );
+  if (!capResult.success) {
+    return void 0;
+  }
+  return capResult.data.review_lenses;
+}
+async function enumerateHiredRolesWithCapabilities(targetRepoRoot) {
   const teamDir = path80.join(targetRepoRoot, "team");
   let dirEntries;
   try {
@@ -45842,7 +45936,7 @@ async function enumerateHiredRoles(targetRepoRoot) {
     throw err;
   }
   const SKIP_DIRS = /* @__PURE__ */ new Set(["custom", "_archived"]);
-  const hiredRoles = [];
+  const roleIds = [];
   for (const entry of dirEntries) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) {
       continue;
@@ -45861,10 +45955,18 @@ async function enumerateHiredRoles(targetRepoRoot) {
     } catch {
       continue;
     }
-    hiredRoles.push(entry);
+    roleIds.push(entry);
   }
-  hiredRoles.sort();
-  return hiredRoles;
+  roleIds.sort();
+  const roles = await Promise.all(
+    roleIds.map(async (id) => {
+      const reviewLenses = await readPersonaCapabilities(
+        path80.join(teamDir, id, "PERSONA.md")
+      );
+      return { id, reviewLenses };
+    })
+  );
+  return roles;
 }
 async function unhirePersona(opts) {
   const { targetRepoRoot, role } = opts;
@@ -45877,8 +45979,8 @@ async function unhirePersona(opts) {
     role,
     "PERSONA.md"
   );
-  const hiredRoles = await enumerateHiredRoles(targetRepoRoot);
-  const isHired = hiredRoles.includes(role);
+  const hiredRolesWithCaps = await enumerateHiredRolesWithCapabilities(targetRepoRoot);
+  const isHired = hiredRolesWithCaps.some((r) => r.id === role);
   if (!isHired) {
     let alreadyArchived = false;
     try {
@@ -45891,7 +45993,7 @@ async function unhirePersona(opts) {
     }
     throw new RoleNotHiredError({ role });
   }
-  const postUnhireRoster = hiredRoles.filter((r) => r !== role);
+  const postUnhireRoster = hiredRolesWithCaps.filter((r) => r.id !== role);
   let unstaffedLens = null;
   try {
     resolveLensRoleBinding(postUnhireRoster);

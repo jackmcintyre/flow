@@ -531,6 +531,144 @@ describe("AC5 — 5+ roles but still cannot staff all 5 lenses (candidate-list c
 });
 
 // ---------------------------------------------------------------------------
+// Story native:01KVPQHYMMQEM56RH59YGZFCKB AC3 —
+// Unhire guard reflects declared capabilities, not just LENS_CANDIDATES names
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a PERSONA.md with a capabilities block declaring the given review lenses.
+ * Used for AC3 tests where the guard must read declared capabilities.
+ */
+async function hireRoleWithCapabilities(
+  role: string,
+  reviewLenses: string[],
+): Promise<void> {
+  const dir = path.join(tmpRoot, "team", role);
+  await fs.mkdir(dir, { recursive: true });
+  const lensYaml =
+    reviewLenses.length === 0
+      ? "    review_lenses: []\n"
+      : reviewLenses.map((l) => `    - ${l}`).join("\n") + "\n";
+  await atomicWriteFile(
+    path.join(dir, "PERSONA.md"),
+    `---\nrole: ${role}\ndomain: "${role} domain"\nmodel_tier: sonnet\n` +
+      `tools_allow:\n  - Read\ngh_allow: []\n` +
+      `locked_phrases:\n  handoff: "Handoff to reviewer — story <story-id> ready for review."\n` +
+      `  yield: "This sits in <role>'s domain — handing off."\n` +
+      `  verdict: "**Verdict: <SENTINEL>**"\n` +
+      `capabilities:\n  review_lenses:\n${lensYaml}  run_jobs: []\n` +
+      `hired_at: "2026-01-01T00:00:00.000Z"\n` +
+      `catalogue_version: "0.1.0"\n---\n\n## Domain\n\n${role} domain\n\n## Mandate\n\n- Work.\n\n` +
+      `## Out of mandate\n\n- Nothing.\n\n## Prompt\n\nYou are ${role}.\n\n## Knowledge\n\n- No entries.\n`,
+  );
+}
+
+describe("AC3 (Story native:01KVPQHYMMQEM56RH59YGZFCKB): unhire guard reflects declared capabilities and names the unstaffable lens", () => {
+  it("refuses unhire when the post-unhire roster (capability-declared) cannot cover a lens — names the lens", async () => {
+    // Build a minimal 5-role team using capability-declared personas.
+    // Only my-only-considered covers 'considered'; removing any other role is fine,
+    // but removing my-only-considered would leave 'considered' uncoverable.
+    await hireRoleWithCapabilities("my-only-considered", ["considered"]);
+    await hireRoleWithCapabilities("generalist-dev", ["domain"]);
+    await hireRoleWithCapabilities("generalist-reviewer", ["verifiability", "discipline"]);
+    await hireRoleWithCapabilities("orchestrator", ["structure", "verifiability", "discipline", "domain"]);
+    await hireRoleWithCapabilities("planner", ["structure", "discipline", "domain"]); // no considered
+
+    // Removing my-only-considered must be refused because considered would be uncoverable.
+    let err: unknown;
+    try {
+      await unhirePersona({
+        targetRepoRoot: tmpRoot,
+        role: "my-only-considered",
+        clock: FIXED_CLOCK,
+      });
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(UnhireBelowJudgeMinimumError);
+    const typed = err as UnhireBelowJudgeMinimumError;
+    expect(typed.unstaffedLens).toBe("considered");
+    expect(typed.message).toMatch(/considered/);
+    expect(typed.role).toBe("my-only-considered");
+  });
+
+  it("leaves the team completely unchanged after a refused unhire (capability path)", async () => {
+    await hireRoleWithCapabilities("my-only-considered", ["considered"]);
+    await hireRoleWithCapabilities("generalist-dev", ["domain"]);
+    await hireRoleWithCapabilities("generalist-reviewer", ["verifiability", "discipline"]);
+    await hireRoleWithCapabilities("orchestrator", ["structure", "verifiability", "discipline", "domain"]);
+    await hireRoleWithCapabilities("planner", ["structure", "discipline", "domain"]);
+
+    try {
+      await unhirePersona({
+        targetRepoRoot: tmpRoot,
+        role: "my-only-considered",
+        clock: FIXED_CLOCK,
+      });
+    } catch {
+      // expected refusal
+    }
+
+    // Live persona file must still be there.
+    await expect(
+      fs.access(path.join(tmpRoot, "team", "my-only-considered", "PERSONA.md")),
+    ).resolves.toBeUndefined();
+
+    // Archive must NOT have been created.
+    await expect(
+      fs.access(path.join(tmpRoot, "team", "_archived", "my-only-considered", "PERSONA.md")),
+    ).rejects.toThrow();
+  });
+
+  it("allows unhire when a second teammate covers the same lens (capability path)", async () => {
+    // 6-role team: both my-only-considered and retro-analyst cover 'considered'.
+    // Removing my-only-considered leaves 5 roles that can still staff all 5 lenses.
+    await hireRoleWithCapabilities("my-only-considered", ["considered"]);
+    await hireRoleWithCapabilities("retro-analyst", ["considered"]); // second considered-capable role
+    await hireRoleWithCapabilities("generalist-dev", ["domain"]);
+    await hireRoleWithCapabilities("generalist-reviewer", ["verifiability", "discipline"]);
+    await hireRoleWithCapabilities("orchestrator", ["structure", "verifiability", "discipline", "domain"]);
+    await hireRoleWithCapabilities("planner", ["structure", "discipline", "domain"]);
+
+    // Post-unhire roster: [generalist-dev, generalist-reviewer, orchestrator, planner, retro-analyst]
+    // retro-analyst covers considered; all 5 lenses are staffable.
+    const result = await unhirePersona({
+      targetRepoRoot: tmpRoot,
+      role: "my-only-considered",
+      clock: FIXED_CLOCK,
+    });
+
+    expect(result.status).toBe("archived");
+  });
+
+  it("names a different unstaffable lens when a different role is the only candidate for it", async () => {
+    // Only generalist-dev covers 'domain'; removing it leaves domain uncoverable.
+    await hireRoleWithCapabilities("my-only-considered", ["considered"]);
+    await hireRoleWithCapabilities("generalist-dev", ["domain"]); // only domain candidate
+    await hireRoleWithCapabilities("generalist-reviewer", ["verifiability", "discipline"]);
+    await hireRoleWithCapabilities("orchestrator", ["structure", "verifiability", "discipline"]);
+    await hireRoleWithCapabilities("planner", ["structure", "discipline", "considered"]);
+
+    let err: unknown;
+    try {
+      await unhirePersona({
+        targetRepoRoot: tmpRoot,
+        role: "generalist-dev",
+        clock: FIXED_CLOCK,
+      });
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(UnhireBelowJudgeMinimumError);
+    const typed = err as UnhireBelowJudgeMinimumError;
+    expect(typed.unstaffedLens).toBe("domain");
+    expect(typed.role).toBe("generalist-dev");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // stampArchivedAt unit tests
 // ---------------------------------------------------------------------------
 
