@@ -639,7 +639,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("unhirePersona");
       // /flow:init added initWorkspace (first-run workspace scaffolder). 60 → 61.
       expect(toolNames).toContain("initWorkspace");
-      expect(toolNames.length).toBe(61);
+      // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story). 61 → 62.
+      expect(toolNames).toContain("requeueBlockedStory");
+      expect(toolNames.length).toBe(62);
     } finally {
       await client.close();
       await server.close();

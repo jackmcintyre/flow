@@ -43,6 +43,7 @@ import {
   readRepoSignalsInputSchema,
   reattachOrphanInputSchema,
   recallLessonInputSchema,
+  requeueBlockedStoryInputSchema,
   recordAgentFrictionInputSchema,
   recordMaintainerFeedbackInputSchema,
   reviewMaintainerInboxInputSchema,
@@ -136,6 +137,7 @@ import { resolveJudgePlan } from "./resolve-judge-plan.js";
 import { resolveBuildPlan } from "./resolve-build-plan.js";
 import { summariseRetroProposal } from "./summarise-retro-proposal.js";
 import { discardDraft } from "./discard-draft.js";
+import { requeueBlockedStory } from "./requeue-blocked-story.js";
 import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 import { analyzeTeamFit } from "./analyze-team-fit.js";
 import { unhirePersona } from "./unhire-persona.js";
@@ -2497,6 +2499,51 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           })
           .parse(args);
         const result = await discardDraft(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC — requeueBlockedStory: the inverse
+  // of blockStory. Moves a genuinely blocked story back into the to-do (buildable)
+  // queue with its block cleared, so the next run can claim and build it normally.
+  // This is the missing supported escape path from the blocked state — before this
+  // tool the only exit was hand-editing files the rules forbid. Refuses with
+  // NotABlockedStoryError when the ref is not in blocked/ (not-found, to-do,
+  // in-progress, or done). The move is a single rename(2) syscall (NFR8) so a
+  // successful requeue leaves exactly one copy in to-do/ and none in blocked/.
+  // Used by the /flow:run recovery surface and by operators via the CLI.
+  server.registerTool({
+    name: "requeueBlockedStory",
+    description:
+      "Move a genuinely blocked story back into the buildable to-do queue " +
+      "(Story native:01KVN6ASCWXAHZ0FF7YRFKJECC). The inverse of blockStory: " +
+      "renames blocked/<ref>.yaml → to-do/<ref>.yaml (single rename syscall, NFR8), " +
+      "then rewrites the manifest to clear blocked_by, claimed_by, and reset status " +
+      "to 'to-do', so the next claimNextStory call sees a normal claimable item. " +
+      "Refuses with NotABlockedStoryError when the ref is not in blocked/ — including " +
+      "not-found, to-do, in-progress, or done. A successful requeue provably leaves " +
+      "exactly one copy of the manifest (in to-do/) and none in blocked/.",
+    inputSchema: requeueBlockedStoryInputSchema,
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            ref: z.string().min(1),
+          })
+          .parse(args);
+        const result = await requeueBlockedStory(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

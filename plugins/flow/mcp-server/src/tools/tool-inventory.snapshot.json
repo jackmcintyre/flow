@@ -39,6 +39,7 @@
   "readRepoSignals",
   "reattachOrphan",
   "recallLesson",
+  "requeueBlockedStory",
   "recordAgentFriction",
   "recordMaintainerFeedback",
   "reviewMaintainerInbox",
