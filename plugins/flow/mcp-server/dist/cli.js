@@ -28553,6 +28553,7 @@ async function computeSkillEffectiveness(opts) {
 
 // src/tools/write-native-story.ts
 import { createHash as createHash3 } from "node:crypto";
+import { existsSync as existsSync2 } from "node:fs";
 import * as path17 from "node:path";
 
 // src/validators/discipline-resolvability.ts
@@ -29878,6 +29879,76 @@ async function scanSources(opts) {
   return result;
 }
 
+// src/tools/build-feedback-issue-url.ts
+var MAX_URL_BYTES = 8192;
+var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
+function composeFeedbackIssueTitle(item) {
+  return `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
+}
+function composeFeedbackIssueBody(item) {
+  const lines = [
+    `**Problem**`,
+    item.problem,
+    ``,
+    `**Tool area**`,
+    item.tool_area
+  ];
+  if (item.suggested_direction) {
+    lines.push(``, `**Suggested direction**`, item.suggested_direction);
+  }
+  lines.push(``, `**Trigger**`, item.trigger);
+  return lines.join("\n");
+}
+function buildFeedbackIssueUrl(opts) {
+  const { owner, repo, item } = opts;
+  const title = composeFeedbackIssueTitle(item);
+  const body = composeFeedbackIssueBody(item);
+  const base = `https://github.com/${owner}/${repo}/issues/new`;
+  const encodedTitle = encodeURIComponent(title);
+  const fullUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(body)}`;
+  if (Buffer.byteLength(fullUrl, "utf8") <= MAX_URL_BYTES) {
+    return { url: fullUrl, bodyShortened: false };
+  }
+  const encodedNote = encodeURIComponent(SHORTENED_NOTE);
+  const fixedPartLength = Buffer.byteLength(
+    `${base}?title=${encodedTitle}&body=${encodedNote}`,
+    "utf8"
+  );
+  const bodyBudget = MAX_URL_BYTES - fixedPartLength;
+  let lo = 0;
+  let hi = body.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = encodeURIComponent(body.slice(0, mid));
+    if (Buffer.byteLength(candidate, "utf8") <= bodyBudget) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const shortenedBody = body.slice(0, lo) + SHORTENED_NOTE;
+  const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
+  return { url: shortenedUrl, bodyShortened: true };
+}
+function resolveGhRepoIdentity(execSyncImpl) {
+  try {
+    const impl = execSyncImpl ?? ((cmd, opts) => {
+      const { execSync } = __require("node:child_process");
+      return execSync(cmd, opts);
+    });
+    const stdout = impl("gh repo view --json owner,name", {
+      encoding: "utf-8"
+    });
+    const parsed = JSON.parse(stdout);
+    const owner = parsed.owner?.login ?? "";
+    const repo = parsed.name ?? "";
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
+
 // src/tools/write-native-story.ts
 var WriteNativeStoryInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
@@ -29968,13 +30039,37 @@ var WriteNativeStoryInputSchema = external_exports.object({
   source_issue: external_exports.string().optional()
 });
 var DEFAULT_FILES_TOUCHED = "To be completed by dev \u2014 list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
-var DEFAULT_DEFINITION_OF_DONE = [
+var FLOW_DEFINITION_OF_DONE = [
   "- [ ] All ACs met.",
   "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
   "- [ ] `pnpm test` green (all tests passing).",
   "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
   "- [ ] PR opened against `main` with CI green."
 ].join("\n");
+var PROJECT_AGNOSTIC_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] The project's build is green before the PR.",
+  "- [ ] The project's tests are passing.",
+  "- [ ] A reviewed change (PR or equivalent) is open with CI green."
+].join("\n");
+var FLOW_REPO_OWNER = "jackmcintyre";
+var FLOW_REPO_NAME = "crew";
+var FLOW_REPO_DISK_SENTINEL = "plugins/flow/mcp-server";
+function resolveDefaultDefinitionOfDone(targetRepoRoot, execSyncImpl, existsImpl) {
+  const identity3 = resolveGhRepoIdentity(execSyncImpl);
+  if (identity3 !== null) {
+    if (identity3.owner.toLowerCase() === FLOW_REPO_OWNER.toLowerCase() && identity3.repo.toLowerCase() === FLOW_REPO_NAME.toLowerCase()) {
+      return FLOW_DEFINITION_OF_DONE;
+    }
+    return PROJECT_AGNOSTIC_DEFINITION_OF_DONE;
+  }
+  const checkExists = existsImpl ?? existsSync2;
+  const sentinelPath = path17.join(targetRepoRoot, FLOW_REPO_DISK_SENTINEL);
+  if (checkExists(sentinelPath)) {
+    return FLOW_DEFINITION_OF_DONE;
+  }
+  return PROJECT_AGNOSTIC_DEFINITION_OF_DONE;
+}
 var DEFAULT_RISK_REASONING = "No elevated risk identified \u2014 confirm at dev time. Highest-risk failure mode: TBD by dev.";
 function normaliseSourceIssue(raw) {
   if (raw === void 0 || raw.trim().length === 0) return void 0;
@@ -29997,7 +30092,7 @@ function renderNarrativeSentence(narrative) {
 function indefiniteArticle(noun) {
   return /^[aeiou]/i.test(noun.trim()) ? "an" : "a";
 }
-function renderNativeStoryBody(input) {
+function renderNativeStoryBody(input, resolvedDod = FLOW_DEFINITION_OF_DONE) {
   const lines = [`# ${input.title}`, ""];
   lines.push("## Narrative", "");
   lines.push(renderNarrativeSentence(input.narrative));
@@ -30023,7 +30118,7 @@ function renderNativeStoryBody(input) {
   }
   lines.push("");
   lines.push("## Implementation Notes", "");
-  lines.push(renderImplementationNotesBody(input));
+  lines.push(renderImplementationNotesBody(input, resolvedDod));
   lines.push("");
   lines.push("## Dependencies", "");
   if (input.depends_on.length > 0) {
@@ -30041,7 +30136,7 @@ function renderNativeStoryBody(input) {
   }
   return lines.join("\n");
 }
-async function writeNativeStory(rawInput) {
+async function writeNativeStory(rawInput, seams) {
   const input = WriteNativeStoryInputSchema.parse(rawInput);
   const targetRepoRoot = path17.resolve(input.targetRepoRoot);
   const workspace = await resolveWorkspace({ targetRepoRoot });
@@ -30053,7 +30148,13 @@ async function writeNativeStory(rawInput) {
       toolName: "writeNativeStory"
     });
   }
-  const result = await renderGateWriteNativeStory(input, targetRepoRoot);
+  const result = await renderGateWriteNativeStory(
+    input,
+    targetRepoRoot,
+    "author",
+    seams?.execSyncImpl,
+    seams?.existsImpl
+  );
   try {
     await scanSources({ targetRepoRoot });
     return { ...result, materialised: true };
@@ -30062,12 +30163,13 @@ async function writeNativeStory(rawInput) {
     return { ...result, materialised: false, materialiseWarning: reason };
   }
 }
-async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author") {
+async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author", execSyncImpl, existsImpl) {
   const newUlid = ulid3();
   const storiesDir = path17.join(targetRepoRoot, ".flow", "native-stories");
   const absPath = path17.join(storiesDir, `${newUlid}.md`);
   const ref = `native:${newUlid}`;
-  const candidate = inputToSourceStory(input, ref, absPath);
+  const resolvedDod = resolveDefaultDefinitionOfDone(targetRepoRoot, execSyncImpl, existsImpl);
+  const candidate = inputToSourceStory(input, ref, absPath, resolvedDod);
   const pureResult = validateStoryAgainstDiscipline(candidate);
   const violations = "kind" in pureResult && pureResult.kind === "discipline-violation" ? [...pureResult.violations] : [];
   violations.push(...await resolveDisciplinePaths(candidate, targetRepoRoot));
@@ -30093,7 +30195,7 @@ async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author
     });
     throw new DisciplineViolationError({ violations });
   }
-  const body = renderNativeStoryBody(input);
+  const body = renderNativeStoryBody(input, resolvedDod);
   parseNativeStory(absPath, body);
   await atomicWriteFile(absPath, body);
   await logTelemetryEvent({
@@ -30108,7 +30210,7 @@ async function renderGateWriteNativeStory(input, targetRepoRoot, agent = "author
   });
   return { ref, path: absPath };
 }
-function renderImplementationNotesBody(input) {
+function renderImplementationNotesBody(input, resolvedDod) {
   const parts = [];
   if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
     parts.push(input.implementation_notes.trim());
@@ -30116,13 +30218,13 @@ function renderImplementationNotesBody(input) {
   }
   const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
   parts.push("### Files touched", "", filesTouched, "");
-  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+  const dod = (input.definition_of_done ?? "").trim() || resolvedDod;
   parts.push("### Definition of Done", "", dod, "");
   const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
   parts.push("### Risk", "", risk, "");
   return parts.join("\n").trim();
 }
-function inputToSourceStory(input, ref, absPath) {
+function inputToSourceStory(input, ref, absPath, resolvedDod = FLOW_DEFINITION_OF_DONE) {
   return {
     ref,
     title: input.title,
@@ -30135,7 +30237,7 @@ function inputToSourceStory(input, ref, absPath) {
     // Story 10.8: pass the full rendered implementation notes (including the
     // three build-ready sub-sections with their defaults) so the discipline
     // gate sees the same text the file will contain.
-    implementation_notes: renderImplementationNotesBody(input),
+    implementation_notes: renderImplementationNotesBody(input, resolvedDod),
     tasks: input.tasks,
     cited_sources: input.cited_sources,
     // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the normalised issue
@@ -30143,7 +30245,7 @@ function inputToSourceStory(input, ref, absPath) {
     source_issue: normaliseSourceIssue(input.source_issue),
     raw_path: absPath,
     raw_frontmatter: { title: input.title, ref },
-    source_hash: createHash3("sha256").update(renderNativeStoryBody(input)).digest("hex")
+    source_hash: createHash3("sha256").update(renderNativeStoryBody(input, resolvedDod)).digest("hex")
   };
 }
 
@@ -30856,76 +30958,6 @@ function parseMaintainerFeedbackInput(input) {
     });
   }
   return result.data;
-}
-
-// src/tools/build-feedback-issue-url.ts
-var MAX_URL_BYTES = 8192;
-var SHORTENED_NOTE = "\n\n_(body shortened \u2014 see full detail in the maintainer inbox)_";
-function composeFeedbackIssueTitle(item) {
-  return `[tool-feedback] ${item.tool_area}: ${item.problem.slice(0, 120)}`;
-}
-function composeFeedbackIssueBody(item) {
-  const lines = [
-    `**Problem**`,
-    item.problem,
-    ``,
-    `**Tool area**`,
-    item.tool_area
-  ];
-  if (item.suggested_direction) {
-    lines.push(``, `**Suggested direction**`, item.suggested_direction);
-  }
-  lines.push(``, `**Trigger**`, item.trigger);
-  return lines.join("\n");
-}
-function buildFeedbackIssueUrl(opts) {
-  const { owner, repo, item } = opts;
-  const title = composeFeedbackIssueTitle(item);
-  const body = composeFeedbackIssueBody(item);
-  const base = `https://github.com/${owner}/${repo}/issues/new`;
-  const encodedTitle = encodeURIComponent(title);
-  const fullUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(body)}`;
-  if (Buffer.byteLength(fullUrl, "utf8") <= MAX_URL_BYTES) {
-    return { url: fullUrl, bodyShortened: false };
-  }
-  const encodedNote = encodeURIComponent(SHORTENED_NOTE);
-  const fixedPartLength = Buffer.byteLength(
-    `${base}?title=${encodedTitle}&body=${encodedNote}`,
-    "utf8"
-  );
-  const bodyBudget = MAX_URL_BYTES - fixedPartLength;
-  let lo = 0;
-  let hi = body.length;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi + 1) / 2);
-    const candidate = encodeURIComponent(body.slice(0, mid));
-    if (Buffer.byteLength(candidate, "utf8") <= bodyBudget) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  const shortenedBody = body.slice(0, lo) + SHORTENED_NOTE;
-  const shortenedUrl = `${base}?title=${encodedTitle}&body=${encodeURIComponent(shortenedBody)}`;
-  return { url: shortenedUrl, bodyShortened: true };
-}
-function resolveGhRepoIdentity(execSyncImpl) {
-  try {
-    const impl = execSyncImpl ?? ((cmd, opts) => {
-      const { execSync } = __require("node:child_process");
-      return execSync(cmd, opts);
-    });
-    const stdout = impl("gh repo view --json owner,name", {
-      encoding: "utf-8"
-    });
-    const parsed = JSON.parse(stdout);
-    const owner = parsed.owner?.login ?? "";
-    const repo = parsed.name ?? "";
-    if (!owner || !repo) return null;
-    return { owner, repo };
-  } catch {
-    return null;
-  }
 }
 
 // src/tools/record-maintainer-feedback.ts
