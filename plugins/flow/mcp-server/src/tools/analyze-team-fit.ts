@@ -11,9 +11,13 @@
  *  - Test-heavy backlog → recommend hiring test-specialist.
  *  - Docs-heavy backlog → recommend hiring docs-specialist.
  *  - Recurring stall (≥2) on an uncovered domain → hire gap (with stall count).
+ *    The role recommended is dynamically resolved from the full available
+ *    role set (built-in catalogue + operator custom roles), not a hard-coded
+ *    list of four names (Story native:01KVPQYRDWRSDCXD15XNJN0MC6).
  *  - Specialist with no role-attributable useful work in the window →
  *    unhire candidate, UNLESS removing them would leave the grading panel
- *    unable to staff all five distinct lenses.
+ *    unable to staff all five distinct lenses. Custom roles are evaluated
+ *    on equal footing with built-in specialists.
  *
  * Input: `{ targetRepoRoot }`.
  * Output: `{ hire: [{role, reason, evidence}], unhire: [{role, reason, evidence}], gaps: [{domain, signal}] }`.
@@ -28,10 +32,9 @@ import { z } from "zod";
 import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { resolveLensRoleBinding } from "./judge-panel.js";
 import { TelemetryEventSchema } from "../schemas/telemetry-events.js";
-import {
-  specialistRoleForDomain,
-  ALL_SPECIALIST_ROLES,
-} from "../lib/specialist-domain-map.js";
+import { GENERALIST_BACKBONE_ROLES } from "../lib/specialist-domain-map.js";
+import { parseCatalogueRole } from "../lib/markdown-frontmatter.js";
+import { getPluginRoot } from "../lib/plugin-root.js";
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -39,6 +42,13 @@ import {
 
 const AnalyzeTeamFitInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
+  /**
+   * Optional: absolute path to the plugin root (`plugins/flow/`). If
+   * provided, used to enumerate available catalogue roles. Defaults to
+   * `getPluginRoot()` when omitted; supplied by tests and other callers
+   * that want a controlled catalogue.
+   */
+  pluginRoot: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -213,6 +223,87 @@ async function readHiredRoles(targetRepoRoot: string): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Available role set (Story native:01KVPQYRDWRSDCXD15XNJN0MC6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a dynamic map of domain → roleId over ALL roles that could be hired:
+ *  1. Non-backbone roles from the built-in catalogue (`<pluginRoot>/catalogue/`).
+ *  2. Non-backbone operator-authored custom roles (`<targetRepoRoot>/team/custom/`).
+ *
+ * Custom roles shadow catalogue roles only if they declare the same domain; in
+ * practice this is an operator-configuration error, but we keep the last-write
+ * wins semantics (catalogue first, custom second) so custom entries take
+ * precedence — consistent with how instantiatePersona resolves PERSONA files.
+ *
+ * Parsing errors on individual files are silently skipped (best-effort read);
+ * the caller already verified the in-team-dir personas are well-formed at
+ * hire time.
+ *
+ * Returns:
+ *  - `domainToRole`: domain string → role id (non-backbone only).
+ *  - `availableRoleIds`: set of all non-backbone role ids found.
+ */
+async function buildAvailableRoleSet(
+  targetRepoRoot: string,
+  pluginRoot: string,
+): Promise<{ domainToRole: Map<string, string>; availableRoleIds: Set<string> }> {
+  const domainToRole = new Map<string, string>();
+  const availableRoleIds = new Set<string>();
+
+  // 1. Read all non-backbone catalogue roles.
+  const catalogueDir = path.join(pluginRoot, "catalogue");
+  let catalogueEntries: string[] = [];
+  try {
+    catalogueEntries = await fs.readdir(catalogueDir);
+  } catch {
+    // No catalogue directory (e.g. in a unit-test environment without one).
+  }
+
+  for (const entry of catalogueEntries) {
+    if (!entry.endsWith(".md")) continue;
+    const roleId = entry.slice(0, -3); // strip ".md"
+    if (GENERALIST_BACKBONE_ROLES.has(roleId)) continue;
+
+    try {
+      const raw = await fs.readFile(path.join(catalogueDir, entry), "utf8");
+      const role = parseCatalogueRole(raw, path.join(catalogueDir, entry));
+      domainToRole.set(role.domain, role.role);
+      availableRoleIds.add(role.role);
+    } catch {
+      // Skip unparseable files.
+    }
+  }
+
+  // 2. Read all non-backbone custom roles from `team/custom/`.
+  const customDir = path.join(targetRepoRoot, "team", "custom");
+  let customEntries: string[] = [];
+  try {
+    customEntries = await fs.readdir(customDir);
+  } catch {
+    // No custom roles directory — fine.
+  }
+
+  for (const entry of customEntries) {
+    if (!entry.endsWith(".md")) continue;
+    const roleId = entry.slice(0, -3);
+    if (GENERALIST_BACKBONE_ROLES.has(roleId)) continue;
+
+    try {
+      const raw = await fs.readFile(path.join(customDir, entry), "utf8");
+      const role = parseCatalogueRole(raw, path.join(customDir, entry));
+      // Custom roles override catalogue entries for the same domain.
+      domainToRole.set(role.domain, role.role);
+      availableRoleIds.add(role.role);
+    } catch {
+      // Skip unparseable files.
+    }
+  }
+
+  return { domainToRole, availableRoleIds };
+}
+
+// ---------------------------------------------------------------------------
 // Grading-panel guard
 // ---------------------------------------------------------------------------
 
@@ -274,15 +365,19 @@ function isDocsHeavy(specText: string): boolean {
 export async function analyzeTeamFit(rawInput: unknown): Promise<AnalyzeTeamFitResult> {
   const input = AnalyzeTeamFitInputSchema.parse(rawInput);
   const { targetRepoRoot } = input;
+  // Resolve pluginRoot: prefer the explicit override (supplied by tests and
+  // callers that need a controlled catalogue); fall back to the real plugin root.
+  const pluginRoot = input.pluginRoot ?? getPluginRoot();
 
-  // Read all three inputs in parallel.
-  const [hiredRoles, backlog, telemetry] = await Promise.all([
+  // Read all inputs in parallel.
+  const [hiredRoles, backlog, telemetry, { domainToRole }] = await Promise.all([
     readHiredRoles(targetRepoRoot),
     readBacklogInventory({
       targetRepoRoot,
       includeSpecText: true,
     }),
     readTelemetrySummary(targetRepoRoot),
+    buildAvailableRoleSet(targetRepoRoot, pluginRoot),
   ]);
 
   const hire: HireRecommendation[] = [];
@@ -356,29 +451,33 @@ export async function analyzeTeamFit(rawInput: unknown): Promise<AnalyzeTeamFitR
   // -------------------------------------------------------------------------
 
   // Any domain that stalled ≥2 times on work that nobody covered → gap.
+  // Role resolution uses the dynamic domainToRole map (built-in catalogue +
+  // operator custom roles) rather than the hard-coded four-specialist list
+  // (Story native:01KVPQYRDWRSDCXD15XNJN0MC6).
   const STALL_THRESHOLD = 2;
   for (const [domain, storySet] of telemetry.stallsByDomain) {
     if (storySet.size < STALL_THRESHOLD) continue;
 
-    const specialistRole = specialistRoleForDomain(domain);
+    // Look up the role that covers this domain across ALL available roles.
+    const roleForDomain = domainToRole.get(domain) ?? null;
     const stallCount = storySet.size;
 
     gaps.push({
       domain,
       signal:
-        specialistRole !== null
-          ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain}". Hiring ${specialistRole} would close this gap.`
-          : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain}". No specialist in the catalogue maps to this domain.`,
+        roleForDomain !== null
+          ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain}". Hiring ${roleForDomain} would close this gap.`
+          : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain}". No available role (built-in or custom) covers this area.`,
     });
 
-    // Also produce a hire recommendation if there IS a specialist for this domain
+    // Also produce a hire recommendation if there IS a role for this domain
     // and they are not already hired.
-    if (specialistRole !== null && !hiredRoleSet.has(specialistRole)) {
+    if (roleForDomain !== null && !hiredRoleSet.has(roleForDomain)) {
       // Avoid a duplicate entry (the backlog rules above may already recommend this role).
-      const alreadyHireEntry = hire.find((h) => h.role === specialistRole);
+      const alreadyHireEntry = hire.find((h) => h.role === roleForDomain);
       if (!alreadyHireEntry) {
         hire.push({
-          role: specialistRole,
+          role: roleForDomain,
           reason: `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} waiting for "${domain}" expertise that nobody on the team covers.`,
           evidence: [`stall-count:${stallCount}`, `domain:${domain}`],
         });
@@ -393,10 +492,15 @@ export async function analyzeTeamFit(rawInput: unknown): Promise<AnalyzeTeamFitR
   // Unhire rule
   // -------------------------------------------------------------------------
 
-  // Only specialist roles are ever unhire candidates (generalist backbone is
-  // never let go by this tool).
+  // Any non-backbone role is an unhire candidate — this includes both
+  // built-in specialists and operator-authored custom roles. Generalist
+  // backbone roles (dev, reviewer, orchestrator, planner, retro-analyst,
+  // quality-lead, hiring-manager, author) are never let go by this tool.
+  // Story native:01KVPQYRDWRSDCXD15XNJN0MC6: replaced the hard-coded
+  // ALL_SPECIALIST_ROLES filter with GENERALIST_BACKBONE_ROLES exclusion so
+  // custom roles are evaluated on equal footing.
   for (const role of hiredRoles) {
-    if (!ALL_SPECIALIST_ROLES.includes(role)) continue;
+    if (GENERALIST_BACKBONE_ROLES.has(role)) continue;
 
     // Useful-work signal: role-attributable events in telemetry.
     const usefulWork = telemetry.usefulWorkByRole.get(role) ?? 0;

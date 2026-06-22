@@ -663,3 +663,354 @@ describe("AC6: zero-useful-work specialist not needed by panel → unhire recomm
     expect(result.unhire).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Helpers for dynamic role-set tests (Story native:01KVPQYRDWRSDCXD15XNJN0MC6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a minimal valid catalogue-format role file to
+ * `<pluginRoot>/catalogue/<role>.md`.
+ * Used to create a fake built-in catalogue in the tmp plugin root fixture.
+ */
+async function writeCatalogueRole(
+  pluginRoot: string,
+  role: string,
+  domain: string,
+): Promise<void> {
+  const dir = path.join(pluginRoot, "catalogue");
+  await fs.mkdir(dir, { recursive: true });
+  const content =
+    `---\n` +
+    `role: ${role}\n` +
+    `domain: "${domain}"\n` +
+    `model_tier: sonnet\n` +
+    `tools_allow:\n` +
+    `  - Read\n` +
+    `  - Bash\n` +
+    `gh_allow: []\n` +
+    `locked_phrases:\n` +
+    `  handoff: "Handoff to reviewer — story <story-id> ready for review."\n` +
+    `  yield: "This sits in <role>'s domain — handing off."\n` +
+    `  verdict: "**Verdict: <SENTINEL>**"\n` +
+    `---\n\n` +
+    `# ${role}\n\n` +
+    `## Domain\n\n${domain}\n\n` +
+    `## Mandate\n\n- Do the work.\n\n` +
+    `## Out of mandate\n\n- Nothing.\n\n` +
+    `## Prompt\n\nYou are the ${role}.\n`;
+  await atomicWriteFile(path.join(dir, `${role}.md`), content);
+}
+
+/**
+ * Write a minimal valid catalogue-format role file to
+ * `<targetRepoRoot>/team/custom/<role>.md`.
+ * Used to create an operator-authored custom role in the fixture repo.
+ */
+async function writeCustomRole(
+  targetRepoRoot: string,
+  role: string,
+  domain: string,
+): Promise<void> {
+  const dir = path.join(targetRepoRoot, "team", "custom");
+  await fs.mkdir(dir, { recursive: true });
+  const content =
+    `---\n` +
+    `role: ${role}\n` +
+    `domain: "${domain}"\n` +
+    `model_tier: sonnet\n` +
+    `tools_allow:\n` +
+    `  - Read\n` +
+    `  - Bash\n` +
+    `gh_allow: []\n` +
+    `locked_phrases:\n` +
+    `  handoff: "Handoff to reviewer — story <story-id> ready for review."\n` +
+    `  yield: "This sits in <role>'s domain — handing off."\n` +
+    `  verdict: "**Verdict: <SENTINEL>**"\n` +
+    `---\n\n` +
+    `# ${role}\n\n` +
+    `## Domain\n\n${domain}\n\n` +
+    `## Mandate\n\n- Do the work.\n\n` +
+    `## Out of mandate\n\n- Nothing.\n\n` +
+    `## Prompt\n\nYou are the ${role}.\n`;
+  await atomicWriteFile(path.join(dir, `${role}.md`), content);
+}
+
+// ---------------------------------------------------------------------------
+// Story native:01KVPQYRDWRSDCXD15XNJN0MC6 ACs: dynamic role set
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVPQYRDWRSDCXD15XNJN0MC6 — AC1: custom role recommended for hire via stall signal", () => {
+  const TS = "2026-06-01T10:00:00.000Z";
+
+  it("recommends a custom role by name when stalls match its declared domain", async () => {
+    // Hire a minimal backbone team — custom role NOT yet hired.
+    await hireRole("generalist-dev", "feature implementation in a story scope");
+    await hireRole("generalist-reviewer", "code review and verdict authoring");
+    await hireRole("planner", "story authoring and acceptance criteria");
+    await hireRole("orchestrator", "session liveness and story state transitions");
+    await hireRole("retro-analyst", "cycle-end lessons and rule proposals");
+
+    // Author a custom role that covers "data pipeline orchestration".
+    const customDomain = "data pipeline orchestration and ETL";
+    await writeCustomRole(tmpRoot, "data-engineer", customDomain);
+
+    // Build a fake pluginRoot with no catalogue roles (so only the custom role is available).
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    await fs.mkdir(path.join(fakePluginRoot, "catalogue"), { recursive: true });
+
+    // Two stall events on the custom domain.
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000001",
+      agent: "generalist-reviewer",
+      story_id: "native:01AAAAAAAAAAAAAAAAAAAAAAAA",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "data-engineer",
+        domain: customDomain,
+      },
+    });
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000002",
+      agent: "generalist-reviewer",
+      story_id: "native:01BBBBBBBBBBBBBBBBBBBBBBBB",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "data-engineer",
+        domain: customDomain,
+      },
+    });
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    // A hire recommendation for the custom role must appear.
+    const customHire = result.hire.find((h) => h.role === "data-engineer");
+    expect(customHire).toBeDefined();
+    // The reason must be derived from the declared domain, not from a hard-coded name.
+    expect(customHire!.reason).toContain(customDomain);
+    expect(customHire!.evidence).toContain("stall-count:2");
+
+    // A gap entry must appear naming the custom domain.
+    const gap = result.gaps.find((g) => g.domain === customDomain);
+    expect(gap).toBeDefined();
+    // The gap signal must name the custom role — not fall through to "no specialist".
+    expect(gap!.signal).toContain("data-engineer");
+  });
+
+  it("does NOT recommend a custom role that is already hired", async () => {
+    // Hire the custom role.
+    await hireRole("data-engineer", "data pipeline orchestration and ETL");
+
+    const customDomain = "data pipeline orchestration and ETL";
+    await writeCustomRole(tmpRoot, "data-engineer", customDomain);
+
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    await fs.mkdir(path.join(fakePluginRoot, "catalogue"), { recursive: true });
+
+    // Two stalls on the same domain.
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000001",
+      agent: "generalist-reviewer",
+      story_id: "native:01AAAAAAAAAAAAAAAAAAAAAAAA",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "data-engineer",
+        domain: customDomain,
+      },
+    });
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000002",
+      agent: "generalist-reviewer",
+      story_id: "native:01BBBBBBBBBBBBBBBBBBBBBBBB",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "data-engineer",
+        domain: customDomain,
+      },
+    });
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    // Already hired — no hire recommendation.
+    const customHire = result.hire.find((h) => h.role === "data-engineer");
+    expect(customHire).toBeUndefined();
+  });
+});
+
+describe("Story native:01KVPQYRDWRSDCXD15XNJN0MC6 — AC2: custom role evaluated for set-aside on equal footing", () => {
+  it("recommends set-aside of a custom role with no useful work when panel is intact without them", async () => {
+    // Full backbone team that can staff all lenses without the custom role.
+    await hireRole("generalist-dev", "feature implementation in a story scope");
+    await hireRole("generalist-reviewer", "code review and verdict authoring");
+    await hireRole("planner", "story authoring and acceptance criteria");
+    await hireRole("orchestrator", "session liveness and story state transitions");
+    await hireRole("retro-analyst", "cycle-end lessons and rule proposals");
+    // Add a custom role — no useful work will be recorded.
+    await hireRole("data-engineer", "data pipeline orchestration and ETL");
+
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    await fs.mkdir(path.join(fakePluginRoot, "catalogue"), { recursive: true });
+    await writeCustomRole(tmpRoot, "data-engineer", "data pipeline orchestration and ETL");
+
+    const TS = "2026-06-01T10:00:00.000Z";
+    // Give the backbone roles useful work — custom role gets nothing.
+    for (const role of ["generalist-dev", "generalist-reviewer", "planner", "orchestrator", "retro-analyst"]) {
+      await appendTelemetryEvent({
+        type: "agent.invoke",
+        ts: TS,
+        session_id: "01SESSION000000000000000001",
+        agent: role,
+        data: { runtime_ms: 1000 },
+      });
+    }
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    // Custom role with no useful work must appear as an unhire candidate.
+    const customUnhire = result.unhire.find((u) => u.role === "data-engineer");
+    expect(customUnhire).toBeDefined();
+    expect(customUnhire!.evidence).toContain("no useful work in the recent window");
+    expect(customUnhire!.reason).toMatch(/no useful work/i);
+  });
+
+  it("does NOT recommend set-aside of a custom role that has done useful work", async () => {
+    await hireRole("generalist-dev", "feature implementation in a story scope");
+    await hireRole("generalist-reviewer", "code review and verdict authoring");
+    await hireRole("planner", "story authoring and acceptance criteria");
+    await hireRole("orchestrator", "session liveness and story state transitions");
+    await hireRole("retro-analyst", "cycle-end lessons and rule proposals");
+    await hireRole("data-engineer", "data pipeline orchestration and ETL");
+
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    await fs.mkdir(path.join(fakePluginRoot, "catalogue"), { recursive: true });
+    await writeCustomRole(tmpRoot, "data-engineer", "data pipeline orchestration and ETL");
+
+    const TS = "2026-06-01T10:00:00.000Z";
+    // Custom role HAS useful work.
+    await appendTelemetryEvent({
+      type: "agent.invoke",
+      ts: TS,
+      session_id: "01SESSION000000000000000001",
+      agent: "data-engineer",
+      data: { runtime_ms: 5000 },
+    });
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    const customUnhire = result.unhire.find((u) => u.role === "data-engineer");
+    expect(customUnhire).toBeUndefined();
+  });
+});
+
+describe("Story native:01KVPQYRDWRSDCXD15XNJN0MC6 — AC3: hire/gap reasons derived from declared domain", () => {
+  const TS = "2026-06-01T10:00:00.000Z";
+
+  it("derives the recommended role and reason from the matched role's declared domain string", async () => {
+    await hireRole("generalist-dev", "feature implementation in a story scope");
+
+    // A built-in catalogue role (via fakePluginRoot) with a specific domain.
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    const builtInDomain = "performance profiling and optimisation";
+    await writeCatalogueRole(fakePluginRoot, "perf-specialist", builtInDomain);
+
+    // Two stall events on that domain.
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000001",
+      agent: "generalist-reviewer",
+      story_id: "native:01AAAAAAAAAAAAAAAAAAAAAAAA",
+      data: { from_role: "generalist-reviewer", to_role: "perf-specialist", domain: builtInDomain },
+    });
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000002",
+      agent: "generalist-reviewer",
+      story_id: "native:01BBBBBBBBBBBBBBBBBBBBBBBB",
+      data: { from_role: "generalist-reviewer", to_role: "perf-specialist", domain: builtInDomain },
+    });
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    const hireRec = result.hire.find((h) => h.role === "perf-specialist");
+    expect(hireRec).toBeDefined();
+    // Reason is derived from the declared domain string.
+    expect(hireRec!.reason).toContain(builtInDomain);
+    // Evidence carries the domain tag.
+    expect(hireRec!.evidence).toContain(`domain:${builtInDomain}`);
+
+    // Gap signal also names the role from the catalogue, not a hard-coded name.
+    const gap = result.gaps.find((g) => g.domain === builtInDomain);
+    expect(gap).toBeDefined();
+    expect(gap!.signal).toContain("perf-specialist");
+  });
+});
+
+describe("Story native:01KVPQYRDWRSDCXD15XNJN0MC6 — AC4: coverage gap flags 'no available role'", () => {
+  const TS = "2026-06-01T10:00:00.000Z";
+
+  it("flags a gap with 'No available role' message when no role (built-in or custom) declares the stalled domain", async () => {
+    await hireRole("generalist-dev", "feature implementation in a story scope");
+
+    // A fake plugin root with a catalogue role whose domain does NOT match the stalled domain.
+    const fakePluginRoot = path.join(tmpRoot, "fake-plugin");
+    await writeCatalogueRole(fakePluginRoot, "perf-specialist", "performance profiling and optimisation");
+
+    const unknownDomain = "quantum circuit optimisation";
+
+    // Two stall events on the unknown domain.
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000001",
+      agent: "generalist-reviewer",
+      story_id: "native:01AAAAAAAAAAAAAAAAAAAAAAAA",
+      data: { from_role: "generalist-reviewer", to_role: "quantum-specialist", domain: unknownDomain },
+    });
+    await appendTelemetryEvent({
+      type: "yield.handoff",
+      ts: TS,
+      session_id: "01SESSION000000000000000002",
+      agent: "generalist-reviewer",
+      story_id: "native:01BBBBBBBBBBBBBBBBBBBBBBBB",
+      data: { from_role: "generalist-reviewer", to_role: "quantum-specialist", domain: unknownDomain },
+    });
+
+    const result = await analyzeTeamFit({
+      targetRepoRoot: tmpRoot,
+      pluginRoot: fakePluginRoot,
+    });
+
+    const gap = result.gaps.find((g) => g.domain === unknownDomain);
+    expect(gap).toBeDefined();
+    // Must explicitly state that no available role covers this area.
+    expect(gap!.signal).toMatch(/no available role/i);
+    // Must NOT produce a hire recommendation (no matching role).
+    const hireRec = result.hire.find((h) => h.evidence?.some((e) => e.includes(unknownDomain)));
+    expect(hireRec).toBeUndefined();
+  });
+});

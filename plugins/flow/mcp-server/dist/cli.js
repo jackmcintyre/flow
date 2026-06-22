@@ -10614,7 +10614,11 @@ var LENS_NAMES_TUPLE = [
 var analyzeTeamFitInputSchema = {
   type: "object",
   properties: {
-    targetRepoRoot: { type: "string" }
+    targetRepoRoot: { type: "string" },
+    pluginRoot: {
+      type: "string",
+      description: "Optional absolute path to the plugin root. When provided, used to enumerate available catalogue roles for the dynamic role set. Defaults to the resolved plugin root when omitted (production callers omit; tests supply a fixture)."
+    }
   },
   required: ["targetRepoRoot"]
 };
@@ -31420,22 +31424,27 @@ async function aggregateJudgePanel(opts) {
 }
 
 // src/lib/specialist-domain-map.ts
-var DOMAIN_TO_SPECIALIST = /* @__PURE__ */ new Map([
-  ["authentication authorization and secret handling", "security-specialist"],
-  ["test design and coverage gaps", "test-specialist"],
-  ["developer-facing documentation and READMEs", "docs-specialist"],
-  ["failure-mode diagnosis and root-cause isolation", "debugger"]
+var GENERALIST_BACKBONE_ROLES = /* @__PURE__ */ new Set([
+  "generalist-dev",
+  "generalist-reviewer",
+  "orchestrator",
+  "planner",
+  "retro-analyst",
+  "quality-lead",
+  "hiring-manager",
+  "author"
 ]);
-function specialistRoleForDomain(domain2) {
-  return DOMAIN_TO_SPECIALIST.get(domain2) ?? null;
-}
-var ALL_SPECIALIST_ROLES = Array.from(
-  DOMAIN_TO_SPECIALIST.values()
-);
 
 // src/tools/analyze-team-fit.ts
 var AnalyzeTeamFitInputSchema = external_exports.object({
-  targetRepoRoot: external_exports.string().min(1)
+  targetRepoRoot: external_exports.string().min(1),
+  /**
+   * Optional: absolute path to the plugin root (`plugins/flow/`). If
+   * provided, used to enumerate available catalogue roles. Defaults to
+   * `getPluginRoot()` when omitted; supplied by tests and other callers
+   * that want a controlled catalogue.
+   */
+  pluginRoot: external_exports.string().optional()
 });
 var MONTH_BUCKET_REGEX = /^\d{4}-\d{2}\.jsonl$/;
 async function readTelemetrySummary(targetRepoRoot) {
@@ -31513,6 +31522,47 @@ async function readHiredRoles(targetRepoRoot) {
   hiredRoles.sort();
   return hiredRoles;
 }
+async function buildAvailableRoleSet(targetRepoRoot, pluginRoot) {
+  const domainToRole = /* @__PURE__ */ new Map();
+  const availableRoleIds = /* @__PURE__ */ new Set();
+  const catalogueDir = path23.join(pluginRoot, "catalogue");
+  let catalogueEntries = [];
+  try {
+    catalogueEntries = await fs17.readdir(catalogueDir);
+  } catch {
+  }
+  for (const entry of catalogueEntries) {
+    if (!entry.endsWith(".md")) continue;
+    const roleId = entry.slice(0, -3);
+    if (GENERALIST_BACKBONE_ROLES.has(roleId)) continue;
+    try {
+      const raw = await fs17.readFile(path23.join(catalogueDir, entry), "utf8");
+      const role = parseCatalogueRole(raw, path23.join(catalogueDir, entry));
+      domainToRole.set(role.domain, role.role);
+      availableRoleIds.add(role.role);
+    } catch {
+    }
+  }
+  const customDir = path23.join(targetRepoRoot, "team", "custom");
+  let customEntries = [];
+  try {
+    customEntries = await fs17.readdir(customDir);
+  } catch {
+  }
+  for (const entry of customEntries) {
+    if (!entry.endsWith(".md")) continue;
+    const roleId = entry.slice(0, -3);
+    if (GENERALIST_BACKBONE_ROLES.has(roleId)) continue;
+    try {
+      const raw = await fs17.readFile(path23.join(customDir, entry), "utf8");
+      const role = parseCatalogueRole(raw, path23.join(customDir, entry));
+      domainToRole.set(role.domain, role.role);
+      availableRoleIds.add(role.role);
+    } catch {
+    }
+  }
+  return { domainToRole, availableRoleIds };
+}
 function wouldBreakPanel(role, hiredRoles) {
   const rosterWithout = hiredRoles.filter((r) => r !== role);
   try {
@@ -31533,13 +31583,15 @@ function isDocsHeavy(specText) {
 async function analyzeTeamFit(rawInput) {
   const input = AnalyzeTeamFitInputSchema.parse(rawInput);
   const { targetRepoRoot } = input;
-  const [hiredRoles, backlog, telemetry] = await Promise.all([
+  const pluginRoot = input.pluginRoot ?? getPluginRoot();
+  const [hiredRoles, backlog, telemetry, { domainToRole }] = await Promise.all([
     readHiredRoles(targetRepoRoot),
     readBacklogInventory({
       targetRepoRoot,
       includeSpecText: true
     }),
-    readTelemetrySummary(targetRepoRoot)
+    readTelemetrySummary(targetRepoRoot),
+    buildAvailableRoleSet(targetRepoRoot, pluginRoot)
   ]);
   const hire = [];
   const unhire = [];
@@ -31582,17 +31634,17 @@ async function analyzeTeamFit(rawInput) {
   const STALL_THRESHOLD = 2;
   for (const [domain2, storySet] of telemetry.stallsByDomain) {
     if (storySet.size < STALL_THRESHOLD) continue;
-    const specialistRole = specialistRoleForDomain(domain2);
+    const roleForDomain = domainToRole.get(domain2) ?? null;
     const stallCount = storySet.size;
     gaps.push({
       domain: domain2,
-      signal: specialistRole !== null ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". Hiring ${specialistRole} would close this gap.` : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". No specialist in the catalogue maps to this domain.`
+      signal: roleForDomain !== null ? `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". Hiring ${roleForDomain} would close this gap.` : `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} on uncovered domain "${domain2}". No available role (built-in or custom) covers this area.`
     });
-    if (specialistRole !== null && !hiredRoleSet.has(specialistRole)) {
-      const alreadyHireEntry = hire.find((h2) => h2.role === specialistRole);
+    if (roleForDomain !== null && !hiredRoleSet.has(roleForDomain)) {
+      const alreadyHireEntry = hire.find((h2) => h2.role === roleForDomain);
       if (!alreadyHireEntry) {
         hire.push({
-          role: specialistRole,
+          role: roleForDomain,
           reason: `Work stalled ${stallCount} time${stallCount === 1 ? "" : "s"} waiting for "${domain2}" expertise that nobody on the team covers.`,
           evidence: [`stall-count:${stallCount}`, `domain:${domain2}`]
         });
@@ -31602,7 +31654,7 @@ async function analyzeTeamFit(rawInput) {
     }
   }
   for (const role of hiredRoles) {
-    if (!ALL_SPECIALIST_ROLES.includes(role)) continue;
+    if (GENERALIST_BACKBONE_ROLES.has(role)) continue;
     const usefulWork = telemetry.usefulWorkByRole.get(role) ?? 0;
     if (usefulWork > 0) continue;
     if (wouldBreakPanel(role, hiredRoles)) continue;

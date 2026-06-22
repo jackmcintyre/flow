@@ -625,7 +625,9 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     inputSchema: analyzeTeamFitInputSchema,
     handler: async (args) => {
       const root = z.string().min(1).parse(args.targetRepoRoot);
-      const result = await analyzeTeamFit({ targetRepoRoot: root });
+      // Pass the resolved plugin root so the handler can enumerate the full
+      // built-in catalogue when building the dynamic role set.
+      const result = await analyzeTeamFit({ targetRepoRoot: root, pluginRoot: getPluginRoot() });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };

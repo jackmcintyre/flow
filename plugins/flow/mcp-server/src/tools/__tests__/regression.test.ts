@@ -32,7 +32,9 @@ interface Baseline {
 const BASELINE: Record<string, Baseline> = {
   analyzeTeamFit: {
     required: ["targetRepoRoot"],
-    properties: ["targetRepoRoot"],
+    // pluginRoot added in Story native:01KVPQYRDWRSDCXD15XNJN0MC6 — optional param
+    // for catalogue enumeration; production callers omit it.
+    properties: ["targetRepoRoot", "pluginRoot"],
   },
   acceptProposal: {
     required: ["targetRepoRoot", "proposalId"],
