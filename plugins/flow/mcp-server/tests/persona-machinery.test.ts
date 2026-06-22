@@ -31,6 +31,8 @@ import {
   CatalogueRoleNotFoundError,
   PersonaAlreadyExistsError,
   PersonaFileMalformedError,
+  PersonaFileNotFoundError,
+  UnhireBelowJudgeMinimumError,
 } from "../src/errors.js";
 import {
   parseCatalogueRole,
@@ -40,9 +42,11 @@ import { parsePersonaFile, renderPersonaFile } from "../src/lib/persona-file.js"
 import { getPluginRoot } from "../src/lib/plugin-root.js";
 import { REQUIRED_PERSONA_SECTIONS } from "../src/schemas/persona.js";
 import { instantiatePersona } from "../src/tools/instantiate-persona.js";
+import { refreshPersona } from "../src/tools/refresh-persona.js";
 import { lookupRoleByDomain } from "../src/tools/lookup-role-by-domain.js";
 import { readCatalogue } from "../src/tools/read-catalogue.js";
 import { readPersona } from "../src/tools/read-persona.js";
+import { unhirePersona } from "../src/tools/unhire-persona.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT_FROM_TEST = path.resolve(HERE, "..", "..");
@@ -962,6 +966,311 @@ You are the data engineer. Design pipelines, review data-adjacent code, keep the
           `rendered H1 for ${role} must byte-equal catalogue H1`,
         ).toBe(catalogueH1);
       }
+    });
+  });
+});
+
+/**
+ * Story native:01KVQSCP87NMRZM0C2CTAF31DJ — refreshPersona
+ *
+ * AC1: Given a hired persona that is stale relative to the current catalogue
+ *      (e.g. missing a capabilities block), When I refresh that persona, Then
+ *      its catalogue-derived frontmatter and body are re-materialised from the
+ *      current catalogue (capabilities now present), while its hired_at timestamp
+ *      and its accrued Knowledge/lessons section are preserved unchanged.
+ *
+ * AC2: Given exactly the minimum roster is hired (so a plain unhire is guarded
+ *      by UnhireBelowJudgeMinimumError), When I refresh a persona, Then the
+ *      refresh succeeds without requiring an unhire-then-re-instantiate, and
+ *      instantiatePersona's existing-persona refusal (FR89) still refuses a
+ *      genuine non-force re-instantiation of an existing persona.
+ */
+describe("Story native:01KVQSCP87NMRZM0C2CTAF31DJ — refreshPersona (AC1, AC2)", () => {
+  /**
+   * Write a minimal PERSONA.md at team/<role>/PERSONA.md that simulates a
+   * stale persona — it is missing the capabilities block that the current
+   * catalogue ships. The Knowledge section holds a learnt lesson so we can
+   * verify it survives the refresh.
+   */
+  async function writeStalePersona(
+    tmp: string,
+    role: string,
+    opts: { hiredAt?: string; knowledgeBody?: string } = {},
+  ): Promise<void> {
+    const hiredAt = opts.hiredAt ?? FIXED_HIRED_AT;
+    const knowledgeBody = opts.knowledgeBody ?? "";
+    const dir = path.join(tmp, "team", role);
+    await fs.mkdir(dir, { recursive: true });
+    // Deliberately omit the capabilities block to simulate a stale persona.
+    const contents =
+      `---\n` +
+      `role: ${role}\n` +
+      `domain: "${role} domain"\n` +
+      `model_tier: sonnet\n` +
+      `tools_allow:\n  - Read\n` +
+      `gh_allow: []\n` +
+      `locked_phrases:\n` +
+      `  handoff: "Handoff to reviewer — story <story-id> ready for review."\n` +
+      `  yield: "This sits in <role>'s domain — handing off."\n` +
+      `  verdict: "**Verdict: <SENTINEL>**"\n` +
+      `hired_at: "${hiredAt}"\n` +
+      `catalogue_version: "0.0.1"\n` +
+      `---\n\n` +
+      `# ${role.split("-").map((w) => w[0]!.toUpperCase() + w.slice(1)).join(" ")}\n\n` +
+      `## Domain\n\n${role} domain\n\n` +
+      `## Mandate\n\n- Work.\n\n` +
+      `## Out of mandate\n\n- Nothing.\n\n` +
+      `## Prompt\n\nYou are ${role}.\n\n` +
+      `## Knowledge\n\n` +
+      (knowledgeBody ? knowledgeBody + "\n" : "");
+    await fs.writeFile(path.join(dir, "PERSONA.md"), contents, "utf8");
+  }
+
+  /**
+   * The five-role roster that satisfies all five judge-panel lenses by
+   * default (mirrors unhire-persona.test.ts). With exactly these five roles,
+   * unhiring any one leaves a lens unstaffed (UnhireBelowJudgeMinimumError).
+   */
+  const DEFAULT_ROSTER = [
+    "planner",
+    "generalist-dev",
+    "generalist-reviewer",
+    "retro-analyst",
+    "orchestrator",
+  ] as const;
+
+  async function hireDefaultRosterStale(tmp: string): Promise<void> {
+    for (const role of DEFAULT_ROSTER) {
+      await writeStalePersona(tmp, role);
+    }
+  }
+
+  // --- AC1 ---
+
+  describe("AC1 — catalogue-derived fields re-materialised; hired_at and Knowledge preserved", () => {
+    it("refreshes the catalogue-derived frontmatter while keeping hired_at unchanged", async () => {
+      const tmp = await makeTmp("refresh-ac1-at");
+      tmpDirs.push(tmp);
+
+      const ORIGINAL_HIRED_AT = "2025-01-01T00:00:00.000Z";
+      await writeStalePersona(tmp, "planner", { hiredAt: ORIGINAL_HIRED_AT });
+
+      const result = await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: FIXED_VERSION,
+      });
+
+      expect(result.path).toBe(path.join(tmp, "team", "planner", "PERSONA.md"));
+      expect(result.hiredAt).toBe(ORIGINAL_HIRED_AT);
+
+      const persona = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      // hired_at is preserved from the original stale persona (not overwritten).
+      expect(persona.hired_at).toBe(ORIGINAL_HIRED_AT);
+      // catalogue_version is updated to the current version.
+      expect(persona.catalogue_version).toBe(FIXED_VERSION);
+    });
+
+    it("re-materialises the catalogue body sections from the current catalogue", async () => {
+      const tmp = await makeTmp("refresh-ac1-body");
+      tmpDirs.push(tmp);
+
+      await writeStalePersona(tmp, "planner");
+
+      await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: FIXED_VERSION,
+      });
+
+      const persona = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      const catalogue = await readCatalogue({
+        pluginRoot: getPluginRoot(),
+        role: "planner",
+      });
+
+      // All four catalogue body sections must byte-equal the current catalogue.
+      expect(persona.domain).toBe(catalogue.domain);
+      expect(persona.model_tier).toBe(catalogue.model_tier);
+      expect(persona.sections.Domain).toBe(catalogue.sections.Domain);
+      expect(persona.sections.Mandate).toBe(catalogue.sections.Mandate);
+      expect(persona.sections["Out of mandate"]).toBe(catalogue.sections["Out of mandate"]);
+      expect(persona.sections.Prompt).toBe(catalogue.sections.Prompt);
+    });
+
+    it("capabilities block is re-materialised when the catalogue ships one (stale persona lacked it)", async () => {
+      const tmp = await makeTmp("refresh-ac1-cap");
+      tmpDirs.push(tmp);
+
+      // Use a custom role with capabilities so we control what the catalogue has.
+      const CUSTOM_ROLE_WITH_CAPABILITIES = `---
+role: ml-analyst
+domain: "ml pipeline and model evaluation"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — analysis complete"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - domain
+    - considered
+  run_jobs:
+    - build
+---
+
+# Ml Analyst
+
+## Domain
+
+Owns ML pipeline evaluation and model quality checks.
+
+## Mandate
+
+- Analyse model metrics and surface regressions.
+- Review pipeline changes against the domain model.
+
+## Out of mandate
+
+- Production deploys.
+
+## Prompt
+
+You are the ML analyst. Read the model output, surface regressions, evaluate pipeline changes.
+`;
+      const customDir = path.join(tmp, "team", "custom");
+      await fs.mkdir(customDir, { recursive: true });
+      await fs.writeFile(path.join(customDir, "ml-analyst.md"), CUSTOM_ROLE_WITH_CAPABILITIES, "utf8");
+
+      // Write a stale persona that is missing the capabilities block.
+      await writeStalePersona(tmp, "ml-analyst");
+
+      // The stale persona has no capabilities.
+      const staleBefore = await readPersona({ targetRepoRoot: tmp, role: "ml-analyst" });
+      expect(staleBefore.capabilities).toBeUndefined();
+
+      // Refresh from the current catalogue (which includes capabilities).
+      await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "ml-analyst",
+        pluginVersion: FIXED_VERSION,
+      });
+
+      // After refresh, capabilities are present and match the catalogue declaration.
+      const refreshed = await readPersona({ targetRepoRoot: tmp, role: "ml-analyst" });
+      expect(refreshed.capabilities).toBeDefined();
+      expect([...(refreshed.capabilities?.review_lenses ?? [])].sort()).toEqual(
+        ["considered", "domain"],
+      );
+    });
+
+    it("preserves the accrued Knowledge section body unchanged across a refresh", async () => {
+      const tmp = await makeTmp("refresh-ac1-knowledge");
+      tmpDirs.push(tmp);
+
+      const LESSON = "- Pitfall: always validate the schema before writing.\n- Pattern: prefer deterministic seams.";
+      await writeStalePersona(tmp, "planner", { knowledgeBody: LESSON });
+
+      // Verify the Knowledge body is present before refresh.
+      const before = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(before.sections.Knowledge).toContain("Pitfall: always validate the schema before writing.");
+
+      await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: FIXED_VERSION,
+      });
+
+      // Verify the Knowledge body is preserved after refresh.
+      const after = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(after.sections.Knowledge).toContain("Pitfall: always validate the schema before writing.");
+      expect(after.sections.Knowledge).toContain("Pattern: prefer deterministic seams.");
+    });
+
+    it("throws PersonaFileNotFoundError when the role is not hired", async () => {
+      const tmp = await makeTmp("refresh-ac1-notfound");
+      tmpDirs.push(tmp);
+
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: FIXED_VERSION,
+        }),
+      ).rejects.toBeInstanceOf(PersonaFileNotFoundError);
+    });
+  });
+
+  // --- AC2 ---
+
+  describe("AC2 — refresh works at minimum roster; FR89 guard still refuses genuine re-instantiation", () => {
+    it("refreshPersona succeeds even when the roster is at the minimum size that blocks unhirePersona", async () => {
+      const tmp = await makeTmp("refresh-ac2-minroster");
+      tmpDirs.push(tmp);
+
+      // Hire exactly the default roster (5 roles) — at this size, unhiring any
+      // one role would leave a judge lens unstaffed.
+      await hireDefaultRosterStale(tmp);
+
+      // Confirm that unhiring planner IS refused (UnhireBelowJudgeMinimumError).
+      await expect(
+        unhirePersona({ targetRepoRoot: tmp, role: "planner" }),
+      ).rejects.toBeInstanceOf(UnhireBelowJudgeMinimumError);
+
+      // refreshPersona MUST succeed on the same role without requiring an unhire.
+      const ORIGINAL_HIRED_AT = FIXED_HIRED_AT;
+      const result = await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: FIXED_VERSION,
+      });
+
+      expect(result.path).toBe(path.join(tmp, "team", "planner", "PERSONA.md"));
+      expect(result.hiredAt).toBe(ORIGINAL_HIRED_AT);
+
+      // The persona file is still live (refresh is an in-place overwrite, not an archive).
+      await expect(fs.access(result.path)).resolves.toBeUndefined();
+
+      // The refreshed persona parses cleanly.
+      const persona = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(persona.role).toBe("planner");
+      expect(persona.hired_at).toBe(ORIGINAL_HIRED_AT);
+    });
+
+    it("instantiatePersona FR89 guard still refuses a genuine non-force re-instantiation of an existing persona", async () => {
+      const tmp = await makeTmp("refresh-ac2-fr89");
+      tmpDirs.push(tmp);
+
+      // Hire planner via instantiatePersona.
+      await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      // A second instantiatePersona call (no force flag) must still refuse with
+      // PersonaAlreadyExistsError — refreshPersona must NOT weaken this guard.
+      await expect(
+        instantiatePersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          clock: () => new Date(FIXED_HIRED_AT),
+          pluginVersion: FIXED_VERSION,
+        }),
+      ).rejects.toBeInstanceOf(PersonaAlreadyExistsError);
     });
   });
 });

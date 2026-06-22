@@ -631,7 +631,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story). 61 → 62.
     // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic run slot resolution). 62 → 63.
     // Story native:01KVPSZ14HH48J9NEH7N6S6QDR added matchStorySpecialist + recordSpecialistEngagement (specialist auto-engage). 63 → 65.
-    expect(registeredTools.length).toBe(65);
+    // Story native:01KVQSCP87NMRZM0C2CTAF31DJ added refreshPersona (refresh hired persona from catalogue). 65 → 66.
+    expect(registeredTools.length).toBe(66);
   });
 });
 

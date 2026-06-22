@@ -63,6 +63,7 @@ import {
   summariseRetroProposalInputSchema,
   validatePlannerBacklogInputSchema,
   unhirePersonaInputSchema,
+  refreshPersonaInputSchema,
   writeLensVerdictInputSchema,
   writeNativeStoryInputSchema,
   writeRetroProposalInputSchema,
@@ -145,6 +146,7 @@ import { requeueBlockedStory } from "./requeue-blocked-story.js";
 import { getHelpAdvice, renderHelpAdvice } from "./help-advisor.js";
 import { analyzeTeamFit } from "./analyze-team-fit.js";
 import { unhirePersona } from "./unhire-persona.js";
+import { refreshPersona } from "./refresh-persona.js";
 import { matchStorySpecialist } from "./match-story-specialist.js";
 import { recordSpecialistEngagement } from "./record-specialist-engagement.js";
 
@@ -664,6 +666,52 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await unhirePersona(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story native:01KVQSCP87NMRZM0C2CTAF31DJ — refreshPersona: re-materialise a hired
+  // persona from the current catalogue while preserving hired_at and accrued Knowledge.
+  // Unlike instantiatePersona, this succeeds even at minimum roster size (does not route
+  // through unhirePersona). Throws PersonaFileNotFoundError if the role is not hired.
+  server.registerTool({
+    name: "refreshPersona",
+    description:
+      "Re-materialise a hired persona from the current catalogue without losing its accrued " +
+      "Knowledge (Story native:01KVQSCP87NMRZM0C2CTAF31DJ). " +
+      "Reads the existing persona's hired_at timestamp and ## Knowledge section, then overwrites " +
+      "the persona with a freshly-rendered file from the catalogue (custom-first precedence), " +
+      "preserving hired_at and the Knowledge body. " +
+      "Does NOT route through unhirePersona, so it works even when the roster is at minimum size. " +
+      "Throws PersonaFileNotFoundError if the role is not hired; " +
+      "PersonaFileMalformedError if the existing file is corrupt; " +
+      "CatalogueRoleNotFoundError if the role is absent from both custom and catalogue. " +
+      "Returns { path, hiredAt } on success.",
+    inputSchema: refreshPersonaInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          role: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: parsed.targetRepoRoot,
+          role: parsed.role,
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

@@ -305,6 +305,11 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot", "role"],
     properties: ["targetRepoRoot", "role", "clock"],
   },
+  // Story native:01KVQSCP87NMRZM0C2CTAF31DJ
+  refreshPersona: {
+    required: ["targetRepoRoot", "role"],
+    properties: ["targetRepoRoot", "role"],
+  },
   writeRetroProposal: {
     required: ["targetRepoRoot", "isoTimestamp", "proposals"],
     properties: ["targetRepoRoot", "isoTimestamp", "proposals", "cycleWindow", "role"],

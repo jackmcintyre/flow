@@ -476,7 +476,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
       // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story) = 62 total.
       // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic run slot resolution) = 63 total.
       // Story native:01KVPSZ14HH48J9NEH7N6S6QDR added matchStorySpecialist + recordSpecialistEngagement (specialist auto-engage) = 65 total.
-      expect(result.tools.length, "expected exactly 65 tools").toBe(65);
+      // Story native:01KVQSCP87NMRZM0C2CTAF31DJ added refreshPersona (refresh hired persona from catalogue) = 66 total.
+      expect(result.tools.length, "expected exactly 66 tools").toBe(66);
     } finally {
       await client.close();
       await server.close();

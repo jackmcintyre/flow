@@ -851,6 +851,17 @@ export const unhirePersonaInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot", "role"],
 };
 
+// Story native:01KVQSCP87NMRZM0C2CTAF31DJ — refreshPersona: re-materialise a
+// hired persona from the current catalogue while preserving hired_at and Knowledge.
+export const refreshPersonaInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" },
+  },
+  required: ["targetRepoRoot", "role"],
+};
+
 export const writeRetroProposalInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -936,6 +947,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   readCatalogue: readCatalogueInputSchema,
   readCustomRole: readCustomRoleInputSchema,
   readPersona: readPersonaInputSchema,
+  refreshPersona: refreshPersonaInputSchema,
   readRepoSignals: readRepoSignalsInputSchema,
   reattachOrphan: reattachOrphanInputSchema,
   recallLesson: recallLessonInputSchema,

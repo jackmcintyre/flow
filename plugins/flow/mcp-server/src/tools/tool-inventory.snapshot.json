@@ -40,6 +40,7 @@
   "readRepoSignals",
   "reattachOrphan",
   "recallLesson",
+  "refreshPersona",
   "requeueBlockedStory",
   "recordAgentFriction",
   "recordMaintainerFeedback",
