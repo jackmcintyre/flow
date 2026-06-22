@@ -45,8 +45,13 @@ export const LockedPhrasesSchema = z
 /**
  * The fixed set of review lenses (rubric §3 Tier-1 panel).
  * A role may declare itself qualified for any subset of these.
+ *
+ * Exported as a type alias (`ReviewLens`) for use in tests and consumers
+ * that need to name the lens union. The const array and Zod schema are
+ * module-internal — only `RoleCapabilitiesSchema` (which builds on them)
+ * is exported for use in persona.ts.
  */
-export const REVIEW_LENS_VALUES = [
+const REVIEW_LENS_VALUES = [
   "structure",
   "verifiability",
   "discipline",
@@ -54,16 +59,19 @@ export const REVIEW_LENS_VALUES = [
   "considered",
 ] as const;
 
-export const ReviewLensSchema = z.enum(REVIEW_LENS_VALUES);
+const ReviewLensSchema = z.enum(REVIEW_LENS_VALUES);
 export type ReviewLens = z.infer<typeof ReviewLensSchema>;
 
 /**
  * The fixed set of run jobs in the continuous-flow loop.
  * A role may declare itself qualified to fill any subset of these.
+ *
+ * Exported as a type alias (`RunJob`) for use in tests and consumers.
+ * The const array and Zod schema are module-internal.
  */
-export const RUN_JOB_VALUES = ["build", "review"] as const;
+const RUN_JOB_VALUES = ["build", "review"] as const;
 
-export const RunJobSchema = z.enum(RUN_JOB_VALUES);
+const RunJobSchema = z.enum(RUN_JOB_VALUES);
 export type RunJob = z.infer<typeof RunJobSchema>;
 
 /**
@@ -83,8 +91,6 @@ export const RoleCapabilitiesSchema = z
     run_jobs: z.array(RunJobSchema).default([]),
   })
   .strict();
-
-export type RoleCapabilities = z.infer<typeof RoleCapabilitiesSchema>;
 
 export const CatalogueRoleSchema = z
   .object({
