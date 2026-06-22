@@ -45,6 +45,13 @@ export const analyzeTeamFitInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
     targetRepoRoot: { type: "string" },
+    pluginRoot: {
+      type: "string",
+      description:
+        "Optional absolute path to the plugin root. When provided, used to enumerate " +
+        "available catalogue roles for the dynamic role set. Defaults to the resolved " +
+        "plugin root when omitted (production callers omit; tests supply a fixture).",
+    },
   },
   required: ["targetRepoRoot"],
 };
