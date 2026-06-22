@@ -22,6 +22,43 @@ import { DisciplineViolationError } from "../../errors.js";
 import { writeNativeStory } from "../write-native-story.js";
 import { parseNativeStory } from "../../adapters/native/parse-native-story.js";
 
+// ---------------------------------------------------------------------------
+// Seam stubs for Flow-repo detection (used by the DOD-branching tests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulates `gh repo view --json owner,name` returning Flow's own identity.
+ * Injected as `execSyncImpl` to trigger the FLOW_DEFINITION_OF_DONE branch.
+ */
+const FLOW_REPO_EXEC_SYNC = (_cmd: string, _opts: { encoding: "utf-8" }): string =>
+  JSON.stringify({ owner: { login: "jackmcintyre" }, name: "crew" });
+
+/**
+ * Simulates `gh` being unavailable (throws, triggering the disk-sentinel fallback).
+ */
+const GH_UNAVAILABLE_EXEC_SYNC = (_cmd: string, _opts: { encoding: "utf-8" }): string => {
+  throw new Error("gh: command not found");
+};
+
+/**
+ * Simulates `gh repo view` returning a DIFFERENT repo (neither gh-identity nor
+ * disk sentinel fires — treats as non-Flow).
+ */
+const OTHER_REPO_EXEC_SYNC = (_cmd: string, _opts: { encoding: "utf-8" }): string =>
+  JSON.stringify({ owner: { login: "someoneelse" }, name: "my-project" });
+
+/**
+ * Always returns `false` — simulates the on-disk Flow sentinel being absent.
+ * Used in conjunction with GH_UNAVAILABLE_EXEC_SYNC to force the non-Flow branch.
+ */
+const SENTINEL_ABSENT: (p: string) => boolean = () => false;
+
+/**
+ * Always returns `true` — simulates the on-disk Flow sentinel being present.
+ * Used to trigger the FLOW_DEFINITION_OF_DONE branch via the fallback path.
+ */
+const SENTINEL_PRESENT: (p: string) => boolean = () => true;
+
 let root: string;
 let storiesDir: string;
 
@@ -701,5 +738,159 @@ describe("writeNativeStory AC3 (Story native:01KTZGJ68HE6Z66A50BV7N6BJZ) — ret
 
     expect(result.ref).toMatch(/^native:[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(await listStoryFiles()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 + AC2 — project-appropriate default Definition-of-Done
+//
+// AC1: a draft in a non-Flow workspace gets a generic DOD with no Flow-internal
+//   folder names, no dist/ rebuild rule, and no 'against main' assumption.
+//
+// AC2: a draft inside Flow's own repository keeps Flow's existing build steps.
+//
+// Detection is injected deterministically via the seam parameters so neither
+// branch depends on the real machine's git state or file system layout.
+// ---------------------------------------------------------------------------
+
+/** A minimal well-formed candidate for the DOD-branching tests. */
+function dodCandidate(overrides: Record<string, unknown> = {}) {
+  return {
+    targetRepoRoot: root,
+    title: "A story to test default DOD branching",
+    narrative: {
+      role: "developer",
+      want: "the default definition of done to fit my project",
+      so_that: "I do not get confusing build instructions",
+    },
+    acceptance_criteria: [
+      {
+        text: "**Given** a story is drafted without a definition_of_done, **When** it is written, **Then** the default DOD matches the project.",
+        kind: "integration" as const,
+        verification: {
+          type: "vitest" as const,
+          target: "src/__tests__/dod-branching.integration.test.ts",
+        },
+      },
+    ],
+    tasks: [{ text: "Assert the default DOD content", ac_refs: ["AC1"] }],
+    cited_sources: ["src/state/ledger.ts"],
+    depends_on: [] as string[],
+    risk_reasoning:
+      "Highest risk: wrong DOD branch fires and inserts Flow-internal instructions into a non-Flow project — caught by the AC1 absence assertions.",
+    ...overrides,
+  };
+}
+
+describe("writeNativeStory AC1+AC2 — project-appropriate default Definition-of-Done", () => {
+  it("AC1: a draft in a non-Flow workspace (remote resolves to another repo) gets a generic DOD with no Flow-internal mentions", async () => {
+    // OTHER_REPO_EXEC_SYNC returns a different owner/repo → definitively non-Flow.
+    // SENTINEL_ABSENT ensures the on-disk fallback also does not fire.
+    const result = await writeNativeStory(dodCandidate(), {
+      execSyncImpl: OTHER_REPO_EXEC_SYNC,
+      existsImpl: SENTINEL_ABSENT,
+    });
+
+    expect(await listStoryFiles()).toHaveLength(1);
+    const body = await fs.readFile(result.path, "utf8");
+
+    // The DOD section must be present.
+    expect(body).toMatch(/^### Definition of Done/m);
+
+    // Extract DOD content.
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    const dodContent = dodMatch![1]!;
+
+    // Must list generic completion steps.
+    expect(dodContent).toMatch(/build/i);
+    expect(dodContent).toMatch(/test/i);
+
+    // Must NOT mention any Flow-internal folder, the dist/ rebuild rule,
+    // or the 'against main' branch assumption.
+    expect(dodContent).not.toMatch(/plugins\/flow\/mcp-server/);
+    expect(dodContent).not.toMatch(/dist\//);
+    expect(dodContent).not.toMatch(/src\/dist drift/);
+    expect(dodContent).not.toMatch(/against `main`/);
+    expect(dodContent).not.toMatch(/pnpm build.*plugins/);
+  });
+
+  it("AC1: a draft in a non-Flow workspace (gh unavailable, no disk sentinel) gets a generic DOD with no Flow-internal mentions", async () => {
+    // GH_UNAVAILABLE_EXEC_SYNC simulates gh being absent; SENTINEL_ABSENT means
+    // the on-disk fallback also does not fire → indeterminate → project-agnostic.
+    const result = await writeNativeStory(dodCandidate(), {
+      execSyncImpl: GH_UNAVAILABLE_EXEC_SYNC,
+      existsImpl: SENTINEL_ABSENT,
+    });
+
+    expect(await listStoryFiles()).toHaveLength(1);
+    const body = await fs.readFile(result.path, "utf8");
+
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    const dodContent = dodMatch![1]!;
+
+    expect(dodContent).toMatch(/build/i);
+    expect(dodContent).toMatch(/test/i);
+
+    // No Flow-internal leakage.
+    expect(dodContent).not.toMatch(/plugins\/flow\/mcp-server/);
+    expect(dodContent).not.toMatch(/dist\//);
+    expect(dodContent).not.toMatch(/src\/dist drift/);
+  });
+
+  it("AC2: a draft inside Flow's own repository (remote identity matches) keeps Flow's existing build steps", async () => {
+    // FLOW_REPO_EXEC_SYNC returns owner=jackmcintyre, repo=crew → Flow's own repo.
+    const result = await writeNativeStory(dodCandidate(), {
+      execSyncImpl: FLOW_REPO_EXEC_SYNC,
+      existsImpl: SENTINEL_ABSENT,
+    });
+
+    expect(await listStoryFiles()).toHaveLength(1);
+    const body = await fs.readFile(result.path, "utf8");
+
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    const dodContent = dodMatch![1]!;
+
+    // Must keep Flow's existing build steps.
+    expect(dodContent).toMatch(/pnpm build/);
+    expect(dodContent).toMatch(/plugins\/flow\/mcp-server/);
+    expect(dodContent).toMatch(/dist\//);
+  });
+
+  it("AC2: a draft inside Flow's own repository (gh unavailable, disk sentinel present) keeps Flow's existing build steps", async () => {
+    // GH_UNAVAILABLE_EXEC_SYNC: gh not available → fall back to disk sentinel.
+    // SENTINEL_PRESENT: sentinel directory found → Flow's own repo.
+    const result = await writeNativeStory(dodCandidate(), {
+      execSyncImpl: GH_UNAVAILABLE_EXEC_SYNC,
+      existsImpl: SENTINEL_PRESENT,
+    });
+
+    expect(await listStoryFiles()).toHaveLength(1);
+    const body = await fs.readFile(result.path, "utf8");
+
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    const dodContent = dodMatch![1]!;
+
+    expect(dodContent).toMatch(/pnpm build/);
+    expect(dodContent).toMatch(/plugins\/flow\/mcp-server/);
+    expect(dodContent).toMatch(/dist\//);
+  });
+
+  it("an author-supplied definition_of_done is always preserved regardless of repo detection", async () => {
+    // When the author supplies their own DOD, it must be used as-is regardless
+    // of what the detection signal returns — the detection only controls the DEFAULT.
+    const customDod = "- [ ] My custom step one.\n- [ ] My custom step two.";
+    const result = await writeNativeStory(dodCandidate({ definition_of_done: customDod }), {
+      execSyncImpl: OTHER_REPO_EXEC_SYNC,
+      existsImpl: SENTINEL_ABSENT,
+    });
+
+    const body = await fs.readFile(result.path, "utf8");
+    const dodMatch = /### Definition of Done\n+([\s\S]+?)(?=\n###|\n##|$)/.exec(body);
+    expect(dodMatch).not.toBeNull();
+    expect(dodMatch![1]!.trim()).toBe(customDod);
   });
 });

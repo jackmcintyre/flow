@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { ulid as generateUlid } from "ulid";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { validateStoryAgainstDiscipline } from "../validators/planning-disciplin
 import { resolveDisciplinePaths } from "../validators/discipline-resolvability.js";
 import { emitFriction } from "../lib/emit-friction.js";
 import { scanSources } from "./scan-sources.js";
+import { resolveGhRepoIdentity } from "./build-feedback-issue-url.js";
 
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
@@ -136,15 +138,94 @@ export interface WriteNativeStoryOutput {
 const DEFAULT_FILES_TOUCHED =
   "To be completed by dev — list new files (`NEW`) and updated files (`UPDATE`) here before opening the PR.";
 
-/** Default text for the Definition-of-Done sub-section when the author omits it. */
-const DEFAULT_DEFINITION_OF_DONE =
-  [
-    "- [ ] All ACs met.",
-    "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
-    "- [ ] `pnpm test` green (all tests passing).",
-    "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
-    "- [ ] PR opened against `main` with CI green.",
-  ].join("\n");
+/**
+ * Flow's own contributor Definition-of-Done — used when the story is drafted
+ * inside Flow's own repository. Kept exactly as before for contributors working
+ * on Flow itself (build steps, dist/ rebuild, PR against main).
+ */
+const FLOW_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] `pnpm build` green from `plugins/flow/mcp-server` before the PR.",
+  "- [ ] `pnpm test` green (all tests passing).",
+  "- [ ] `dist/` rebuilt and committed in the same change (CI fails on `src`/`dist` drift).",
+  "- [ ] PR opened against `main` with CI green.",
+].join("\n");
+
+/**
+ * Project-agnostic Definition-of-Done — used when the story is drafted in any
+ * project other than Flow's own repository. Contains no Flow-internal folder
+ * names, no dist/ rebuild rule, and no branch assumption.
+ */
+const PROJECT_AGNOSTIC_DEFINITION_OF_DONE = [
+  "- [ ] All ACs met.",
+  "- [ ] The project's build is green before the PR.",
+  "- [ ] The project's tests are passing.",
+  "- [ ] A reviewed change (PR or equivalent) is open with CI green.",
+].join("\n");
+
+// ---------------------------------------------------------------------------
+// Flow repo detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Owner and repo name that identify Flow's own repository on GitHub.
+ */
+const FLOW_REPO_OWNER = "jackmcintyre";
+const FLOW_REPO_NAME = "crew";
+
+/**
+ * On-disk sentinel that reliably marks Flow's own repository even when the
+ * git remote is unavailable (e.g. in CI checkouts without a configured remote).
+ */
+const FLOW_REPO_DISK_SENTINEL = "plugins/flow/mcp-server";
+
+/**
+ * Resolve the appropriate default Definition-of-Done for a draft story.
+ *
+ * Detection strategy (first positive match wins; bias to project-agnostic when
+ * neither resolves, so a false non-Flow result at worst merely omits Flow's
+ * dist-rebuild step for a contributor):
+ *
+ * 1. Primary: `gh repo view` returns owner/repo matching Flow's own identity.
+ * 2. Fallback: `plugins/flow/mcp-server` directory exists under `targetRepoRoot`.
+ *
+ * When neither fires, return the project-agnostic default.
+ *
+ * The `execSyncImpl` seam is injected by callers (and tests) so neither a real
+ * `gh` process nor real disk I/O is required in unit/integration tests.
+ *
+ * @param targetRepoRoot  The resolved absolute path of the target repository.
+ * @param execSyncImpl    Optional override for `gh repo view` subprocess (tests inject this).
+ * @param existsImpl      Optional override for the on-disk sentinel check (tests inject this).
+ */
+function resolveDefaultDefinitionOfDone(
+  targetRepoRoot: string,
+  execSyncImpl?: (cmd: string, opts: { encoding: "utf-8" }) => string,
+  existsImpl?: (p: string) => boolean,
+): string {
+  // Primary: git remote identity.
+  const identity = resolveGhRepoIdentity(execSyncImpl);
+  if (identity !== null) {
+    if (
+      identity.owner.toLowerCase() === FLOW_REPO_OWNER.toLowerCase() &&
+      identity.repo.toLowerCase() === FLOW_REPO_NAME.toLowerCase()
+    ) {
+      return FLOW_DEFINITION_OF_DONE;
+    }
+    // Remote resolved to a DIFFERENT repo — definitively not Flow. Skip disk check.
+    return PROJECT_AGNOSTIC_DEFINITION_OF_DONE;
+  }
+
+  // Primary unavailable (gh absent / no remote) — fall back to on-disk sentinel.
+  const checkExists = existsImpl ?? existsSync;
+  const sentinelPath = path.join(targetRepoRoot, FLOW_REPO_DISK_SENTINEL);
+  if (checkExists(sentinelPath)) {
+    return FLOW_DEFINITION_OF_DONE;
+  }
+
+  // Neither resolved — treat as non-Flow (project-agnostic default).
+  return PROJECT_AGNOSTIC_DEFINITION_OF_DONE;
+}
 
 /**
  * Default text for the risk-reasoning sub-section when the author omits it.
@@ -217,8 +298,14 @@ function indefiniteArticle(noun: string): string {
  *   4. `## Cited Sources`
  *   5. `## Implementation Notes` (omitted if empty/absent)
  *   6. `## Dependencies`
+ *
+ * @param input        the validated write input.
+ * @param resolvedDod  the project-appropriate definition-of-done default. Pass
+ *                     the result of `resolveDefaultDefinitionOfDone(…)`. Falls
+ *                     back to the Flow-contributor default when omitted so existing
+ *                     callers (e.g. BMad ingest) are not affected.
  */
-function renderNativeStoryBody(input: WriteNativeStoryInput): string {
+function renderNativeStoryBody(input: WriteNativeStoryInput, resolvedDod: string = FLOW_DEFINITION_OF_DONE): string {
   const lines: string[] = [`# ${input.title}`, ""];
 
   // ## Narrative — the canonical "As a … I want … so that …" sentence (10.2).
@@ -266,7 +353,7 @@ function renderNativeStoryBody(input: WriteNativeStoryInput): string {
   // NOTE: renderImplementationNotesBody is defined AFTER this function (below),
   // but TypeScript hoists function declarations; this call is safe.
   lines.push("## Implementation Notes", "");
-  lines.push(renderImplementationNotesBody(input));
+  lines.push(renderImplementationNotesBody(input, resolvedDod));
   lines.push("");
 
   // ## Dependencies
@@ -296,6 +383,25 @@ function renderNativeStoryBody(input: WriteNativeStoryInput): string {
 }
 
 /**
+ * Optional seams for `writeNativeStory` — injected by tests to avoid real
+ * subprocess and filesystem calls in the Flow-repo detection logic.
+ */
+export interface WriteNativeStorySeams {
+  /**
+   * Override for the `gh repo view` subprocess used to detect Flow's own repo
+   * via its GitHub remote identity. Return the JSON string `gh` would print.
+   * Return `null` (or throw) to simulate `gh` being unavailable.
+   */
+  execSyncImpl?: (cmd: string, opts: { encoding: "utf-8" }) => string;
+  /**
+   * Override for the on-disk sentinel existence check (`plugins/flow/mcp-server`
+   * directory under the repo root). Return `true` to simulate the sentinel being
+   * present, `false` to simulate it being absent.
+   */
+  existsImpl?: (p: string) => boolean;
+}
+
+/**
  * Write a new native-story file under `<targetRepoRoot>/.flow/native-stories/`.
  *
  * Steps:
@@ -306,10 +412,15 @@ function renderNativeStoryBody(input: WriteNativeStoryInput): string {
  *   5. Write atomically (`.tmp` + rename).
  *   6. Return `{ ref, path }`.
  *
+ * @param rawInput  the raw (un-validated) write input — parsed via Zod internally.
+ * @param seams     optional test-injection seams for the Flow-repo detection logic.
+ *                  Production callers omit this; tests inject deterministic stubs.
+ *
  * @see _bmad-output/implementation-artifacts/3-4-native-adapter-planner-subagent-and-plan-skill.md § Task 4
  */
 export async function writeNativeStory(
   rawInput: unknown,
+  seams?: WriteNativeStorySeams,
 ): Promise<WriteNativeStoryOutput> {
   const input = WriteNativeStoryInputSchema.parse(rawInput);
   const targetRepoRoot = path.resolve(input.targetRepoRoot);
@@ -332,7 +443,13 @@ export async function writeNativeStory(
   // runs while BMad is still the active adapter — you ingest first, cut over
   // second). Keeping the write body in one place means the two paths can never
   // diverge on what "a Tier-0-clean native story on disk" means.
-  const result = await renderGateWriteNativeStory(input, targetRepoRoot);
+  const result = await renderGateWriteNativeStory(
+    input,
+    targetRepoRoot,
+    "author",
+    seams?.execSyncImpl,
+    seams?.existsImpl,
+  );
 
   // Story native:01KT49G9B38NZ2QP16GY843KYK — auto-materialise the newly written
   // story into the backlog immediately, so the operator does not need to run
@@ -383,17 +500,30 @@ export async function writeNativeStory(
  * @param targetRepoRoot the resolved repo root (already `path.resolve`d).
  * @param agent          telemetry `agent` field — "author" for the native write
  *                       path, "ingest" for the BMad→native seam.
+ * @param execSyncImpl   optional seam for `gh repo view` subprocess used by
+ *                       `resolveDefaultDefinitionOfDone`. Inject in tests to avoid
+ *                       real subprocess invocations.
+ * @param existsImpl     optional seam for on-disk sentinel check used by
+ *                       `resolveDefaultDefinitionOfDone`. Inject in tests to point
+ *                       at a controlled temp directory.
  */
 export async function renderGateWriteNativeStory(
   input: WriteNativeStoryInput,
   targetRepoRoot: string,
   agent: "author" | "ingest" = "author",
+  execSyncImpl?: (cmd: string, opts: { encoding: "utf-8" }) => string,
+  existsImpl?: (p: string) => boolean,
 ): Promise<WriteNativeStoryOutput> {
   // Generate a fresh ULID.
   const newUlid = generateUlid();
   const storiesDir = path.join(targetRepoRoot, ".flow", "native-stories");
   const absPath = path.join(storiesDir, `${newUlid}.md`);
   const ref = `native:${newUlid}`;
+
+  // Resolve the project-appropriate default Definition-of-Done once here so
+  // both the discipline-gate candidate and the rendered file body use the same
+  // text (the gate candidate must equal the file that will be written).
+  const resolvedDod = resolveDefaultDefinitionOfDone(targetRepoRoot, execSyncImpl, existsImpl);
 
   // Story 9.2 — fail-closed discipline gate.
   //
@@ -420,7 +550,7 @@ export async function renderGateWriteNativeStory(
   // creates that test file, so requiring it would make every new-test story
   // un-writable (the chicken-and-egg the story's pre-mortem pins). All violations
   // accumulate into one `DisciplineViolationError` so the author fixes in one pass.
-  const candidate = inputToSourceStory(input, ref, absPath);
+  const candidate = inputToSourceStory(input, ref, absPath, resolvedDod);
   const pureResult = validateStoryAgainstDiscipline(candidate);
   const violations =
     "kind" in pureResult && pureResult.kind === "discipline-violation"
@@ -462,8 +592,8 @@ export async function renderGateWriteNativeStory(
     throw new DisciplineViolationError({ violations });
   }
 
-  // Render the body.
-  const body = renderNativeStoryBody(input);
+  // Render the body using the resolved project-appropriate DOD.
+  const body = renderNativeStoryBody(input, resolvedDod);
 
   // Round-trip validation — throws MalformedNativeStoryError if the rendered
   // body would not parse back cleanly. This ensures the file on disk always
@@ -502,8 +632,15 @@ export async function renderGateWriteNativeStory(
  *
  * Used both in `renderNativeStoryBody` and in `inputToSourceStory` so the
  * discipline-gate candidate sees the same rendered text the file will contain.
+ *
+ * @param input        the validated write input.
+ * @param resolvedDod  the project-appropriate definition-of-done default to use
+ *                     when the author did not supply `definition_of_done`. Pass
+ *                     the result of `resolveDefaultDefinitionOfDone(…)` so both
+ *                     the rendered file and the discipline-gate candidate use the
+ *                     same text.
  */
-function renderImplementationNotesBody(input: WriteNativeStoryInput): string {
+function renderImplementationNotesBody(input: WriteNativeStoryInput, resolvedDod: string): string {
   const parts: string[] = [];
   if (input.implementation_notes && input.implementation_notes.trim().length > 0) {
     parts.push(input.implementation_notes.trim());
@@ -511,7 +648,7 @@ function renderImplementationNotesBody(input: WriteNativeStoryInput): string {
   }
   const filesTouched = (input.files_touched ?? "").trim() || DEFAULT_FILES_TOUCHED;
   parts.push("### Files touched", "", filesTouched, "");
-  const dod = (input.definition_of_done ?? "").trim() || DEFAULT_DEFINITION_OF_DONE;
+  const dod = (input.definition_of_done ?? "").trim() || resolvedDod;
   parts.push("### Definition of Done", "", dod, "");
   const risk = (input.risk_reasoning ?? "").trim() || DEFAULT_RISK_REASONING;
   parts.push("### Risk", "", risk, "");
@@ -527,11 +664,17 @@ function renderImplementationNotesBody(input: WriteNativeStoryInput): string {
  * Story 9.2. Story 10.8: `implementation_notes` now reflects the full rendered
  * body (author notes + three build-ready sub-sections with defaults) so the
  * discipline gate and round-trip see the same text the written file will contain.
+ *
+ * @param resolvedDod  the project-appropriate definition-of-done default, as
+ *                     resolved by `resolveDefaultDefinitionOfDone(…)`. Must match
+ *                     the value passed to `renderNativeStoryBody` so the candidate
+ *                     the gate validates equals the file that will be written.
  */
 function inputToSourceStory(
   input: WriteNativeStoryInput,
   ref: string,
   absPath: string,
+  resolvedDod: string = FLOW_DEFINITION_OF_DONE,
 ): SourceStory {
   return {
     ref,
@@ -545,7 +688,7 @@ function inputToSourceStory(
     // Story 10.8: pass the full rendered implementation notes (including the
     // three build-ready sub-sections with their defaults) so the discipline
     // gate sees the same text the file will contain.
-    implementation_notes: renderImplementationNotesBody(input),
+    implementation_notes: renderImplementationNotesBody(input, resolvedDod),
     tasks: input.tasks,
     cited_sources: input.cited_sources,
     // Story native:01KVC6N2K6AEEGYHG98N2WJQ8M — carry the normalised issue
@@ -553,6 +696,6 @@ function inputToSourceStory(
     source_issue: normaliseSourceIssue(input.source_issue),
     raw_path: absPath,
     raw_frontmatter: { title: input.title, ref },
-    source_hash: createHash("sha256").update(renderNativeStoryBody(input)).digest("hex"),
+    source_hash: createHash("sha256").update(renderNativeStoryBody(input, resolvedDod)).digest("hex"),
   };
 }
