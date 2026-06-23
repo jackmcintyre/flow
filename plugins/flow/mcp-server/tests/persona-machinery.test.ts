@@ -1106,6 +1106,70 @@ You are the data engineer. Design pipelines, review data-adjacent code, keep the
       expect(after.sections.Knowledge).not.toContain("discard me");
       expect(after.sections.Knowledge).not.toContain("Trailing Section");
     });
+
+    it("throws CatalogueRoleNotFoundError when the role is in neither custom nor the catalogue", async () => {
+      const tmp = await makeTmp("refresh-unknown-role");
+      tmpDirs.push(tmp);
+
+      // 'ghost-role' passes the kebab-case guard but exists in no catalogue:
+      // readCustomRole reports not-found (ENOENT), then readCatalogue reports
+      // not-found, and refreshPersona wraps both into one
+      // CatalogueRoleNotFoundError. (refresh-persona.ts:113-120)
+      const { CatalogueRoleNotFoundError } = await import("../src/errors.js");
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "ghost-role",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.toBeInstanceOf(CatalogueRoleNotFoundError);
+    });
+
+    it("re-throws a non-not-found custom-role read error instead of falling through to the catalogue", async () => {
+      const tmp = await makeTmp("refresh-custom-eisdir");
+      tmpDirs.push(tmp);
+
+      // Make team/custom/planner.md a *directory* so readCustomRole's readFile
+      // throws EISDIR — a non-CatalogueRoleNotFoundError that refreshPersona
+      // must surface verbatim rather than swallow. (refresh-persona.ts:101-102)
+      await fs.mkdir(path.join(tmp, "team", "custom", "planner.md"), {
+        recursive: true,
+      });
+
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.toMatchObject({ code: "EISDIR" });
+    });
+
+    it("re-throws a non-not-found catalogue read error instead of reporting role-not-found", async () => {
+      const tmp = await makeTmp("refresh-cat-eisdir");
+      tmpDirs.push(tmp);
+      const fakeRoot = await makeTmp("refresh-fake-plugin");
+      tmpDirs.push(fakeRoot);
+
+      // No custom planner (readCustomRole reports not-found), then point the
+      // catalogue at a *directory* so readCatalogue's readFile throws EISDIR —
+      // a non-CatalogueRoleNotFoundError that refreshPersona surfaces verbatim
+      // rather than masking as role-not-found. (refresh-persona.ts:119-120)
+      await fs.mkdir(path.join(fakeRoot, "catalogue", "planner.md"), {
+        recursive: true,
+      });
+
+      await expect(
+        refreshPersona({
+          pluginRoot: fakeRoot,
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.toMatchObject({ code: "EISDIR" });
+    });
   });
 
   /**
