@@ -493,3 +493,86 @@ describe("Story native:01KVS0ZW2GYSN25VC45GWNA4MG — AC1/AC2: run pre-flight ch
     expect(SRC).toContain("'slot:review'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVS1150C7H9HCGG07Y0XBT98 — AC1 + AC2: stories built from
+// local HEAD so committed workspace config reaches the builder and the PR.
+//
+// AC1: the run resolves the current local HEAD and uses it as the worktree base,
+//      so committed changes to tracked files are present in the dev's worktree
+//      and in the resulting PR, not dropped because the worktree was based on an
+//      older origin/main commit.
+//
+// AC2: the run reads config (team/, docs/standards.md) and the dev builds code
+//      from the SAME commit (both at local HEAD). If the worktree base would
+//      differ from local HEAD and local HEAD carries committed tracked-config
+//      the base lacks, the run fails loud rather than silently splitting
+//      config reads from one commit and code from another.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVS1150C7H9HCGG07Y0XBT98 — AC1/AC2: local-HEAD worktree base", () => {
+  it("AC1: calls resolveRunBase as a retryable preflight seam before claiming", () => {
+    // The run must invoke resolveRunBase via the CLI seam in the pre-flight.
+    // The 'preflight:run-base' label is the structural anchor.
+    expect(SRC).toContain("resolveRunBase");
+    expect(SRC).toContain("'preflight:run-base'");
+    // The seam is retryable (read-only — resolving HEAD is idempotent).
+    expect(SRC).toMatch(/'preflight:run-base',\s*true/);
+  });
+
+  it("AC1: the resolved local HEAD is logged so the operator sees which commit stories are built from", () => {
+    // The run logs the localHead SHA from the resolveRunBase result.
+    // This gives the operator visibility into the base commit WITHOUT breaking the run.
+    expect(SRC).toContain("runBaseCheck.localHead");
+    expect(SRC).toContain("local HEAD =");
+    // The worktree.baseRef setting guidance is surfaced in the log message so the
+    // operator knows what to set if they see config divergence.
+    expect(SRC).toContain("worktree.baseRef");
+  });
+
+  it("AC1: resolveRunBase preflight check occurs before the claim loop (structural order)", () => {
+    // The base-resolution check must precede any claim, so no story can be
+    // claimed from a config-split base.
+    const baseCheckIdx = SRC.indexOf("'preflight:run-base'");
+    const claimLoopIdx = SRC.indexOf("claimsStarted >= MAX");
+    expect(baseCheckIdx).toBeGreaterThan(-1);
+    expect(claimLoopIdx).toBeGreaterThan(-1);
+    expect(baseCheckIdx).toBeLessThan(claimLoopIdx);
+  });
+
+  it("AC2: fails loud when configDiverges is true and divergingPaths is non-empty", () => {
+    // When resolveRunBase reports that local HEAD has committed tracked-config
+    // (team/, docs/standards.md) that the worktree base lacks, the run must
+    // add a failure entry to preflightFailures naming the diverging paths.
+    expect(SRC).toContain("configDiverges");
+    expect(SRC).toContain("divergingPaths");
+    // The failure entry is pushed to preflightFailures (not thrown separately).
+    expect(SRC).toMatch(/preflightFailures\.push.*config-vs-base divergence/s);
+  });
+
+  it("AC2: the config-divergence failure message names the diverging paths and the fix", () => {
+    // The operator must see WHICH paths diverge and HOW to fix it
+    // (set worktree.baseRef:"head" OR push local config commits).
+    expect(SRC).toContain("config-vs-base divergence");
+    expect(SRC).toContain("worktree.baseRef");
+    expect(SRC).toContain("push your local config commits");
+  });
+
+  it("AC2: a garbled resolveRunBase relay is LOGGED but does NOT add to preflightFailures (fail-safe for a new check)", () => {
+    // The config-vs-base check was previously absent — a garbled relay means
+    // we don't know the base but must not break existing runs that never had
+    // this check. A garble logs a diagnostic but does NOT add to preflightFailures.
+    // The guard: `} else { log(...) }` — log, never push.
+    expect(SRC).toContain("resolveRunBase relay garbled");
+    // The garble path DOES NOT push to preflightFailures — the garbled string appears
+    // only inside a log() call, never inside a preflightFailures.push() call.
+    expect(SRC).not.toMatch(/preflightFailures\.push\([^)]*resolveRunBase relay garbled/);
+  });
+
+  it("AC2: the config-vs-base divergence check fires ONLY when configDiverges AND divergingPaths is non-empty", () => {
+    // The guard condition must check both configDiverges (the boolean) and that
+    // divergingPaths is a non-empty array — prevents a false-positive failure on
+    // a garbled result that sets configDiverges:false with no paths.
+    expect(SRC).toContain("runBaseCheck.configDiverges && runBaseCheck.divergingPaths && runBaseCheck.divergingPaths.length > 0");
+  });
+});

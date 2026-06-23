@@ -323,6 +323,16 @@ export async function runDevTerminalAction(opts: {
     // rebase is safe without a force-push precisely because the branch has not
     // been pushed yet (created just above, pushed once below): rebase-then-push
     // is a normal fast-forward from origin's view.
+    //
+    // Local-HEAD base (Story native:01KVS1150C7H9HCGG07Y0XBT98): when the
+    // worktree is cut from the current local HEAD (via worktree.baseRef:"head"
+    // in .claude/settings.json), and local HEAD is ahead of origin/main, the
+    // story branch includes BOTH the dev's implementation commits AND the operator's
+    // committed-but-not-yet-pushed local changes (workspace config etc.). The
+    // rebase replays all of those onto the latest origin/main, so the PR carries
+    // the full integrated tree. This is the correct behavior — it ensures
+    // committed workspace config (team/, docs/standards.md) that exists locally
+    // but not yet on origin reaches the PR rather than being silently dropped.
     await gitFetch({
       targetRepoRoot: gitRoot,
       role: ROLE,

@@ -313,8 +313,18 @@ log(`run session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' 
 //   3. Both run slots can be staffed (resolveRunSlot for build + review — this was
 //      previously a pair of sequential throws; now it is folded into the same
 //      unified checklist so all missing prerequisites surface in one message).
+//   4. Config-vs-base consistency (resolveRunBase — Story native:01KVS1150C7H9HCGG07Y0XBT98):
+//      the run reads team/ and docs/standards.md from the repo root (at local HEAD)
+//      while the dev's per-story worktree is cut from a base commit. When
+//      `worktree.baseRef: "head"` is set in .claude/settings.json (this story sets
+//      it), the worktree IS local HEAD so both are the same commit. But if the
+//      setting is absent or overridden (the base is `origin/main`), and local HEAD
+//      carries committed tracked-config (team/, docs/standards.md) that the base
+//      lacks, the run would silently source config from one commit and code from
+//      another. Detect and fail loud in that case so the operator knows to either
+//      set worktree.baseRef:"head" or push their local config commits before running.
 //
-// All four seams are read-only / idempotent → retryable. A garbled relay on ANY
+// All seams are read-only / idempotent → retryable. A garbled relay on ANY
 // seam is treated as "prerequisite unknown — include in checklist" rather than
 // "prerequisite met" (fail-safe bias). If ALL prerequisites pass, the run proceeds
 // unchanged. If ANY fail, the run stops pre-claim with one actionable message
@@ -335,7 +345,48 @@ if (!remoteCheck || remoteCheck._parseError || remoteCheck.hasRemote === false) 
   preflightFailures.push(`no git remote is configured — add a remote (e.g. \`git remote add origin <url>\`) before running (every story push will fail without one)${detail}`)
 }
 
-// 3 + 4. SLOT RESOLUTION (Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/
+// 3 (config-vs-base). WORKTREE BASE RESOLUTION + CONFIG DIVERGENCE CHECK
+// (Story native:01KVS1150C7H9HCGG07Y0XBT98 AC1+AC2). Resolve the current local HEAD
+// SHA and check for config-path divergence between local HEAD and origin/main.
+// Rationale: each story's per-dev worktree must be cut from the current local HEAD
+// (not an older origin/main). The `worktree.baseRef: "head"` project setting (in
+// .claude/settings.json) ensures the Workflow runtime uses local HEAD. This seam
+// logs the HEAD so the operator can see what commit stories will be built from.
+// When the worktree base WOULD differ from local HEAD (worktree.baseRef not set, so
+// the base falls back to origin/main), and local HEAD has committed tracked-config
+// (team/, docs/standards.md) that origin/main lacks, the run fails loud: sourcing
+// config from root (local HEAD) while building code from the older base silently
+// diverges. Read-only / idempotent → retryable.
+const runBaseCheck = await seam(`node ${CLI} resolveRunBase --json '${J({ targetRepoRoot: REPO })}'`, 'preflight:run-base', true)
+if (runBaseCheck && !runBaseCheck._parseError) {
+  const localHead = runBaseCheck.localHead || '(unknown)'
+  log(`run worktree base: local HEAD = ${localHead} (stories will be built from this commit when worktree.baseRef:"head" is set in .claude/settings.json)`)
+  // CONFIG DIVERGENCE: fail loud when local HEAD has committed tracked-config
+  // that origin/main lacks AND the worktrees would be cut from origin/main (i.e.
+  // localHead !== originHead). With worktree.baseRef:"head" both root and worktree
+  // are at local HEAD — no divergence. This guard catches the case where the
+  // setting is absent or overridden, preventing a silent config-from-root /
+  // code-from-base split.
+  if (runBaseCheck.configDiverges && runBaseCheck.divergingPaths && runBaseCheck.divergingPaths.length > 0) {
+    const shown = runBaseCheck.divergingPaths.slice(0, 6).join(', ')
+    const more = runBaseCheck.divergingPaths.length > 6 ? `, +${runBaseCheck.divergingPaths.length - 6} more` : ''
+    preflightFailures.push(
+      `config-vs-base divergence: local HEAD has committed tracked-config (${shown}${more}) ` +
+      `that origin/main lacks. The run reads config from the repo root (local HEAD) but ` +
+      `story worktrees would be cut from origin/main — they would not see these changes. ` +
+      `Fix: set worktree.baseRef:"head" in .claude/settings.json so worktrees are cut ` +
+      `from local HEAD, OR push your local config commits to origin/main before running.`
+    )
+  }
+} else {
+  // Garbled relay — log and continue (fail-safe: not adding to preflightFailures here,
+  // because a garble on this read-only seam means we simply don't know the base —
+  // we do NOT fail loud on uncertainty for a check that was previously absent).
+  const detail = runBaseCheck?._parseError || 'no result'
+  log(`run preflight: resolveRunBase relay garbled (${detail}) — skipping config-vs-base check`)
+}
+
+// 4 + 5. SLOT RESOLUTION (Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/
 // reviewer selection). Resolve the role that fills each run slot from the live hired
 // team's declared run-job capabilities. The generalist defaults (generalist-dev /
 // generalist-reviewer) win when present and qualified; a different qualified hired
