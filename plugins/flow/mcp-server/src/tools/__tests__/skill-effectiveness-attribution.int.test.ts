@@ -144,6 +144,103 @@ afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+describe("skill-effectiveness done/-manifest attribution (Story native:01KVS12K)", () => {
+  // This describe block uses its OWN isolated temp dir (doneTestRoot) — completely
+  // separate from the shared `tmpRoot` set up by the outer beforeEach. The shared
+  // `tmpRoot` always contains an in-progress manifest for STORY_REF, so using it
+  // would leave two in-progress manifests at once, making resolveActiveStoryRef
+  // return undefined (ambiguous) and breaking story_id attribution.
+  let doneTestRoot: string;
+
+  beforeEach(() => {
+    doneTestRoot = mkdtempSync(path.join(os.tmpdir(), "skill-attr-done-"));
+  });
+
+  afterEach(() => {
+    rmSync(doneTestRoot, { recursive: true, force: true });
+  });
+
+  it("AC1: credits a skill.invoke as a useful fire when its story reached done/ but NO READY-FOR-MERGE verdict event was recorded", async () => {
+    // Scenario: /flow:run fires for a story, the story reaches done/ (manifest
+    // lands in .flow/state/done/) but the run path produced NO reviewer.verdict
+    // READY FOR MERGE event in telemetry — e.g. auto-merge gate or operator merge.
+    //
+    // Before this fix, computeSkillEffectiveness would score useful_fire_count: 0
+    // and the retro might draft a false retire/revise proposal.
+    // After this fix, the done/-manifest read credits the invoke as useful.
+
+    const harnessSession = "01HZDONE0MANIFEST000000TEST";
+    const storyRef = "native:01HZDONE0STORYREF000000001";
+
+    // Minimal .flow/config.yaml so the capture seam's cwd-derived root is valid.
+    await fs.mkdir(path.join(doneTestRoot, ".flow"), { recursive: true });
+    await atomicWriteFile(
+      path.join(doneTestRoot, ".flow", "config.yaml"),
+      "adapter: native\nadapter_config: {}\n",
+    );
+
+    // Write a single in-progress manifest for storyRef so resolveActiveStoryRef
+    // returns storyRef unambiguously (exactly ONE in-progress manifest → attribute).
+    const inProgressDir = path.join(doneTestRoot, ".flow", "state", "in-progress");
+    await fs.mkdir(inProgressDir, { recursive: true });
+    // Use the raw ref as the filename — matching moveBetweenStates convention.
+    await atomicWriteFile(
+      path.join(inProgressDir, storyRef + ".yaml"),
+      `ref: "${storyRef}"\nstatus: in-progress\nclaimed_by: "${harnessSession}"\n`,
+    );
+
+    // Write a real skill.invoke event via the capture seam. Since there is exactly
+    // ONE in-progress manifest, the capture seam resolves storyRef and stamps it as
+    // story_id on the skill.invoke telemetry event.
+    const captured = await captureSkillInvoke(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Skill",
+        tool_input: { skill: "flow:run", args: "" },
+        session_id: harnessSession,
+        cwd: doneTestRoot,
+      },
+      {
+        recordImpl: (opts) =>
+          recordSkillInvoke({
+            ...opts,
+            now: () => new Date("2020-02-01T00:00:00.000Z"),
+          }),
+        pluginRoot: undefined,
+      },
+    );
+    expect(captured).toEqual({ recorded: true });
+
+    // Write a done/ manifest for the story — this is the only signal that the
+    // story completed. There is NO reviewer.verdict READY FOR MERGE event.
+    // The done-manifest file name is the raw story ref + ".yaml" — matching the
+    // real convention used by moveBetweenStates / completeStory (which writes
+    // `<stateRoot>/<state>/<ref>.yaml` using the ref as-is, NOT sanitised).
+    // See manifest-state-machine.ts lines 99-100.
+    const doneDir = path.join(doneTestRoot, ".flow", "state", "done");
+    await fs.mkdir(doneDir, { recursive: true });
+    await atomicWriteFile(
+      path.join(doneDir, storyRef + ".yaml"),
+      `ref: "${storyRef}"\nstatus: done\n`,
+    );
+
+    // Run the scorer — it should credit the invoke via the done/ manifest even
+    // though NO READY FOR MERGE verdict event exists in telemetry.
+    const result = await computeSkillEffectiveness({ targetRepoRoot: doneTestRoot });
+
+    // The invoke carries storyRef as story_id; the done/ manifest for storyRef is
+    // present; therefore useful_fire_count must be 1 and ratio > 0.
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1,
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+    // Attribution must be "attributed" — done/ signals completion.
+    expect(result.attribution).toBe("attributed");
+  });
+});
+
 describe("skill-effectiveness attribution end-to-end (issue #390)", () => {
   it("credits a useful fire across the divergent harness/run session namespaces", async () => {
     // 1) REAL capture seam: a programmatic skill invocation whose session id is

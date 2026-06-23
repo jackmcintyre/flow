@@ -224,6 +224,19 @@ export interface ComputeSkillEffectivenessOptions {
    * Test seam: inject a fake file reader. Production callers do not pass this.
    */
   readFileImpl?: (filePath: string) => Promise<string>;
+  /**
+   * Test seam / declared dependency: inject a reader that returns the set of
+   * story refs present in `.flow/state/done/`. The default implementation reads
+   * the real `.flow/state/done/` directory — each `.yaml` filename (minus the
+   * extension) is a completed story ref.
+   *
+   * This is a NEW, EXPLICIT dependency (Story native:01KVS12K): a skill.invoke
+   * whose `story_id` is in the done set is credited as a useful fire even when
+   * no joined `READY FOR MERGE` reviewer.verdict event exists in telemetry —
+   * covering completion paths that produce no verdict event (auto-merge gate,
+   * operator merge, etc.).
+   */
+  readDoneRefsImpl?: (doneDir: string) => Promise<Set<string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +256,7 @@ export interface ComputeSkillEffectivenessOptions {
 export async function computeSkillEffectiveness(
   opts: ComputeSkillEffectivenessOptions,
 ): Promise<SkillEffectivenessResult> {
-  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl } = opts;
+  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl, readDoneRefsImpl } = opts;
 
   // ------------------------------------------------------------------
   // Step 1: Validate window (mirrors computeAgreement's AC2c guard).
@@ -358,6 +371,42 @@ export async function computeSkillEffectiveness(
   const windowedInvokes = sortedInvokes.slice(0, window);
 
   // ------------------------------------------------------------------
+  // Step 5a: Read done/ manifest refs — the second useful-fire criterion.
+  //
+  // A skill.invoke whose joined story_id is in the done set is credited as a
+  // useful fire even when no `READY FOR MERGE` reviewer.verdict event exists in
+  // telemetry. This covers completion paths that produce no verdict event (e.g.
+  // the auto-merge gate or an operator merge on the paused-for-human path).
+  //
+  // The done/ dir may not exist on repos without completed stories — ENOENT is
+  // treated as "no done refs" (same empty-result posture as the telemetry dir).
+  // ------------------------------------------------------------------
+  const doneDir = path.join(targetRepoRoot, ".flow", "state", "done");
+  let doneRefs: Set<string>;
+  try {
+    if (readDoneRefsImpl) {
+      doneRefs = await readDoneRefsImpl(doneDir);
+    } else {
+      const entries = await fs.readdir(doneDir, { withFileTypes: true });
+      doneRefs = new Set(
+        entries
+          .filter((e) => e.isFile() && e.name.endsWith(".yaml"))
+          .map((e) => e.name.slice(0, -".yaml".length)),
+      );
+    }
+  } catch (err: unknown) {
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      (err as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      doneRefs = new Set(); // done dir absent → no done refs (documented posture)
+    } else {
+      throw err;
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Step 5: Index READY FOR MERGE verdicts by session_id for the join.
   // Each entry holds the verdicts' (ts, story_id) so the per-invocation
   // join can require a LATER verdict in the SAME story flow.
@@ -430,7 +479,7 @@ export async function computeSkillEffectiveness(
       isUseful = true;
       anyNonExecutionInvoke = true;
     } else {
-      // execution tier: verdict-join criterion (existing logic, unchanged).
+      // execution tier: verdict-join criterion + done/-manifest criterion.
 
       // Primary join: same story_id, later verdict. Fires whenever the invoke
       // carries a story_id matching a useful verdict's story_id.
@@ -456,6 +505,14 @@ export async function computeSkillEffectiveness(
           return true;
         });
       }
+
+      // Done-manifest fallback (Story native:01KVS12K): credit the invoke as a
+      // useful fire when its joined story reached done/ but produced NO joined
+      // READY FOR MERGE verdict event — e.g. auto-merge gate or operator merge.
+      // Augments (does not replace) the verdict join above.
+      if (!isUseful && inv.story_id !== undefined) {
+        isUseful = doneRefs.has(inv.story_id);
+      }
     }
 
     if (isUseful) {
@@ -477,12 +534,13 @@ export async function computeSkillEffectiveness(
     };
   }
 
-  // Attribution is "attributed" when EITHER:
+  // Attribution is "attributed" when ANY of:
   //   - at least one READY FOR MERGE verdict existed for execution-tier scoring,
-  //   - OR at least one planning/cockpit-tier skill was invoked (presence-based).
-  // Only "no-completed-flows" when neither condition is met (truly nothing to
-  // attribute — a cycle with no done stories AND no planning/cockpit activity).
-  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke;
+  //   - OR at least one planning/cockpit-tier skill was invoked (presence-based),
+  //   - OR at least one story reached done/ (done-manifest fallback criterion).
+  // Only "no-completed-flows" when none of these conditions is met (truly nothing
+  // to attribute — a cycle with no done stories AND no planning/cockpit activity).
+  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke || doneRefs.size > 0;
 
   return {
     per_skill,
