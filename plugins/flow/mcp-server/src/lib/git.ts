@@ -764,6 +764,63 @@ export async function listDirtyPaths(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// listDirtyPathsWithStatus (Story native:01KVS0Z0 — clean-root guard classification)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the repo-relative paths that are dirty in the working tree at `cwd`,
+ * each annotated with its `git status --porcelain` XY two-character status code.
+ *
+ * The XY code drives the clean-root guard's classification:
+ *   - `XY === "??"` → untracked (not yet known to git)
+ *   - any other code → tracked (previously committed, now modified/added/deleted/renamed)
+ *
+ * The same `.flow/state/**` exclusion as `listDirtyPaths` applies — operational
+ * state artefacts are always dropped.
+ *
+ * Best-effort: a non-zero `git status` returns `[]`.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (only
+ * `lib/git.ts` may spawn `git`) stays satisfied.
+ */
+export async function listDirtyPathsWithStatus(opts: {
+  cwd: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<Array<{ path: string; xy: string }>> {
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+  const result = await execaImpl(
+    "git",
+    // `--untracked-files=all` forces individual file paths even for wholly-untracked
+    // directories (without it, git reports `plugins/` instead of
+    // `plugins/flow/mcp-server/src/tools/leaked-file.ts` when the directory has no
+    // prior tracked files). Individual paths are required so the config-path prefix
+    // check (team/**, docs/**) can classify each file correctly.
+    ["-C", opts.cwd, "status", "--porcelain", "-z", "--untracked-files=all"],
+    { reject: false },
+  );
+  if ((result.exitCode ?? 1) !== 0) return [];
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+
+  const out: Array<{ path: string; xy: string }> = [];
+  const records = stdout.split("\0").filter((r) => r.length > 0);
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i]!;
+    // Each record: XY<space>PATH. A rename/copy emits the destination path as
+    // the NEXT NUL-record (same convention as listDirtyPaths).
+    const xy = rec.slice(0, 2);
+    const p = rec.slice(3);
+    if (xy[0] === "R" || xy[0] === "C") {
+      if (records[i + 1] !== undefined) i++;
+    }
+    out.push({ path: p, xy });
+  }
+  return out.filter(
+    ({ path: p }) =>
+      !p.startsWith(".flow/state/") && p !== ".flow/state" && p !== ".flow",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // stashWorkingTree (Epic 10 run fix-plan — Fix 2b, clean-root guard)
 // ---------------------------------------------------------------------------
 

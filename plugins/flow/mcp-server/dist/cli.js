@@ -39608,6 +39608,35 @@ async function listDirtyPaths(opts) {
     (p) => !p.startsWith(".flow/state/") && p !== ".flow/state" && p !== ".flow"
   );
 }
+async function listDirtyPathsWithStatus(opts) {
+  const execaImpl = opts.execaImpl ?? execa;
+  const result = await execaImpl(
+    "git",
+    // `--untracked-files=all` forces individual file paths even for wholly-untracked
+    // directories (without it, git reports `plugins/` instead of
+    // `plugins/flow/mcp-server/src/tools/leaked-file.ts` when the directory has no
+    // prior tracked files). Individual paths are required so the config-path prefix
+    // check (team/**, docs/**) can classify each file correctly.
+    ["-C", opts.cwd, "status", "--porcelain", "-z", "--untracked-files=all"],
+    { reject: false }
+  );
+  if ((result.exitCode ?? 1) !== 0) return [];
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const out = [];
+  const records = stdout.split("\0").filter((r) => r.length > 0);
+  for (let i2 = 0; i2 < records.length; i2++) {
+    const rec = records[i2];
+    const xy = rec.slice(0, 2);
+    const p = rec.slice(3);
+    if (xy[0] === "R" || xy[0] === "C") {
+      if (records[i2 + 1] !== void 0) i2++;
+    }
+    out.push({ path: p, xy });
+  }
+  return out.filter(
+    ({ path: p }) => !p.startsWith(".flow/state/") && p !== ".flow/state" && p !== ".flow"
+  );
+}
 async function stashWorkingTree(opts) {
   const execaImpl = opts.execaImpl ?? execa;
   const args = ["-C", opts.cwd, "stash", "push", "-u"];
@@ -44244,6 +44273,7 @@ async function markStoryReady(rawInput) {
 
 // src/tools/guard-clean-root.ts
 import * as path65 from "node:path";
+var CONFIG_PATH_PREFIXES = ["team/", "docs/"];
 var GuardCleanRootInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   /** Optional story ref for a more legible stash message / log line. */
@@ -44254,22 +44284,42 @@ var GuardCleanRootInputSchema = external_exports.object({
 async function guardCleanRoot(rawInput) {
   const input = GuardCleanRootInputSchema.parse(rawInput);
   const cwd = path65.resolve(input.targetRepoRoot);
-  const paths = await listDirtyPaths({ cwd });
+  const allDirty = await listDirtyPathsWithStatus({ cwd });
+  const configEdits = [];
+  const leakPaths = [];
+  for (const { path: p, xy } of allDirty) {
+    const isTracked = xy !== "??";
+    const isConfigPath = CONFIG_PATH_PREFIXES.some(
+      (prefix) => p.startsWith(prefix)
+    );
+    if (isTracked && isConfigPath) {
+      configEdits.push(p);
+    } else {
+      leakPaths.push(p);
+    }
+  }
   let stashed = false;
   let stashMessage;
-  if (paths.length > 0) {
+  if (leakPaths.length > 0) {
     stashMessage = `flow-run clean-root guard${input.ref ? `: ${input.ref}` : ""}`;
-    ({ stashed } = await stashWorkingTree({ cwd, paths, message: stashMessage }));
+    ({ stashed } = await stashWorkingTree({
+      cwd,
+      paths: leakPaths,
+      message: stashMessage
+    }));
   }
   const head = await restoreRootHead({
     cwd,
     ...input.baseBranch ? { baseBranch: input.baseBranch } : {}
   });
+  const dirty = allDirty.length > 0;
   return {
-    dirty: paths.length > 0,
+    dirty,
     stashed,
-    paths,
+    paths: leakPaths,
     ...stashMessage ? { stashMessage } : {},
+    hasConfigEdits: configEdits.length > 0,
+    configEdits,
     headMoved: head.headMoved,
     ...head.restoredFrom ? { restoredFrom: head.restoredFrom } : {},
     ...head.restoredTo ? { restoredTo: head.restoredTo } : {},
