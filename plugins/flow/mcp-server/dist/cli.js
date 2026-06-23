@@ -42103,15 +42103,13 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
     const parsed = (0, import_yaml22.parse)(yaml);
     const packages = parsed?.packages;
     if (!Array.isArray(packages)) return { ok: false };
+    const candidates = [];
     for (const pattern of packages) {
       if (typeof pattern !== "string") continue;
       const segments = pattern.split("/");
       const hasGlob = segments.some((s) => s === "*" || s === "**");
       if (!hasGlob) {
-        const memberDir = path52.join(workspaceRoot, pattern);
-        if (hasLocalVitest(memberDir)) {
-          return { ok: true, packageRoot: memberDir };
-        }
+        candidates.push(path52.join(workspaceRoot, pattern));
       } else {
         const parentSegments = segments.slice(0, segments.indexOf("*"));
         const parentDir = path52.join(workspaceRoot, ...parentSegments);
@@ -42119,13 +42117,22 @@ function findVitestInWorkspaceMembers(workspaceRoot) {
           const entries = readdirSync2(parentDir, { withFileTypes: true });
           for (const entry of entries) {
             if (!entry.isDirectory()) continue;
-            const memberDir = path52.join(parentDir, entry.name);
-            if (hasLocalVitest(memberDir)) {
-              return { ok: true, packageRoot: memberDir };
-            }
+            candidates.push(path52.join(parentDir, entry.name));
           }
         } catch {
         }
+      }
+    }
+    for (const memberDir of candidates) {
+      if (hasLocalVitest(memberDir)) {
+        return { ok: true, packageRoot: memberDir };
+      }
+    }
+    for (const memberDir of candidates) {
+      try {
+        accessSync(path52.join(memberDir, "package.json"));
+        return { ok: true, packageRoot: memberDir };
+      } catch {
       }
     }
   } catch {

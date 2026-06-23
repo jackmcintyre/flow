@@ -268,10 +268,19 @@ function hasLocalVitest(dir: string): boolean {
  * Given a pnpm workspace root (`dir`), parse `pnpm-workspace.yaml` and return
  * the first workspace-member directory that has vitest installed locally.
  *
+ * Two-pass strategy:
+ *   Pass 1 (preferred): return the first member that has vitest installed in its
+ *   local `node_modules/.bin/vitest`. This is the fast path when the reviewer's
+ *   worktree was set up with `pnpm install`.
+ *   Pass 2 (fallback): in a fresh git worktree there are no `node_modules` at all
+ *   (git does not track them). When pass 1 finds nothing, return the first member
+ *   that has a `package.json` — pnpm will auto-install vitest on the first `pnpm
+ *   vitest` invocation, so the presence of a manifest is sufficient.
+ *
  * Returns `{ ok: true, packageRoot }` on success or `{ ok: false }` when no
- * workspace member with vitest is found.  Only single-level glob patterns
- * (e.g. `"mcp-server"` or `"packages/*"`) are supported — deep globs are
- * skipped.  Fail-soft: any parse / access error returns `{ ok: false }`.
+ * workspace member is found.  Only single-level glob patterns (e.g. `"mcp-server"`
+ * or `"packages/*"`) are supported — deep globs are skipped.  Fail-soft: any
+ * parse / access error returns `{ ok: false }`.
  */
 function findVitestInWorkspaceMembers(
   workspaceRoot: string,
@@ -285,6 +294,8 @@ function findVitestInWorkspaceMembers(
     const packages = parsed?.packages;
     if (!Array.isArray(packages)) return { ok: false };
 
+    // Collect all candidate member directories by expanding the pattern list.
+    const candidates: string[] = [];
     for (const pattern of packages) {
       if (typeof pattern !== "string") continue;
       // Only handle simple (non-glob) patterns like "mcp-server" and single-level
@@ -293,10 +304,7 @@ function findVitestInWorkspaceMembers(
       const hasGlob = segments.some((s) => s === "*" || s === "**");
       if (!hasGlob) {
         // Direct member: `<workspaceRoot>/<pattern>`
-        const memberDir = path.join(workspaceRoot, pattern);
-        if (hasLocalVitest(memberDir)) {
-          return { ok: true, packageRoot: memberDir };
-        }
+        candidates.push(path.join(workspaceRoot, pattern));
       } else {
         // Single-level glob like "packages/*": scan the parent directory.
         const parentSegments = segments.slice(0, segments.indexOf("*"));
@@ -305,14 +313,30 @@ function findVitestInWorkspaceMembers(
           const entries = readdirSync(parentDir, { withFileTypes: true });
           for (const entry of entries) {
             if (!entry.isDirectory()) continue;
-            const memberDir = path.join(parentDir, entry.name);
-            if (hasLocalVitest(memberDir)) {
-              return { ok: true, packageRoot: memberDir };
-            }
+            candidates.push(path.join(parentDir, entry.name));
           }
         } catch {
           // parent directory not readable — skip this pattern.
         }
+      }
+    }
+
+    // Pass 1: prefer a member with vitest already installed locally.
+    for (const memberDir of candidates) {
+      if (hasLocalVitest(memberDir)) {
+        return { ok: true, packageRoot: memberDir };
+      }
+    }
+
+    // Pass 2: fresh-worktree fallback — no node_modules present yet, but pnpm
+    // will auto-install on the first `pnpm vitest` call. Return the first member
+    // that has a package.json (signals it is a real pnpm member).
+    for (const memberDir of candidates) {
+      try {
+        accessSync(path.join(memberDir, "package.json"));
+        return { ok: true, packageRoot: memberDir };
+      } catch {
+        // No package.json in this candidate — try the next one.
       }
     }
   } catch {

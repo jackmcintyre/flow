@@ -1017,4 +1017,81 @@ describe("AC6 (Story native:01KV6S35N4VF64WZT99SMZSFRJ): findPackageRoot fallbac
     if (!result.ok) return;
     expect(result.packageRoot).toBe(pkgDir);
   });
+
+  /**
+   * Build a workspace fixture WITHOUT node_modules — mimics a fresh git worktree
+   * where `pnpm install` has not yet been run. The reviewer materialises PR branch
+   * worktrees via `git worktree add` which only checks out tracked files; gitignored
+   * node_modules are never present. `findVitestInWorkspaceMembers` pass 2 must fall
+   * back to any member with a package.json so pnpm can auto-install at runtime.
+   */
+  function buildWorkspaceFixtureAtRootNoNodeModules(root: string): { memberPkgDir: string } {
+    const workspaceRoot = path.join(root, "plugins", "flow");
+
+    writeFile(
+      path.join(workspaceRoot, "package.json"),
+      JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+    );
+    writeFile(
+      path.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "packages:\n  - \"mcp-server\"\n",
+    );
+
+    const memberPkgDir = path.join(workspaceRoot, "mcp-server");
+    writeFile(
+      path.join(memberPkgDir, "package.json"),
+      JSON.stringify({ name: "@flow/mcp-server", version: "0.1.0", private: true }, null, 2),
+    );
+    // Deliberately NO node_modules/.bin/vitest — fresh-worktree scenario.
+
+    return { memberPkgDir };
+  }
+
+  it("resolves to workspace member even when node_modules are absent (fresh git worktree)", () => {
+    // Story native:01KVQSCP87NMRZM0C2CTAF31DJ — reviewer's `git worktree add`
+    // does not install node_modules; `hasLocalVitest` returns false for all members,
+    // but `findVitestInWorkspaceMembers` pass 2 must still return the member with a
+    // package.json so pnpm can auto-install on the `pnpm vitest` invocation.
+    const root = path.join(tmp, "fresh-worktree");
+    mkdir(root);
+    const { memberPkgDir } = buildWorkspaceFixtureAtRootNoNodeModules(root);
+
+    // Path that does NOT resolve within checkRoot (e.g. "mcp-server/tests/foo.test.ts"
+    // when the actual layout is "plugins/flow/mcp-server/tests/foo.test.ts").
+    // The upward walk exhausts checkRoot without finding package.json; the fallback
+    // scans downward and reaches the workspace; pass 2 must succeed.
+    const testNameMarker = "some-test-name-pattern";
+    const testFilePathAbs = path.resolve(root, testNameMarker);
+
+    const result = findPackageRoot({
+      testFilePathAbs,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(memberPkgDir);
+  });
+
+  it("resolves via pass 2 for a path-style marker when the member has no node_modules", () => {
+    // Simulates "mcp-server/tests/persona-machinery.test.ts" as the vitest: marker
+    // when checkRoot has the layout plugins/flow/mcp-server (not mcp-server at root).
+    // The upward walk fails (no mcp-server/ dir at checkRoot level); the downward
+    // scan finds the workspace; pass 2 returns the member despite absent node_modules.
+    const root = path.join(tmp, "path-style-no-node-modules");
+    mkdir(root);
+    const { memberPkgDir } = buildWorkspaceFixtureAtRootNoNodeModules(root);
+
+    // Simulate a wrong-prefix path that doesn't resolve inside checkRoot.
+    const badPath = path.resolve(root, "mcp-server", "tests", "persona-machinery.test.ts");
+
+    const result = findPackageRoot({
+      testFilePathAbs: badPath,
+      checkRoot: root,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packageRoot).toBe(memberPkgDir);
+  });
 });
