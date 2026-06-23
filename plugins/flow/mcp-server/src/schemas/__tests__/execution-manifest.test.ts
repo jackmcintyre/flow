@@ -103,6 +103,8 @@ const ALL_BLOCKED_BY_MEMBERS = [
   "orphan-no-transcript",
   "reviewer-grammar",
   "deps-drift",
+  // Story native:01KVS10J5NZQPGT7MSMJPTZERM: setup failure path (standards.md missing / FR45)
+  "review-could-not-run",
 ] as const;
 
 describe("blocked_by field — closed enum (Story 5.13)", () => {

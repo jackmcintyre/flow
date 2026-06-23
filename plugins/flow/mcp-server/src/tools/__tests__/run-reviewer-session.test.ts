@@ -1110,3 +1110,79 @@ describe("unbacked-criterion gate — AC1: all backed and passing → approval p
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVS10J5NZQPGT7MSMJPTZERM — standards-missing setup-error path
+//
+// AC1 (run-reviewer-session side): when docs/standards.md is absent,
+// runReviewerSession MUST persist a reviewer-result.json with
+// recommendedVerdict: "setup-error" (carrying FR45 guidance in setupError)
+// INSTEAD OF throwing — so processReviewerTranscript has a present, distinctly-
+// marked file to read, enabling the review-could-not-run variant.
+//
+// AC2 (reviewer path — existing verdicts unchanged): a genuine NEEDS CHANGES /
+// BLOCKED verdict still routes to its existing path; READY FOR MERGE still goes
+// to the merge gate. These paths are already covered by the existing tests above;
+// the regression guards below confirm the new setup-error code path is cleanly
+// isolated and does NOT affect those routes.
+// ---------------------------------------------------------------------------
+
+describe("standards-missing setup-error — AC1: persists reviewer-result.json with 'setup-error' (Story F5b)", () => {
+  it("deletes docs/standards.md before invocation — result has recommendedVerdict:'setup-error', does NOT throw", async () => {
+    // Remove docs/standards.md — this triggers StandardsDocMissingError in lookupStandards.
+    await fs.rm(path.join(tmpRoot, "docs", "standards.md"));
+
+    // runReviewerSession MUST NOT throw; it MUST persist the marker instead.
+    const result = await callSession();
+
+    expect(result.recommendedVerdict).toBe("setup-error");
+    expect(result.acResults).toEqual({});
+  });
+
+  it("reviewer-result.json persisted with recommendedVerdict:'setup-error' and setupError carrying FR45 guidance", async () => {
+    await fs.rm(path.join(tmpRoot, "docs", "standards.md"));
+
+    const expectedFilePath = path.join(
+      tmpRoot,
+      ".flow",
+      "state",
+      "sessions",
+      SESSION_ULID,
+      sanitiseRefForPathSegment(STORY_REF),
+      "reviewer-result.json",
+    );
+
+    await callSession();
+
+    // File must be present.
+    const raw = await fs.readFile(expectedFilePath, "utf8");
+    const parsed = JSON.parse(raw) as { recommendedVerdict: string; setupError?: string };
+
+    expect(parsed.recommendedVerdict).toBe("setup-error");
+    // setupError must carry the FR45 guidance so processReviewerTranscript can surface it.
+    expect(typeof parsed.setupError).toBe("string");
+    expect(parsed.setupError).toContain("FR45");
+    expect(parsed.setupError).toContain("standards.md");
+  });
+
+  it("regression: NEEDS CHANGES on normal fixture (standards present) is unaffected", async () => {
+    // docs/standards.md is present (seeded in buildFixture). A missing artifact → NEEDS CHANGES.
+    await fs.rm(path.join(tmpRoot, "hello-a.txt"));
+    const result = await callSession();
+    expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+  });
+
+  it("regression: READY FOR MERGE on normal fixture (all pass) is unaffected", async () => {
+    const spy = await stubExtractAcsManual([
+      ["**Given** the artifact, **When** checked, **Then** present.", "artifact: hello-a.txt"],
+      ["**Given** the test, **When** run, **Then** passes.", "vitest: fixture passing test"],
+    ]);
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
+    try {
+      const result = await callSession({ execaImpl: passingStub });
+      expect(result.recommendedVerdict).toBe("READY FOR MERGE");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

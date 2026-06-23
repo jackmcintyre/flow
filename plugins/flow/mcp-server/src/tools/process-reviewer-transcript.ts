@@ -79,6 +79,13 @@ import type { RecommendedVerdict } from "./run-reviewer-session.js";
  * The deterministic seam lives in the file-absent branch of
  * `processReviewerTranscript` (see implementation below).
  * The prose mandate in the reviewer PERSONA.md is now belt-and-braces only.
+ *
+ * Story native:01KVS10J5NZQPGT7MSMJPTZERM — setup-error path:
+ * When `reviewer-result.json` is present with `recommendedVerdict === "setup-error"`,
+ * the review could not run because a setup prerequisite was missing (e.g. docs/standards.md
+ * absent, FR45). This is a distinct variant from both the file-absent throw and from
+ * any quality verdict — no quality judgment was made. The `review-could-not-run` variant
+ * carries the FR45 guidance from the `setupError` field so the operator knows how to fix it.
  */
 export type ProcessReviewerTranscriptResult =
   | { next: "done-ready-for-merge"; completed: true; chatLog: string[] }
@@ -90,6 +97,17 @@ export type ProcessReviewerTranscriptResult =
   | {
       /** Reviewer's `runReviewerSession` returned BLOCKED (no ACs declared in source story). */
       next: "done-blocked-reviewer-blocked";
+      chatLog: string[];
+    }
+  | {
+      /**
+       * The review could not run because a setup prerequisite was missing (e.g.
+       * docs/standards.md absent — StandardsDocMissingError / FR45). This is NOT a
+       * quality verdict — no AC was evaluated. The `setupError` field carries the
+       * FR45 guidance message so the operator knows how to resolve the setup issue.
+       */
+      next: "review-could-not-run";
+      setupError: string;
       chatLog: string[];
     };
 
@@ -160,6 +178,27 @@ export async function processReviewerTranscript(
   }
 
   const verdict: RecommendedVerdict = resultFile.recommendedVerdict;
+
+  if (verdict === "setup-error") {
+    // Story native:01KVS10J5NZQPGT7MSMJPTZERM: the review could not run because a
+    // setup prerequisite was missing (StandardsDocMissingError / FR45). This is NOT
+    // a quality verdict — no AC was evaluated. Stamp a distinct block reason so the
+    // operator cannot confuse this with a failing quality review.
+    const currentManifest = await readManifest(manifestPath);
+    const setupErrorMsg = ((resultFile as unknown) as Record<string, unknown>)["setupError"] as string | undefined ?? "review setup prerequisite was missing";
+    await writeManifest(manifestPath, {
+      ...currentManifest,
+      blocked_by: "review-could-not-run",
+    });
+
+    chatLog.push(
+      `reviewer setup error — story ${ref} could not be reviewed: ${setupErrorMsg} ` +
+        `(FR45: copy plugins/flow/docs/standards-example.md to docs/standards.md). ` +
+        `This is a setup failure, NOT a quality verdict. Fix the setup issue and re-run.`,
+    );
+
+    return { next: "review-could-not-run", setupError: setupErrorMsg, chatLog };
+  }
 
   if (verdict === "READY FOR MERGE") {
     // fix/run-isolation-coordination-honesty: do NOT complete here. The manifest
