@@ -84,6 +84,9 @@ async function runRun(opts: { withHeartbeat: boolean }): Promise<{
   // it as { stdout: JSON } because the workflow's `seam()` parses agent.stdout.
   const seamResult = (label: string): unknown => {
     if (label === "mint") return { sessionUlid: "01TESTULID0000000000000000" };
+    // Story native:01KVS0ZW2GYSN25VC45GWNA4MG — pre-flight checklist stubs.
+    if (label === "preflight:standards") return { standards: { state: "ok", path: "/tmp/target-repo/docs/standards.md" } };
+    if (label === "preflight:remote") return { hasRemote: true };
     // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
     if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
     if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };

@@ -85,6 +85,7 @@ import { unhirePersona } from "./tools/unhire-persona.js";
 import { refreshPersona } from "./tools/refresh-persona.js";
 import { matchStorySpecialist } from "./tools/match-story-specialist.js";
 import { recordSpecialistEngagement } from "./tools/record-specialist-engagement.js";
+import { checkGitRemote } from "./tools/check-git-remote.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -306,6 +307,11 @@ const TOOLS: Record<string, ToolFn> = {
   //   node dist/cli.js recordSpecialistEngagement \
   //     --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","specialistRole":"<role>"}'
   recordSpecialistEngagement,
+  // Story native:01KVS0ZW2GYSN25VC45GWNA4MG — checkGitRemote: check whether the
+  // target repo has at least one configured git remote. Used by the run pre-flight
+  // checklist so a missing remote is surfaced before any story is claimed or built.
+  //   node dist/cli.js checkGitRemote --json '{"targetRepoRoot":"..."}'
+  checkGitRemote,
 };
 
 function emit(obj: unknown): void {

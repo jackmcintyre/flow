@@ -303,21 +303,70 @@ const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', t
 if (!SU) return { error: 'no-session-ulid' }
 log(`run session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME} maxConcurrency=${MAX_CONCURRENCY}`)
 
-// SLOT RESOLUTION (Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/reviewer
-// selection). Before fetching persona prompts, resolve the role that fills each run slot
-// from the live hired team's declared run-job capabilities. The generalist defaults
-// (generalist-dev / generalist-reviewer) win when present and qualified; a different
-// qualified hired role wins when the generalists are absent. If no qualified role exists
-// for a slot the run stops immediately with a clear operator-facing message naming the
-// unstaffed slot — never silently proceeding or falling back to a hard-coded name.
-// Read-only / idempotent → retryable. Fail-loud: a garbled relay (missing role field)
-// also stops the run, matching the behaviour of the 'fail loud on empty persona' guard.
+// PRE-FLIGHT CHECKLIST (Story native:01KVS0ZW2GYSN25VC45GWNA4MG): before claiming
+// any story, verify that all prerequisites for a successful run are in place. The
+// checks are:
+//   1. docs/standards.md present (getStatus already computes this — standards:missing
+//      means the reviewer would fail immediately on any story built this run).
+//   2. A git remote is configured (checkGitRemote — a missing remote means every
+//      push step would fail after a full dev build; catch it here first).
+//   3. Both run slots can be staffed (resolveRunSlot for build + review — this was
+//      previously a pair of sequential throws; now it is folded into the same
+//      unified checklist so all missing prerequisites surface in one message).
+//
+// All four seams are read-only / idempotent → retryable. A garbled relay on ANY
+// seam is treated as "prerequisite unknown — include in checklist" rather than
+// "prerequisite met" (fail-safe bias). If ALL prerequisites pass, the run proceeds
+// unchanged. If ANY fail, the run stops pre-claim with one actionable message
+// listing each missing prerequisite.
+const preflightFailures = []
+
+// 1. Standards-doc presence (sourced from getStatus).
+const statusCheck = await seam(`node ${CLI} getStatus --json '${J({ targetRepoRoot: REPO })}'`, 'preflight:standards', true)
+if (!statusCheck || statusCheck._parseError || !statusCheck.standards || statusCheck.standards.state === 'missing') {
+  const detail = statusCheck?._parseError ? ` (seam error: ${statusCheck._parseError})` : ''
+  preflightFailures.push(`docs/standards.md is missing — create it before running (the reviewer requires it on every story)${detail}`)
+}
+
+// 2. Git remote configured (checkGitRemote).
+const remoteCheck = await seam(`node ${CLI} checkGitRemote --json '${J({ targetRepoRoot: REPO })}'`, 'preflight:remote', true)
+if (!remoteCheck || remoteCheck._parseError || remoteCheck.hasRemote === false) {
+  const detail = remoteCheck?._parseError ? ` (seam error: ${remoteCheck._parseError})` : ''
+  preflightFailures.push(`no git remote is configured — add a remote (e.g. \`git remote add origin <url>\`) before running (every story push will fail without one)${detail}`)
+}
+
+// 3 + 4. SLOT RESOLUTION (Story native:01KVPQS1DVJE41KNG065D6X1X7 — dynamic builder/
+// reviewer selection). Resolve the role that fills each run slot from the live hired
+// team's declared run-job capabilities. The generalist defaults (generalist-dev /
+// generalist-reviewer) win when present and qualified; a different qualified hired
+// role wins when the generalists are absent. Previously these were sequential throws;
+// now they are collected into the unified pre-flight checklist (AC2 of this story).
+// Fail-loud: a garbled relay (missing role field) also adds to the checklist, matching
+// the behaviour of the 'fail loud on empty persona' guard.
 const devSlot = await seam(`node ${CLI} resolveRunSlot --json '${J({ targetRepoRoot: REPO, job: 'build' })}'`, 'slot:build', true)
-if (!devSlot || devSlot._parseError || !devSlot.role) throw new Error(`run: resolveRunSlot failed for the build slot — cannot determine who builds stories${devSlot?._parseError ? ` (${devSlot._parseError})` : devSlot?.message ? `: ${devSlot.message}` : ''}`)
-const devRole = devSlot.role
+let devRole = null
+if (!devSlot || devSlot._parseError || !devSlot.role) {
+  // Include the domain-error message from RunSlotUnstaffedError when available
+  const slotMsg = devSlot?.error?.message || devSlot?._parseError || ''
+  preflightFailures.push(`build slot is unstaffed — no hired role declares run_jobs:[build] (hire a generalist-dev or a role with capabilities.run_jobs including "build")${slotMsg ? `: ${slotMsg}` : ''}`)
+} else {
+  devRole = devSlot.role
+}
 const reviewerSlot = await seam(`node ${CLI} resolveRunSlot --json '${J({ targetRepoRoot: REPO, job: 'review' })}'`, 'slot:review', true)
-if (!reviewerSlot || reviewerSlot._parseError || !reviewerSlot.role) throw new Error(`run: resolveRunSlot failed for the review slot — cannot determine who reviews stories${reviewerSlot?._parseError ? ` (${reviewerSlot._parseError})` : reviewerSlot?.message ? `: ${reviewerSlot.message}` : ''}`)
-const reviewerRole = reviewerSlot.role
+let reviewerRole = null
+if (!reviewerSlot || reviewerSlot._parseError || !reviewerSlot.role) {
+  const slotMsg = reviewerSlot?.error?.message || reviewerSlot?._parseError || ''
+  preflightFailures.push(`review slot is unstaffed — no hired role declares run_jobs:[review] (hire a generalist-reviewer or a role with capabilities.run_jobs including "review")${slotMsg ? `: ${slotMsg}` : ''}`)
+} else {
+  reviewerRole = reviewerSlot.role
+}
+
+// Surface all failures together as one actionable checklist.
+if (preflightFailures.length > 0) {
+  const checklist = preflightFailures.map((f, i) => `  ${i + 1}. ${f}`).join('\n')
+  throw new Error(`run: pre-flight checks failed — fix these prerequisites before running:\n${checklist}`)
+}
+
 log(`run slots resolved: build=${devRole}${devSlot.isDefault ? ' (default)' : ' (non-default)'} review=${reviewerRole}${reviewerSlot.isDefault ? ' (default)' : ' (non-default)'}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):

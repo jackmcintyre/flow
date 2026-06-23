@@ -46627,6 +46627,21 @@ async function recordSpecialistEngagement(opts) {
   return { ok: true, ref, specialistRole };
 }
 
+// src/tools/check-git-remote.ts
+async function checkGitRemote(opts) {
+  const { targetRepoRoot } = opts;
+  const execaImpl = opts.execaImpl ?? execa;
+  let stdout = "";
+  try {
+    const result = await execaImpl("git", ["-C", targetRepoRoot, "remote"]);
+    stdout = result.stdout ?? "";
+  } catch {
+    return { hasRemote: false };
+  }
+  const hasRemote = stdout.trim().length > 0;
+  return { hasRemote };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -46842,7 +46857,12 @@ var TOOLS = {
   // engaged_specialist onto the in-progress manifest to record participation.
   //   node dist/cli.js recordSpecialistEngagement \
   //     --json '{"targetRepoRoot":"...","ref":"native:...","sessionUlid":"...","specialistRole":"<role>"}'
-  recordSpecialistEngagement
+  recordSpecialistEngagement,
+  // Story native:01KVS0ZW2GYSN25VC45GWNA4MG — checkGitRemote: check whether the
+  // target repo has at least one configured git remote. Used by the run pre-flight
+  // checklist so a missing remote is surfaced before any story is claimed or built.
+  //   node dist/cli.js checkGitRemote --json '{"targetRepoRoot":"..."}'
+  checkGitRemote
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");
