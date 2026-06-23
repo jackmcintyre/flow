@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, promises as fsP } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { findPackageRoot, runReviewerSession } from "../run-reviewer-session.js";
+import { findPackageRoot, runReviewerSession, runVitestCheck } from "../run-reviewer-session.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 
@@ -1093,5 +1093,135 @@ describe("AC6 (Story native:01KV6S35N4VF64WZT99SMZSFRJ): findPackageRoot fallbac
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.packageRoot).toBe(memberPkgDir);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVQSCP87NMRZM0C2CTAF31DJ: runVitestCheck suffix-walk fallback
+//
+// When the `vitest:` marker uses a truncated path prefix (e.g. "mcp-server/tests/
+// foo.test.ts" when the actual layout is "plugins/flow/mcp-server/tests/foo.test.ts"),
+// findPackageRoot resolves the workspace member via the two-pass strategy but the
+// computed relativeToPackage escapes the package root. runVitestCheck must then walk
+// the path segments as progressively shorter suffixes and use the first suffix that
+// resolves to an existing file inside pkgRoot.packageRoot, so the vitest run targets
+// the correct file rather than falling back to a useless -t name filter.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVQSCP87NMRZM0C2CTAF31DJ: runVitestCheck truncated-prefix suffix-walk", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "flow-01kvqscp-suffix-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("resolves 'mcp-server/tests/foo.test.ts' to the correct file inside plugins/flow/mcp-server when workspace fallback is used", async () => {
+    // Layout: checkRoot (no package.json at root) / plugins/flow/pnpm-workspace.yaml
+    //                                              / plugins/flow/mcp-server/package.json
+    //                                              / plugins/flow/mcp-server/tests/foo.test.ts
+    // vitest: marker = "mcp-server/tests/foo.test.ts" (wrong prefix, missing "plugins/flow/")
+    //
+    // Expected: vitest runs tests/foo.test.ts from plugins/flow/mcp-server (suffix walk)
+    const workspaceRoot = path.join(tmp, "plugins", "flow");
+    writeFile(
+      path.join(workspaceRoot, "package.json"),
+      JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+    );
+    writeFile(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - \"mcp-server\"\n");
+    const memberPkgDir = path.join(workspaceRoot, "mcp-server");
+    writeFile(
+      path.join(memberPkgDir, "package.json"),
+      JSON.stringify({ name: "@flow/mcp-server", version: "0.1.0", private: true }, null, 2),
+    );
+    // The actual test file inside the member (no node_modules — fresh worktree).
+    writeFile(path.join(memberPkgDir, "tests", "foo.test.ts"), PASSING_VITEST_TEST);
+
+    const capturedCalls: Array<{ cmd: string; args: string[]; cwd: string | undefined }> = [];
+
+    const stubExeca = vi.fn().mockImplementation(
+      async (cmd: string, args: string[], cmdOpts?: { cwd?: string }) => {
+        capturedCalls.push({ cmd, args, cwd: cmdOpts?.cwd });
+        return {
+          exitCode: 0,
+          stdout: "\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n",
+          stderr: "",
+          timedOut: false,
+        };
+      },
+    ) as unknown as typeof import("execa").execa;
+
+    const result = await runVitestCheck(
+      1,
+      "integration",
+      "mcp-server/tests/foo.test.ts",
+      "mcp-server/tests/foo.test.ts",
+      tmp,
+      stubExeca,
+    );
+
+    // runVitestCheck must have invoked vitest with the suffix-resolved file path,
+    // not the -t name filter.
+    expect(capturedCalls).toHaveLength(1);
+    const call = capturedCalls[0]!;
+    expect(call.cmd).toBe("pnpm");
+    // Args should contain the resolved relative path "tests/foo.test.ts", not a -t filter.
+    expect(call.args).toContain("vitest");
+    expect(call.args).not.toContain("-t");
+    expect(call.args).toContain(path.join("tests", "foo.test.ts"));
+
+    // The cwd must be the member package root.
+    expect(call.cwd).toBe(memberPkgDir);
+
+    // The result must be runnable-vitest (not manual-check-required) with pass status.
+    expect(result.applicability).toBe("runnable-vitest");
+    if (result.applicability !== "runnable-vitest") return;
+    expect(result.status).toBe("pass");
+  });
+
+  it("falls back to -t name filter when no suffix resolves to an existing file", async () => {
+    // No test file exists in the package — suffix walk finds nothing, so vitest
+    // falls back to the -t name filter (which produces a zero-executed guard fail).
+    const workspaceRoot = path.join(tmp, "plugins", "flow");
+    writeFile(
+      path.join(workspaceRoot, "package.json"),
+      JSON.stringify({ name: "flow", version: "0.1.0", private: true }, null, 2),
+    );
+    writeFile(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - \"mcp-server\"\n");
+    const memberPkgDir = path.join(workspaceRoot, "mcp-server");
+    writeFile(
+      path.join(memberPkgDir, "package.json"),
+      JSON.stringify({ name: "@flow/mcp-server", version: "0.1.0", private: true }, null, 2),
+    );
+    // Deliberately NO test file in the member.
+
+    const capturedCalls: Array<{ args: string[] }> = [];
+
+    const stubExeca = vi.fn().mockImplementation(
+      async (_cmd: string, args: string[], _opts?: unknown) => {
+        capturedCalls.push({ args });
+        return { exitCode: 0, stdout: "Tests  0 passed (0)", stderr: "", timedOut: false };
+      },
+    ) as unknown as typeof import("execa").execa;
+
+    void memberPkgDir; // referenced above; suppress unused warning
+
+    await runVitestCheck(
+      1,
+      "integration",
+      "mcp-server/tests/nonexistent.test.ts",
+      "mcp-server/tests/nonexistent.test.ts",
+      tmp,
+      stubExeca,
+    );
+
+    // Must use -t filter when suffix walk finds nothing.
+    expect(capturedCalls).toHaveLength(1);
+    const call = capturedCalls[0]!;
+    expect(call.args).toContain("-t");
+    expect(call.args).not.toContain(path.join("tests", "nonexistent.test.ts"));
   });
 });

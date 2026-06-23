@@ -56196,8 +56196,23 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
   }
   const testFilePathAbs2 = path74.resolve(checkRoot, testFilePath);
   const relativeToPackage = path74.relative(pkgRoot.packageRoot, testFilePathAbs2);
-  const looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
-  const vitestArgs = looksLikeFilePath ? ["vitest", "--run", relativeToPackage] : ["vitest", "--run", "-t", testNameFilter];
+  let looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
+  let resolvedRelativePath = relativeToPackage;
+  if (!looksLikeFilePath && (testFilePath.includes("/") || testFilePath.includes("\\"))) {
+    const segments = testFilePath.split(/[/\\]/);
+    for (let i2 = 1; i2 < segments.length; i2++) {
+      const suffix = segments.slice(i2).join(path74.sep);
+      const candidate = path74.join(pkgRoot.packageRoot, suffix);
+      try {
+        accessSync(candidate);
+        resolvedRelativePath = suffix;
+        looksLikeFilePath = true;
+        break;
+      } catch {
+      }
+    }
+  }
+  const vitestArgs = looksLikeFilePath ? ["vitest", "--run", resolvedRelativePath] : ["vitest", "--run", "-t", testNameFilter];
   const result = await execaImpl("pnpm", vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,

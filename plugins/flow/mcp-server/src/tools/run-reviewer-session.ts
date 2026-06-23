@@ -530,18 +530,48 @@ export async function runVitestCheck(
   // runs with cwd=pkgRoot.packageRoot, can locate the file (an absolute or
   // checkRoot-relative path would escape the package boundary).
   //
+  // Truncated-prefix fallback (Story native:01KVQSCP87NMRZM0C2CTAF31DJ): when the
+  // workspace-fallback path in findPackageRoot resolves the package via pass 2 (no
+  // node_modules), the testFilePathAbs may lie OUTSIDE the package root
+  // (relativeToPackage starts with ".."). This happens when the `vitest:` marker
+  // uses a truncated path like "mcp-server/tests/foo.test.ts" instead of the full
+  // "plugins/flow/mcp-server/tests/foo.test.ts". In that case, walk the path
+  // segments from longest suffix to shortest and use the first suffix that resolves
+  // to an existing file inside pkgRoot.packageRoot. This lets vitest run the correct
+  // file even with a wrong-prefix marker, without changing the zero-executed guard.
+  //
   // If the marker is not a file path (e.g. a test-name pattern with no `/`),
   // fall back to -t filter so the existing named-test-filter behaviour is
   // preserved for markers that are genuinely test-name patterns.
   const testFilePathAbs2 = path.resolve(checkRoot, testFilePath);
   const relativeToPackage = path.relative(pkgRoot.packageRoot, testFilePathAbs2);
-  const looksLikeFilePath =
+  let looksLikeFilePath =
     (testFilePath.includes("/") || testFilePath.includes("\\")) &&
     !relativeToPackage.startsWith("..") &&
     relativeToPackage !== testFilePath; // ensure it resolved relative to pkgRoot
 
+  // Truncated-prefix resolution: when the path escapes the package root, try
+  // progressively shorter suffixes until one resolves to an existing file inside
+  // pkgRoot.packageRoot. Only applies to path-style markers (contains "/").
+  let resolvedRelativePath = relativeToPackage;
+  if (!looksLikeFilePath && (testFilePath.includes("/") || testFilePath.includes("\\"))) {
+    const segments = testFilePath.split(/[/\\]/);
+    for (let i = 1; i < segments.length; i++) {
+      const suffix = segments.slice(i).join(path.sep);
+      const candidate = path.join(pkgRoot.packageRoot, suffix);
+      try {
+        accessSync(candidate);
+        resolvedRelativePath = suffix;
+        looksLikeFilePath = true;
+        break;
+      } catch {
+        // candidate doesn't exist in pkgRoot — try shorter suffix
+      }
+    }
+  }
+
   const vitestArgs = looksLikeFilePath
-    ? ["vitest", "--run", relativeToPackage]
+    ? ["vitest", "--run", resolvedRelativePath]
     : ["vitest", "--run", "-t", testNameFilter];
 
   const result = await execaImpl("pnpm", vitestArgs, {
