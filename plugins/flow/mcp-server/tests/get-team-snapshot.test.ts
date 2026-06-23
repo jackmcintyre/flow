@@ -844,6 +844,193 @@ describe("TOCTOU — persona file deleted mid-snapshot completes for remaining r
 });
 
 // ---------------------------------------------------------------------------
-// Task 7.16 — Header + no .only/.todo/.skip
+// Story native:01KVS0XXPMX0K9F650QP0Q2RNQ — AC2: capabilities-missing warning
+// ---------------------------------------------------------------------------
+describe("AC2 — capabilities-missing flag fires only for personas without capabilities block", () => {
+  /**
+   * Write a PERSONA.md with NO capabilities block (old-style hire, pre-catalogue update).
+   */
+  async function writePersonaNoCapabilities(targetRepoRoot: string, role: string): Promise<void> {
+    const roleDir = path.join(targetRepoRoot, "team", role);
+    await fs.mkdir(roleDir, { recursive: true });
+    const content = [
+      "---",
+      `role: ${role}`,
+      `domain: "${role} domain"`,
+      `model_tier: sonnet`,
+      `tools_allow:`,
+      `  - Read`,
+      `gh_allow: []`,
+      `locked_phrases:`,
+      `  handoff: "Handoff to reviewer — story <story-id> ready for review."`,
+      `  yield: "This sits in <domain>'s domain — handing off."`,
+      `  verdict: "**Verdict: <SENTINEL>**"`,
+      `hired_at: "${FIXED_HIRED_AT}"`,
+      `catalogue_version: "${FIXED_VERSION}"`,
+      "---",
+      "",
+      `# ${role}`,
+      "",
+      "## Domain",
+      "",
+      `${role} domain`,
+      "",
+      "## Mandate",
+      "",
+      "Implement things.",
+      "",
+      "## Out of mandate",
+      "",
+      "Nothing.",
+      "",
+      "## Prompt",
+      "",
+      `You are the ${role}.`,
+      "",
+      "## Knowledge",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(roleDir, "PERSONA.md"), content, "utf8");
+  }
+
+  /**
+   * Write a PERSONA.md WITH a capabilities block.
+   */
+  async function writePersonaWithCapabilities(targetRepoRoot: string, role: string): Promise<void> {
+    const roleDir = path.join(targetRepoRoot, "team", role);
+    await fs.mkdir(roleDir, { recursive: true });
+    const content = [
+      "---",
+      `role: ${role}`,
+      `domain: "${role} domain"`,
+      `model_tier: sonnet`,
+      `tools_allow:`,
+      `  - Read`,
+      `gh_allow: []`,
+      `locked_phrases:`,
+      `  handoff: "Handoff to reviewer — story <story-id> ready for review."`,
+      `  yield: "This sits in <domain>'s domain — handing off."`,
+      `  verdict: "**Verdict: <SENTINEL>**"`,
+      `capabilities:`,
+      `  review_lenses: []`,
+      `  run_jobs: []`,
+      `  path_patterns: []`,
+      `hired_at: "${FIXED_HIRED_AT}"`,
+      `catalogue_version: "${FIXED_VERSION}"`,
+      "---",
+      "",
+      `# ${role}`,
+      "",
+      "## Domain",
+      "",
+      `${role} domain`,
+      "",
+      "## Mandate",
+      "",
+      "Implement things.",
+      "",
+      "## Out of mandate",
+      "",
+      "Nothing.",
+      "",
+      "## Prompt",
+      "",
+      `You are the ${role}.`,
+      "",
+      "## Knowledge",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(roleDir, "PERSONA.md"), content, "utf8");
+  }
+
+  it("snapshot sets capabilitiesMissing=true for a persona without a capabilities block", async () => {
+    const root = await makeTmp("ac2-no-cap");
+    await writePersonaNoCapabilities(root, "generalist-dev");
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const role = snapshot.roles.find((r) => r.role === "generalist-dev");
+    expect(role?.state).toBe("ok");
+    if (role?.state === "ok") {
+      expect(role.capabilitiesMissing).toBe(true);
+    }
+  });
+
+  it("snapshot sets capabilitiesMissing=false for a persona that declares a capabilities block", async () => {
+    const root = await makeTmp("ac2-with-cap");
+    await writePersonaWithCapabilities(root, "generalist-dev");
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const role = snapshot.roles.find((r) => r.role === "generalist-dev");
+    expect(role?.state).toBe("ok");
+    if (role?.state === "ok") {
+      expect(role.capabilitiesMissing).toBe(false);
+    }
+  });
+
+  it("only the persona without capabilities is flagged when both kinds are hired", async () => {
+    const root = await makeTmp("ac2-mixed");
+    await writePersonaNoCapabilities(root, "generalist-dev");
+    await writePersonaWithCapabilities(root, "generalist-reviewer");
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const byRole = Object.fromEntries(snapshot.roles.map((r) => [r.role, r]));
+
+    const dev = byRole["generalist-dev"];
+    expect(dev?.state).toBe("ok");
+    if (dev?.state === "ok") {
+      expect(dev.capabilitiesMissing).toBe(true);
+    }
+
+    const reviewer = byRole["generalist-reviewer"];
+    expect(reviewer?.state).toBe("ok");
+    if (reviewer?.state === "ok") {
+      expect(reviewer.capabilitiesMissing).toBe(false);
+    }
+  });
+
+  it("renderTeamSnapshot includes 'needs refresh: capabilities missing' for flagged persona", async () => {
+    const root = await makeTmp("ac2-render-flag");
+    await writePersonaNoCapabilities(root, "generalist-dev");
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const rendered = renderTeamSnapshot(snapshot);
+
+    expect(rendered).toContain("needs refresh: capabilities missing");
+    expect(rendered).toContain("re-hire this role");
+  });
+
+  it("renderTeamSnapshot does NOT include 'needs refresh' for a persona with capabilities", async () => {
+    const root = await makeTmp("ac2-render-no-flag");
+    await writePersonaWithCapabilities(root, "generalist-dev");
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const rendered = renderTeamSnapshot(snapshot);
+
+    expect(rendered).not.toContain("needs refresh: capabilities missing");
+  });
+
+  it("capabilitiesMissing=false for personas hired via instantiatePersona (catalogue has capabilities block)", async () => {
+    const root = await makeTmp("ac2-instantiate");
+    // instantiatePersona reads the catalogue, which includes a capabilities block.
+    await instantiatePersona({
+      pluginRoot: getPluginRoot(),
+      targetRepoRoot: root,
+      role: "generalist-dev",
+      clock: FIXED_CLOCK,
+      pluginVersion: FIXED_VERSION,
+    });
+
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+    const role = snapshot.roles.find((r) => r.role === "generalist-dev");
+    expect(role?.state).toBe("ok");
+    if (role?.state === "ok") {
+      // The catalogue has a capabilities block, so the persona should not be flagged.
+      expect(role.capabilitiesMissing).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 7.16 — Header + no .only/.skip
 // All tests in this file meet that constraint by construction.
 // ---------------------------------------------------------------------------

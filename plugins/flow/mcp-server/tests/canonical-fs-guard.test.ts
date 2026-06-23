@@ -150,6 +150,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // fs.writeFile/mkdir to exercise the liveness gate in reapStaleDevStoryWorktrees.
   // Test file only; the production reaper performs no raw fs writes.
   path.join(SRC_DIR, "lib", "__tests__", "reap-stale-worktrees-liveness.test.ts"),
+  // Story native:01KVS0XXPMX0K9F650QP0Q2RNQ: resolve-run-slot tests seed minimal
+  // PERSONA.md fixture files directly to tmpdir via raw fs.writeFile/mkdir to
+  // exercise the missing-capabilities graceful-default path and the non-generalist-
+  // stays-unqualified constraint in resolveRunSlot. Test file only; the production
+  // tool (resolve-run-slot.ts) is a pure reader — it performs no fs writes.
+  path.join(SRC_DIR, "tools", "__tests__", "resolve-run-slot.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

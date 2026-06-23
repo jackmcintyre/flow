@@ -109,6 +109,14 @@ export async function resolveRunSlot(
     const runJobs = await readRunJobs(teamDir, entry);
     if (runJobs !== undefined && runJobs.includes(job)) {
       qualifiedRoles.push(entry);
+    } else if (runJobs === undefined && entry === defaultRole) {
+      // Graceful default for built-in generalists hired before the catalogue
+      // declared a capabilities block (e.g. teams hired at catalogue_version
+      // 0.1.0 before the capabilities: block was added). The generalist-dev
+      // default inherits the 'build' job; generalist-reviewer inherits 'review'.
+      // Non-generalist roles without a capabilities block remain unqualified
+      // (strict bias — no accidental slot mis-staffing).
+      qualifiedRoles.push(entry);
     }
   }
 

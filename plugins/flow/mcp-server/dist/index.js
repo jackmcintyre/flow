@@ -53664,7 +53664,17 @@ var TeamSnapshotRoleSchema = external_exports.discriminatedUnion("state", [
     role: external_exports.string().min(1).regex(KEBAB_ROLE_REGEX),
     domain: external_exports.string().min(1),
     fireCount: external_exports.number().int().nonnegative(),
-    knowledge: external_exports.array(KnowledgeEntrySchema)
+    knowledge: external_exports.array(KnowledgeEntrySchema),
+    /**
+     * True when the hired persona's PERSONA.md frontmatter lacks a capabilities
+     * block (hired before the catalogue declared one). A missing capabilities
+     * block means the role is invisible to dynamic staffing (run slots, lens
+     * assignment). The operator should re-hire the role to pick up the current
+     * catalogue declaration.
+     *
+     * Defaults to false when the capabilities block is present.
+     */
+    capabilitiesMissing: external_exports.boolean().default(false)
   }),
   external_exports.object({
     state: external_exports.literal("error"),
@@ -53726,12 +53736,14 @@ async function getTeamSnapshot(opts) {
         persona.sections.Knowledge,
         knowledgeLimit
       );
+      const capabilitiesMissing = persona.capabilities === void 0;
       roles.push({
         state: "ok",
         role,
         domain: persona.domain,
         fireCount: stats.fireCountsByAgent[role] ?? 0,
-        knowledge
+        knowledge,
+        capabilitiesMissing
       });
     } catch (err) {
       if (err instanceof PersonaFileMalformedError) {
@@ -53817,6 +53829,9 @@ function renderTeamSnapshot(snapshot) {
             const provenance = entry.source_ref != null ? ` [${entry.source_ref}]` : "";
             lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
           }
+        }
+        if (role.capabilitiesMissing) {
+          lines.push(`  needs refresh: capabilities missing \u2014 re-hire this role (/flow:hire) to pick up the current catalogue declaration`);
         }
       }
       if (i2 < roles.length - 1) {
@@ -58143,6 +58158,8 @@ async function resolveRunSlot(opts) {
     }
     const runJobs = await readRunJobs(teamDir, entry);
     if (runJobs !== void 0 && runJobs.includes(job)) {
+      qualifiedRoles.push(entry);
+    } else if (runJobs === void 0 && entry === defaultRole) {
       qualifiedRoles.push(entry);
     }
   }

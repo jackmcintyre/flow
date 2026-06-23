@@ -45,6 +45,16 @@ const TeamSnapshotRoleSchema = z.discriminatedUnion("state", [
     domain: z.string().min(1),
     fireCount: z.number().int().nonnegative(),
     knowledge: z.array(KnowledgeEntrySchema),
+    /**
+     * True when the hired persona's PERSONA.md frontmatter lacks a capabilities
+     * block (hired before the catalogue declared one). A missing capabilities
+     * block means the role is invisible to dynamic staffing (run slots, lens
+     * assignment). The operator should re-hire the role to pick up the current
+     * catalogue declaration.
+     *
+     * Defaults to false when the capabilities block is present.
+     */
+    capabilitiesMissing: z.boolean().default(false),
   }),
   z.object({
     state: z.literal("error"),
