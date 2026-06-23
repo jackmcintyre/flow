@@ -679,6 +679,9 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
     "adapter: native\nadapter_config: {}\n",
   );
 
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
+
   // Native stories directory
   const storiesDir = path.join(root, ".flow", "native-stories");
   await fs.mkdir(storiesDir, { recursive: true });

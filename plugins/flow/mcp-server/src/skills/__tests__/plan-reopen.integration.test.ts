@@ -73,6 +73,8 @@ afterEach(async () => {
 async function copyFixture(fixturePath: string): Promise<string> {
   const dest = path.join(scratch, path.basename(fixturePath));
   await fs.cp(fixturePath, dest, { recursive: true });
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(dest, "package.json"), `{ "name": "fixture" }\n`);
   return dest;
 }
 

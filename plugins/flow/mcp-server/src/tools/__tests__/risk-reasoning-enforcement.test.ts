@@ -125,6 +125,8 @@ beforeEach(async () => {
     path.join(root, ".flow", "config.yaml"),
     `adapter: native\nadapter_config: {}\n`,
   );
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
   // Seed files cited by the test candidates so T0-5 resolvability passes.
   await seedFile("src/ui/greeting.ts");
   await seedFile("src/state/ledger.ts");

@@ -128,6 +128,9 @@ beforeEach(async () => {
   );
   // Seed the resolvable paths the clean enricher cites/references.
   await seedFile("src/parser.ts");
+  // Story native:01KVS2MG — package.json at the workspace root so the enricher's
+  // `vitest:` targets (e.g. `src/__tests__/*.test.ts`) resolve to a package.
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
   // Reset the BMad adapter's per-process bound context between tests so the
   // ref-index does not leak across tmpdirs.
   resetBmadAdapter();

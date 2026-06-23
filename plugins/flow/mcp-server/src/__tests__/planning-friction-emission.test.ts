@@ -96,6 +96,8 @@ async function readFrictionEvents(root: string): Promise<Array<{ kind: string; r
  */
 async function seedWorkspace(root: string): Promise<void> {
   await fs.mkdir(path.join(root, ".flow", "native-stories"), { recursive: true });
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 }
 
 /** Seed a repo-relative file under `root`. */

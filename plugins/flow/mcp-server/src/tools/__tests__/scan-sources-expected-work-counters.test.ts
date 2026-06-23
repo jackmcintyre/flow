@@ -85,6 +85,9 @@ async function writeFlowConfig(root: string): Promise<void> {
     path.join(configDir, "config.yaml"),
     "adapter: native\nadapter_config: {}\n",
   );
+  // Story native:01KVS2MG — package.json at the workspace root so freshly-scanned
+  // stories' shape-valid `vitest:` targets resolve to a runnable package.
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 }
 
 /** Write a native story file at the expected ULID path. */

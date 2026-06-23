@@ -110,6 +110,15 @@ export type AC = {
  *     source file rather than a recognised runnable test (conventionally named
  *     `.test.ts` / `.spec.ts` or living under a `__tests__/` directory). A
  *     source-file proof is structurally guaranteed to verify nothing.
+ *
+ * Story native:01KVS2MG — vitest-target resolvability check:
+ *   - `unresolvable-test-target`: a shape-valid `vitest:` target has NO
+ *     `package.json` between it and the repo root (e.g. a wrong-prefix
+ *     `mcp-server/tests/x.test.ts` instead of
+ *     `plugins/flow/mcp-server/tests/x.test.ts`). The test FILE need not exist
+ *     yet (the build creates it), but a runnable package must enclose it — this
+ *     is the same upward `findPackageRoot` walk the reviewer uses, so it catches
+ *     wrong-path markers at author/scan time before a build is wasted.
  */
 export type DisciplineViolationReason = {
   code:
@@ -124,7 +133,8 @@ export type DisciplineViolationReason = {
     | "invalid-verification-target"
     | "unresolvable-verification-target"
     | "placeholder-risk"
-    | "non-runnable-test-target";
+    | "non-runnable-test-target"
+    | "unresolvable-test-target";
   field: string;
   detail: string;
 };

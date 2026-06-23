@@ -95,6 +95,9 @@ describe("scan-sources Story 9.1 (AC5) — fresh manifests default ready: false"
     // Story 10.3 — seed the cited source so the Tier-0 T0-5 resolvability check
     // passes at scan (cited paths must resolve on disk).
     await atomicWriteFile(path.join(root, "src", "handler.ts"), "// seeded\n");
+    // Story native:01KVS2MG — package.json at the workspace root so the story's
+    // shape-valid `vitest:` target resolves to a runnable package at scan time.
+    await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 
     // Seed a single source story. No pre-existing manifest → scan composes fresh.
     await atomicWriteFile(path.join(storiesDir, `${STORY_ULID}.md`), makeStoryBody());
@@ -142,6 +145,9 @@ describe("scan-sources Story native:01KT49G9B38NZ2QP16GY843KYK AC3 — idempoten
 
     // Seed the cited source so T0-5 resolvability passes.
     await atomicWriteFile(path.join(workspace, "src", "state", "ledger.ts"), "// seeded\n");
+    // Story native:01KVS2MG — package.json at the workspace root so the story's
+    // shape-valid `vitest:` target resolves to a runnable package.
+    await atomicWriteFile(path.join(workspace, "package.json"), `{ "name": "fixture" }\n`);
 
     // Author a native story — writeNativeStory auto-materialises the manifest.
     const { ref } = await writeNativeStory({

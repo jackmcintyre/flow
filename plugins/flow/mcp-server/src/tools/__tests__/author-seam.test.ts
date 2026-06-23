@@ -141,6 +141,9 @@ beforeEach(async () => {
   // disk. Seed the cited path both candidates reference so the Tier-0 T0-5 check
   // passes. (Their verification targets are vitest:, which is not existence-checked.)
   await atomicWriteFile(path.join(root, "src", "state", "ledger.ts"), "// seeded\n");
+  // Story native:01KVS2MG — package.json at the workspace root so the
+  // candidates' `vitest:` targets resolve to a package.
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 });
 
 afterEach(async () => {

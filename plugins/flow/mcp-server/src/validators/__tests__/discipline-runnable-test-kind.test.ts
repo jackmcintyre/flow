@@ -77,6 +77,10 @@ beforeEach(async () => {
   );
   // Seed the cited source so the cited-source check never false-fires.
   await seedFile("src/validators/discipline-resolvability.ts");
+  // Seed a package.json at the repo root so the vitest-target resolvability
+  // check (Story native:01KVS2MG) resolves a package for default targets like
+  // `src/validators/__tests__/foo.test.ts` (findPackageRoot walks up to here).
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 });
 
 afterEach(async () => {
@@ -386,6 +390,31 @@ describe("back-compat — artifact: proof is unaffected by the runnable-test-kin
     expect(kindViolations).toHaveLength(0);
   });
 
+  it("does not emit unresolvable-test-target for a BMad story (non-enriched, gated by isEnrichedStory)", async () => {
+    // A BMad story whose vitest: target would NOT resolve to a package must still
+    // be skipped entirely — resolveDisciplinePaths returns [] for non-enriched.
+    const bmadStory: SourceStory = {
+      ref: "bmad:2.7",
+      title: "BMad story with wrong-prefix vitest target",
+      narrative: "As a user, I want things.",
+      acceptance_criteria: [
+        {
+          text: "Given X When Y Then Z.",
+          kind: "integration",
+          // wrong-prefix target with no package above it — would fire for native.
+          verification: { type: "vitest", target: "mcp-server/tests/x.test.ts" },
+        },
+      ],
+      depends_on: [],
+      raw_path: "/fake/bmad.md",
+      raw_frontmatter: {},
+      source_hash: "c".repeat(64),
+    };
+
+    const violations = await resolveDisciplinePaths(bmadStory, root);
+    expect(violations).toHaveLength(0);
+  });
+
   it("does not emit non-runnable-test-target for a BMad story (non-enriched, gated by isEnrichedStory)", async () => {
     // BMad stories are non-enriched (bmad: ref). resolveDisciplinePaths returns
     // [] immediately for non-enriched stories — no new check fires.
@@ -410,5 +439,132 @@ describe("back-compat — artifact: proof is unaffected by the runnable-test-kin
     const violations = await resolveDisciplinePaths(bmadStory, root);
     // BMad stories are gated out entirely by isEnrichedStory.
     expect(violations).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVS2MG — vitest-target resolvability check
+//
+// A shape-valid `vitest:` target is additionally required to resolve to a
+// runnable PACKAGE: a package.json must exist between the target path and the
+// repo root (the same `findPackageRoot` walk the reviewer uses). The test FILE
+// itself need NOT pre-exist (the build creates it) — only the package above it.
+// These tests use a separate scratch tree per case so we control exactly where
+// (if anywhere) a package.json sits above the target.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVS2MG — vitest target must resolve to a runnable package", () => {
+  let repoRoot: string;
+
+  beforeEach(async () => {
+    const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "flow-resolvable-test-target-"));
+    repoRoot = path.join(scratch, "repo");
+    // Mirror the real monorepo layout: the package lives under
+    // plugins/flow/mcp-server, NOT directly at the repo root. So the repo root
+    // itself has NO package.json — a wrong-prefix target that lands directly
+    // under the root cannot resolve a package.
+    await fs.mkdir(path.join(repoRoot, "plugins", "flow", "mcp-server", "src"), {
+      recursive: true,
+    });
+    await atomicWriteFile(
+      path.join(repoRoot, "plugins", "flow", "mcp-server", "package.json"),
+      `{ "name": "@flow/mcp-server" }\n`,
+    );
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(repoRoot), { recursive: true, force: true });
+  });
+
+  /** Build a native story with a single vitest: AC, citing a seeded source. */
+  async function makeResolvabilityStory(target: string): Promise<SourceStory> {
+    // Seed a cited source under the real package so the cited-source check passes.
+    const citedRel = "plugins/flow/mcp-server/src/feature.ts";
+    await atomicWriteFile(path.join(repoRoot, citedRel), "// seeded\n");
+    return {
+      ref: "native:RESOLVABLETEST000000000001",
+      title: "Resolvability test story",
+      narrative: "As an operator, I want the check to gate wrong-path targets.",
+      acceptance_criteria: [
+        {
+          text: "Given a vitest target When the story is saved Then resolvability is checked.",
+          kind: "integration",
+          verification: { type: "vitest", target },
+        },
+      ],
+      tasks: [{ text: "Implement", ac_refs: ["AC1"] }],
+      cited_sources: [citedRel],
+      depends_on: [],
+      raw_path: "/fake/story.md",
+      raw_frontmatter: {},
+      source_hash: "d".repeat(64),
+    };
+  }
+
+  // AC1 — a wrong-prefix target with NO package.json between it and the repo
+  // root is refused with an `unresolvable-test-target` violation naming the
+  // offending target, and nothing else fires (no build wasted).
+  it("AC1: refuses a wrong-prefix vitest target that resolves to no package", async () => {
+    // Wrong prefix: 'mcp-server/...' instead of 'plugins/flow/mcp-server/...'.
+    // No package.json exists at repoRoot/mcp-server or above (up to repoRoot).
+    const wrongPrefix = "mcp-server/tests/x.test.ts";
+    const story = await makeResolvabilityStory(wrongPrefix);
+
+    const violations = await resolveDisciplinePaths(story, repoRoot);
+
+    const unresolvable = violations.filter((v) => v.code === "unresolvable-test-target");
+    expect(unresolvable).toHaveLength(1);
+    // Names the offending target.
+    expect(unresolvable[0]!.detail).toContain(wrongPrefix);
+    // Names the AC.
+    expect(unresolvable[0]!.detail).toMatch(/AC1/);
+    // The shape check is NOT what fired — the path IS a runnable-test shape.
+    expect(violations.some((v) => v.code === "non-runnable-test-target")).toBe(false);
+  });
+
+  it("AC1: the violation array is non-empty so the save/scan gate refuses before any build", async () => {
+    const story = await makeResolvabilityStory("mcp-server/tests/y.test.ts");
+    const violations = await resolveDisciplinePaths(story, repoRoot);
+    // A non-empty array is the signal the write gate and scan path both check
+    // before materialising the manifest.
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.some((v) => v.code === "unresolvable-test-target")).toBe(true);
+  });
+
+  // AC2 — a NOT-YET-EXISTING test file under a real package PASSES. The check
+  // verifies a package resolves, not that the test file already exists.
+  it("AC2: passes a not-yet-existing test file under a real package", async () => {
+    // This .test.ts does not exist on disk, but plugins/flow/mcp-server has a
+    // package.json that resolves above it.
+    const target = "plugins/flow/mcp-server/src/__tests__/not-yet-created.test.ts";
+    const story = await makeResolvabilityStory(target);
+
+    // Sanity: the test file genuinely does not exist yet.
+    await expect(
+      fs.stat(path.join(repoRoot, target)),
+    ).rejects.toBeTruthy();
+
+    const violations = await resolveDisciplinePaths(story, repoRoot);
+    expect(violations.filter((v) => v.code === "unresolvable-test-target")).toHaveLength(0);
+    // And it does not trip any other discipline check either.
+    expect(violations).toHaveLength(0);
+  });
+
+  // AC3 — a shape-invalid target (not under __tests__/, not ending .test/.spec)
+  // still fails with the EXISTING non-runnable-test-target violation, NOT the
+  // new resolvability one (no regression to the shape check; no double-report).
+  it("AC3: a shape-invalid target still fails non-runnable-test-target, not unresolvable-test-target", async () => {
+    // Ordinary source file under the real package — shape-invalid as a test.
+    const sourceFile = "plugins/flow/mcp-server/src/feature.ts";
+    const story = await makeResolvabilityStory(sourceFile);
+
+    const violations = await resolveDisciplinePaths(story, repoRoot);
+
+    const shape = violations.filter((v) => v.code === "non-runnable-test-target");
+    expect(shape).toHaveLength(1);
+    expect(shape[0]!.detail).toContain(sourceFile);
+    // The resolvability check must NOT also fire — the shape error is the single
+    // actionable signal for a malformed/source-file target.
+    expect(violations.some((v) => v.code === "unresolvable-test-target")).toBe(false);
   });
 });

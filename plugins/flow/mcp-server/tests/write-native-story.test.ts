@@ -65,6 +65,8 @@ beforeEach(async () => {
   );
   // Create the native-stories directory so detect() returns true.
   await fs.mkdir(path.join(scratch, ".flow", "native-stories"), { recursive: true });
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(scratch, "package.json"), `{ "name": "fixture" }\n`);
   // Story 10.3 — writeNativeStory now resolves cited_sources on disk. Seed every
   // cited path the tests below reference so those writes are not (correctly)
   // rejected. All verification targets in this file are `vitest:` (not
