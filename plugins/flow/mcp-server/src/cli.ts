@@ -82,6 +82,7 @@ import { readCatalogue } from "./tools/read-catalogue.js";
 import { summariseRetroProposal } from "./tools/summarise-retro-proposal.js";
 import { analyzeTeamFit } from "./tools/analyze-team-fit.js";
 import { unhirePersona } from "./tools/unhire-persona.js";
+import { refreshPersona } from "./tools/refresh-persona.js";
 import { matchStorySpecialist } from "./tools/match-story-specialist.js";
 import { recordSpecialistEngagement } from "./tools/record-specialist-engagement.js";
 
@@ -287,6 +288,12 @@ const TOOLS: Record<string, ToolFn> = {
   // (uses the bipartite matcher — not a head-count). Idempotent on already-archived.
   //   node dist/cli.js unhirePersona --json '{"targetRepoRoot":"...","role":"<role>"}'
   unhirePersona,
+  // Story native:01KVS0YFNNFWFDP2EJT10FMV08 — refreshPersona: re-materialise an
+  // existing hired persona from the current catalogue, preserving its hired_at
+  // timestamp and accrued ## Knowledge section. Works even at the minimum roster
+  // (no unhire needed). Throws PersonaFileNotFoundError when the role is not hired.
+  //   node dist/cli.js refreshPersona --json '{"targetRepoRoot":"...","role":"<role>"}'
+  refreshPersona,
   // Story native:01KVPSZ14HH48J9NEH7N6S6QDR — matchStorySpecialist: derive the
   // specialist to auto-engage for a story from its cited-source paths matched against
   // hired specialists' declared capabilities.path_patterns. Returns { role, domain }

@@ -646,7 +646,9 @@ describe("AC4(g): tool count and required tools present", () => {
       // Story native:01KVPSZ14HH48J9NEH7N6S6QDR added matchStorySpecialist + recordSpecialistEngagement (specialist auto-engage). 63 → 65.
       expect(toolNames).toContain("matchStorySpecialist");
       expect(toolNames).toContain("recordSpecialistEngagement");
-      expect(toolNames.length).toBe(65);
+      // Story native:01KVS0YFNNFWFDP2EJT10FMV08 added refreshPersona (refresh stale persona from catalogue). 65 → 66.
+      expect(toolNames).toContain("refreshPersona");
+      expect(toolNames.length).toBe(66);
     } finally {
       await client.close();
       await server.close();

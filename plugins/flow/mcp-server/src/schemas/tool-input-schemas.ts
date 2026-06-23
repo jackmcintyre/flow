@@ -445,6 +445,15 @@ export const readPersonaInputSchema: ToolInputSchema = {
   required: ["targetRepoRoot", "role"],
 };
 
+export const refreshPersonaInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    targetRepoRoot: { type: "string" },
+    role: { type: "string" },
+  },
+  required: ["targetRepoRoot", "role"],
+};
+
 export const readRepoSignalsInputSchema: ToolInputSchema = {
   type: "object",
   properties: {
@@ -936,6 +945,7 @@ export const TOOL_INPUT_SCHEMAS: Record<string, ToolInputSchema> = {
   readCatalogue: readCatalogueInputSchema,
   readCustomRole: readCustomRoleInputSchema,
   readPersona: readPersonaInputSchema,
+  refreshPersona: refreshPersonaInputSchema,
   readRepoSignals: readRepoSignalsInputSchema,
   reattachOrphan: reattachOrphanInputSchema,
   recallLesson: recallLessonInputSchema,

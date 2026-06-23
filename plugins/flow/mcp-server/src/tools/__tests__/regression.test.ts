@@ -180,6 +180,10 @@ const BASELINE: Record<string, Baseline> = {
     required: ["targetRepoRoot", "role"],
     properties: ["targetRepoRoot", "role"],
   },
+  refreshPersona: {
+    required: ["targetRepoRoot", "role"],
+    properties: ["targetRepoRoot", "role"],
+  },
   readRepoSignals: {
     required: ["targetRepoRoot"],
     properties: ["targetRepoRoot"],
