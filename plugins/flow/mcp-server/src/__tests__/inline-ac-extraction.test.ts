@@ -106,6 +106,17 @@ async function setupRepo(): Promise<TestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+  // Flow-shaped build home (Story native:01KVTB3Z) so the structural toolchain
+  // resolver lands on plugins/flow + pnpm. NO `knip` script here, so the bloat
+  // gate is SKIPPED (knipCmd null) — this fixture's stub only handles build/test.
+  const flowDir = path.join(repoRoot, "plugins", "flow");
+  await fs.mkdir(flowDir, { recursive: true });
+  await atomicWriteFile(
+    path.join(flowDir, "package.json"),
+    JSON.stringify({ name: "flow", private: true, scripts: { build: "pnpm -r build", test: "pnpm -r test" } }, null, 2),
+  );
+  await atomicWriteFile(path.join(flowDir, "pnpm-workspace.yaml"), "packages:\n  - mcp-server\n");
+  await atomicWriteFile(path.join(flowDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
 

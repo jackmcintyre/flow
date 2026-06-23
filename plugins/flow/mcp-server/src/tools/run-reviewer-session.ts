@@ -33,6 +33,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { execa as defaultExeca } from "execa";
 // `findPackageRoot` now lives in `../lib/find-package-root.js` (extracted in
 // Story native:01KVS2MG) so the review-time vitest check and the author/scan-time
@@ -41,6 +42,7 @@ import { execa as defaultExeca } from "execa";
 // by name from this module.
 import { findPackageRoot } from "../lib/find-package-root.js";
 export { findPackageRoot };
+import { resolveProjectToolchain } from "../lib/resolve-project-toolchain.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { lookupStandards } from "../state/lookup-standards.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
@@ -299,6 +301,49 @@ export function countExecutedTests(output: string): number {
   return (passed ? Number(passed[1]) : 0) + (failed ? Number(failed[1]) : 0);
 }
 
+/**
+ * Resolve how to invoke `vitest` for a resolved package root, aligned to the
+ * target repo's toolchain (Story native:01KVTB3Z).
+ *
+ *  1. If `<packageRoot>/node_modules/.bin/vitest` exists, invoke it DIRECTLY —
+ *     the command is the binary path and the only prefix is the bin itself. This
+ *     works irrespective of the package manager and avoids assuming a manager is
+ *     even installed.
+ *  2. Otherwise resolve the package manager structurally (via the SAME resolver
+ *     the dev pre-PR gate uses) at the package root and emit `<pm> vitest` — so a
+ *     pnpm repo runs `pnpm vitest`, an npm repo runs `npm exec vitest`, etc. The
+ *     returned `args` already include the `vitest` token; the caller appends the
+ *     run-mode arguments.
+ *
+ * Returns `{ command, args }` where `args` is the prefix BEFORE the `--run …`
+ * arguments (so the full argv is `[command, ...args, ...runArgs]`).
+ */
+export function resolveVitestInvocation(packageRoot: string): {
+  command: string;
+  args: string[];
+} {
+  const localBin = path.join(packageRoot, "node_modules", ".bin", "vitest");
+  if (existsSync(localBin)) {
+    return { command: localBin, args: [] };
+  }
+  // No local binary — derive the package manager structurally at the package root
+  // and run vitest through it. The resolver's package-manager detection (lockfile
+  // → pnpm/npm/yarn/bun, default npm) is the single source of truth shared with
+  // the dev pre-PR gate.
+  const pm = resolveProjectToolchain({ targetRepoRoot: packageRoot }).packageManager;
+  switch (pm) {
+    case "npm":
+      return { command: "npm", args: ["exec", "vitest"] };
+    case "yarn":
+      return { command: "yarn", args: ["vitest"] };
+    case "bun":
+      return { command: "bun", args: ["x", "vitest"] };
+    case "pnpm":
+    default:
+      return { command: "pnpm", args: ["vitest"] };
+  }
+}
+
 export async function runVitestCheck(
   index: number,
   tag: string | null,
@@ -350,11 +395,25 @@ export async function runVitestCheck(
     !relativeToPackage.startsWith("..") &&
     relativeToPackage !== testFilePath; // ensure it resolved relative to pkgRoot
 
-  const vitestArgs = looksLikeFilePath
-    ? ["vitest", "--run", relativeToPackage]
-    : ["vitest", "--run", "-t", testNameFilter];
+  const vitestRunArgs = looksLikeFilePath
+    ? ["--run", relativeToPackage]
+    : ["--run", "-t", testNameFilter];
 
-  const result = await execaImpl("pnpm", vitestArgs, {
+  // Story native:01KVTB3Z — align the vitest invocation to the RESOLVED toolchain
+  // rather than hardcoding `pnpm vitest`. Resolution order:
+  //   1. A locally-installed vitest binary at `<packageRoot>/node_modules/.bin/
+  //      vitest` is invoked DIRECTLY (works regardless of the package manager).
+  //   2. Otherwise the resolved package manager's exec command runs `vitest`
+  //      (pnpm exec / npm exec / yarn exec / bun x) — so an external repo on npm
+  //      runs its own vitest rather than a pnpm that may not exist.
+  // The dev pre-PR gate and this reviewer runner share `resolveProjectToolchain`,
+  // so they agree on the package manager for any target repo.
+  const { command: vitestCommand, args: vitestPrefixArgs } = resolveVitestInvocation(
+    pkgRoot.packageRoot,
+  );
+  const vitestArgs = [...vitestPrefixArgs, ...vitestRunArgs];
+
+  const result = await execaImpl(vitestCommand, vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,

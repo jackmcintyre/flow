@@ -9208,12 +9208,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve20, reject) {
+        return new Promise(function(resolve21, reject) {
           isexe(path86, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve20(is);
+              resolve21(is);
             }
           });
         });
@@ -9279,27 +9279,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve20, reject) => {
+      const step = (i2) => new Promise((resolve21, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve20(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve21(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path86.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve20(subStep(p, i2, 0));
+        resolve21(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve20, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve21, reject) => {
         if (ii === pathExt.length)
-          return resolve20(step(i2 + 1));
+          return resolve21(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve20(p + ext);
+              return resolve21(p + ext);
           }
-          return resolve20(subStep(p, i2, ii + 1));
+          return resolve21(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -9634,6 +9634,19 @@ var InvalidWorkspaceConfigError = class extends DomainError {
     this.yamlPath = opts.yamlPath;
     this.zodMessage = opts.zodMessage;
     this.schemaModule = opts.schemaModule;
+  }
+};
+var ToolchainConfigError = class extends DomainError {
+  configPath;
+  yamlPath;
+  detail;
+  constructor(opts) {
+    super(
+      `${opts.configPath} has an invalid 'build:' block at '${opts.yamlPath}': ${opts.detail}. Fix the build override (or remove it to fall back to structural toolchain detection). Recognised packageManager values: pnpm | npm | yarn | bun. See mcp-server/src/lib/resolve-project-toolchain.ts.`
+    );
+    this.configPath = opts.configPath;
+    this.yamlPath = opts.yamlPath;
+    this.detail = opts.detail;
   }
 };
 var NoAdapterMatchedError = class extends DomainError {
@@ -34251,8 +34264,8 @@ var disconnect = (anyProcess) => {
 // ../node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve20, reject) => {
-    Object.assign(methods, { resolve: resolve20, reject });
+  const promise2 = new Promise((resolve21, reject) => {
+    Object.assign(methods, { resolve: resolve21, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -38894,11 +38907,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve20 = promise2.resolve.bind(promise2);
-  return { resolve: resolve20, promises };
+  const resolve21 = promise2.resolve.bind(promise2);
+  return { resolve: resolve21, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve20, promises }, subprocess) => {
-  resolve20();
+var waitForConcurrentStreams = async ({ resolve: resolve21, promises }, subprocess) => {
+  resolve21();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -39529,7 +39542,7 @@ function gitLockBackoffMs(attempt, random = Math.random) {
   return Math.floor(random() * window2);
 }
 function defaultGitLockSleep(ms) {
-  return new Promise((resolve20) => setTimeout(resolve20, ms));
+  return new Promise((resolve21) => setTimeout(resolve21, ms));
 }
 function isGitLockContention(value) {
   const stderr = typeof value === "string" ? value : String(
@@ -41649,62 +41662,324 @@ async function loadRolePermissions(opts) {
   return { ...result.data, sourcePath: specPath };
 }
 
-// src/lib/run-project-build.ts
+// src/lib/resolve-project-toolchain.ts
+var import_yaml23 = __toESM(require_dist(), 1);
 import * as path50 from "node:path";
+import {
+  existsSync as existsSync3,
+  readFileSync as readFileSync5,
+  readdirSync as readdirSync3
+} from "node:fs";
+var PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"];
+var LOCKFILE_TO_PACKAGE_MANAGER = [
+  ["pnpm-lock.yaml", "pnpm"],
+  ["package-lock.json", "npm"],
+  ["yarn.lock", "yarn"],
+  ["bun.lockb", "bun"]
+];
+var KNIP_CONFIG_FILENAMES = [
+  "knip.json",
+  "knip.jsonc",
+  "knip.ts",
+  "knip.js",
+  "knip.config.ts",
+  "knip.config.js"
+];
+var BuildConfigSchema = external_exports.object({
+  packageManager: external_exports.enum(PACKAGE_MANAGERS).optional(),
+  cwd: external_exports.string().min(1).optional(),
+  buildCmd: external_exports.string().min(1).optional(),
+  testCmd: external_exports.string().min(1).optional(),
+  knipCmd: external_exports.string().min(1).optional()
+}).strict();
+function readPackageJson(dir) {
+  try {
+    const raw = readFileSync5(path50.join(dir, "package.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function hasScript(dir, script) {
+  const pkg = readPackageJson(dir);
+  const value = pkg?.scripts?.[script];
+  return typeof value === "string" && value.trim().length > 0;
+}
+function scriptInvocation(pm2, script) {
+  switch (pm2) {
+    case "npm":
+      return ["npm", "run", script];
+    case "bun":
+      return ["bun", "run", script];
+    case "pnpm":
+      return ["pnpm", script];
+    case "yarn":
+      return ["yarn", script];
+  }
+}
+function splitCommand(cmd) {
+  return cmd.trim().split(/\s+/);
+}
+function detectPackageManagerAt(cwd) {
+  for (const [lockfile, pm2] of LOCKFILE_TO_PACKAGE_MANAGER) {
+    if (existsSync3(path50.join(cwd, lockfile))) {
+      return { pm: pm2, assumed: false };
+    }
+  }
+  return { pm: "npm", assumed: true };
+}
+function hasKnipConfig(cwd) {
+  return KNIP_CONFIG_FILENAMES.some((name) => existsSync3(path50.join(cwd, name)));
+}
+function findWorkspaceMemberWithBuild(workspaceDir) {
+  let packages;
+  try {
+    const raw = readFileSync5(path50.join(workspaceDir, "pnpm-workspace.yaml"), "utf8");
+    const parsed = (0, import_yaml23.parse)(raw);
+    packages = parsed?.packages;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(packages)) return null;
+  const candidates = [];
+  for (const pattern of packages) {
+    if (typeof pattern !== "string") continue;
+    const segments = pattern.split("/");
+    const globIdx = segments.findIndex((s) => s === "*" || s === "**");
+    if (globIdx === -1) {
+      candidates.push(path50.join(workspaceDir, pattern));
+    } else if (segments[globIdx] === "*") {
+      const parentDir = path50.join(workspaceDir, ...segments.slice(0, globIdx));
+      try {
+        for (const entry of readdirSync3(parentDir, { withFileTypes: true })) {
+          if (entry.isDirectory()) candidates.push(path50.join(parentDir, entry.name));
+        }
+      } catch {
+      }
+    }
+  }
+  for (const member of candidates) {
+    if (hasScript(member, "build")) return member;
+  }
+  return null;
+}
+function findNearestPackageWithBuild(root, maxDepth) {
+  let frontier = [root];
+  for (let depth = 0; depth <= maxDepth; depth++) {
+    const next = [];
+    for (const dir of frontier) {
+      if (hasScript(dir, "build")) return dir;
+      let entries;
+      try {
+        entries = readdirSync3(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const name = entry.name;
+        if (name === "node_modules" || name === ".git") continue;
+        next.push(path50.join(dir, name));
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+function findWorkspaceYamlDir(root, maxDepth) {
+  let frontier = [root];
+  for (let depth = 0; depth <= maxDepth; depth++) {
+    const next = [];
+    for (const dir of frontier) {
+      if (existsSync3(path50.join(dir, "pnpm-workspace.yaml"))) return dir;
+      let entries;
+      try {
+        entries = readdirSync3(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const name = entry.name;
+        if (name === "node_modules" || name === ".git") continue;
+        next.push(path50.join(dir, name));
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+var STRUCTURAL_SEARCH_MAX_DEPTH = 4;
+function loadBuildConfigBlock(targetRepoRoot) {
+  const configPath = path50.join(targetRepoRoot, ".flow", "config.yaml");
+  try {
+    const raw = readFileSync5(configPath, "utf8");
+    const parsed = (0, import_yaml23.parse)(raw);
+    if (parsed && typeof parsed === "object" && "build" in parsed) {
+      return parsed.build;
+    }
+  } catch {
+  }
+  return void 0;
+}
+function resolveProjectToolchain(opts) {
+  const targetRepoRoot = path50.resolve(opts.targetRepoRoot);
+  const configPath = path50.join(targetRepoRoot, ".flow", "config.yaml");
+  const rawBuildBlock = opts.buildConfigOverride !== void 0 ? opts.buildConfigOverride : loadBuildConfigBlock(targetRepoRoot);
+  if (rawBuildBlock !== void 0 && rawBuildBlock !== null) {
+    const parsed = BuildConfigSchema.safeParse(rawBuildBlock);
+    if (!parsed.success) {
+      const issue2 = parsed.error.issues[0];
+      throw new ToolchainConfigError({
+        configPath,
+        yamlPath: issue2.path.length === 0 ? "build" : `build.${issue2.path.join(".")}`,
+        detail: issue2.message
+      });
+    }
+    const cfg = parsed.data;
+    const structural2 = detectStructuralBuildHome(targetRepoRoot);
+    const cwd2 = cfg.cwd ? path50.resolve(targetRepoRoot, cfg.cwd) : structural2.cwd;
+    const pmDetection = detectPackageManagerAt(cwd2);
+    const pm3 = cfg.packageManager ?? pmDetection.pm;
+    const pmAssumed = cfg.packageManager ? false : pmDetection.assumed;
+    const buildCmd2 = cfg.buildCmd ? splitCommand(cfg.buildCmd) : scriptInvocation(pm3, "build");
+    const testCmd2 = cfg.testCmd ? splitCommand(cfg.testCmd) : scriptInvocation(pm3, "test");
+    let knipCmd2;
+    if (cfg.knipCmd) {
+      knipCmd2 = splitCommand(cfg.knipCmd);
+    } else {
+      knipCmd2 = resolveKnipCmd(cwd2, pm3);
+    }
+    return { packageManager: pm3, cwd: cwd2, buildCmd: buildCmd2, testCmd: testCmd2, knipCmd: knipCmd2, pmAssumed, source: "config" };
+  }
+  const structural = detectStructuralBuildHome(targetRepoRoot);
+  const cwd = structural.cwd;
+  const { pm: pm2, assumed } = detectPackageManagerAt(cwd);
+  const buildCmd = scriptInvocation(pm2, "build");
+  const testCmd = scriptInvocation(pm2, "test");
+  const knipCmd = resolveKnipCmd(cwd, pm2);
+  return {
+    packageManager: pm2,
+    cwd,
+    buildCmd,
+    testCmd,
+    knipCmd,
+    pmAssumed: assumed,
+    source: structural.source
+  };
+}
+function detectStructuralBuildHome(targetRepoRoot) {
+  const workspaceDir = findWorkspaceYamlDir(targetRepoRoot, STRUCTURAL_SEARCH_MAX_DEPTH);
+  if (workspaceDir !== null) {
+    const member = findWorkspaceMemberWithBuild(workspaceDir);
+    if (member !== null) {
+      if (hasScript(workspaceDir, "build")) {
+        return { cwd: workspaceDir, source: "workspace" };
+      }
+      return { cwd: member, source: "workspace" };
+    }
+    if (hasScript(workspaceDir, "build")) {
+      return { cwd: workspaceDir, source: "workspace" };
+    }
+  }
+  const pkgDir = findNearestPackageWithBuild(targetRepoRoot, STRUCTURAL_SEARCH_MAX_DEPTH);
+  if (pkgDir !== null) {
+    return { cwd: pkgDir, source: "package" };
+  }
+  return { cwd: targetRepoRoot, source: "repo-root" };
+}
+function resolveKnipCmd(cwd, pm2) {
+  if (hasScript(cwd, "knip")) {
+    return scriptInvocation(pm2, "knip");
+  }
+  if (hasKnipConfig(cwd)) {
+    switch (pm2) {
+      case "pnpm":
+        return ["pnpm", "knip", "--no-progress"];
+      case "yarn":
+        return ["yarn", "knip", "--no-progress"];
+      case "bun":
+        return ["bun", "run", "knip", "--no-progress"];
+      case "npm":
+        return ["npx", "knip", "--no-progress"];
+    }
+  }
+  return null;
+}
+
+// src/lib/run-project-build.ts
 var DEFAULT_BUILD_TEST_TIMEOUT_MS = 20 * 60 * 1e3;
-var PROJECT_BUILD_COMMAND = "pnpm";
-var PROJECT_BUILD_ARGS = ["build"];
-function deriveProjectBuildCwd(devWorkingDir) {
-  return path50.join(devWorkingDir, "plugins", "flow");
+function resolveBuildToolchain(devWorkingDir) {
+  return resolveProjectToolchain({ targetRepoRoot: devWorkingDir });
+}
+function normaliseTimedOutExit(result) {
+  const timedOut = "timedOut" in result && typeof result.timedOut === "boolean" ? result.timedOut : false;
+  const rawExit = typeof result.exitCode === "number" ? result.exitCode : 1;
+  const exitCode = timedOut ? rawExit !== 0 ? rawExit : 1 : rawExit;
+  return { exitCode, timedOut };
 }
 async function runProjectBuild(opts) {
   const execaImpl = opts.execaImpl ?? execa;
-  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const toolchain = resolveBuildToolchain(opts.devWorkingDir);
+  const cwd = toolchain.cwd;
+  const [command, ...args] = toolchain.buildCmd;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
-  const result = await execaImpl(PROJECT_BUILD_COMMAND, [...PROJECT_BUILD_ARGS], {
+  const result = await execaImpl(command, args, {
     cwd,
     reject: false,
     ...timeoutMs > 0 ? { timeout: timeoutMs } : {}
   });
-  const timedOut = "timedOut" in result && typeof result.timedOut === "boolean" ? result.timedOut : false;
+  const { exitCode, timedOut } = normaliseTimedOutExit(result);
   return {
-    exitCode: timedOut ? typeof result.exitCode === "number" && result.exitCode !== 0 ? result.exitCode : 1 : typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     cwd,
-    commandLine: `${PROJECT_BUILD_COMMAND} ${PROJECT_BUILD_ARGS.join(" ")}`,
+    commandLine: toolchain.buildCmd.join(" "),
     timedOut,
     timeoutMs
   };
 }
-var PROJECT_TEST_COMMAND = "pnpm";
-var PROJECT_TEST_ARGS = ["test"];
 async function runProjectTests(opts) {
   const execaImpl = opts.execaImpl ?? execa;
-  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
+  const toolchain = resolveBuildToolchain(opts.devWorkingDir);
+  const cwd = toolchain.cwd;
+  const [command, ...args] = toolchain.testCmd;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TEST_TIMEOUT_MS;
-  const result = await execaImpl(PROJECT_TEST_COMMAND, [...PROJECT_TEST_ARGS], {
+  const result = await execaImpl(command, args, {
     cwd,
     reject: false,
     ...timeoutMs > 0 ? { timeout: timeoutMs } : {}
   });
-  const timedOut = "timedOut" in result && typeof result.timedOut === "boolean" ? result.timedOut : false;
+  const { exitCode, timedOut } = normaliseTimedOutExit(result);
   return {
-    exitCode: timedOut ? typeof result.exitCode === "number" && result.exitCode !== 0 ? result.exitCode : 1 : typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     cwd,
-    commandLine: `${PROJECT_TEST_COMMAND} ${PROJECT_TEST_ARGS.join(" ")}`,
+    commandLine: toolchain.testCmd.join(" "),
     timedOut,
     timeoutMs
   };
 }
-var PROJECT_BLOAT_COMMAND = "pnpm";
-var PROJECT_BLOAT_ARGS = ["knip"];
 async function runProjectBloatCheck(opts) {
   const execaImpl = opts.execaImpl ?? execa;
-  const cwd = deriveProjectBuildCwd(opts.devWorkingDir);
-  const result = await execaImpl(PROJECT_BLOAT_COMMAND, [...PROJECT_BLOAT_ARGS], {
+  const toolchain = resolveBuildToolchain(opts.devWorkingDir);
+  const cwd = toolchain.cwd;
+  if (toolchain.knipCmd === null) {
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      cwd,
+      commandLine: "(no dead-code check \u2014 bloat gate skipped)",
+      skipped: true
+    };
+  }
+  const [command, ...args] = toolchain.knipCmd;
+  const result = await execaImpl(command, args, {
     cwd,
     reject: false
   });
@@ -41713,7 +41988,8 @@ async function runProjectBloatCheck(opts) {
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     cwd,
-    commandLine: `${PROJECT_BLOAT_COMMAND} ${PROJECT_BLOAT_ARGS.join(" ")}`
+    commandLine: toolchain.knipCmd.join(" "),
+    skipped: false
   };
 }
 
@@ -41826,7 +42102,7 @@ async function runDevTerminalAction(opts) {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm build exits 0 (no type errors)",
+        expected: `${buildResult.commandLine} exits 0 (no type errors)`,
         observed: buildObserved
       });
       throw new PrePrBuildFailedError({
@@ -41852,7 +42128,7 @@ async function runDevTerminalAction(opts) {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm test exits 0 (no failing tests)",
+        expected: `${testResult.commandLine} exits 0 (no failing tests)`,
         observed: testObserved
       });
       throw new PrePrTestFailedError({
@@ -41876,7 +42152,7 @@ async function runDevTerminalAction(opts) {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm knip exits 0 (no dead code)",
+        expected: `${bloatResult.commandLine} exits 0 (no dead code)`,
         observed: `pre-PR bloat gate failed (exit ${bloatResult.exitCode})`
       });
       throw new PrePrBloatFailedError({
@@ -42027,6 +42303,7 @@ async function runDevTerminalAction(opts) {
 // src/tools/run-reviewer-session.ts
 import * as path53 from "node:path";
 import * as fs37 from "node:fs/promises";
+import { existsSync as existsSync4 } from "node:fs";
 
 // src/lib/slugify-standards-criterion.ts
 function slugifyStandardsCriterion(name) {
@@ -42267,6 +42544,24 @@ function countExecutedTests(output) {
   const failed = /(\d+)\s+failed/.exec(seg);
   return (passed ? Number(passed[1]) : 0) + (failed ? Number(failed[1]) : 0);
 }
+function resolveVitestInvocation(packageRoot) {
+  const localBin = path53.join(packageRoot, "node_modules", ".bin", "vitest");
+  if (existsSync4(localBin)) {
+    return { command: localBin, args: [] };
+  }
+  const pm2 = resolveProjectToolchain({ targetRepoRoot: packageRoot }).packageManager;
+  switch (pm2) {
+    case "npm":
+      return { command: "npm", args: ["exec", "vitest"] };
+    case "yarn":
+      return { command: "yarn", args: ["vitest"] };
+    case "bun":
+      return { command: "bun", args: ["x", "vitest"] };
+    case "pnpm":
+    default:
+      return { command: "pnpm", args: ["vitest"] };
+  }
+}
 async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoot, execaImpl) {
   const testFilePathAbs = path53.resolve(checkRoot, testFilePath);
   const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
@@ -42286,8 +42581,12 @@ async function runVitestCheck(index, tag, testNameFilter, testFilePath, checkRoo
   const testFilePathAbs2 = path53.resolve(checkRoot, testFilePath);
   const relativeToPackage = path53.relative(pkgRoot.packageRoot, testFilePathAbs2);
   const looksLikeFilePath = (testFilePath.includes("/") || testFilePath.includes("\\")) && !relativeToPackage.startsWith("..") && relativeToPackage !== testFilePath;
-  const vitestArgs = looksLikeFilePath ? ["vitest", "--run", relativeToPackage] : ["vitest", "--run", "-t", testNameFilter];
-  const result = await execaImpl("pnpm", vitestArgs, {
+  const vitestRunArgs = looksLikeFilePath ? ["--run", relativeToPackage] : ["--run", "-t", testNameFilter];
+  const { command: vitestCommand, args: vitestPrefixArgs } = resolveVitestInvocation(
+    pkgRoot.packageRoot
+  );
+  const vitestArgs = [...vitestPrefixArgs, ...vitestRunArgs];
+  const result = await execaImpl(vitestCommand, vitestArgs, {
     cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS
@@ -43059,7 +43358,7 @@ async function applyReviewerLabels(opts) {
 // src/tools/run-auto-merge-gate.ts
 import * as path56 from "node:path";
 import { promises as fs39 } from "node:fs";
-var import_yaml23 = __toESM(require_dist(), 1);
+var import_yaml24 = __toESM(require_dist(), 1);
 
 // src/lib/auto-merge-gate.ts
 function decideAutoMerge(input) {
@@ -43274,7 +43573,7 @@ async function loadWorkspaceConfig(targetRepoRoot) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml23.parse)(raw);
+  const parsed = (0, import_yaml24.parse)(raw);
   if (parsed === null || parsed === void 0 || typeof parsed !== "object" || !("plugin" in parsed)) {
     return PluginSettingsSchema.parse({});
   }
@@ -43329,7 +43628,7 @@ async function waitForCiGreen(opts) {
         return { kind: "ci-status-unreadable", reason };
       }
       if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-      await new Promise((resolve20) => setTimeout(resolve20, CI_GATE_POLL_INTERVAL_MS));
+      await new Promise((resolve21) => setTimeout(resolve21, CI_GATE_POLL_INTERVAL_MS));
       continue;
     }
     let rollup = [];
@@ -43346,7 +43645,7 @@ async function waitForCiGreen(opts) {
     if (state === "green") return "green";
     if (state === "failed") return "failed";
     if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
-    await new Promise((resolve20) => setTimeout(resolve20, CI_GATE_POLL_INTERVAL_MS));
+    await new Promise((resolve21) => setTimeout(resolve21, CI_GATE_POLL_INTERVAL_MS));
   }
 }
 async function runAutoMergeGate(opts) {
@@ -43560,7 +43859,7 @@ async function runAutoMergeGate(opts) {
 }
 
 // src/tools/complete-story.ts
-var import_yaml24 = __toESM(require_dist(), 1);
+var import_yaml25 = __toESM(require_dist(), 1);
 import { promises as fs40 } from "node:fs";
 import * as path57 from "node:path";
 function stripUndefined3(obj) {
@@ -43588,7 +43887,7 @@ async function completeStory(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml24.parse)(rawText);
+  const parsed = (0, import_yaml25.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: absInProgressPath });
   if (manifest.claimed_by !== sessionUlid) {
     throw new WrongClaimantError({
@@ -43612,7 +43911,7 @@ async function completeStory(opts) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absDonePath
   });
-  const yamlText = (0, import_yaml24.stringify)(
+  const yamlText = (0, import_yaml25.stringify)(
     stripUndefined3(reparsed),
     { lineWidth: 0 }
   );
@@ -43987,7 +44286,7 @@ async function processReviewerYield(opts) {
 }
 
 // src/tools/scan-orphaned-in-progress.ts
-var import_yaml25 = __toESM(require_dist(), 1);
+var import_yaml26 = __toESM(require_dist(), 1);
 import { promises as fs44 } from "node:fs";
 import * as path61 from "node:path";
 async function scanOrphanedInProgress(opts) {
@@ -44018,7 +44317,7 @@ async function scanOrphanedInProgress(opts) {
       }
       throw err;
     }
-    const parsed = (0, import_yaml25.parse)(raw);
+    const parsed = (0, import_yaml26.parse)(raw);
     const manifest = parseExecutionManifest(parsed, { absPath });
     if (!manifest.claimed_by) {
       continue;
@@ -44279,12 +44578,12 @@ async function reapStaleWorktrees(opts) {
 }
 
 // src/tools/mark-story-ready.ts
-var import_yaml27 = __toESM(require_dist(), 1);
+var import_yaml28 = __toESM(require_dist(), 1);
 import { promises as fs46 } from "node:fs";
 import * as path65 from "node:path";
 
 // src/tools/mark-withdrawn.ts
-var import_yaml26 = __toESM(require_dist(), 1);
+var import_yaml27 = __toESM(require_dist(), 1);
 var MarkWithdrawnInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -44295,7 +44594,7 @@ function stripUndefined4(obj) {
   );
 }
 function serialiseManifest(manifest) {
-  return (0, import_yaml26.stringify)(
+  return (0, import_yaml27.stringify)(
     stripUndefined4(manifest),
     { lineWidth: 0 }
   );
@@ -44338,7 +44637,7 @@ async function markStoryReady(rawInput) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "not-in-to-do" });
   }
   const rawText = await fs46.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml27.parse)(rawText);
+  const parsed = (0, import_yaml28.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleBacklogItemError({ ref, foundState, reason: "withdrawn" });
@@ -44734,7 +45033,7 @@ async function dismissMaintainerFeedback(opts) {
 }
 
 // src/tools/resolve-lens-roles.ts
-var import_yaml28 = __toESM(require_dist(), 1);
+var import_yaml29 = __toESM(require_dist(), 1);
 import { promises as fs50 } from "node:fs";
 import * as path70 from "node:path";
 async function resolveLensRoles(opts) {
@@ -44798,7 +45097,7 @@ async function readRoleCapabilities(teamDir, roleId) {
   const frontmatterRaw = normalised.slice(4, closeIdx);
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml28.parse)(frontmatterRaw);
+    parsedYaml = (0, import_yaml29.parse)(frontmatterRaw);
   } catch {
     return { id: roleId, reviewLenses: void 0 };
   }
@@ -44821,7 +45120,7 @@ function isEnoent12(err) {
 }
 
 // src/tools/resolve-run-slot.ts
-var import_yaml29 = __toESM(require_dist(), 1);
+var import_yaml30 = __toESM(require_dist(), 1);
 import { promises as fs51 } from "node:fs";
 import * as path71 from "node:path";
 var RUN_JOB_GENERALISTS = {
@@ -44896,7 +45195,7 @@ async function readRunJobs(teamDir, roleId) {
   const frontmatterRaw = normalised.slice(4, closeIdx);
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml29.parse)(frontmatterRaw);
+    parsedYaml = (0, import_yaml30.parse)(frontmatterRaw);
   } catch {
     return void 0;
   }
@@ -44954,7 +45253,7 @@ async function readReviewerLesson(opts) {
 }
 
 // src/tools/record-story-retro.ts
-var import_yaml30 = __toESM(require_dist(), 1);
+var import_yaml31 = __toESM(require_dist(), 1);
 import { promises as fs52 } from "node:fs";
 import * as path72 from "node:path";
 var NON_DONE_STATES = ["in-progress", "to-do", "blocked"];
@@ -45009,7 +45308,7 @@ async function recordStoryRetro(opts) {
     duration_seconds: retro.duration_seconds
   };
   const reparsed = parseExecutionManifest(merged, { absPath: absDonePath });
-  const yamlText = (0, import_yaml30.stringify)(
+  const yamlText = (0, import_yaml31.stringify)(
     stripUndefined5(reparsed),
     { lineWidth: 0 }
   );
@@ -45100,7 +45399,7 @@ async function readDevLesson(opts) {
 // src/tools/recall-lesson.ts
 import * as path75 from "node:path";
 import { promises as fs55 } from "node:fs";
-var import_yaml31 = __toESM(require_dist(), 1);
+var import_yaml32 = __toESM(require_dist(), 1);
 var _LESSON_BLOCK_PREFIX = LESSON_BLOCK_PREFIX;
 var _LESSON_BLOCK_SUFFIX = LESSON_BLOCK_SUFFIX;
 var TOOL_NAME2 = "recallLesson";
@@ -45252,7 +45551,7 @@ function reconstructPersonaFile(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml31.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml32.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -45347,7 +45646,7 @@ function resolveJudgePlan(opts) {
 }
 
 // src/tools/resolve-build-plan.ts
-var import_yaml32 = __toESM(require_dist(), 1);
+var import_yaml33 = __toESM(require_dist(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
 var FAST_LANE_MODEL = "haiku";
 var FULL_LANE_MODEL = "sonnet";
@@ -45370,7 +45669,7 @@ var BuildPlanSchema = external_exports.object({
 async function readLaneFromManifest(manifestPath) {
   try {
     const raw = await readFile2(manifestPath, "utf8");
-    const parsed = (0, import_yaml32.parse)(raw);
+    const parsed = (0, import_yaml33.parse)(raw);
     const lane = parsed?.lane;
     if (lane === "fast" || lane === "full") return lane;
     return void 0;
@@ -45401,7 +45700,7 @@ async function resolveBuildPlan(opts) {
 // src/tools/discard-draft.ts
 import { promises as fs56 } from "node:fs";
 import * as path76 from "node:path";
-var import_yaml33 = __toESM(require_dist(), 1);
+var import_yaml34 = __toESM(require_dist(), 1);
 var DiscardDraftInputSchema = external_exports.object({
   targetRepoRoot: external_exports.string().min(1),
   ref: external_exports.string().min(1)
@@ -45434,7 +45733,7 @@ async function discardDraft(rawInput) {
     });
   }
   const rawText = await fs56.readFile(foundAbsPath, "utf8");
-  const parsed = (0, import_yaml33.parse)(rawText);
+  const parsed = (0, import_yaml34.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: foundAbsPath });
   if (manifest.withdrawn === true) {
     throw new NotAnEligibleDraftError({ ref, foundState, reason: "withdrawn" });
@@ -45471,7 +45770,7 @@ function isEnoent14(err) {
 }
 
 // src/tools/block-story.ts
-var import_yaml34 = __toESM(require_dist(), 1);
+var import_yaml35 = __toESM(require_dist(), 1);
 import { promises as fs57 } from "node:fs";
 import * as path77 from "node:path";
 
@@ -45527,7 +45826,7 @@ async function blockStory(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml34.parse)(rawText);
+  const parsed = (0, import_yaml35.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath: absInProgressPath });
   if (manifest.claimed_by !== sessionUlid) {
     throw new WrongClaimantError({
@@ -45549,7 +45848,7 @@ async function blockStory(opts) {
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absBlockedPath
   });
-  const yamlText = (0, import_yaml34.stringify)(
+  const yamlText = (0, import_yaml35.stringify)(
     stripUndefined6(reparsed),
     { lineWidth: 0 }
   );
@@ -45587,7 +45886,7 @@ async function extractNativeStoryAcs(opts) {
 }
 
 // src/tools/capture-skill-invoke.ts
-var import_yaml35 = __toESM(require_dist(), 1);
+var import_yaml36 = __toESM(require_dist(), 1);
 import * as path79 from "node:path";
 import { promises as fs58 } from "node:fs";
 
@@ -45665,7 +45964,7 @@ async function resolveActiveStoryRef(targetRepoRoot, readInProgressDirImpl, read
       let parsed;
       try {
         const raw = await readFileImpl(path79.join(inProgressDir, file2));
-        parsed = (0, import_yaml35.parse)(raw);
+        parsed = (0, import_yaml36.parse)(raw);
       } catch {
         continue;
       }
@@ -45723,12 +46022,12 @@ async function captureSkillInvoke(rawHookPayload, deps = {}) {
 }
 
 // src/tools/auto-absorb-retro-proposals.ts
-var import_yaml38 = __toESM(require_dist(), 1);
+var import_yaml39 = __toESM(require_dist(), 1);
 import { promises as fs61 } from "node:fs";
 import * as path82 from "node:path";
 
 // src/lib/locate-proposal.ts
-var import_yaml36 = __toESM(require_dist(), 1);
+var import_yaml37 = __toESM(require_dist(), 1);
 import { promises as fs59 } from "node:fs";
 import * as path80 from "node:path";
 
@@ -45917,7 +46216,7 @@ async function locateProposal(opts) {
     const absPath = path80.join(proposalsDir, file2);
     const raw = await fs59.readFile(absPath, "utf8");
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml36.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml37.parse)(frontmatterRaw);
     const parsedFile = parseRetroProposalFile(parsedYaml);
     parsedFile.proposals.forEach((proposal, index) => {
       if (proposal.id === proposalId) {
@@ -45953,7 +46252,7 @@ function isEnoent15(err) {
 // src/lib/apply-persona-append.ts
 import { promises as fs60 } from "node:fs";
 import * as path81 from "node:path";
-var import_yaml37 = __toESM(require_dist(), 1);
+var import_yaml38 = __toESM(require_dist(), 1);
 var TOOL_NAME3 = "acceptProposal";
 function personaRelPath(targetRole) {
   return `team/${targetRole}/PERSONA.md`;
@@ -45980,7 +46279,7 @@ function reconstructPersonaFile2(parsed, newKnowledgeBody) {
     hired_at: parsed.hired_at,
     catalogue_version: parsed.catalogue_version
   };
-  const yamlBlock = (0, import_yaml37.stringify)(frontmatter).replace(/\n$/, "");
+  const yamlBlock = (0, import_yaml38.stringify)(frontmatter).replace(/\n$/, "");
   const h1 = parsed.role.split("-").map(
     (part) => part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)
   ).join(" ");
@@ -46148,7 +46447,7 @@ function stampProposalAutoAbsorbed(rawFile, located, appliedAt, idempotencyKey, 
       (p, i2) => i2 === located.index ? { ...p, applied: appliedBlock } : p
     )
   };
-  const fm = (0, import_yaml38.stringify)(
+  const fm = (0, import_yaml39.stringify)(
     {
       iso_timestamp: file2.iso_timestamp,
       cycle_window: file2.cycle_window,
@@ -46325,7 +46624,7 @@ async function autoAbsorbProposalFile(opts) {
   let proposals;
   try {
     const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-    const parsedYaml = (0, import_yaml38.parse)(frontmatterRaw);
+    const parsedYaml = (0, import_yaml39.parse)(frontmatterRaw);
     const file2 = parseRetroProposalFile(parsedYaml);
     proposals = file2.proposals;
   } catch (err) {
@@ -46346,13 +46645,13 @@ async function autoAbsorbProposalFile(opts) {
 }
 
 // src/tools/summarise-retro-proposal.ts
-var import_yaml39 = __toESM(require_dist(), 1);
+var import_yaml40 = __toESM(require_dist(), 1);
 import { promises as fs62 } from "node:fs";
 async function summariseRetroProposal(opts) {
   const { absPath } = opts;
   const raw = await fs62.readFile(absPath, "utf8");
   const { frontmatterRaw } = splitFrontmatter(raw, absPath);
-  const parsedYaml = (0, import_yaml39.parse)(frontmatterRaw);
+  const parsedYaml = (0, import_yaml40.parse)(frontmatterRaw);
   const file2 = parseRetroProposalFile(parsedYaml);
   const proposals = file2.proposals.map((p) => ({
     type: p.type,
@@ -46369,7 +46668,7 @@ async function summariseRetroProposal(opts) {
 }
 
 // src/tools/unhire-persona.ts
-var import_yaml40 = __toESM(require_dist(), 1);
+var import_yaml41 = __toESM(require_dist(), 1);
 import { promises as fs63 } from "node:fs";
 import * as path83 from "node:path";
 async function readPersonaCapabilities(personaPath) {
@@ -46390,7 +46689,7 @@ async function readPersonaCapabilities(personaPath) {
   const frontmatterRaw = normalised.slice(4, closeIdx);
   let parsedYaml;
   try {
-    parsedYaml = (0, import_yaml40.parse)(frontmatterRaw);
+    parsedYaml = (0, import_yaml41.parse)(frontmatterRaw);
   } catch {
     return void 0;
   }
@@ -46651,7 +46950,7 @@ function isEnoent17(err) {
 }
 
 // src/tools/match-story-specialist.ts
-var import_yaml41 = __toESM(require_dist(), 1);
+var import_yaml42 = __toESM(require_dist(), 1);
 import { promises as fs65 } from "node:fs";
 async function matchStorySpecialist(opts) {
   const { targetRepoRoot, manifestPath } = opts;
@@ -46663,7 +46962,7 @@ async function matchStorySpecialist(opts) {
   }
   let manifest;
   try {
-    const parsed = (0, import_yaml41.parse)(raw);
+    const parsed = (0, import_yaml42.parse)(raw);
     manifest = parseExecutionManifest(parsed, { absPath: manifestPath });
   } catch {
     return { role: null, domain: null };
@@ -46680,7 +46979,7 @@ async function matchStorySpecialist(opts) {
 }
 
 // src/tools/record-specialist-engagement.ts
-var import_yaml42 = __toESM(require_dist(), 1);
+var import_yaml43 = __toESM(require_dist(), 1);
 import { promises as fs66 } from "node:fs";
 import * as path85 from "node:path";
 function stripUndefined7(obj) {
@@ -46711,7 +47010,7 @@ async function recordSpecialistEngagement(opts) {
     }
     throw err;
   }
-  const parsed = (0, import_yaml42.parse)(rawText);
+  const parsed = (0, import_yaml43.parse)(rawText);
   const manifest = parseExecutionManifest(parsed, { absPath });
   if (manifest.claimed_by !== sessionUlid) {
     throw new Error(
@@ -46720,7 +47019,7 @@ async function recordSpecialistEngagement(opts) {
   }
   const updated = { ...manifest, engaged_specialist: specialistRole };
   const reparsed = parseExecutionManifest(updated, { absPath });
-  const yamlText = (0, import_yaml42.stringify)(
+  const yamlText = (0, import_yaml43.stringify)(
     stripUndefined7(reparsed),
     { lineWidth: 0 }
   );

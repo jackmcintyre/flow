@@ -168,6 +168,14 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // already has .gitignore rules. Test file only; the production initWorkspace routes
   // all file writes through writeManagedFile and performs no raw fs writes itself.
   path.join(SRC_DIR, "tools", "__tests__", "init-workspace.test.ts"),
+  // Story native:01KVTB3Z: the toolchain resolver tests and the Flow-shaped
+  // build-home test helper seed package.json / pnpm-workspace.yaml / lockfile
+  // fixtures directly to tmpdir via raw fs writes so the STRUCTURAL toolchain
+  // resolver can be exercised against real on-disk shapes. Test files / helper
+  // only; the production resolver (resolve-project-toolchain.ts) is a pure reader.
+  path.join(SRC_DIR, "lib", "__tests__", "resolve-project-toolchain.test.ts"),
+  path.join(SRC_DIR, "lib", "__tests__", "run-project-build-toolchain.test.ts"),
+  path.join(SRC_DIR, "lib", "__tests__", "flow-shaped-build-home.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

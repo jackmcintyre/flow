@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, promises as fsP } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { findPackageRoot, runReviewerSession } from "../run-reviewer-session.js";
+import { findPackageRoot, runReviewerSession, resolveVitestInvocation } from "../run-reviewer-session.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 
@@ -47,6 +47,17 @@ function writePackageJson(dir: string, name: string): void {
     path.join(dir, "package.json"),
     JSON.stringify({ name, version: "0.0.0", private: true }, null, 2),
   );
+}
+
+/**
+ * Seed a pnpm-lock.yaml in `dir` so the toolchain resolver (used by
+ * `resolveVitestInvocation` when no local vitest binary is present) detects the
+ * package manager as pnpm — mirroring the real Flow repo. Story native:01KVTB3Z
+ * aligned the reviewer's vitest invocation to the resolved toolchain, so a
+ * fixture that wants the `pnpm vitest` invocation must carry a pnpm lockfile.
+ */
+function writePnpmLock(dir: string): void {
+  writeFile(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +262,12 @@ function makeRunnerStub(opts: RunnerStubOpts) {
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }
 
-      if (cmd === "pnpm") {
+      // The reviewer's vitest invocation is now toolchain-resolved (Story
+      // native:01KVTB3Z): either `pnpm vitest …` (no local binary) OR the local
+      // `node_modules/.bin/vitest` binary directly (when present). Recognise both
+      // so the stub records the vitest run regardless of resolution path.
+      const isVitestRun = cmd === "pnpm" || cmd.endsWith(path.join("node_modules", ".bin", "vitest")) || cmd.endsWith("vitest");
+      if (isVitestRun) {
         const exitCode = opts.vitestExitCode ?? 0;
         pnpmCalls.push({
           args: args as string[],
@@ -446,6 +462,8 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
           const innerPkgDir = path.join(worktreePath, "plugins", "flow", "mcp-server");
           capturedInnerPkgDir = innerPkgDir;
           writePackageJson(innerPkgDir, "@flow/mcp-server");
+          // pnpm lockfile so resolveVitestInvocation detects pnpm (no .bin/vitest here).
+          writePnpmLock(innerPkgDir);
           writeFile(
             path.join(innerPkgDir, "tests", "my-test.test.ts"),
             PASSING_VITEST_TEST,
@@ -591,6 +609,8 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
           capturedWorktreeRoot = worktreePath;
           // Root-level package.json present — walk stops at the root.
           writePackageJson(worktreePath, "root-pkg");
+          // pnpm lockfile so resolveVitestInvocation detects pnpm (no .bin/vitest here).
+          writePnpmLock(worktreePath);
           writeFile(
             path.join(worktreePath, TEST_FILE_REL_C),
             PASSING_VITEST_TEST,
@@ -733,6 +753,7 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
         const innerPkgDir = path.join(worktreePath, "plugins", "flow", "mcp-server");
         capturedInnerPkgDir = innerPkgDir;
         writePackageJson(innerPkgDir, "@flow/mcp-server");
+        writePnpmLock(innerPkgDir);
         writeFile(path.join(innerPkgDir, "tests", "my-test.test.ts"), PASSING_VITEST_TEST);
       },
     });
@@ -875,11 +896,15 @@ describe("AC5 (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP): findPackageRoot delegat
     // The check must pass (vitest ran successfully from the delegate member).
     expect(ac1!.status).toBe("pass");
 
-    // pnpm was invoked with cwd === the mcp-server member directory, not the workspace root.
+    // vitest was invoked with cwd === the mcp-server member directory, not the
+    // workspace root. The member fixture seeds a local `node_modules/.bin/vitest`,
+    // so the toolchain-resolved invocation (Story native:01KVTB3Z) runs that
+    // binary DIRECTLY (`--run …` args, no `vitest` token). The cwd is the
+    // load-bearing assertion: the run happens from the delegate member package.
     expect(pnpmCalls).toHaveLength(1);
     const pnpmCall = pnpmCalls[0]!;
     expect(pnpmCall.cwd).toBe(capturedMemberPkgDir);
-    expect(pnpmCall.args).toContain("vitest");
+    expect(pnpmCall.args).toContain("--run");
   });
 });
 
@@ -1016,5 +1041,49 @@ describe("AC6 (Story native:01KV6S35N4VF64WZT99SMZSFRJ): findPackageRoot fallbac
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.packageRoot).toBe(pkgDir);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVTB3Z: resolveVitestInvocation aligns the reviewer's vitest
+// command to the resolved toolchain (binary-first, else the package manager) —
+// it no longer hardcodes `pnpm`. The dev pre-PR gate and this reviewer runner
+// share the SAME resolver, so they agree on the package manager for any target.
+// ---------------------------------------------------------------------------
+
+describe("resolveVitestInvocation (Story native:01KVTB3Z) — toolchain-aligned vitest command", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "resolve-vitest-inv-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("invokes the local node_modules/.bin/vitest binary DIRECTLY when present", () => {
+    const localBin = path.join(tmp, "node_modules", ".bin", "vitest");
+    writeFile(localBin, "#!/usr/bin/env node\n");
+
+    const { command, args } = resolveVitestInvocation(tmp);
+    expect(command).toBe(localBin);
+    expect(args).toEqual([]);
+  });
+
+  it("falls back to `pnpm vitest` when no local binary but a pnpm lockfile is present", () => {
+    writePackageJson(tmp, "pkg");
+    writePnpmLock(tmp);
+
+    const { command, args } = resolveVitestInvocation(tmp);
+    expect(command).toBe("pnpm");
+    expect(args).toEqual(["vitest"]);
+  });
+
+  it("falls back to `npm exec vitest` for an npm-lockfile repo (does NOT hardcode pnpm)", () => {
+    writePackageJson(tmp, "pkg");
+    writeFile(path.join(tmp, "package-lock.json"), "{}\n");
+
+    const { command, args } = resolveVitestInvocation(tmp);
+    expect(command).toBe("npm");
+    expect(args).toEqual(["exec", "vitest"]);
   });
 });

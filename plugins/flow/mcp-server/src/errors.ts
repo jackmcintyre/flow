@@ -53,6 +53,32 @@ export class InvalidWorkspaceConfigError extends DomainError {
 }
 
 /**
+ * `.flow/config.yaml` carries a `build:` block (the toolchain escape hatch) that
+ * failed schema validation — e.g. an unrecognised `packageManager` value, or a
+ * non-string command field. The resolver surfaces this TYPED error rather than
+ * silently falling back to structural detection, so a deliberate-but-malformed
+ * override is loud (the operator fixes the block) instead of being quietly
+ * ignored. (Story native:01KVTB3Z AC3.)
+ */
+export class ToolchainConfigError extends DomainError {
+  readonly configPath: string;
+  readonly yamlPath: string;
+  readonly detail: string;
+
+  constructor(opts: { configPath: string; yamlPath: string; detail: string }) {
+    super(
+      `${opts.configPath} has an invalid 'build:' block at '${opts.yamlPath}': ${opts.detail}. ` +
+        `Fix the build override (or remove it to fall back to structural toolchain ` +
+        `detection). Recognised packageManager values: pnpm | npm | yarn | bun. ` +
+        `See mcp-server/src/lib/resolve-project-toolchain.ts.`,
+    );
+    this.configPath = opts.configPath;
+    this.yamlPath = opts.yamlPath;
+    this.detail = opts.detail;
+  }
+}
+
+/**
  * `.flow/config.yaml` declares an `adapter:` name that does not match
  * any registered adapter. The user must either install the matching
  * adapter package or edit the `adapter:` key in the config file.

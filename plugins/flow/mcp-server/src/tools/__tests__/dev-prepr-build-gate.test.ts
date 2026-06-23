@@ -78,6 +78,26 @@ async function setupRepo(): Promise<TestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+
+  // Flow-SHAPED build home so the structural toolchain resolver (Story
+  // native:01KVTB3Z) lands on `plugins/flow` with pnpm PURELY from on-disk
+  // structure — no `.flow/config.yaml` (it is gitignored and absent here). The
+  // resolver finds the pnpm-workspace.yaml whose root package.json owns a `build`
+  // script and resolves cwd=plugins/flow, packageManager=pnpm — mirroring the
+  // real Flow repo's dogfood path on a clean worktree.
+  const flowDir = path.join(repoRoot, "plugins", "flow");
+  await fs.mkdir(flowDir, { recursive: true });
+  await atomicWriteFile(
+    path.join(flowDir, "package.json"),
+    JSON.stringify(
+      { name: "flow", private: true, scripts: { build: "pnpm -r build", test: "pnpm -r test", knip: "knip --no-progress" } },
+      null,
+      2,
+    ),
+  );
+  await atomicWriteFile(path.join(flowDir, "pnpm-workspace.yaml"), "packages:\n  - mcp-server\n");
+  await atomicWriteFile(path.join(flowDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
 
@@ -369,8 +389,19 @@ describe("AC3 — the gate runs the project's full build in the dev's working di
     expect(deriveProjectBuildCwd(ctx.repoRoot)).toBe(expectedCwd);
   });
 
-  it("deriveProjectBuildCwd joins plugins/flow onto the dev working dir", () => {
-    expect(deriveProjectBuildCwd("/tmp/wt")).toBe(path.join("/tmp/wt", "plugins", "flow"));
+  it("deriveProjectBuildCwd resolves the build home STRUCTURALLY (Story native:01KVTB3Z)", () => {
+    // For a Flow-SHAPED dir (a pnpm-workspace whose root package.json owns a
+    // build script at plugins/flow), the resolver lands on plugins/flow PURELY
+    // from on-disk structure — no `.flow/config.yaml` consulted. ctx.repoRoot is
+    // seeded Flow-shaped in setupRepo().
+    expect(deriveProjectBuildCwd(ctx.repoRoot)).toBe(
+      path.join(ctx.repoRoot, "plugins", "flow"),
+    );
+    // For a bare directory with no build home, it falls back to the dir itself
+    // (a plain single-package repo) — NOT the old hardcoded `<dir>/plugins/flow`.
+    expect(deriveProjectBuildCwd("/tmp/nonexistent-bare-dir-xyz")).toBe(
+      "/tmp/nonexistent-bare-dir-xyz",
+    );
   });
 });
 

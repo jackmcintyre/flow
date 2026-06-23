@@ -388,7 +388,7 @@ export async function runDevTerminalAction(opts: {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm build exits 0 (no type errors)",
+        expected: `${buildResult.commandLine} exits 0 (no type errors)`,
         observed: buildObserved,
       });
       throw new PrePrBuildFailedError({
@@ -426,7 +426,7 @@ export async function runDevTerminalAction(opts: {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm test exits 0 (no failing tests)",
+        expected: `${testResult.commandLine} exits 0 (no failing tests)`,
         observed: testObserved,
       });
       throw new PrePrTestFailedError({
@@ -457,7 +457,7 @@ export async function runDevTerminalAction(opts: {
         role: ROLE,
         session_id: sessionUlid,
         story_id: ref,
-        expected: "pnpm knip exits 0 (no dead code)",
+        expected: `${bloatResult.commandLine} exits 0 (no dead code)`,
         observed: `pre-PR bloat gate failed (exit ${bloatResult.exitCode})`,
       });
       throw new PrePrBloatFailedError({
