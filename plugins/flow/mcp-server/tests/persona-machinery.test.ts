@@ -1037,6 +1037,75 @@ You are the data engineer. Design pipelines, review data-adjacent code, keep the
         }),
       ).rejects.toBeInstanceOf(PersonaFileNotFoundError);
     });
+
+    it("re-throws a non-ENOENT persona read error verbatim instead of masking it as not-found", async () => {
+      const tmp = await makeTmp("refresh-read-eisdir");
+      tmpDirs.push(tmp);
+
+      // Make team/planner/PERSONA.md a *directory*, so fs.readFile throws
+      // EISDIR (a non-ENOENT error). The tool must surface that raw error, not
+      // mistake it for PersonaFileNotFoundError. (refresh-persona.ts:141-142)
+      await fs.mkdir(path.join(tmp, "team", "planner", "PERSONA.md"), {
+        recursive: true,
+      });
+
+      const { PersonaFileNotFoundError } = await import("../src/errors.js");
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.toMatchObject({ code: "EISDIR" });
+
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.not.toBeInstanceOf(PersonaFileNotFoundError);
+    });
+
+    it("stops collecting Knowledge at the next ##-level heading, dropping any trailing section", async () => {
+      const tmp = await makeTmp("refresh-knowledge-break");
+      tmpDirs.push(tmp);
+
+      const HIRED_AT = "2026-04-01T09:00:00.000Z";
+
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(HIRED_AT),
+        pluginVersion: "0.1.0",
+      });
+
+      // The rendered persona ends with `## Knowledge\n\n`. Append a Knowledge
+      // body followed by a *trailing* ##-level heading. The extractor must keep
+      // the Knowledge body and break at the trailing heading, dropping it.
+      // (refresh-persona.ts:219-221)
+      await fs.appendFile(
+        personaPath,
+        "- preserved lesson\n\n## Trailing Section\n\ndiscard me\n",
+        "utf8",
+      );
+
+      await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: "0.1.1",
+      });
+
+      const after = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(after.hired_at).toBe(HIRED_AT);
+      expect(after.sections.Knowledge).toContain("preserved lesson");
+      expect(after.sections.Knowledge).not.toContain("discard me");
+      expect(after.sections.Knowledge).not.toContain("Trailing Section");
+    });
   });
 
   /**
