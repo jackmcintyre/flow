@@ -44141,6 +44141,19 @@ async function runGit2(args, cwd, execaImpl) {
     exitCode: typeof result.exitCode === "number" ? result.exitCode : 1
   };
 }
+async function resolveLocalHead(targetRepoRoot, execaImpl = execa) {
+  const result = await runGit2(
+    ["-C", targetRepoRoot, "rev-parse", "HEAD"],
+    targetRepoRoot,
+    execaImpl
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `resolveLocalHead: git rev-parse HEAD failed in ${targetRepoRoot}: ${result.stderr}`
+    );
+  }
+  return result.stdout.trim();
+}
 async function realpathOrSelf(p) {
   try {
     return await fs45.realpath(p);
@@ -46707,12 +46720,11 @@ async function resolveRunBase(opts) {
   const baseBranch = opts.baseBranch ?? "main";
   const execaImpl = opts.execaImpl ?? execa;
   const originRef = `origin/${baseBranch}`;
-  const headResult = await runGit3(
-    ["-C", targetRepoRoot, "rev-parse", "HEAD"],
-    targetRepoRoot,
-    execaImpl
-  );
-  const localHead = headResult.exitCode === 0 ? headResult.stdout : "";
+  let localHead = "";
+  try {
+    localHead = await resolveLocalHead(targetRepoRoot, execaImpl);
+  } catch {
+  }
   const originResult = await runGit3(
     ["-C", targetRepoRoot, "rev-parse", originRef],
     targetRepoRoot,

@@ -19,10 +19,12 @@
  */
 
 import { execa } from "execa";
+import { resolveLocalHead } from "../lib/dev-story-worktree.js";
 
 // Tracked config paths the run reads from the repo root — team/ and docs/standards.md.
 // A diff between local HEAD and origin/<base> on these paths is a config divergence.
-export const CONFIG_PATH_PREFIXES = ["team/", "docs/standards.md"];
+// Not exported: callers that need this list should read it from the tool result, not import it.
+const CONFIG_PATH_PREFIXES = ["team/", "docs/standards.md"];
 
 export interface ResolveRunBaseOptions {
   /** Absolute path to the target repo root. */
@@ -93,13 +95,13 @@ export async function resolveRunBase(
   const execaImpl = opts.execaImpl ?? execa;
   const originRef = `origin/${baseBranch}`;
 
-  // Step 1: Resolve local HEAD SHA.
-  const headResult = await runGit(
-    ["-C", targetRepoRoot, "rev-parse", "HEAD"],
-    targetRepoRoot,
-    execaImpl,
-  );
-  const localHead = headResult.exitCode === 0 ? headResult.stdout : "";
+  // Step 1: Resolve local HEAD SHA via the shared helper in dev-story-worktree.
+  let localHead = "";
+  try {
+    localHead = await resolveLocalHead(targetRepoRoot, execaImpl);
+  } catch {
+    // resolveLocalHead throws on git error — treat as unknown HEAD.
+  }
 
   // Step 2: Resolve origin/<baseBranch> SHA. Fail-soft: a missing remote or
   // un-fetched remote returns null (the remote-check pre-flight handles this).
