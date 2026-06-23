@@ -40,6 +40,16 @@ const CLI = A.cli
 // the loop always terminates on queue-emptied. A positive integer caps the run.
 const MAX = Number.isInteger(A.maxStories) && A.maxStories > 0 ? A.maxStories : Infinity
 const MAX_REWORK = A.maxRework || 2
+// CI-FIX ROUNDS (Story native:01KVS13C): on a red PR CI the run drives a bounded
+// dev fix-and-recheck round before giving up and routing to blocked/. This cap is
+// INDEPENDENT of MAX_REWORK (which counts reviewer NEEDS-CHANGES rounds, a quality
+// signal) — a CI-fix round is triggered by a `ci-not-green` gate outcome AFTER a
+// READY-FOR-MERGE verdict, a distinct axis. It MUST be bounded so a CI that never
+// goes green cannot spin the dev re-spawn forever (the story's highest risk). The
+// default of 1 means: on the first red CI, re-spawn the dev once with the failing-
+// check context, push to the SAME PR branch, then re-poll the gate; if still red,
+// block exactly as today. Non-integer/garbage → the default.
+const MAX_CI_FIX_ROUNDS = Number.isInteger(A.maxCiFixRounds) && A.maxCiFixRounds >= 0 ? A.maxCiFixRounds : 1
 const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResume : 2
 // Concurrency cap for the main run loop (Story 8.22). Mirrors the maxStories /
 // maxRework / maxResume knobs. Default 2; clamp a non-positive/garbage value to 1
@@ -491,6 +501,151 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // routing continues to use exactly the same model as before.
   const agentModel = storyModel || execModel
 
+  // DEV ROUND (extracted closure). Spawns the builder once inside its OWN worktree,
+  // parses the handoff, and returns a discriminated outcome the CALLER routes on.
+  // It does NOT push result buckets or call blockStoryGiveUp itself — that stays
+  // with the caller — so the SAME closure serves both the reviewer-rework loop AND
+  // the bounded CI-fix round (Story native:01KVS13C) without duplicating the long
+  // dev-spawn block or its parse/blocking semantics.
+  //
+  //   `roundTag`  — appended to the agent/seam labels so each spawn is distinct in
+  //                 telemetry (rework uses `:${rw}`, a CI-fix round uses `:cf${cf}`).
+  //   `briefNote` — extra context appended to the dev prompt (the NEEDS-CHANGES
+  //                 rework note OR the failing-check CI-fix brief). Empty for round 0.
+  //
+  // Returns one of:
+  //   { kind: 'spawn-reviewer', prNumber, reviewerPrompt }  — clean handoff, PR (re)opened
+  //   { kind: 'needs-human', question }                     — dev asked a human
+  //   { kind: 'no-handoff', tail }                          — dirty exit (no locked phrase)
+  //   { kind: 'pd-failed', pdNext, parseError }             — handoff parse failed
+  // The dev pushes to the SAME PR branch when one already exists (branch reuse is
+  // owned by runDevTerminalAction), so a CI-fix round re-uses the existing PR.
+  const runDevRound = async (roundTag, briefNote) => {
+    // DEV — persona prompt (judgment + evidence-only discipline). The dev edits
+    // and builds INSIDE ITS OWN WORKTREE (Story 8.20): the `isolation: 'worktree'`
+    // per-agent primitive roots the subagent's working directory in a fresh
+    // worktree cut clean from the base, so the dev's *editing surface* — not just
+    // its commit — is per-worktree. Two devs against the same repo therefore can
+    // never cross-contaminate edits, which is what makes the deferred concurrent
+    // dispatch (bmad:8.22) safe by construction. The orchestrating checkout is
+    // never the dev's editing surface. Because the worktree contains ONLY the
+    // dev's own work, runDevTerminalAction stages the worktree's own dirty set
+    // (an explicit changed-paths stage — never `git add .`); the 8.16
+    // snapshot-baseline/transplant is gone (it was the serial-only workaround).
+    // The dev passes its OWN working directory as targetRepoRoot (the worktree),
+    // NOT the orchestrating REPO — the tool maps the worktree back to the
+    // orchestrating checkout for the session ledger via `git --git-common-dir`.
+    // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
+    //
+    // INLINE ACs (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1/AC2): when the
+    // story is a native story, the orchestrator pre-extracted the ACs from
+    // .flow/native-stories/<ULID>.md (which is gitignored and present ONLY in the
+    // orchestrating checkout). The builder receives them inline via the
+    // `inlineAcs` field in runDevTerminalAction, so it never needs to read
+    // a .flow path from within its own worktree. Non-native stories (whose specs
+    // are tracked in git) pass no inlineAcs and use the existing file-read path.
+    const runDevArgs = { targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' }
+    if (inlineAcs && Array.isArray(inlineAcs) && inlineAcs.length > 0) {
+      runDevArgs.inlineAcs = inlineAcs
+    }
+    // HEARTBEAT: enter the dev-build phase — the longest per-story span (the
+    // single long dev agent() call). The start line flags it as the long one
+    // so an operator reading the narrator knows a multi-minute gap is expected.
+    const devStartedAt = await progressStart(ref, 'dev-build')
+    const devFinal = await agent(
+      `${devPersona}\n\n## This run (story ${ref})\n` +
+        `- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
+        `You are working inside your OWN dedicated git worktree (your current working directory) — a clean checkout cut for this story alone. Edit and build HERE; never reach outside it.\n` +
+        `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
+        `Implement the story end-to-end in your working directory: write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
+        `Do NOT gold-plate; do NOT touch the execution manifest or any \`.flow/state\` file (the tools own the ledger).\n\n` +
+        `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
+        `  node ${CLI} runDevTerminalAction --json '${J(runDevArgs)}'\n` +
+        `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
+        `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the run and orphans your story. ` +
+        `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${briefNote}\n\n` +
+        `## Optional: record ONE reusable lesson (learning loop)\n` +
+        `If — and ONLY if — this build surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runDevTerminalAction call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
+        `  node ${CLI} recordDevLesson --json '${J({ targetRepoRoot: '<your-working-directory>', sessionUlid: SU, ref, lesson: { kind: '<kind>', text: '<one-line lesson text>' } })}'\n` +
+        `This is OPTIONAL and fail-soft: most builds teach nothing reusable — in that case call nothing. Recording no lesson, or any failure of this command, must NEVER block or change the handoff, the build, or the merge. Do not invent a lesson just to fill the slot; one real lesson or none.\n\n` +
+        `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
+      { label: `dev:${ref}${roundTag}${tag}`, phase: ph, isolation: 'worktree', model: agentModel },
+    )
+
+    const devText = String(devFinal || '')
+
+    // NEEDS-HUMAN-DECISION (Story 8.19): the dev signalled a genuine decision a
+    // human must make — checked BEFORE the handoff/`dev-no-handoff` paths so an
+    // ambiguity pause is never mistaken for a dirty no-handoff exit or a silent
+    // failure. processDevTranscript owns the parse (extracts the verbatim
+    // question and stamps the manifest); the script only routes. We pass the
+    // REAL dev transcript here (not the synthesised handoff phrase) so the tool
+    // can read the question. retryable=true: the tool is idempotent (re-stamps
+    // the same blocked_by, re-extracts the same question).
+    if (NEEDS_HUMAN_MARKER.test(devText)) {
+      const ph0 = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: devText })}'`, `pd-needs-human:${ref}${roundTag}${tag}`, true)
+      if (ph0 && ph0.next === 'done-needs-human-decision') {
+        const question = ph0.question || '(no question text captured)'
+        await progressDone(ref, 'dev-build', devStartedAt)
+        return { kind: 'needs-human', question }
+      }
+      // Marker present but the tool did not confirm it (garbled relay / parse
+      // miss): fall through to the normal evidence checks below rather than
+      // guess — a no-handoff exit then blocks the story (no silent success).
+    }
+
+    // Evidence check (in-script, cheap): the dev must have genuinely handed off.
+    // We do NOT fabricate a handoff — if the real transcript lacks the locked
+    // phrase, the dev did not finish cleanly; block rather than fake success.
+    if (!devText.includes(HANDOFF(ref))) {
+      await progressDone(ref, 'dev-build', devStartedAt)
+      return { kind: 'no-handoff', tail: devText.slice(-300) }
+    }
+
+    // PARSE DEV — locked-grammar handoff parse + prNumber from dev-outcome.json.
+    // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
+    // same blocked_by) — safe to retry the relay on a garble.
+    const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}${roundTag}${tag}`, true)
+    if (!pd || pd.next !== 'spawn-reviewer') {
+      await progressDone(ref, 'dev-build', devStartedAt)
+      return { kind: 'pd-failed', pdNext: pd?.next, parseError: pd?._parseError }
+    }
+    log(`${ref} -> PR #${pd.prNumber}`)
+    // READ THE BUILDER LESSON (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder
+    // lesson capture, read side). After the pd: parse the dev has already run
+    // (and may have recorded a lesson via recordDevLesson). Read it now — BEFORE
+    // spawning the reviewer — so the FORWARD step in the green-verdict block has
+    // the captured lesson ready without an extra seam after completeStory.
+    // FAIL-SOFT: retryable+swallow; a garble, a missing file, or any throw is
+    // treated as "no lesson captured" — the merge is never blocked.
+    const devLessonRead = await seam(`node ${CLI} readDevLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `dev-lesson-read:${ref}`, true, true)
+    capturedDevLesson = devLessonRead && !devLessonRead._parseError ? (devLessonRead.lesson ?? null) : null
+    // HEARTBEAT: leave the dev-build phase with elapsed wall-clock time.
+    await progressDone(ref, 'dev-build', devStartedAt)
+    return { kind: 'spawn-reviewer', prNumber: pd.prNumber, reviewerPrompt: pd.reviewerPrompt }
+  }
+
+  // Route a dev-round outcome that is NOT a clean handoff into the right result
+  // bucket + give-up move, exactly as the inline code did before extraction. Used
+  // by BOTH the reviewer-rework loop and the CI-fix round so the blocking
+  // semantics on dev failure stay identical regardless of which path spawned the dev.
+  const handleDevFailure = async (outcome) => {
+    if (outcome.kind === 'needs-human') {
+      pausedForHuman.push({ ref, reason: 'needs-human-decision', question: outcome.question })
+      notifyHumanNeeded(ref, outcome.question)
+      await blockStoryGiveUp(ref, 'needs-human-decision')
+      return
+    }
+    if (outcome.kind === 'no-handoff') {
+      blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: outcome.tail })
+      await blockStoryGiveUp(ref, 'handoff-grammar')
+      return
+    }
+    // pd-failed
+    blocked.push({ ref, blocked_by: outcome.pdNext || outcome.parseError || 'pd-failed' })
+    await blockStoryGiveUp(ref, ['gh-defer', 'gh-retry', 'gh-needs-human'].includes(outcome.pdNext) ? outcome.pdNext : 'handoff-grammar')
+  }
+
   for (let rw = 0; rw < MAX_REWORK; rw++) {
     const skipDev = resumeAtReview && rw === 0
     let reviewerPrompt
@@ -503,120 +658,15 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       reviewerPrompt = reviewerPersona
       log(`${ref} resume-at-review -> PR #${prNumber} (dev already shipped; skipping dev)`)
     } else {
-      // DEV — persona prompt (judgment + evidence-only discipline). The dev edits
-      // and builds INSIDE ITS OWN WORKTREE (Story 8.20): the `isolation: 'worktree'`
-      // per-agent primitive roots the subagent's working directory in a fresh
-      // worktree cut clean from the base, so the dev's *editing surface* — not just
-      // its commit — is per-worktree. Two devs against the same repo therefore can
-      // never cross-contaminate edits, which is what makes the deferred concurrent
-      // dispatch (bmad:8.22) safe by construction. The orchestrating checkout is
-      // never the dev's editing surface. Because the worktree contains ONLY the
-      // dev's own work, runDevTerminalAction stages the worktree's own dirty set
-      // (an explicit changed-paths stage — never `git add .`); the 8.16
-      // snapshot-baseline/transplant is gone (it was the serial-only workaround).
-      // The dev passes its OWN working directory as targetRepoRoot (the worktree),
-      // NOT the orchestrating REPO — the tool maps the worktree back to the
-      // orchestrating checkout for the session ledger via `git --git-common-dir`.
-      // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
-      //
-      // INLINE ACs (Story native:01KT6QGBWP7KJDVMHQK3MEKDXP AC1/AC2): when the
-      // story is a native story, the orchestrator pre-extracted the ACs from
-      // .flow/native-stories/<ULID>.md (which is gitignored and present ONLY in the
-      // orchestrating checkout). The builder receives them inline via the
-      // `inlineAcs` field in runDevTerminalAction, so it never needs to read
-      // a .flow path from within its own worktree. Non-native stories (whose specs
-      // are tracked in git) pass no inlineAcs and use the existing file-read path.
-      const runDevArgs = { targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' }
-      if (inlineAcs && Array.isArray(inlineAcs) && inlineAcs.length > 0) {
-        runDevArgs.inlineAcs = inlineAcs
-      }
-      // HEARTBEAT: enter the dev-build phase — the longest per-story span (the
-      // single long dev agent() call). The start line flags it as the long one
-      // so an operator reading the narrator knows a multi-minute gap is expected.
-      const devStartedAt = await progressStart(ref, 'dev-build')
       const reworkNote = rw === 0 ? '' :
         `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .flow/state for the recorded verdict), push the fixes, and hand off again.`
-      const devFinal = await agent(
-        `${devPersona}\n\n## This run (story ${ref})\n` +
-          `- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
-          `You are working inside your OWN dedicated git worktree (your current working directory) — a clean checkout cut for this story alone. Edit and build HERE; never reach outside it.\n` +
-          `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
-          `Implement the story end-to-end in your working directory: write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
-          `Do NOT gold-plate; do NOT touch the execution manifest or any \`.flow/state\` file (the tools own the ledger).\n\n` +
-          `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
-          `  node ${CLI} runDevTerminalAction --json '${J(runDevArgs)}'\n` +
-          `That tool runs the project's full build AND test gates itself (the same whole-project build+test CI runs) before opening the PR and refuses to open one on a red build, failing tests, or a leak (Story 8.17), so a red PR can no longer leak — but still build and test green yourself first. ` +
-          `The ONLY way to open the PR is this tool. NEVER run \`gh pr create\` or push-and-open a PR by hand — not even if you are sure your work is done and believe the gate tripped spuriously. A PR opened outside the tool is invisible to the run and orphans your story. ` +
-          `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, PrePrTestFailedError, or PrePrLeakDetectedError, the pre-PR gate refused — read the captured stderr/stdout in the error, FIX the cause (including breakage in files your story did not touch), and re-run the SAME tool; do NOT hand off and do NOT emit the gh-recoverable line for these gate failures. If you genuinely cannot make the gate pass after a real attempt, emit \`needs-human-decision: <one-line reason>\` as your LAST line and stop (the story pauses for a human) — do NOT open the PR yourself as a workaround. If the tool prints any other "error", or any flow tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
-          `## Optional: record ONE reusable lesson (learning loop)\n` +
-          `If — and ONLY if — this build surfaced ONE genuinely reusable lesson worth carrying forward (a pitfall, a pattern, a tool-quirk, or a discipline point that a future story should benefit from), call this command EXACTLY ONCE, AFTER the runDevTerminalAction call above (replace <kind> and <one-line lesson text>; kind must be one of pitfall|pattern|tool-quirk|discipline; if kind is pitfall you MUST also add a "failure_class":"<short-label>" field to the lesson):\n` +
-          `  node ${CLI} recordDevLesson --json '${J({ targetRepoRoot: '<your-working-directory>', sessionUlid: SU, ref, lesson: { kind: '<kind>', text: '<one-line lesson text>' } })}'\n` +
-          `This is OPTIONAL and fail-soft: most builds teach nothing reusable — in that case call nothing. Recording no lesson, or any failure of this command, must NEVER block or change the handoff, the build, or the merge. Do not invent a lesson just to fill the slot; one real lesson or none.\n\n` +
-          `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
-        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree', model: agentModel },
-      )
-
-      const devText = String(devFinal || '')
-
-      // NEEDS-HUMAN-DECISION (Story 8.19): the dev signalled a genuine decision a
-      // human must make — checked BEFORE the handoff/`dev-no-handoff` paths so an
-      // ambiguity pause is never mistaken for a dirty no-handoff exit or a silent
-      // failure. processDevTranscript owns the parse (extracts the verbatim
-      // question and stamps the manifest); the script only routes. We pass the
-      // REAL dev transcript here (not the synthesised handoff phrase) so the tool
-      // can read the question. On a clean parse we file the story into the
-      // human-needed surface (pausedForHuman) carrying its question, NOTIFY the
-      // operator, and RETURN — no PR is opened and the run continues to the
-      // next claimable story. retryable=true: the tool is idempotent (re-stamps
-      // the same blocked_by, re-extracts the same question).
-      if (NEEDS_HUMAN_MARKER.test(devText)) {
-        const ph0 = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: devText })}'`, `pd-needs-human:${ref}:${rw}${tag}`, true)
-        if (ph0 && ph0.next === 'done-needs-human-decision') {
-          const question = ph0.question || '(no question text captured)'
-          pausedForHuman.push({ ref, reason: 'needs-human-decision', question })
-          notifyHumanNeeded(ref, question)
-          await blockStoryGiveUp(ref, 'needs-human-decision')
-          return
-        }
-        // Marker present but the tool did not confirm it (garbled relay / parse
-        // miss): fall through to the normal evidence checks below rather than
-        // guess — a no-handoff exit then blocks the story (no silent success).
-      }
-
-      // Evidence check (in-script, cheap): the dev must have genuinely handed off.
-      // We do NOT fabricate a handoff — if the real transcript lacks the locked
-      // phrase, the dev did not finish cleanly; block rather than fake success.
-      if (!devText.includes(HANDOFF(ref))) {
-        blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: devText.slice(-300) })
-        await blockStoryGiveUp(ref, 'handoff-grammar')
+      const outcome = await runDevRound(`:${rw}`, reworkNote)
+      if (outcome.kind !== 'spawn-reviewer') {
+        await handleDevFailure(outcome)
         return
       }
-
-      // PARSE DEV — locked-grammar handoff parse + prNumber from dev-outcome.json.
-      // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
-      // same blocked_by) — safe to retry the relay on a garble.
-      const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}${tag}`, true)
-      if (!pd || pd.next !== 'spawn-reviewer') {
-        blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' })
-        // Move out of in-progress/. pd.next may be a recoverable gh-* enum reason
-        // (a real blocked_by value); otherwise fall back to handoff-grammar.
-        await blockStoryGiveUp(ref, ['gh-defer', 'gh-retry', 'gh-needs-human'].includes(pd?.next) ? pd.next : 'handoff-grammar')
-        return
-      }
-      prNumber = pd.prNumber
-      reviewerPrompt = pd.reviewerPrompt
-      log(`${ref} -> PR #${prNumber}`)
-      // READ THE BUILDER LESSON (Story native:01KTAWXSVFEDNRCZDNG76PJ1BD — builder
-      // lesson capture, read side). After the pd: parse the dev has already run
-      // (and may have recorded a lesson via recordDevLesson). Read it now — BEFORE
-      // spawning the reviewer — so the FORWARD step in the green-verdict block has
-      // the captured lesson ready without an extra seam after completeStory.
-      // FAIL-SOFT: retryable+swallow; a garble, a missing file, or any throw is
-      // treated as "no lesson captured" — the merge is never blocked.
-      const devLessonRead = await seam(`node ${CLI} readDevLesson --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref })}'`, `dev-lesson-read:${ref}`, true, true)
-      capturedDevLesson = devLessonRead && !devLessonRead._parseError ? (devLessonRead.lesson ?? null) : null
-      // HEARTBEAT: leave the dev-build phase with elapsed wall-clock time.
-      await progressDone(ref, 'dev-build', devStartedAt)
+      prNumber = outcome.prNumber
+      reviewerPrompt = outcome.reviewerPrompt
     }
 
     // REVIEW — clean context. The reviewer's binding verdict transports through
@@ -692,18 +742,64 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // the PR on auto-merge and applies the needs-human label on a pause, but it does
   // NOT move the manifest; the workflow owns completion below. Stage-1 expects
   // pause-needs-human (no agreement history yet) on a GREEN CI -> a human merges.
-  const gateStartedAt = await progressStart(ref, 'gate')
-  const gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)
-  await progressDone(ref, 'gate', gateStartedAt)
+  //
+  // BOUNDED CI-FIX ROUND (Story native:01KVS13C). The gate call is wrapped in a
+  // bounded loop: on a `ci-not-green` outcome with a CI-fix round still remaining,
+  // instead of immediately routing to blocked/ we drive ONE bounded dev fix-and-
+  // recheck round — re-spawn the SAME builder seeded with the failing-check context
+  // (the gate's chatLog), have it push to the SAME existing PR branch (branch reuse
+  // is owned by runDevTerminalAction), then re-run the gate to re-poll CI. The loop
+  // is bounded by MAX_CI_FIX_ROUNDS (default 1) so the dev re-spawn can NEVER spin
+  // forever on a CI that never goes green — the story's highest risk. Only the
+  // `ci-not-green` reason triggers a fix round; a confirmed-green outcome, an
+  // `ci-status-unreadable`, a `verdict-failed`/garbled gate, or a missing decision
+  // all break out unchanged and route exactly as before. On exhausted-still-red the
+  // loop breaks and the existing not-confirmed-green handler blocks `ci-not-green`.
+  let gate, decision, gateReason, ciUnconfirmed, confirmedGreen
+  let ciFixRoundsLeft = MAX_CI_FIX_ROUNDS
+  for (;;) {
+    const gateStartedAt = await progressStart(ref, 'gate')
+    gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)
+    await progressDone(ref, 'gate', gateStartedAt)
 
-  const decision = gate?.decision
-  const gateReason = gate?.reason || decision || gate?._parseError || 'gate-failed'
-  // CONFIRMED GREEN iff the gate auto-merged (green CI + agreement, PR merged) OR
-  // it paused for a reason OTHER than a CI problem (green CI, held only for a human
-  // to merge — the Stage-1 happy path). A red CI, an unreadable CI status, a
-  // garbled relay, or a missing decision is NOT confirmed green -> never done/.
-  const ciUnconfirmed = gateReason === 'ci-not-green' || gateReason === 'ci-status-unreadable' || !!gate?._parseError || !decision
-  const confirmedGreen = decision === 'auto-merge' || (decision === 'pause-needs-human' && !ciUnconfirmed)
+    decision = gate?.decision
+    gateReason = gate?.reason || decision || gate?._parseError || 'gate-failed'
+    // CONFIRMED GREEN iff the gate auto-merged (green CI + agreement, PR merged) OR
+    // it paused for a reason OTHER than a CI problem (green CI, held only for a human
+    // to merge — the Stage-1 happy path). A red CI, an unreadable CI status, a
+    // garbled relay, or a missing decision is NOT confirmed green -> never done/.
+    ciUnconfirmed = gateReason === 'ci-not-green' || gateReason === 'ci-status-unreadable' || !!gate?._parseError || !decision
+    confirmedGreen = decision === 'auto-merge' || (decision === 'pause-needs-human' && !ciUnconfirmed)
+
+    // CI-FIX ROUND: a red CI (and ONLY a red CI) with a fix round remaining drives
+    // a bounded dev fix-and-recheck before giving up. Every other not-confirmed-green
+    // reason (ci-status-unreadable, verdict-failed/garbled gate) falls straight
+    // through to the existing handler — behaviour unchanged.
+    if (!confirmedGreen && gateReason === 'ci-not-green' && ciFixRoundsLeft > 0) {
+      ciFixRoundsLeft--
+      const failingChecks = Array.isArray(gate?.chatLog) && gate.chatLog.length > 0
+        ? gate.chatLog.join('; ')
+        : 'CI is red (no failing-check detail was captured)'
+      log(`${ref} CI red on PR #${prNumber} — driving a bounded fix round (${MAX_CI_FIX_ROUNDS - ciFixRoundsLeft}/${MAX_CI_FIX_ROUNDS}); re-spawning the builder with the failing-check context`)
+      const ciFixNote =
+        `\n\nThis is a CI-FIX round: the reviewer approved this PR (READY FOR MERGE) but the PR's CI on GitHub is RED. ` +
+        `Diagnose and fix the failing CI checks on the existing PR, then push to the SAME PR branch via runDevTerminalAction (it reuses the open PR) and hand off again. ` +
+        `Failing-check context: ${failingChecks}`
+      const cfTag = `:cf${MAX_CI_FIX_ROUNDS - ciFixRoundsLeft}`
+      const outcome = await runDevRound(cfTag, ciFixNote)
+      if (outcome.kind !== 'spawn-reviewer') {
+        // The fix round's dev did not hand off cleanly — route it through the SAME
+        // blocking semantics as a first-round dev failure (no silent success).
+        await handleDevFailure(outcome)
+        return
+      }
+      // The dev pushed to the same PR; refresh the PR number defensively (it is the
+      // same branch/PR) and re-run the gate to re-poll CI. Decrement already applied.
+      prNumber = outcome.prNumber
+      continue
+    }
+    break
+  }
 
   if (!confirmedGreen) {
     // NOT confirmed green -> the story must NOT enter done/. Move it to blocked/

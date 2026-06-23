@@ -576,3 +576,120 @@ describe("Story native:01KVS1150C7H9HCGG07Y0XBT98 — AC1/AC2: local-HEAD worktr
     expect(SRC).toContain("runBaseCheck.configDiverges && runBaseCheck.divergingPaths && runBaseCheck.divergingPaths.length > 0");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story native:01KVS13C — AC1 + AC2 + AC3: bounded CI-fix-and-recheck round on a
+// red PR CI before blocking.
+//
+// AC1: when the auto-merge gate returns `ci-not-green` for a READY-FOR-MERGE story
+//      and a CI-fix round still remains, the run drives a bounded dev fix-and-recheck
+//      round (re-spawn the builder seeded with the failing-check context, push to the
+//      SAME PR branch, re-run the gate to re-poll CI) BEFORE routing to blocked/.
+//
+// AC2: when the bounded CI-fix round(s) are exhausted and the gate still returns
+//      `ci-not-green`, route to blocked/ with reason `ci-not-green` exactly as today.
+//
+// AC3: a confirmed-green outcome (auto-merge / pause on green CI) OR a NON-CI block
+//      reason (`ci-status-unreadable`, `verdict-failed`) triggers NO fix round —
+//      behaviour unchanged from today.
+//
+// The run runs under the Workflow primitive (top-level await/return, injected
+// seams), so it cannot be unit-executed here — these are source-level structural
+// anchors in the same style as the suites above. The bounded-loop bound is the
+// load-bearing safety property (no unbounded re-spawn), so it is asserted directly.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVS13C — AC1/AC2/AC3: bounded CI-fix-and-recheck round", () => {
+  it("declares a MAX_CI_FIX_ROUNDS cap, independent of MAX_REWORK, that bounds the re-spawn loop", () => {
+    // The cap MUST exist and be a real bound (the story's highest risk is an
+    // unbounded dev re-spawn loop). It is read from the args with a default of 1.
+    expect(SRC).toContain("MAX_CI_FIX_ROUNDS");
+    expect(SRC).toContain("A.maxCiFixRounds");
+    // It is INDEPENDENT of MAX_REWORK — declared as its own cap, not derived from it.
+    expect(SRC).not.toMatch(/MAX_CI_FIX_ROUNDS\s*=\s*MAX_REWORK/);
+    // The fix-round counter (ciFixRoundsLeft) gates the re-spawn — a bounded loop.
+    expect(SRC).toContain("ciFixRoundsLeft");
+    // The re-spawn fires ONLY while a round remains (ciFixRoundsLeft > 0) — the bound.
+    expect(SRC).toMatch(/ciFixRoundsLeft\s*>\s*0/);
+    // And the counter is decremented each fix round so it cannot loop forever.
+    expect(SRC).toContain("ciFixRoundsLeft--");
+  });
+
+  it("AC1: a ci-not-green gate outcome with a round remaining re-spawns the builder and re-runs the gate", () => {
+    // The CI-fix branch is guarded on the gate reason being EXACTLY 'ci-not-green'
+    // AND a round remaining — only a red CI triggers the round.
+    expect(SRC).toMatch(/gateReason === 'ci-not-green' && ciFixRoundsLeft > 0/);
+    // The gate call is now inside a loop (the wrapping `for (;;)` around the gate
+    // call + not-confirmed-green handling) so it can be RE-RUN after a fix round.
+    // The fix branch `continue`s back to the top of that loop to re-poll the gate.
+    expect(SRC).toMatch(/for \(;;\) \{[\s\S]*runAutoMergeGate[\s\S]*continue[\s\S]*\}/);
+    // The fix round re-spawns the SAME builder via the extracted dev-round closure.
+    expect(SRC).toContain("runDevRound");
+    // It seeds the builder with the failing-check context from the gate's chatLog.
+    expect(SRC).toContain("gate.chatLog");
+    expect(SRC).toContain("CI-FIX round");
+  });
+
+  it("AC1: the fix round pushes to the SAME existing PR branch (branch reuse), not a fresh PR", () => {
+    // The fix-round prompt instructs the dev to push to the SAME PR branch — branch
+    // reuse is owned by runDevTerminalAction, which reuses the open PR.
+    expect(SRC).toContain("push to the SAME PR branch");
+    // The dev-round closure documents that branch reuse re-uses the existing PR.
+    expect(SRC).toContain("SAME PR branch");
+  });
+
+  it("AC1: a dev failure DURING the fix round routes through the SAME blocking semantics (no silent success)", () => {
+    // If the fix round's dev does not hand off cleanly, it must be routed via the
+    // shared handleDevFailure path exactly like a first-round dev failure — never
+    // silently treated as a success.
+    expect(SRC).toContain("handleDevFailure");
+    // The CI-fix branch checks the dev-round outcome and routes a non-handoff outcome.
+    expect(SRC).toMatch(/outcome\.kind !== 'spawn-reviewer'[\s\S]*handleDevFailure/);
+  });
+
+  it("AC2: an exhausted-still-red story blocks 'ci-not-green' and never reaches done/", () => {
+    // When the bounded loop breaks (rounds exhausted) and the gate is still
+    // not-confirmed-green for a CI reason, the existing handler blocks the story.
+    // The not-confirmed-green handler is preserved: ci-not-green is the fallback enum.
+    expect(SRC).toContain("if (!confirmedGreen) {");
+    expect(SRC).toMatch(/enumReason = gateReason === 'ci-status-unreadable'[\s\S]*'ci-not-green'/);
+    // completeStory (the done/ move) runs ONLY after the !confirmedGreen guard returns,
+    // so a still-red story can never reach done/.
+    const blockIdx = SRC.indexOf("if (!confirmedGreen) {");
+    const completeIdx = SRC.indexOf("node ${CLI} completeStory");
+    expect(blockIdx).toBeGreaterThan(-1);
+    expect(completeIdx).toBeGreaterThan(-1);
+    expect(completeIdx).toBeGreaterThan(blockIdx);
+  });
+
+  it("AC3: a NON-CI block reason (ci-status-unreadable / verdict-failed) triggers NO fix round", () => {
+    // The fix-round guard is on gateReason === 'ci-not-green' EXACTLY — an
+    // unreadable status or a garbled/verdict-failed gate does NOT match, so the loop
+    // breaks immediately and routes through the unchanged not-confirmed-green handler.
+    // ci-status-unreadable and verdict-failed are still mapped in the enumReason ladder.
+    expect(SRC).toContain("ci-status-unreadable");
+    expect(SRC).toContain("verdict-failed");
+    // The fix branch is NOT entered for these reasons (no 'ci-status-unreadable' or
+    // 'verdict-failed' in the fix-round guard — it keys ONLY on 'ci-not-green').
+    expect(SRC).not.toMatch(/gateReason === 'ci-status-unreadable' && ciFixRoundsLeft/);
+  });
+
+  it("AC3: a confirmed-green outcome breaks the loop without a fix round (unchanged happy path)", () => {
+    // confirmedGreen short-circuits the fix branch (the branch requires !confirmedGreen),
+    // so an auto-merge or a green-CI pause-needs-human breaks the loop and proceeds to
+    // completeStory unchanged.
+    expect(SRC).toMatch(/!confirmedGreen && gateReason === 'ci-not-green'/);
+    // The confirmed-green path still completes the story via completeStory.
+    expect(SRC).toContain("node ${CLI} completeStory");
+  });
+
+  it("the dev-round closure is shared by BOTH the reviewer-rework loop and the CI-fix round", () => {
+    // The extracted runDevRound closure is invoked by the rework loop (`:${rw}` tag)
+    // AND the CI-fix round (`:cf...` tag) — the long dev-spawn block is not duplicated.
+    expect(SRC).toContain("runDevRound(`:${rw}`");
+    expect(SRC).toMatch(/runDevRound\(cfTag/);
+    // The closure keeps the load-bearing dev-spawn invariants: worktree isolation and
+    // the runDevTerminalAction handoff path live inside it.
+    expect(SRC).toMatch(/runDevRound = async[\s\S]*isolation: 'worktree'[\s\S]*runDevTerminalAction/);
+  });
+});
