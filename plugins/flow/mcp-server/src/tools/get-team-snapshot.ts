@@ -111,12 +111,17 @@ export async function getTeamSnapshot(
         persona.sections.Knowledge,
         knowledgeLimit,
       );
+      // Detect personas hired before the catalogue declared a capabilities block.
+      // These personas are invisible to dynamic staffing (run slots, lens assignment)
+      // and operators should re-hire them to pick up the current catalogue declaration.
+      const capabilitiesMissing = persona.capabilities === undefined;
       roles.push({
         state: "ok",
         role,
         domain: persona.domain,
         fireCount: stats.fireCountsByAgent[role] ?? 0,
         knowledge,
+        capabilitiesMissing,
       });
     } catch (err) {
       if (err instanceof PersonaFileMalformedError) {
@@ -282,6 +287,13 @@ export function renderTeamSnapshot(snapshot: TeamSnapshot): string {
               entry.source_ref != null ? ` [${entry.source_ref}]` : "";
             lines.push(`    - ${entry.kind} | ${entry.applies_when}${provenance}`);
           }
+        }
+
+        // Warn when the persona was hired before the catalogue declared a
+        // capabilities block — it is invisible to dynamic run-slot and lens
+        // staffing until re-hired.
+        if (role.capabilitiesMissing) {
+          lines.push(`  needs refresh: capabilities missing — re-hire this role (/flow:hire) to pick up the current catalogue declaration`);
         }
       }
 

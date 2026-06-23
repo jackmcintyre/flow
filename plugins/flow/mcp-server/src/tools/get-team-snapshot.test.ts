@@ -35,6 +35,7 @@ function makeSnapshot(
         domain: "feature implementation in a story scope",
         fireCount: 0,
         knowledge,
+        capabilitiesMissing: false,
       },
     ],
     knowledgeLimit: 10,
