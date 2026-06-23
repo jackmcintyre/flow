@@ -40,6 +40,7 @@ import {
   readCatalogueInputSchema,
   readCustomRoleInputSchema,
   readPersonaInputSchema,
+  refreshPersonaInputSchema,
   readRepoSignalsInputSchema,
   reattachOrphanInputSchema,
   recallLessonInputSchema,
@@ -95,6 +96,7 @@ import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { readCatalogue } from "./read-catalogue.js";
 import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
+import { refreshPersona } from "./refresh-persona.js";
 import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
 import { validatePlannerBacklog } from "./validate-planner-backlog.js";
@@ -308,6 +310,46 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
       };
+    },
+  });
+
+  // Story native:01KVS0YFNNFWFDP2EJT10FMV08 — refreshPersona: re-materialise an
+  // existing hired persona from the current catalogue, preserving its hired_at
+  // timestamp and accrued ## Knowledge / lessons section.
+  server.registerTool({
+    name: "refreshPersona",
+    description:
+      "Re-materialise an existing hired persona from the current catalogue (Story native:01KVS0YFNNFWFDP2EJT10FMV08). " +
+      "Preserves the persona's hired_at timestamp and accrued ## Knowledge section. " +
+      "Does NOT require an unhire — works even when the minimum roster is hired. " +
+      "Throws PersonaFileNotFoundError if the role is not currently hired. " +
+      "Returns { path, hiredAt, catalogueVersion }.",
+    inputSchema: refreshPersonaInputSchema,
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          role: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: parsed.targetRepoRoot,
+          role: parsed.role,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 

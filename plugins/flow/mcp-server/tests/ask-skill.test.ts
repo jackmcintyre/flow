@@ -538,7 +538,8 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
     // Story native:01KVN6ASCWXAHZ0FF7YRFKJECC added requeueBlockedStory (requeue blocked story) = 62 total.
     // Story native:01KVPQS1DVJE41KNG065D6X1X7 added resolveRunSlot (dynamic run slot resolution) = 63 total.
     // Story native:01KVPSZ14HH48J9NEH7N6S6QDR added matchStorySpecialist + recordSpecialistEngagement (specialist auto-engage) = 65 total.
-    expect(result.tools.length).toBe(65);
+    // Story native:01KVS0YFNNFWFDP2EJT10FMV08 added refreshPersona (refresh stale persona from catalogue) = 66 total.
+    expect(result.tools.length).toBe(66);
 
     // /flow:ask registers no new MCP tool.
     expect(toolNames).not.toContain("ask");

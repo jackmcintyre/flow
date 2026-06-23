@@ -31,6 +31,7 @@ import {
   CatalogueRoleNotFoundError,
   PersonaAlreadyExistsError,
   PersonaFileMalformedError,
+  UnhireBelowJudgeMinimumError,
 } from "../src/errors.js";
 import {
   parseCatalogueRole,
@@ -43,6 +44,8 @@ import { instantiatePersona } from "../src/tools/instantiate-persona.js";
 import { lookupRoleByDomain } from "../src/tools/lookup-role-by-domain.js";
 import { readCatalogue } from "../src/tools/read-catalogue.js";
 import { readPersona } from "../src/tools/read-persona.js";
+import { refreshPersona } from "../src/tools/refresh-persona.js";
+import { unhirePersona } from "../src/tools/unhire-persona.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT_FROM_TEST = path.resolve(HERE, "..", "..");
@@ -917,6 +920,418 @@ You are the data engineer. Design pipelines, review data-adjacent code, keep the
       expect(parsed.sections.Mandate.length).toBeGreaterThan(0);
       expect(parsed.sections["Out of mandate"].length).toBeGreaterThan(0);
       expect(parsed.sections.Prompt.length).toBeGreaterThan(0);
+    });
+  });
+
+  /**
+   * Story native:01KVS0YFNNFWFDP2EJT10FMV08 AC1 — refreshPersona re-materialises
+   * catalogue-derived content while preserving hired_at and the accrued Knowledge
+   * section.
+   */
+  describe("Story native:01KVS0YFNNFWFDP2EJT10FMV08 AC1 — refreshPersona preserves hired_at and Knowledge", () => {
+    it("re-materialises a stale persona from the catalogue while preserving hired_at and Knowledge", async () => {
+      const tmp = await makeTmp("refresh-ac1");
+      tmpDirs.push(tmp);
+
+      const ORIGINAL_HIRED_AT = "2026-01-15T08:00:00.000Z";
+
+      // 1) Hire the planner role.
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(ORIGINAL_HIRED_AT),
+        pluginVersion: "0.0.9",
+      });
+
+      // 2) Simulate accrued knowledge by appending to the Knowledge section.
+      const accrued = "- learned: always check the spec before coding\n- learned: run tests locally first\n";
+      await fs.appendFile(personaPath, accrued, "utf8");
+
+      // Confirm knowledge is present before refresh.
+      const before = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(before.sections.Knowledge).toContain("always check the spec before coding");
+      expect(before.hired_at).toBe(ORIGINAL_HIRED_AT);
+
+      // 3) Refresh the persona (simulates catalogue update — capabilities now present).
+      const result = await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: "0.2.0", // bumped version simulates a catalogue update
+      });
+
+      // Result contract.
+      expect(result.path).toBe(personaPath);
+      expect(result.hiredAt).toBe(ORIGINAL_HIRED_AT);
+      expect(result.catalogueVersion).toBe("0.2.0");
+
+      // 4) Read the refreshed persona and assert preservation + catalogue parity.
+      const after = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+
+      // hired_at must be the ORIGINAL value, not the refresh time.
+      expect(after.hired_at).toBe(ORIGINAL_HIRED_AT);
+
+      // catalogue_version is updated to reflect the refresh.
+      expect(after.catalogue_version).toBe("0.2.0");
+
+      // Knowledge section is preserved verbatim.
+      expect(after.sections.Knowledge).toContain("always check the spec before coding");
+      expect(after.sections.Knowledge).toContain("run tests locally first");
+
+      // Catalogue-derived content is re-materialised from the current catalogue.
+      const catalogue = await readCatalogue({ pluginRoot: getPluginRoot(), role: "planner" });
+      expect(after.domain).toBe(catalogue.domain);
+      expect(after.sections.Domain).toBe(catalogue.sections.Domain);
+      expect(after.sections.Mandate).toBe(catalogue.sections.Mandate);
+      expect(after.sections["Out of mandate"]).toBe(catalogue.sections["Out of mandate"]);
+      expect(after.sections.Prompt).toBe(catalogue.sections.Prompt);
+
+      // All required sections present and the file is parseable.
+      for (const section of REQUIRED_PERSONA_SECTIONS) {
+        expect(after.sections[section]).toBeDefined();
+      }
+    });
+
+    it("preserves an empty Knowledge section without appending spurious content", async () => {
+      const tmp = await makeTmp("refresh-empty-knowledge");
+      tmpDirs.push(tmp);
+
+      const HIRED_AT = "2026-03-10T10:00:00.000Z";
+
+      await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "generalist-dev",
+        clock: () => new Date(HIRED_AT),
+        pluginVersion: "0.1.0",
+      });
+
+      // Knowledge is empty at hire time (FR89).
+      const before = await readPersona({ targetRepoRoot: tmp, role: "generalist-dev" });
+      expect(before.sections.Knowledge).toBe("");
+
+      await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "generalist-dev",
+        pluginVersion: "0.1.1",
+      });
+
+      const after = await readPersona({ targetRepoRoot: tmp, role: "generalist-dev" });
+      expect(after.hired_at).toBe(HIRED_AT);
+      expect(after.sections.Knowledge).toBe("");
+    });
+
+    it("throws PersonaFileNotFoundError when the role is not hired", async () => {
+      const tmp = await makeTmp("refresh-not-hired");
+      tmpDirs.push(tmp);
+
+      const { PersonaFileNotFoundError } = await import("../src/errors.js");
+      await expect(
+        refreshPersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          pluginVersion: "0.1.0",
+        }),
+      ).rejects.toBeInstanceOf(PersonaFileNotFoundError);
+    });
+  });
+
+  /**
+   * Story native:01KVS0YFNNFWFDP2EJT10FMV08 AC2 — refreshPersona works without
+   * requiring an unhire (safe at minimum roster), and instantiatePersona's FR89
+   * existing-persona refusal still applies to genuine non-force re-instantiation.
+   */
+  describe("Story native:01KVS0YFNNFWFDP2EJT10FMV08 AC2 — refresh at minimum roster; FR89 intact", () => {
+    /**
+     * Build 5 custom roles where each covers exactly one unique lens, so that
+     * hiring exactly these 5 roles produces the minimum roster: removing any one
+     * would leave one lens uncovered → UnhireBelowJudgeMinimumError.
+     */
+    const MINIMUM_ROSTER_ROLES = [
+      {
+        id: "lens-structure-specialist",
+        lens: "structure",
+        body: `---
+role: lens-structure-specialist
+domain: "structure lens coverage"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — done"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - structure
+  run_jobs: []
+  path_patterns: []
+---
+
+# Lens Structure Specialist
+
+## Domain
+
+Covers the structure review lens.
+
+## Mandate
+
+- Review structure.
+
+## Out of mandate
+
+- Other lenses.
+
+## Prompt
+
+You cover the structure lens.
+`,
+      },
+      {
+        id: "lens-verifiability-specialist",
+        lens: "verifiability",
+        body: `---
+role: lens-verifiability-specialist
+domain: "verifiability lens coverage"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — done"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - verifiability
+  run_jobs: []
+  path_patterns: []
+---
+
+# Lens Verifiability Specialist
+
+## Domain
+
+Covers the verifiability review lens.
+
+## Mandate
+
+- Review verifiability.
+
+## Out of mandate
+
+- Other lenses.
+
+## Prompt
+
+You cover the verifiability lens.
+`,
+      },
+      {
+        id: "lens-discipline-specialist",
+        lens: "discipline",
+        body: `---
+role: lens-discipline-specialist
+domain: "discipline lens coverage"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — done"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - discipline
+  run_jobs: []
+  path_patterns: []
+---
+
+# Lens Discipline Specialist
+
+## Domain
+
+Covers the discipline review lens.
+
+## Mandate
+
+- Review discipline.
+
+## Out of mandate
+
+- Other lenses.
+
+## Prompt
+
+You cover the discipline lens.
+`,
+      },
+      {
+        id: "lens-domain-specialist",
+        lens: "domain",
+        body: `---
+role: lens-domain-specialist
+domain: "domain lens coverage"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — done"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - domain
+  run_jobs: []
+  path_patterns: []
+---
+
+# Lens Domain Specialist
+
+## Domain
+
+Covers the domain review lens.
+
+## Mandate
+
+- Review domain.
+
+## Out of mandate
+
+- Other lenses.
+
+## Prompt
+
+You cover the domain lens.
+`,
+      },
+      {
+        id: "lens-considered-specialist",
+        lens: "considered",
+        body: `---
+role: lens-considered-specialist
+domain: "considered lens coverage"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — done"
+  yield: "This sits in <domain>'s domain — handing off."
+  verdict: "**Verdict: <SENTINEL>**"
+capabilities:
+  review_lenses:
+    - considered
+  run_jobs: []
+  path_patterns: []
+---
+
+# Lens Considered Specialist
+
+## Domain
+
+Covers the considered review lens.
+
+## Mandate
+
+- Review considered.
+
+## Out of mandate
+
+- Other lenses.
+
+## Prompt
+
+You cover the considered lens.
+`,
+      },
+    ] as const;
+
+    it("refresh succeeds without unhire even when the minimum roster is hired", async () => {
+      const tmp = await makeTmp("refresh-ac2-min-roster");
+      tmpDirs.push(tmp);
+
+      const HIRED_AT = "2026-05-01T09:00:00.000Z";
+
+      // Write all 5 custom role files and hire them.
+      const customDir = path.join(tmp, "team", "custom");
+      await fs.mkdir(customDir, { recursive: true });
+
+      for (const role of MINIMUM_ROSTER_ROLES) {
+        await fs.writeFile(path.join(customDir, `${role.id}.md`), role.body, "utf8");
+        await instantiatePersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: role.id,
+          clock: () => new Date(HIRED_AT),
+          pluginVersion: "0.1.0",
+        });
+      }
+
+      // Confirm the minimum roster blocks a plain unhire.
+      await expect(
+        unhirePersona({ targetRepoRoot: tmp, role: "lens-structure-specialist" }),
+      ).rejects.toBeInstanceOf(UnhireBelowJudgeMinimumError);
+
+      // Append some knowledge to the role we will refresh.
+      const personaPath = path.join(tmp, "team", "lens-structure-specialist", "PERSONA.md");
+      const knowledgeContent = "- learned: structure review patterns\n";
+      await fs.appendFile(personaPath, knowledgeContent, "utf8");
+
+      // refreshPersona must succeed even though unhirePersona would have refused.
+      const result = await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "lens-structure-specialist",
+        pluginVersion: "0.2.0",
+      });
+
+      expect(result.hiredAt).toBe(HIRED_AT);
+      expect(result.catalogueVersion).toBe("0.2.0");
+
+      // Knowledge is preserved after the refresh.
+      const after = await readPersona({ targetRepoRoot: tmp, role: "lens-structure-specialist" });
+      expect(after.hired_at).toBe(HIRED_AT);
+      expect(after.sections.Knowledge).toContain("structure review patterns");
+    });
+
+    it("instantiatePersona's FR89 existing-persona refusal still applies for non-force re-instantiation", async () => {
+      const tmp = await makeTmp("refresh-ac2-fr89");
+      tmpDirs.push(tmp);
+
+      await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      // A second instantiatePersona on the same role must still refuse (FR89 intact).
+      await expect(
+        instantiatePersona({
+          pluginRoot: getPluginRoot(),
+          targetRepoRoot: tmp,
+          role: "planner",
+          clock: () => new Date(FIXED_HIRED_AT),
+          pluginVersion: FIXED_VERSION,
+        }),
+      ).rejects.toBeInstanceOf(PersonaAlreadyExistsError);
+
+      // refreshPersona, by contrast, must succeed on the same role.
+      const refreshResult = await refreshPersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        pluginVersion: FIXED_VERSION,
+      });
+      expect(refreshResult.path).toBe(path.join(tmp, "team", "planner", "PERSONA.md"));
     });
   });
 

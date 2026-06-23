@@ -37,6 +37,7 @@
   "readCatalogue",
   "readCustomRole",
   "readPersona",
+  "refreshPersona",
   "readRepoSignals",
   "reattachOrphan",
   "recallLesson",
