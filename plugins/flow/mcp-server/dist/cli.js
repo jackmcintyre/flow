@@ -46693,6 +46693,57 @@ async function checkGitRemote(opts) {
   return { hasRemote };
 }
 
+// src/tools/resolve-run-base.ts
+var CONFIG_PATH_PREFIXES2 = ["team/", "docs/standards.md"];
+async function runGit3(args, cwd, execaImpl) {
+  const result = await execaImpl("git", args, { cwd, reject: false });
+  return {
+    stdout: typeof result.stdout === "string" ? result.stdout.trim() : "",
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1
+  };
+}
+async function resolveRunBase(opts) {
+  const { targetRepoRoot } = opts;
+  const baseBranch = opts.baseBranch ?? "main";
+  const execaImpl = opts.execaImpl ?? execa;
+  const originRef = `origin/${baseBranch}`;
+  const headResult = await runGit3(
+    ["-C", targetRepoRoot, "rev-parse", "HEAD"],
+    targetRepoRoot,
+    execaImpl
+  );
+  const localHead = headResult.exitCode === 0 ? headResult.stdout : "";
+  const originResult = await runGit3(
+    ["-C", targetRepoRoot, "rev-parse", originRef],
+    targetRepoRoot,
+    execaImpl
+  );
+  const originHead = originResult.exitCode === 0 ? originResult.stdout : null;
+  let configDiverges = false;
+  let divergingPaths = [];
+  if (localHead && originHead && localHead !== originHead) {
+    const diffResult = await runGit3(
+      [
+        "-C",
+        targetRepoRoot,
+        "diff",
+        "--name-only",
+        originRef,
+        "HEAD",
+        "--",
+        ...CONFIG_PATH_PREFIXES2
+      ],
+      targetRepoRoot,
+      execaImpl
+    );
+    if (diffResult.exitCode === 0 && diffResult.stdout.length > 0) {
+      divergingPaths = diffResult.stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+      configDiverges = divergingPaths.length > 0;
+    }
+  }
+  return { localHead, originHead, configDiverges, divergingPaths };
+}
+
 // src/cli.ts
 var TOOLS = {
   getStatus,
@@ -46913,7 +46964,14 @@ var TOOLS = {
   // target repo has at least one configured git remote. Used by the run pre-flight
   // checklist so a missing remote is surfaced before any story is claimed or built.
   //   node dist/cli.js checkGitRemote --json '{"targetRepoRoot":"..."}'
-  checkGitRemote
+  checkGitRemote,
+  // Story native:01KVS1150C7H9HCGG07Y0XBT98 — resolveRunBase: resolve the current
+  // local HEAD and detect config divergence between local HEAD and origin/<base>.
+  // Used by the run pre-flight checklist: when local HEAD has committed tracked-config
+  // (team/, docs/standards.md) that origin/<base> lacks, the run fails loud rather
+  // than silently sourcing config from one commit and code from another.
+  //   node dist/cli.js resolveRunBase --json '{"targetRepoRoot":"...","baseBranch":"main"}'
+  resolveRunBase
 };
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj ?? null) + "\n");

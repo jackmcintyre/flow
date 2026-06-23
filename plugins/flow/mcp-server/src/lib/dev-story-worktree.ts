@@ -81,7 +81,18 @@ export interface DevStoryWorktreeOpts {
   sessionUlid: string;
   /** Story ref — used to name the worktree path deterministically. */
   ref: string;
-  /** Base branch the worktree (and ultimately the PR) is cut from. */
+  /**
+   * Base commit/ref the worktree (and ultimately the PR) is cut from.
+   *
+   * Story native:01KVS1150C7H9HCGG07Y0XBT98: the correct base is the current
+   * LOCAL HEAD — not `origin/main` or a recorded older base. Cutting from local
+   * HEAD ensures that committed workspace config (team/ personas, docs/standards.md)
+   * that the operator has committed locally but not yet pushed reaches the dev's
+   * worktree and therefore the PR. The Workflow runtime honours this when
+   * `worktree.baseRef: "head"` is set in the project's `.claude/settings.json`
+   * (which this story sets). Use `resolveLocalHead(targetRepoRoot)` to get the
+   * current HEAD SHA when constructing this field programmatically.
+   */
   base: string;
   /** Test seam — production callers do not pass this. */
   execaImpl?: typeof defaultExeca;
@@ -109,6 +120,30 @@ async function runGit(
     stderr: typeof result.stderr === "string" ? result.stderr : "",
     exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
   };
+}
+
+// ---------------------------------------------------------------------------
+// resolveLocalHead: get the current HEAD commit SHA of a repo checkout.
+// Used when materialising a dev worktree at the operator's current HEAD rather
+// than at an older origin base (Story native:01KVS1150C7H9HCGG07Y0XBT98).
+// Callers that already know the HEAD SHA (e.g. from resolveRunBase) can pass
+// it directly as `base` and skip this call.
+// ---------------------------------------------------------------------------
+export async function resolveLocalHead(
+  targetRepoRoot: string,
+  execaImpl: typeof defaultExeca = defaultExeca,
+): Promise<string> {
+  const result = await runGit(
+    ["-C", targetRepoRoot, "rev-parse", "HEAD"],
+    targetRepoRoot,
+    execaImpl,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `resolveLocalHead: git rev-parse HEAD failed in ${targetRepoRoot}: ${result.stderr}`,
+    );
+  }
+  return result.stdout.trim();
 }
 
 // Concurrent `git worktree add` against a shared `.git` can lose a lock race

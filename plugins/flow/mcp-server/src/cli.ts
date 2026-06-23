@@ -86,6 +86,7 @@ import { refreshPersona } from "./tools/refresh-persona.js";
 import { matchStorySpecialist } from "./tools/match-story-specialist.js";
 import { recordSpecialistEngagement } from "./tools/record-specialist-engagement.js";
 import { checkGitRemote } from "./tools/check-git-remote.js";
+import { resolveRunBase } from "./tools/resolve-run-base.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -312,6 +313,13 @@ const TOOLS: Record<string, ToolFn> = {
   // checklist so a missing remote is surfaced before any story is claimed or built.
   //   node dist/cli.js checkGitRemote --json '{"targetRepoRoot":"..."}'
   checkGitRemote,
+  // Story native:01KVS1150C7H9HCGG07Y0XBT98 — resolveRunBase: resolve the current
+  // local HEAD and detect config divergence between local HEAD and origin/<base>.
+  // Used by the run pre-flight checklist: when local HEAD has committed tracked-config
+  // (team/, docs/standards.md) that origin/<base> lacks, the run fails loud rather
+  // than silently sourcing config from one commit and code from another.
+  //   node dist/cli.js resolveRunBase --json '{"targetRepoRoot":"...","baseBranch":"main"}'
+  resolveRunBase,
 };
 
 function emit(obj: unknown): void {
