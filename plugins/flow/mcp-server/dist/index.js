@@ -53475,13 +53475,38 @@ adapter_config: {}
     });
     created.push("docs/standards.md");
   }
+  let claudeIgnored = false;
+  const gitignorePath = path54.join(root, ".gitignore");
+  const CLAUDE_IGNORE_RULE = ".claude/";
+  const existingGitignore = await pathExists(gitignorePath);
+  const currentContent = existingGitignore ? await readFile2(gitignorePath, "utf8") : "";
+  const alreadyIgnored = currentContent.split("\n").some((line) => line.trim() === CLAUDE_IGNORE_RULE);
+  if (alreadyIgnored) {
+    skipped.push(".gitignore (.claude/ already present)");
+  } else {
+    const separator = currentContent.length > 0 && !currentContent.endsWith("\n") ? "\n" : "";
+    const newContent = currentContent + separator + CLAUDE_IGNORE_RULE + "\n";
+    await writeManagedFile({
+      absPath: gitignorePath,
+      contents: newContent,
+      targetRepoRoot: root,
+      mcpToolContext: args.mcpToolContext
+    });
+    if (existingGitignore) {
+      created.push(".gitignore (appended .claude/)");
+    } else {
+      created.push(".gitignore");
+    }
+    claudeIgnored = true;
+  }
   return {
     adapter,
     created,
     skipped,
     gitPresent: await pathExists(path54.join(root, ".git")),
     teamPresent: await pathExists(path54.join(root, "team")),
-    configPath
+    configPath,
+    claudeIgnored
   };
 }
 function renderInitWorkspace(result) {
