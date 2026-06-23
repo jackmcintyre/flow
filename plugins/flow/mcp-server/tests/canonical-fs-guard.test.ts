@@ -156,6 +156,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // stays-unqualified constraint in resolveRunSlot. Test file only; the production
   // tool (resolve-run-slot.ts) is a pure reader — it performs no fs writes.
   path.join(SRC_DIR, "tools", "__tests__", "resolve-run-slot.test.ts"),
+  // Story native:01KVS0Z0: guard-clean-root tests set up a real git repo in tmpdir
+  // using raw fs.writeFile/mkdir to create tracked and untracked files, exercising
+  // the config-edit vs worktree-isolation-leak classification. Test file only; the
+  // production guardCleanRoot tool orchestrates purely over lib/git.ts helpers and
+  // performs no direct fs writes.
+  path.join(SRC_DIR, "tools", "__tests__", "guard-clean-root.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

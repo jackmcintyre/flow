@@ -260,11 +260,27 @@ const notifyHumanNeeded = (ref, question) => {
 // finds the root clean), so retryable; a garbled relay never breaks the run.
 const guardRoot = async (ref) => {
   const g = await seam(`node ${CLI} guardCleanRoot --json '${J({ targetRepoRoot: REPO, ref })}'`, `clean-root-guard:${ref}`, true)
-  if (g && !g._parseError && g.dirty) {
-    const paths = Array.isArray(g.paths) ? g.paths : []
+  // OPERATOR CONFIG EDITS (Story native:01KVS0Z0 — deliberate team/ or docs/ edits
+  // held in the working tree while the run is going). The guard does NOT stash these —
+  // they are intentional. But they will NOT persist into the next story's worktree
+  // (each worktree is cut fresh from the clean base), so the operator must know.
+  if (g && !g._parseError && g.hasConfigEdits) {
+    const configPaths = Array.isArray(g.configEdits) ? g.configEdits : []
+    const shown = configPaths.slice(0, 8).join(', ')
+    const more = configPaths.length > 8 ? `, +${configPaths.length - 8} more` : ''
+    log(`⚠ CLEAN-ROOT GUARD [CONFIG EDIT]: root checkout has uncommitted operator edits to tracked config paths after ${ref} — ${configPaths.length} path(s): ${shown}${more}. ` +
+      `These are NOT worktree-isolation leakage and were NOT stashed. ` +
+      `WARNING: these working-tree fixes will NOT persist across stories — each story's worktree is cut from the clean base and will not see them. ` +
+      `Commit or stash these edits manually before or after the run to preserve them.`)
+  }
+  // WORKTREE-ISOLATION LEAKAGE (bgIsolation:'none' — the dev's edits pinned to the
+  // shared root instead of its own worktree). These are auto-stashed so the next
+  // story still gets a clean base.
+  if (g && !g._parseError && Array.isArray(g.paths) && g.paths.length > 0) {
+    const paths = g.paths
     const shown = paths.slice(0, 8).join(', ')
     const more = paths.length > 8 ? `, +${paths.length - 8} more` : ''
-    log(`⚠ CLEAN-ROOT GUARD: root checkout was dirty after ${ref} — ${paths.length} leaked path(s): ${shown}${more}. ` +
+    log(`⚠ CLEAN-ROOT GUARD [LEAK]: root checkout was dirty after ${ref} — ${paths.length} leaked path(s): ${shown}${more}. ` +
       `${g.stashed ? 'Auto-stashed (recover via `git stash list` / `git stash pop`).' : 'STASH DID NOT LAND — root still dirty; inspect manually.'} ` +
       `Likely a worktree-isolation leak (bgIsolation:'none').`)
   }
