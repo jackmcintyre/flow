@@ -32,6 +32,7 @@ import {
   PrePrBuildFailedError,
 } from "../../errors.js";
 import { DEFAULT_BUILD_TEST_TIMEOUT_MS } from "../../lib/run-project-build.js";
+import { seedFlowShapedBuildHome } from "../../lib/__tests__/flow-shaped-build-home.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -109,6 +110,9 @@ async function setupRepo(): Promise<TestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+  // Flow-shaped build home so the structural toolchain resolver lands on
+  // plugins/flow + pnpm (Story native:01KVTB3Z) — the stub intercepts pnpm.
+  await seedFlowShapedBuildHome(repoRoot);
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
 
@@ -1162,6 +1166,10 @@ async function setupWorktreeRepo(): Promise<WorktreeTestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+  // Flow-shaped build home so the structural resolver lands on plugins/flow +
+  // pnpm (Story native:01KVTB3Z), committed into the base so the cut worktree
+  // carries it (the dev gate resolves against the worktree).
+  await seedFlowShapedBuildHome(repoRoot);
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
   await realExeca("git", ["-C", repoRoot, "push", "-u", "origin", "main"]);

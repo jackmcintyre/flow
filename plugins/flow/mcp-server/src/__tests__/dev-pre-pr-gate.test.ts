@@ -87,6 +87,24 @@ async function setupRepo(): Promise<TestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+
+  // Flow-SHAPED build home so the structural toolchain resolver (Story
+  // native:01KVTB3Z) resolves cwd=plugins/flow + packageManager=pnpm + a knip
+  // script (so the bloat gate runs) PURELY from on-disk structure — no
+  // `.flow/config.yaml`. Mirrors the real Flow repo's dogfood path.
+  const flowDir = path.join(repoRoot, "plugins", "flow");
+  await fs.mkdir(flowDir, { recursive: true });
+  await atomicWriteFile(
+    path.join(flowDir, "package.json"),
+    JSON.stringify(
+      { name: "flow", private: true, scripts: { build: "pnpm -r build", test: "pnpm -r test", knip: "knip --no-progress" } },
+      null,
+      2,
+    ),
+  );
+  await atomicWriteFile(path.join(flowDir, "pnpm-workspace.yaml"), "packages:\n  - mcp-server\n");
+  await atomicWriteFile(path.join(flowDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
 

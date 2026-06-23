@@ -369,6 +369,14 @@ async function buildFixture(tmpRoot: string): Promise<void> {
     path.join(tmpRoot, "package.json"),
     JSON.stringify({ name: "fixture-4-6", version: "0.0.0", private: true }, null, 2),
   );
+  // pnpm lockfile so the toolchain resolver (Story native:01KVTB3Z) detects the
+  // package manager as pnpm for the reviewer's vitest invocation — mirroring the
+  // real Flow repo. Without a lockfile and no local vitest binary the resolver
+  // would default to npm, and this fixture asserts the `pnpm vitest` invocation.
+  await atomicWriteFile(
+    path.join(tmpRoot, "pnpm-lock.yaml"),
+    "lockfileVersion: '9.0'\n",
+  );
 
   // vitest test file (passing)
   await fs.mkdir(path.join(tmpRoot, "__tests__"), { recursive: true });

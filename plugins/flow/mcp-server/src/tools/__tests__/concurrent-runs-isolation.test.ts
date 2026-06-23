@@ -29,6 +29,7 @@ import * as path from "node:path";
 import { execa as realExeca } from "execa";
 import { stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { seedFlowShapedBuildHome } from "../../lib/__tests__/flow-shaped-build-home.js";
 import { runDevTerminalAction } from "../run-dev-terminal-action.js";
 import {
   materialiseDevStoryWorktree,
@@ -90,6 +91,10 @@ async function setupRepo(): Promise<TestContext> {
   const srcDir = path.join(repoRoot, "src");
   await fs.mkdir(srcDir, { recursive: true });
   await atomicWriteFile(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+  // Flow-shaped build home so the structural toolchain resolver lands on
+  // plugins/flow + pnpm (Story native:01KVTB3Z) — committed into the base so the
+  // cut worktrees carry it.
+  await seedFlowShapedBuildHome(repoRoot);
   await realExeca("git", ["-C", repoRoot, "add", "."]);
   await realExeca("git", ["-C", repoRoot, "commit", "-m", "chore: initial commit"]);
   await realExeca("git", ["-C", repoRoot, "push", "-u", "origin", "dev"]);
