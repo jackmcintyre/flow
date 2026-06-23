@@ -162,6 +162,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // production guardCleanRoot tool orchestrates purely over lib/git.ts helpers and
   // performs no direct fs writes.
   path.join(SRC_DIR, "tools", "__tests__", "guard-clean-root.test.ts"),
+  // Story native:01KVS11W: init-workspace tests for AC1 (append-safe gitignore) and
+  // AC2 (idempotent no-dup) seed a pre-existing .gitignore fixture directly to tmpdir
+  // via raw fs.writeFile so initWorkspace can be driven against a workspace that
+  // already has .gitignore rules. Test file only; the production initWorkspace routes
+  // all file writes through writeManagedFile and performs no raw fs writes itself.
+  path.join(SRC_DIR, "tools", "__tests__", "init-workspace.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

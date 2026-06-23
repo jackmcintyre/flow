@@ -7,7 +7,7 @@
  * the bmad variant omits the native-stories dir.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, access, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, access, mkdir, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,6 +130,66 @@ describe("initWorkspace", () => {
     expect(result.gitPresent).toBe(true);
     expect(result.teamPresent).toBe(true);
   });
+
+  // AC1 — git-ignore .claude/ (append-safe, no clobber)
+  it("creates .gitignore with .claude/ rule when no .gitignore exists", async () => {
+    const result = await initWorkspace({
+      targetRepoRoot: root,
+      pluginRoot: PLUGIN_ROOT,
+      mcpToolContext: CTX,
+    });
+
+    const gitignoreContent = await readFile(path.join(root, ".gitignore"), "utf8");
+    expect(gitignoreContent).toContain(".claude/");
+    expect(result.claudeIgnored).toBe(true);
+    expect(result.created.some((c) => c.includes(".gitignore"))).toBe(true);
+  });
+
+  it("appends .claude/ rule to an existing .gitignore without clobbering other rules", async () => {
+    // Pre-seed a .gitignore with existing rules
+    await writeFile(
+      path.join(root, ".gitignore"),
+      "node_modules/\ndist/\n",
+      "utf8",
+    );
+
+    const result = await initWorkspace({
+      targetRepoRoot: root,
+      pluginRoot: PLUGIN_ROOT,
+      mcpToolContext: CTX,
+    });
+
+    const gitignoreContent = await readFile(path.join(root, ".gitignore"), "utf8");
+    expect(gitignoreContent).toContain("node_modules/");
+    expect(gitignoreContent).toContain("dist/");
+    expect(gitignoreContent).toContain(".claude/");
+    expect(result.claudeIgnored).toBe(true);
+  });
+
+  // AC2 — idempotent: no duplicate when .claude/ already present
+  it("does not duplicate .claude/ rule when .gitignore already contains it", async () => {
+    // Pre-seed a .gitignore that already has the .claude/ rule
+    await writeFile(
+      path.join(root, ".gitignore"),
+      "node_modules/\n.claude/\n",
+      "utf8",
+    );
+
+    const result = await initWorkspace({
+      targetRepoRoot: root,
+      pluginRoot: PLUGIN_ROOT,
+      mcpToolContext: CTX,
+    });
+
+    const gitignoreContent = await readFile(path.join(root, ".gitignore"), "utf8");
+    // Count occurrences — exactly one
+    const occurrences = gitignoreContent.split("\n").filter((l) => l.trim() === ".claude/").length;
+    expect(occurrences).toBe(1);
+    // Original content still present
+    expect(gitignoreContent).toContain("node_modules/");
+    expect(result.claudeIgnored).toBe(false);
+    expect(result.skipped.some((s) => s.includes(".gitignore"))).toBe(true);
+  });
 });
 
 describe("renderInitWorkspace", () => {
@@ -141,6 +201,7 @@ describe("renderInitWorkspace", () => {
       gitPresent: false,
       teamPresent: false,
       configPath: "/repo/.flow/config.yaml",
+      claudeIgnored: true,
     });
 
     expect(out).toContain("Flow workspace initialised (adapter: native).");
@@ -158,6 +219,7 @@ describe("renderInitWorkspace", () => {
       gitPresent: true,
       teamPresent: true,
       configPath: "/repo/.flow/config.yaml",
+      claudeIgnored: false,
     });
 
     expect(out).toContain("already initialised");

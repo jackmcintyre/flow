@@ -47,6 +47,8 @@ export interface InitWorkspaceResult {
   gitPresent: boolean;
   teamPresent: boolean;
   configPath: string;
+  /** True when .gitignore was created or updated to include .claude/. */
+  claudeIgnored: boolean;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -129,6 +131,49 @@ export async function initWorkspace(
     created.push("docs/standards.md");
   }
 
+  // 5. .gitignore — ensure .claude/ is ignored so the runtime's per-story
+  //    worktrees (.claude/worktrees/) and agent scratch never show up as
+  //    untracked noise in `git status`. Append-safe: read first, only write
+  //    when the rule is absent, preserve existing rules. Idempotent: a
+  //    second init is a no-op when the rule is already present.
+  let claudeIgnored = false;
+  const gitignorePath = path.join(root, ".gitignore");
+  const CLAUDE_IGNORE_RULE = ".claude/";
+  const existingGitignore = await pathExists(gitignorePath);
+  const currentContent = existingGitignore
+    ? await readFile(gitignorePath, "utf8")
+    : "";
+
+  // Check whether any line in .gitignore already ignores .claude/ — exact
+  // match on the rule (with or without leading/trailing whitespace on that
+  // line, but the canonical form is `.claude/`).
+  const alreadyIgnored = currentContent
+    .split("\n")
+    .some((line) => line.trim() === CLAUDE_IGNORE_RULE);
+
+  if (alreadyIgnored) {
+    skipped.push(".gitignore (.claude/ already present)");
+  } else {
+    // Append: ensure the file ends with a newline before appending the rule,
+    // then add a trailing newline after it.
+    const separator =
+      currentContent.length > 0 && !currentContent.endsWith("\n") ? "\n" : "";
+    const newContent =
+      currentContent + separator + CLAUDE_IGNORE_RULE + "\n";
+    await writeManagedFile({
+      absPath: gitignorePath,
+      contents: newContent,
+      targetRepoRoot: root,
+      mcpToolContext: args.mcpToolContext,
+    });
+    if (existingGitignore) {
+      created.push(".gitignore (appended .claude/)");
+    } else {
+      created.push(".gitignore");
+    }
+    claudeIgnored = true;
+  }
+
   return {
     adapter,
     created,
@@ -136,6 +181,7 @@ export async function initWorkspace(
     gitPresent: await pathExists(path.join(root, ".git")),
     teamPresent: await pathExists(path.join(root, "team")),
     configPath,
+    claudeIgnored,
   };
 }
 
