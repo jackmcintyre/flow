@@ -443,6 +443,120 @@ describe("computeSkillEffectiveness — AC3 edges", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Done/-manifest attribution — Story native:01KVS12K AC1 + AC2
+// ---------------------------------------------------------------------------
+
+describe("computeSkillEffectiveness — done/-manifest attribution (Story native:01KVS12K)", () => {
+  it("AC1: credits a done-but-no-verdict-event invoke as a useful fire via done/-manifest read", async () => {
+    // A skill.invoke whose story_id reached done/ but has NO joined READY FOR
+    // MERGE reviewer.verdict in telemetry — the done/-manifest is the only signal.
+    // Before this fix: useful_fire_count 0 → retro wrongly proposes retire/revise.
+    // After this fix: useful_fire_count 1, effectiveness_ratio 1.
+    const doneStoryRef = "native:01DONE0NOVERDICT00000001";
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-done-1", skill_name: "flow:run", story_id: doneStoryRef }),
+      // No READY FOR MERGE verdict for this story — only the done/ manifest signals completion.
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+      readDoneRefsImpl: async () => new Set([doneStoryRef]),
+    });
+
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1,
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+    // Done refs present → signal is "attributed", not "no-completed-flows".
+    expect(result.attribution).toBe("attributed");
+  });
+
+  it("AC2a: a not-done, no-verdict invoke is NOT credited (genuinely unhelpful skill stays 0)", async () => {
+    // A skill.invoke whose story is neither in done/ nor has a joined READY FOR
+    // MERGE verdict must remain uncredited — the done/ path must not over-credit.
+    const notDoneStoryRef = "native:01NOTDONE0000000000001";
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-notdone-1", skill_name: "flow:run", story_id: notDoneStoryRef }),
+      // No verdict and story NOT in done/.
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+      readDoneRefsImpl: async () => new Set(), // empty done set
+    });
+
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 0,
+      effectiveness_ratio: 0,
+      skill_tier: "execution",
+    });
+    // No done refs, no verdicts, no planning/cockpit → "no-completed-flows".
+    expect(result.attribution).toBe("no-completed-flows");
+  });
+
+  it("AC2b: a skill.invoke that already joins a READY-FOR-MERGE verdict still counts as a useful fire exactly as today", async () => {
+    // The existing verdict-join path must be unaffected by the done/-manifest
+    // augmentation. An invoke followed by a READY FOR MERGE verdict (regardless of
+    // whether the story also has a done/ manifest) must still be credited.
+    const storyRef = "native:01VERDICTANDDO00000001";
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-v-d", skill_name: "flow:run", story_id: storyRef }),
+      makeVerdict({ ts: makeTs(2000), session_id: "run-ulid-v-d", pr_number: 42, verdict: "READY FOR MERGE", story_id: storyRef }),
+    ].map(assertValid);
+
+    // Provide both: verdict in telemetry AND story in done/ — must still credit once.
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+      readDoneRefsImpl: async () => new Set([storyRef]),
+    });
+
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1,     // credited exactly once (verdict join wins; done/ is redundant but harmless)
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+    expect(result.attribution).toBe("attributed");
+  });
+
+  it("done/-manifest ENOENT is treated as empty set (no done refs), not an error", async () => {
+    // Repos without a done/ dir yet should behave as if there are no done refs —
+    // consistent with the empty-telemetry-dir posture.
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-enoent", skill_name: "flow:run", story_id: "native:01SOMEREF000" }),
+    ].map(assertValid);
+
+    // Simulate ENOENT on the done/ dir via the injected seam.
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-06.jsonl": events }),
+      readDoneRefsImpl: async () => {
+        const err = new Error("no done dir") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      },
+    });
+
+    // Should not throw; the invoke is uncredited (no verdict, no done manifest).
+    expect(result.per_skill["flow:run"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 0,
+      effectiveness_ratio: 0,
+      skill_tier: "execution",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tier-aware scoring — Story native:01KVEYY1 AC1 + AC2 + AC3
 // ---------------------------------------------------------------------------
 
