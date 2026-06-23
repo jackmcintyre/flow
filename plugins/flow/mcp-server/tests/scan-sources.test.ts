@@ -500,6 +500,8 @@ describe("Story 10.3 AC1/AC3 — Tier-0 fail-closed at scan (native workspace)",
       path.join(nativeScratch, ".flow", "config.yaml"),
       `adapter: native\nadapter_config: {}\n`,
     );
+    // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+    await atomicWriteFile(path.join(nativeScratch, "package.json"), `{ "name": "fixture" }\n`);
   });
 
   afterEach(async () => {

@@ -108,6 +108,12 @@ beforeEach(async () => {
   ]) {
     await seedFile(rel);
   }
+  // Story native:01KVS2MG — the write-time gate now also resolves `vitest:`
+  // targets to a runnable package (a package.json must sit between the target
+  // and the repo root). Seed one at the workspace root so the passing-candidate
+  // fixtures' `src/__tests__/*.test.ts` targets resolve. (The test FILE itself
+  // still need not exist — only the enclosing package.)
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 });
 
 afterEach(async () => {

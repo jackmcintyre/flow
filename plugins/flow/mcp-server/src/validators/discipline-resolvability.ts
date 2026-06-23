@@ -30,6 +30,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { DisciplineViolationReason, SourceStory } from "../adapters/adapter.js";
 import { isEnrichedStory } from "./planning-discipline.js";
+import { findPackageRoot } from "../lib/find-package-root.js";
 
 /**
  * Reject an obviously non-path verification target — the part of T0-6 that
@@ -179,6 +180,38 @@ export async function resolveDisciplinePaths(
         code: "unresolvable-verification-target",
         field: `acceptance_criteria[${i}].verification.target`,
         detail: `AC${i + 1} artifact verification target '${v.target}' does not resolve on disk (looked at '${abs}'). An 'artifact:' target is an existing contract and must resolve; only 'vitest:' targets (build outputs) are exempt.`,
+      });
+    }
+  }
+
+  // Resolvability-check `vitest:` targets (Story native:01KVS2MG). A `vitest:`
+  // target's test FILE need NOT pre-exist (the build creates it — see module
+  // header), but a runnable *package* must enclose it: the reviewer walks up
+  // from the test path to the nearest `package.json` (`findPackageRoot`) and
+  // fails the AC when none resolves. We run that SAME walk here so a wrong-prefix
+  // target (e.g. `mcp-server/tests/x.test.ts` instead of
+  // `plugins/flow/mcp-server/tests/x.test.ts`) — which has NO package.json
+  // between it and the repo root — is refused at author/scan time, BEFORE a
+  // build is wasted, with an `unresolvable-test-target` violation. Sharing the
+  // walk means author-time and review-time package resolution cannot diverge.
+  //
+  // Critical asymmetry vs `artifact:` existence: we DO NOT require the test file
+  // to exist — only that a package.json resolves above it. A not-yet-existing
+  // test file under a real package therefore PASSES (preserves the
+  // build-creates-it intent).
+  for (let i = 0; i < story.acceptance_criteria.length; i++) {
+    const v = story.acceptance_criteria[i]!.verification;
+    if (!v) continue;
+    if (v.type !== "vitest") continue; // artifact targets handled above.
+    if (!isWellFormedTarget(v.target)) continue; // malformed → already reported.
+    if (!isRunnableTestTarget(v.target)) continue; // shape-bad → already reported.
+    const testFilePathAbs = path.resolve(targetRepoRoot, v.target);
+    const pkg = findPackageRoot({ testFilePathAbs, checkRoot: targetRepoRoot });
+    if (!pkg.ok) {
+      reasons.push({
+        code: "unresolvable-test-target",
+        field: `acceptance_criteria[${i}].verification.target`,
+        detail: `AC${i + 1} vitest verification target '${v.target}' cannot resolve to a runnable package: no package.json was found between it (looked at '${testFilePathAbs}') and the repo root ('${targetRepoRoot}'). The test FILE need not exist yet (the build creates it), but a package must enclose it — this is the same upward walk the reviewer uses, so a target that fails here would also fail at review. A common cause is a wrong-prefix path (e.g. 'mcp-server/tests/x.test.ts' instead of 'plugins/flow/mcp-server/tests/x.test.ts'); fix the prefix so the target lands under a real package.`,
       });
     }
   }

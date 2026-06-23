@@ -100,6 +100,10 @@ beforeEach(async () => {
     path.join(root, ".flow", "config.yaml"),
     `adapter: native\nadapter_config: {}\n`,
   );
+  // Story native:01KVS2MG — package.json at the workspace root so shape-valid
+  // `vitest:` targets resolve to a runnable package (parity holds for the new
+  // resolvability check too, since both paths share the same walk).
+  await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
 });
 
 afterEach(async () => {

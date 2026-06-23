@@ -89,6 +89,8 @@ async function setupNativeWorkspace(tmpRoot: string): Promise<void> {
     path.join(tmpRoot, ".flow", "config.yaml"),
     "adapter: native\nadapter_config: {}\n",
   );
+  // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+  await atomicWriteFile(path.join(tmpRoot, "package.json"), `{ "name": "fixture" }\n`);
   // Seed the cited source that hardening stories reference.
   await atomicWriteFile(
     path.join(tmpRoot, "plugins", "flow", "mcp-server", "src", "tools", "gather-retro-inputs.ts"),

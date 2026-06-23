@@ -398,6 +398,8 @@ describe("AC4 (integration): scanSources persists lane field; hint downgrade-onl
       path.join(root, ".flow", "config.yaml"),
       `adapter: native\nadapter_config: {}\n`,
     );
+    // Story native:01KVS2MG — package.json so shape-valid vitest: targets resolve to a package
+    await atomicWriteFile(path.join(root, "package.json"), `{ "name": "fixture" }\n`);
     for (const { ulid, citedSources } of stories) {
       // Seed cited source files so T0-5 resolvability check passes.
       for (const src of citedSources) {
