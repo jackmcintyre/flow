@@ -28502,7 +28502,7 @@ var SkillEffectivenessResultSchema = external_exports.object({
   attribution: SkillEffectivenessAttribution
 }).strict();
 async function computeSkillEffectiveness(opts) {
-  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl } = opts;
+  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl, readDoneRefsImpl } = opts;
   const window2 = rawWindow ?? DEFAULT_SKILL_EFFECTIVENESS_WINDOW;
   if (!Number.isFinite(window2) || !Number.isInteger(window2) || window2 <= 0) {
     throw new SkillEffectivenessWindowInvalidError({
@@ -28577,6 +28577,24 @@ async function computeSkillEffectiveness(opts) {
     return a2.session_id < b.session_id ? -1 : a2.session_id > b.session_id ? 1 : 0;
   });
   const windowedInvokes = sortedInvokes.slice(0, window2);
+  const doneDir = path11.join(targetRepoRoot, ".flow", "state", "done");
+  let doneRefs;
+  try {
+    if (readDoneRefsImpl) {
+      doneRefs = await readDoneRefsImpl(doneDir);
+    } else {
+      const entries = await fs9.readdir(doneDir, { withFileTypes: true });
+      doneRefs = new Set(
+        entries.filter((e) => e.isFile() && e.name.endsWith(".yaml")).map((e) => e.name.slice(0, -".yaml".length))
+      );
+    }
+  } catch (err) {
+    if (err !== null && typeof err === "object" && err.code === "ENOENT") {
+      doneRefs = /* @__PURE__ */ new Set();
+    } else {
+      throw err;
+    }
+  }
   const usefulVerdictsBySession = /* @__PURE__ */ new Map();
   const usefulVerdictsByStory = /* @__PURE__ */ new Map();
   let usefulVerdictCount = 0;
@@ -28623,6 +28641,9 @@ async function computeSkillEffectiveness(opts) {
           return true;
         });
       }
+      if (!isUseful && inv.story_id !== void 0) {
+        isUseful = doneRefs.has(inv.story_id);
+      }
     }
     if (isUseful) {
       entry.useful++;
@@ -28638,7 +28659,7 @@ async function computeSkillEffectiveness(opts) {
       skill_tier: counts.tier
     };
   }
-  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke;
+  const isAttributed = usefulVerdictCount > 0 || anyNonExecutionInvoke || doneRefs.size > 0;
   return {
     per_skill,
     window_size: window2,
