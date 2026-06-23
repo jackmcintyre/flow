@@ -115,14 +115,14 @@ export async function readReviewerResultFile(
     typeof parsed !== "object" ||
     parsed === null ||
     typeof (parsed as Record<string, unknown>).recommendedVerdict !== "string" ||
-    !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
+    !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED", "setup-error"].includes(
       (parsed as Record<string, unknown>).recommendedVerdict as string,
     )
   ) {
     throw new ReviewerResultFileMalformedError({
       path: filePath,
       cause:
-        "missing or invalid 'recommendedVerdict' field — expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED",
+        "missing or invalid 'recommendedVerdict' field — expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED, setup-error",
     });
   }
 

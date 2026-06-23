@@ -28132,7 +28132,13 @@ var ExecutionManifestSchema = external_exports.object({
     // confirmed green never reaches done/ — the gate routes it to blocked/
     // with one of these so done/ means "reviewer-approved AND CI-green".
     "ci-not-green",
-    "ci-status-unreadable"
+    "ci-status-unreadable",
+    // Story native:01KVS10J5NZQPGT7MSMJPTZERM: the review could not run due to a
+    // setup failure (docs/standards.md absent — StandardsDocMissingError / FR45).
+    // Distinct from 'verdict-failed' (which implies a quality problem) and from
+    // 'reviewer-no-session-result' (file-absent skipped-first-call path). Carries
+    // the FR45 guidance so the operator knows how to resolve the setup issue.
+    "review-could-not-run"
   ]).optional(),
   /**
    * Structured violation list for manifests blocked by `planning-discipline`.
@@ -31312,12 +31318,12 @@ async function readReviewerResultFile(targetRepoRoot, sessionUlid, ref) {
   } catch (cause) {
     throw new ReviewerResultFileMalformedError({ path: filePath, cause });
   }
-  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(
+  if (typeof parsed !== "object" || parsed === null || typeof parsed.recommendedVerdict !== "string" || !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED", "setup-error"].includes(
     parsed.recommendedVerdict
   )) {
     throw new ReviewerResultFileMalformedError({
       path: filePath,
-      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED"
+      cause: "missing or invalid 'recommendedVerdict' field \u2014 expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED, setup-error"
     });
   }
   const asRecord = parsed;
@@ -42362,7 +42368,40 @@ async function runReviewerSession(opts) {
     pluginRootOverride
   });
   const prDiff = diffResult.stdout;
-  const standards = await lookupStandards(targetRepoRoot);
+  let standards;
+  try {
+    standards = await lookupStandards(targetRepoRoot);
+  } catch (err) {
+    if (err instanceof StandardsDocMissingError) {
+      const setupResultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+      await fs37.mkdir(path52.dirname(setupResultFilePath), { recursive: true });
+      const setupFileProjection = {
+        sessionUlid,
+        ref,
+        recommendedVerdict: "setup-error",
+        acResults: {},
+        standardsByCriterionId: {},
+        sourceStoryRef: ref,
+        prNumber,
+        standardsVersion: "",
+        setupError: err.message
+      };
+      await atomicWriteFile(setupResultFilePath, JSON.stringify(setupFileProjection, null, 2));
+      return {
+        sessionUlid,
+        ref,
+        prNumber,
+        sourceStory: { ref, raw_path: "" },
+        sourceStoryRef: ref,
+        prDiff: "",
+        standards: { version: "", updated: "", criteria: [], sourcePath: "" },
+        standardsByCriterionId: {},
+        acResults: {},
+        recommendedVerdict: "setup-error"
+      };
+    }
+    throw err;
+  }
   const standardsByCriterionId = {};
   for (const criterion of standards.criteria) {
     const id = slugifyStandardsCriterion(criterion.name);
@@ -42874,6 +42913,18 @@ async function processReviewerTranscript(opts) {
     throw new ReviewerFirstCallSkippedError({ sessionUlid, ref });
   }
   const verdict = resultFile.recommendedVerdict;
+  if (verdict === "setup-error") {
+    const currentManifest2 = await readManifest(manifestPath);
+    const setupErrorMsg = resultFile["setupError"] ?? "review setup prerequisite was missing";
+    await writeManifest(manifestPath, {
+      ...currentManifest2,
+      blocked_by: "review-could-not-run"
+    });
+    chatLog.push(
+      `reviewer setup error \u2014 story ${ref} could not be reviewed: ${setupErrorMsg} (FR45: copy plugins/flow/docs/standards-example.md to docs/standards.md). This is a setup failure, NOT a quality verdict. Fix the setup issue and re-run.`
+    );
+    return { next: "review-could-not-run", setupError: setupErrorMsg, chatLog };
+  }
   if (verdict === "READY FOR MERGE") {
     chatLog.push(`reviewer verdict: READY FOR MERGE \u2014 story ${ref} ready for the merge gate`);
     return { next: "done-ready-for-merge", completed: true, chatLog };

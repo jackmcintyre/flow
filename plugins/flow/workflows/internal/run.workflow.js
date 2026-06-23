@@ -604,6 +604,15 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
     log(`${ref} verdict -> ${v}`)
     if (v === 'done-ready-for-merge') break
     if (v === 'done-blocked-reviewer-needs-changes') continue // rework (manifest legitimately stays in in-progress/ between rounds)
+    // Story native:01KVS10J5NZQPGT7MSMJPTZERM: when the review could not run due to a
+    // setup failure (docs/standards.md missing — FR45), the verdict is 'review-could-not-run'.
+    // Map this to a distinct block reason so it is never confused with a quality verdict.
+    // A genuine NEEDS CHANGES / BLOCKED from the reviewer still uses the existing paths above.
+    if (v === 'review-could-not-run') {
+      blocked.push({ ref, blocked_by: 'review-could-not-run' })
+      await blockStoryGiveUp(ref, 'review-could-not-run')
+      return
+    }
     blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' })
     await blockStoryGiveUp(ref, v === 'done-blocked-reviewer-blocked' ? 'reviewer-verdict-blocked' : 'verdict-failed')
     return

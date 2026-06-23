@@ -277,6 +277,12 @@ export const ExecutionManifestSchema = z
         // with one of these so done/ means "reviewer-approved AND CI-green".
         "ci-not-green",
         "ci-status-unreadable",
+        // Story native:01KVS10J5NZQPGT7MSMJPTZERM: the review could not run due to a
+        // setup failure (docs/standards.md absent — StandardsDocMissingError / FR45).
+        // Distinct from 'verdict-failed' (which implies a quality problem) and from
+        // 'reviewer-no-session-result' (file-absent skipped-first-call path). Carries
+        // the FR45 guidance so the operator knows how to resolve the setup issue.
+        "review-could-not-run",
       ])
       .optional(),
 

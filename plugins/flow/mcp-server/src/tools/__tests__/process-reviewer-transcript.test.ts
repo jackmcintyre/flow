@@ -342,6 +342,81 @@ describe("(d) reviewer-result.json absent → ReviewerFirstCallSkippedError (Sto
 });
 
 // ---------------------------------------------------------------------------
+// (d2) setup-error → review-could-not-run (Story native:01KVS10J5NZQPGT7MSMJPTZERM AC1)
+//
+// When docs/standards.md is missing, runReviewerSession persists a setup-error marker
+// instead of throwing. processReviewerTranscript must return the distinct
+// "review-could-not-run" variant carrying the FR45 guidance — NOT "verdict-failed"
+// and NOT the file-absent ReviewerFirstCallSkippedError path.
+// ---------------------------------------------------------------------------
+
+describe("(d2) setup-error marker → review-could-not-run, distinct from quality verdicts (Story F5b)", () => {
+  it("returns review-could-not-run, stamps blocked_by: 'review-could-not-run', does NOT throw", async () => {
+    const setupErrorMsg =
+      "docs/standards.md not found at /fake/docs/standards.md. Copy the shipped template from plugins/flow/docs/standards-example.md to <target-repo>/docs/standards.md and edit for your project. (FR45)";
+    const resultFile: ReviewerResultFileShape & { setupError?: string } = {
+      sessionUlid: SESSION_ULID,
+      ref: STORY_REF,
+      recommendedVerdict: "setup-error" as ReviewerResultFileShape["recommendedVerdict"],
+      acResults: {},
+      standardsByCriterionId: {},
+      sourceStoryRef: STORY_REF,
+      prNumber: 42,
+      standardsVersion: "",
+      setupError: setupErrorMsg,
+    };
+    await seedResultFile(resultFile);
+
+    const result = await processReviewerTranscript(makeOpts());
+
+    expect(result.next).toBe("review-could-not-run");
+    if (result.next !== "review-could-not-run") return;
+
+    // Must carry the FR45 guidance.
+    expect(result.setupError).toContain("FR45");
+    expect(result.setupError).toContain("standards.md");
+
+    // chatLog must mention the setup failure and NOT imply a quality verdict.
+    expect(result.chatLog.some((l) => l.includes("setup error"))).toBe(true);
+    expect(result.chatLog.some((l) => l.includes("FR45"))).toBe(true);
+    // Must NOT contain quality-verdict language.
+    expect(result.chatLog.some((l) => l.includes("NEEDS CHANGES"))).toBe(false);
+    expect(result.chatLog.some((l) => l.includes("BLOCKED"))).toBe(false);
+
+    // Manifest stamped with the distinct block reason.
+    const onDisk = await readOnDiskManifest();
+    expect(onDisk.blocked_by).toBe("review-could-not-run");
+
+    // done/ is empty — manifest was NOT moved.
+    const doneFiles = await fs.readdir(path.join(tmpRoot, ".flow", "state", "done"));
+    expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
+  });
+
+  it("setup-error without setupError field still returns review-could-not-run (graceful fallback)", async () => {
+    // Older or minimal result file: setup-error verdict but no setupError field.
+    const resultFile: ReviewerResultFileShape = {
+      sessionUlid: SESSION_ULID,
+      ref: STORY_REF,
+      recommendedVerdict: "setup-error" as ReviewerResultFileShape["recommendedVerdict"],
+      acResults: {},
+      standardsByCriterionId: {},
+      sourceStoryRef: STORY_REF,
+      prNumber: 42,
+      standardsVersion: "",
+    };
+    await seedResultFile(resultFile);
+
+    const result = await processReviewerTranscript(makeOpts());
+
+    expect(result.next).toBe("review-could-not-run");
+    // setupError still populated (fallback message).
+    if (result.next !== "review-could-not-run") return;
+    expect(typeof result.setupError).toBe("string");
+    expect(result.setupError.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // (e) Malformed JSON → ReviewerResultFileMalformedError — spec §4m
 // ---------------------------------------------------------------------------
 

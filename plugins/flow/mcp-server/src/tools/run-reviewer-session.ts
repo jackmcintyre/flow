@@ -44,7 +44,7 @@ import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { reviewerResultFilePath } from "../lib/read-reviewer-result-file.js";
-import { DuplicateStandardsCriterionIdError } from "../errors.js";
+import { DuplicateStandardsCriterionIdError, StandardsDocMissingError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
@@ -85,8 +85,18 @@ export type AcResult =
       reason: string;
     };
 
-/** The three recognized verdict literals — deterministically derived by the tool. */
-export type RecommendedVerdict = "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED";
+/**
+ * The recognized verdict literals — deterministically derived by the tool.
+ *
+ * "setup-error" is a special sentinel that is NOT a quality verdict: it means the
+ * review could not run at all because a setup prerequisite was missing. Written by
+ * `runReviewerSession` on `StandardsDocMissingError` (docs/standards.md absent) so
+ * a result file is always present for `processReviewerTranscript` to read — letting
+ * it return a distinct `review-could-not-run` variant rather than the generic
+ * file-absent `ReviewerFirstCallSkippedError`. A setup-error result NEVER implies
+ * any quality judgment about the PR.
+ */
+export type RecommendedVerdict = "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED" | "setup-error";
 
 export interface ReviewerSessionResult {
   /** ULID of the calling session — carried on the result for the persisted file. */
@@ -132,6 +142,12 @@ export interface ReviewerResultFileShape {
   prNumber: number;
   /** Semver version of the standards doc used to produce this verdict (Story 4.7). */
   standardsVersion: string;
+  /**
+   * Present when `recommendedVerdict === "setup-error"`. Carries a human-readable
+   * description of the setup failure and the FR45 guidance for how to resolve it.
+   * Absent on all normal (quality-verdict) result files.
+   */
+  setupError?: string;
   /**
    * Risk-tier classification result (Story 4.9b — FR40a, Pattern §11).
    * Optional for backward compatibility with pre-4.9b session result files.
@@ -767,8 +783,60 @@ export async function runReviewerSession(
 
   // -------------------------------------------------------------------------
   // Read 3: standards doc
+  //
+  // Story native:01KVS10J5NZQPGT7MSMJPTZERM: when docs/standards.md is absent,
+  // StandardsDocMissingError carries the FR45 guidance (copy standards-example.md).
+  // Rather than throwing and leaving no result file (which causes processReviewerTranscript
+  // to read an absent file and fall through to the file-absent ReviewerFirstCallSkippedError
+  // path, making the block reason look like a quality failure), we catch the error here,
+  // persist a reviewer-result.json with recommendedVerdict: "setup-error" carrying the
+  // FR45 guidance, and return WITHOUT throwing. processReviewerTranscript then reads the
+  // present file, recognises the "setup-error" sentinel, and returns the distinct
+  // "review-could-not-run" variant — making the setup failure unambiguously visible to
+  // the operator rather than masquerading as a quality verdict.
   // -------------------------------------------------------------------------
-  const standards = await lookupStandards(targetRepoRoot);
+  let standards: Awaited<ReturnType<typeof lookupStandards>>;
+  try {
+    standards = await lookupStandards(targetRepoRoot);
+  } catch (err) {
+    if (err instanceof StandardsDocMissingError) {
+      // Persist the setup-error marker so processReviewerTranscript can return a
+      // distinct "review-could-not-run" variant (AC1). The file must be present and
+      // distinctly marked — NOT the generic file-absent path.
+      const setupResultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+      await fs.mkdir(path.dirname(setupResultFilePath), { recursive: true });
+      const setupFileProjection: ReviewerResultFileShape = {
+        sessionUlid,
+        ref,
+        recommendedVerdict: "setup-error",
+        acResults: {},
+        standardsByCriterionId: {},
+        sourceStoryRef: ref,
+        prNumber,
+        standardsVersion: "",
+        setupError: err.message,
+      };
+      await atomicWriteFile(setupResultFilePath, JSON.stringify(setupFileProjection, null, 2));
+      // Return early: the review could not run. No quality verdict is implied.
+      // The rich ReviewerSessionResult fields (sourceStory, prDiff, standards) are
+      // not available — return a minimal sentinel so the caller knows what happened
+      // while processReviewerTranscript handles the routing via the persisted file.
+      return {
+        sessionUlid,
+        ref,
+        prNumber,
+        sourceStory: { ref, raw_path: "" } as ReviewerSessionResult["sourceStory"],
+        sourceStoryRef: ref,
+        prDiff: "",
+        standards: ({ version: "", updated: "", criteria: [], sourcePath: "" } as unknown) as ReviewerSessionResult["standards"],
+        standardsByCriterionId: {},
+        acResults: {},
+        recommendedVerdict: "setup-error",
+      };
+    }
+    // All other errors (StandardsDocMalformedError etc.) propagate uncaught.
+    throw err;
+  }
 
   // -------------------------------------------------------------------------
   // Build standardsByCriterionId (spec §3a–3c)
