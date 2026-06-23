@@ -313,15 +313,18 @@ describe("Story native:01KVPQS1DVJE41KNG065D6X1X7 — AC1/AC2/AC3: dynamic run s
     expect(personaIdx).toBeGreaterThan(slotIdx);
   });
 
-  it("AC3: the run throws when resolveRunSlot returns no role for the build slot", () => {
+  it("AC3: the run fails loud when resolveRunSlot returns no role for the build slot (via pre-flight checklist)", () => {
     // The run must fail loud on a missing/garbled resolveRunSlot result — naming
-    // the build slot — instead of silently falling back or guessing.
-    expect(SRC).toContain("resolveRunSlot failed for the build slot");
+    // the build slot — instead of silently falling back or guessing. The failure
+    // is now surfaced through the unified pre-flight checklist (Story
+    // native:01KVS0ZW2GYSN25VC45GWNA4MG AC2) rather than a separate throw, but
+    // the fail-loud contract is identical: the run stops pre-claim and names the slot.
+    expect(SRC).toContain("build slot is unstaffed");
   });
 
-  it("AC3: the run throws when resolveRunSlot returns no role for the review slot", () => {
-    // Same guard for the review slot.
-    expect(SRC).toContain("resolveRunSlot failed for the review slot");
+  it("AC3: the run fails loud when resolveRunSlot returns no role for the review slot (via pre-flight checklist)", () => {
+    // Same guard for the review slot — surfaced through the unified checklist.
+    expect(SRC).toContain("review slot is unstaffed");
   });
 
   it("AC2: runReviewerSession uses reviewerRole (not a literal 'generalist-reviewer')", () => {
@@ -384,5 +387,109 @@ describe("Story native:01KVPSZ14HH48J9NEH7N6S6QDR — AC3: custom specialist tre
     expect(SRC).toMatch(/recordSpecialistEngagement.*\n.*catch/s);
     // The swallowed error is logged, not silently dropped.
     expect(SRC).toContain("recordSpecialistEngagement failed (swallowed):");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVS0ZW2GYSN25VC45GWNA4MG — AC1 + AC2: run pre-flight checklist.
+//
+// AC1: a workspace missing docs/standards.md and/or a configured git remote
+//      causes the run to stop before claiming any story, with a single
+//      actionable message naming each missing prerequisite.
+//
+// AC2: a fully-provisioned workspace (standards present, remote configured,
+//      slots staffable) proceeds unchanged; and when a slot cannot be staffed
+//      the EXISTING resolveRunSlot fail-loud is surfaced through the same
+//      unified checklist message rather than as a separate ad-hoc throw.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KVS0ZW2GYSN25VC45GWNA4MG — AC1/AC2: run pre-flight checklist", () => {
+  it("AC1: calls getStatus as a retryable seam to check standards presence before claiming", () => {
+    // The run must invoke getStatus via the CLI seam as part of the pre-flight.
+    // The 'preflight:standards' label is the structural anchor.
+    expect(SRC).toContain("preflight:standards");
+    // The seam call checks standards.state === 'missing' to detect the missing doc.
+    expect(SRC).toContain("standards.state === 'missing'");
+  });
+
+  it("AC1: calls checkGitRemote as a retryable seam to check for a configured remote", () => {
+    // The run must invoke checkGitRemote via the CLI seam as part of the pre-flight.
+    // The 'preflight:remote' label is the structural anchor.
+    expect(SRC).toContain("preflight:remote");
+    expect(SRC).toContain("checkGitRemote");
+    // The seam call checks hasRemote === false to detect a missing remote.
+    expect(SRC).toContain("hasRemote === false");
+  });
+
+  it("AC1: preflight seams are retryable (read-only / idempotent)", () => {
+    // Like other read-only pre-claim seams (mint, slot resolution, etc.), the
+    // preflight seams opt in to retryable=true so a garbled relay re-invokes.
+    expect(SRC).toMatch(/'preflight:standards',\s*true/);
+    expect(SRC).toMatch(/'preflight:remote',\s*true/);
+  });
+
+  it("AC1: a missing standards doc adds an actionable entry to the pre-flight failure list", () => {
+    // When getStatus reports standards.state === 'missing', an entry must be
+    // pushed to preflightFailures naming docs/standards.md.
+    expect(SRC).toContain("docs/standards.md is missing");
+    expect(SRC).toContain("preflightFailures");
+  });
+
+  it("AC1: a missing git remote adds an actionable entry to the pre-flight failure list", () => {
+    // When checkGitRemote reports hasRemote === false, an entry must be pushed
+    // to preflightFailures describing how to add a remote.
+    expect(SRC).toContain("no git remote is configured");
+  });
+
+  it("AC1: all pre-flight failures are surfaced in ONE throw with a numbered checklist", () => {
+    // When preflightFailures is non-empty, the run throws exactly once with a
+    // single message carrying every failure — not a separate throw per item.
+    expect(SRC).toContain("pre-flight checks failed");
+    // The throw uses preflightFailures.length as the guard.
+    expect(SRC).toContain("preflightFailures.length > 0");
+    // The message is formatted as a numbered list.
+    expect(SRC).toContain("preflightFailures.map");
+  });
+
+  it("AC1: pre-flight check occurs before the claim loop (structural order)", () => {
+    // The preflight block must appear in the source BEFORE the claim seam so no
+    // story is ever claimed on a provisioning-incomplete workspace.
+    // Use the worker loop's claimsStarted guard as the anchor for the claim loop —
+    // it is unique to the main run loop and not in any earlier comment.
+    const preflightIdx = SRC.indexOf("preflight:standards");
+    const claimLoopIdx = SRC.indexOf("claimsStarted >= MAX");
+    expect(preflightIdx).toBeGreaterThan(-1);
+    expect(claimLoopIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeLessThan(claimLoopIdx);
+  });
+
+  it("AC2: resolveRunSlot failures are collected into preflightFailures (not thrown separately)", () => {
+    // The EXISTING resolveRunSlot fail-loud (previously a separate throw) is now
+    // folded into the unified checklist: a missing role pushes to preflightFailures
+    // rather than throwing immediately. This means all checks report together.
+    // Assert: the slot failure paths push to preflightFailures (not throw directly).
+    expect(SRC).toContain("build slot is unstaffed");
+    expect(SRC).toContain("review slot is unstaffed");
+    // The slot-check paths push to preflightFailures — no separate throw.
+    expect(SRC).toMatch(/preflightFailures\.push.*build slot/s);
+    expect(SRC).toMatch(/preflightFailures\.push.*review slot/s);
+  });
+
+  it("AC2: a garbled preflight seam relay is treated as 'prerequisite not met' (fail-safe bias)", () => {
+    // When getStatus returns a _parseError, the standards check must add a
+    // failure entry (not silently pass). Same pattern for checkGitRemote.
+    // The guard condition checks both _parseError AND the state field.
+    // The condition is: (!statusCheck || statusCheck._parseError || ... || state === 'missing')
+    expect(SRC).toContain("statusCheck._parseError");
+    expect(SRC).toContain("standards.state === 'missing'");
+    expect(SRC).toContain("remoteCheck._parseError");
+    expect(SRC).toContain("hasRemote === false");
+  });
+
+  it("AC2: the 'slot:build' and 'slot:review' seam labels are preserved (unchanged call site)", () => {
+    // The slot resolution seams keep their existing labels ('slot:build', 'slot:review')
+    // so existing run telemetry and log parsing is unaffected.
+    expect(SRC).toContain("'slot:build'");
+    expect(SRC).toContain("'slot:review'");
   });
 });

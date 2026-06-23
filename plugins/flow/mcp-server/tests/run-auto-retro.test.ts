@@ -210,6 +210,9 @@ async function runAutoRetro(opts: RunAutoRetroOpts = {}): Promise<{
       // orphan-scan, worktree-reap — no orphans / nothing to reap
       if (label === "orphan-scan") return { stdout: JSON.stringify({ orphans: [] }) };
       if (label === "worktree-reap") return { stdout: JSON.stringify({ reaped: [] }) };
+      // Story native:01KVS0ZW2GYSN25VC45GWNA4MG — pre-flight checklist stubs.
+      if (label === "preflight:standards") return { stdout: JSON.stringify({ standards: { state: "ok", path: "/tmp/target-repo/docs/standards.md" } }) };
+      if (label === "preflight:remote") return { stdout: JSON.stringify({ hasRemote: true }) };
       // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
       if (label === "slot:build") return { stdout: JSON.stringify({ role: "generalist-dev", isDefault: true }) };
       if (label === "slot:review") return { stdout: JSON.stringify({ role: "generalist-reviewer", isDefault: true }) };

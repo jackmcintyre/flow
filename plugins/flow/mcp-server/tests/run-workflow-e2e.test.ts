@@ -183,6 +183,9 @@ function prNumberForRef(ref?: string): number {
  * Returns the JSON the CLI tool would print on a clean call.
  */
 function stubSeamResult(label: string, refFromLabel: (l: string) => string | undefined): unknown {
+  // Story native:01KVS0ZW2GYSN25VC45GWNA4MG — pre-flight checklist stubs.
+  if (label === "preflight:standards") return { standards: { state: "ok", path: "/tmp/target-repo/docs/standards.md" } };
+  if (label === "preflight:remote") return { hasRemote: true };
   // Story native:01KVPQS1DVJE41KNG065D6X1X7 — slot resolution stubs.
   if (label === "slot:build") return { role: "generalist-dev", isDefault: true };
   if (label === "slot:review") return { role: "generalist-reviewer", isDefault: true };
