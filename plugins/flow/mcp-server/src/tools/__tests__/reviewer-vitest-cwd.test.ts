@@ -262,6 +262,18 @@ function makeRunnerStub(opts: RunnerStubOpts) {
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }
 
+      // Worktree dependency install (Story native:01KVWMCK) runs before the AC
+      // walk. Return success and do NOT record it as a vitest run — these tests
+      // count the vitest invocations specifically.
+      if (
+        (cmd === "pnpm" && args[0] === "install") ||
+        (cmd === "npm" && args[0] === "ci") ||
+        (cmd === "yarn" && args[0] === "install") ||
+        (cmd === "bun" && args[0] === "install")
+      ) {
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }
+
       // The reviewer's vitest invocation is now toolchain-resolved (Story
       // native:01KVTB3Z): either `pnpm vitest …` (no local binary) OR the local
       // `node_modules/.bin/vitest` binary directly (when present). Recognise both

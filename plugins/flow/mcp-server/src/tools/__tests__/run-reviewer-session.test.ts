@@ -213,6 +213,13 @@ interface DiscriminatingStubOpts {
   /** Overrides for `pnpm vitest …` calls (default: exitCode 0 = pass). */
   vitest?: { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean };
   /**
+   * Overrides for the worktree dependency install — `pnpm install` / `npm ci` /
+   * `yarn install` / `bun install` (Story native:01KVWMCK). Default: exitCode 0
+   * (install succeeds), so existing tests behave as before. Override exitCode to a
+   * non-zero value to drive the unpreparable-environment setup-error path.
+   */
+  install?: { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean };
+  /**
    * The tmpRoot directory. When provided, `git worktree add` intercept
    * creates the worktree directory populated from tmpRoot. Required for
    * tests that perform artifact checks.
@@ -223,6 +230,24 @@ interface DiscriminatingStubOpts {
 function makeDiscriminatingStub(opts: DiscriminatingStubOpts = {}) {
   const stub = vi.fn().mockImplementation(
     async (cmd: string, args: string[], _cmdOpts?: unknown) => {
+      // Worktree dependency install (Story native:01KVWMCK): pnpm install /
+      // npm ci / yarn install / bun install. Intercepted BEFORE the per-manager
+      // branches so a `vitest.exitCode` override (failing-vitest tests) does not
+      // also fail the install. Defaults to exit 0 (env prepared successfully).
+      const isInstallCmd =
+        (cmd === "pnpm" && args[0] === "install") ||
+        (cmd === "npm" && args[0] === "ci") ||
+        (cmd === "yarn" && args[0] === "install") ||
+        (cmd === "bun" && args[0] === "install");
+      if (isInstallCmd) {
+        return {
+          stdout: opts.install?.stdout ?? "",
+          stderr: opts.install?.stderr ?? "",
+          exitCode: opts.install?.exitCode ?? 0,
+          timedOut: opts.install?.timedOut ?? false,
+        };
+      }
+
       if (cmd === "gh") {
         const argsArr = args as string[];
         const isPrDiff = argsArr.includes("diff");
@@ -497,8 +522,10 @@ describe("AC4(d): structured acResults for the three fixture ACs", () => {
     expect(ac2!.exitCode).toBe(0);
     // The vitest filter string from the AC body was forwarded to the stub.
     const stub = passingStub as unknown as ReturnType<typeof vi.fn>;
+    // Find the vitest invocation specifically — the install call (`pnpm install`,
+    // Story native:01KVWMCK) is also a `pnpm` call and runs first.
     const vitestCall = stub.mock.calls.find(
-      (c: unknown[]) => c[0] === "pnpm",
+      (c: unknown[]) => c[0] === "pnpm" && Array.isArray(c[1]) && (c[1] as string[]).includes("vitest"),
     );
     expect(vitestCall).toBeDefined();
     expect(vitestCall![1]).toEqual(
@@ -1192,5 +1219,131 @@ describe("standards-missing setup-error — AC1: persists reviewer-result.json w
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KVWMCK — reviewer installs deps into the materialised worktree
+// before the AC walk.
+//
+// AC1: a dependency-importing suite that would fail in an un-installed worktree
+//   passes once the reviewer installs deps — the install runs EXACTLY ONCE, at the
+//   worktree's lockfile root, BEFORE any vitest check, and a green suite reaches an
+//   approved verdict instead of bouncing.
+// AC2: when the worktree cannot be prepared (install fails), the outcome is a
+//   re-runnable setup-error, NOT a quality NEEDS CHANGES — and the AC walk never
+//   runs, so the story is not dead-ended in rework.
+// ---------------------------------------------------------------------------
+
+describe("worktree dependency install — AC1: install runs once, before the AC walk (Story 01KVWMCK)", () => {
+  const findCalls = (stub: ReturnType<typeof vi.fn>) => {
+    const calls = stub.mock.calls as unknown[][];
+    const isInstall = (c: unknown[]) =>
+      c[0] === "pnpm" && Array.isArray(c[1]) && (c[1] as string[]).includes("install");
+    const isVitest = (c: unknown[]) =>
+      c[0] === "pnpm" && Array.isArray(c[1]) && (c[1] as string[]).includes("vitest");
+    return {
+      installIdx: calls.findIndex(isInstall),
+      vitestIdx: calls.findIndex(isVitest),
+      installCalls: calls.filter(isInstall),
+    };
+  };
+
+  it("a frozen install runs exactly once, BEFORE the vitest check, at the worktree root", async () => {
+    const spy = await stubExtractAcsManual([
+      ["**Given** the test, **When** run, **Then** passes.", "vitest: fixture passing test"],
+    ]);
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
+    try {
+      const result = await callSession({ execaImpl: passingStub });
+
+      const stub = passingStub as unknown as ReturnType<typeof vi.fn>;
+      const { installIdx, vitestIdx, installCalls } = findCalls(stub);
+
+      // Install happened, exactly once, and ran a clean frozen install.
+      expect(installCalls).toHaveLength(1);
+      expect(installCalls[0]![1]).toEqual(
+        expect.arrayContaining(["install", "--frozen-lockfile"]),
+      );
+      // Install ran BEFORE the vitest check (so deps are present when tests run).
+      expect(installIdx).toBeGreaterThanOrEqual(0);
+      expect(vitestIdx).toBeGreaterThanOrEqual(0);
+      expect(installIdx).toBeLessThan(vitestIdx);
+
+      // Install ran in the materialised review worktree, NOT the operator's repo.
+      const installCwd = (installCalls[0]![2] as { cwd?: string } | undefined)?.cwd ?? "";
+      expect(installCwd).toContain(".flow-worktrees");
+      expect(installCwd).not.toBe(tmpRoot);
+
+      // The green suite reaches an approved verdict (single passing vitest AC).
+      expect(result.recommendedVerdict).toBe("READY FOR MERGE");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("worktree dependency install — AC2: a failed install is a setup-error, not a quality verdict (Story 01KVWMCK)", () => {
+  const expectedFilePath = () =>
+    path.join(
+      tmpRoot,
+      ".flow",
+      "state",
+      "sessions",
+      SESSION_ULID,
+      sanitiseRefForPathSegment(STORY_REF),
+      "reviewer-result.json",
+    );
+
+  it("install exits non-zero → recommendedVerdict 'setup-error', AC walk skipped, worktree cleaned up", async () => {
+    const failingInstallStub = makeDiscriminatingStub({
+      install: { exitCode: 1, stderr: "ERR_PNPM_OUTDATED_LOCKFILE: lockfile out of date" },
+      get tmpRoot() { return tmpRoot; },
+    });
+
+    const result = await callSession({ execaImpl: failingInstallStub });
+
+    // Setup-error sentinel — NEVER a quality NEEDS CHANGES.
+    expect(result.recommendedVerdict).toBe("setup-error");
+    expect(result.recommendedVerdict).not.toBe("NEEDS CHANGES");
+    expect(result.acResults).toEqual({});
+
+    // The AC walk never ran — no vitest invocation.
+    const stub = failingInstallStub as unknown as ReturnType<typeof vi.fn>;
+    const calls = stub.mock.calls as unknown[][];
+    const vitestRan = calls.some(
+      (c) => c[0] === "pnpm" && Array.isArray(c[1]) && (c[1] as string[]).includes("vitest"),
+    );
+    expect(vitestRan).toBe(false);
+
+    // The worktree was cleaned up before returning (git worktree remove called).
+    const removeCalled = calls.some(
+      (c) => c[0] === "git" && Array.isArray(c[1]) && (c[1] as string[])[0] === "worktree" && (c[1] as string[])[1] === "remove",
+    );
+    expect(removeCalled).toBe(true);
+  });
+
+  it("persists reviewer-result.json with setup-error + a setupError naming the install failure", async () => {
+    const failingInstallStub = makeDiscriminatingStub({
+      install: { exitCode: 1, stderr: "ERR_PNPM_OUTDATED_LOCKFILE: lockfile out of date" },
+      get tmpRoot() { return tmpRoot; },
+    });
+
+    await callSession({ execaImpl: failingInstallStub });
+
+    const raw = await fs.readFile(expectedFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as { recommendedVerdict: string; setupError?: string };
+
+    expect(parsed.recommendedVerdict).toBe("setup-error");
+    expect(typeof parsed.setupError).toBe("string");
+    expect(parsed.setupError).toContain("dependency install failed");
+    // It is surfaced as a re-runnable setup problem, not a quality failure.
+    expect(parsed.setupError).toContain("setup problem");
+  });
+
+  it("regression: a passing install leaves the normal NEEDS CHANGES path intact (missing artifact)", async () => {
+    await fs.rm(path.join(tmpRoot, "hello-a.txt"));
+    const result = await callSession();
+    expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
   });
 });
