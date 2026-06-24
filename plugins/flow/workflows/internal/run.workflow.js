@@ -714,8 +714,26 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       await blockStoryGiveUp(ref, 'review-could-not-run')
       return
     }
-    blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' })
-    await blockStoryGiveUp(ref, v === 'done-blocked-reviewer-blocked' ? 'reviewer-verdict-blocked' : 'verdict-failed')
+    // A GENUINE quality block from the reviewer (recommendedVerdict === BLOCKED) —
+    // still held back as a real quality decision (AC2, unchanged behaviour).
+    if (v === 'done-blocked-reviewer-blocked') {
+      blocked.push({ ref, blocked_by: 'reviewer-verdict-blocked' })
+      await blockStoryGiveUp(ref, 'reviewer-verdict-blocked')
+      return
+    }
+    // No RECOGNISED verdict reached this point: the verdict STEP itself errored or
+    // returned an unreadable/unrecognised result — e.g. processReviewerTranscript
+    // threw ReviewerResultFileMalformedError (an unrecognised recommendedVerdict
+    // token or non-JSON file) and surfaced as an MCP isError response with no
+    // `next`, or the courier relay garbled and seam() returned a _parseError. That
+    // is a SETUP problem, NOT a quality verdict: a green, finished story must NEVER
+    // be dumped into the blocked pile as 'verdict-failed' for the operator to rescue
+    // by hand (the false-failure this story fixes). Route it to a distinct,
+    // re-runnable setup-error outcome whose reason names the VERDICT step, so it
+    // reads distinctly from 'review-could-not-run' (a review that could not RUN) —
+    // satisfying AC3's requirement to tell the two apart.
+    blocked.push({ ref, blocked_by: 'verdict-could-not-run' })
+    await blockStoryGiveUp(ref, 'verdict-could-not-run')
     return
   }
 

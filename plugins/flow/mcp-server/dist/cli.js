@@ -28151,7 +28151,17 @@ var ExecutionManifestSchema = external_exports.object({
     // Distinct from 'verdict-failed' (which implies a quality problem) and from
     // 'reviewer-no-session-result' (file-absent skipped-first-call path). Carries
     // the FR45 guidance so the operator knows how to resolve the setup issue.
-    "review-could-not-run"
+    "review-could-not-run",
+    // Story native:01KVVJNMHDWZZS366S1BY188CG: the VERDICT step itself could not
+    // produce a readable result — processReviewerTranscript errored (e.g. an
+    // unrecognised recommendedVerdict token / non-JSON reviewer-result file →
+    // ReviewerResultFileMalformedError → MCP isError with no `next`) or its
+    // courier relay garbled (seam _parseError). A green, finished story whose
+    // verdict step cannot produce a result is a re-runnable SETUP problem, NOT a
+    // quality failure — so it is held distinctly from 'verdict-failed' (a quality
+    // problem) and, mirroring 'review-could-not-run' but naming the VERDICT step,
+    // distinctly from a review that could not RUN (AC3).
+    "verdict-could-not-run"
   ]).optional(),
   /**
    * Structured violation list for manifests blocked by `planning-discipline`.
