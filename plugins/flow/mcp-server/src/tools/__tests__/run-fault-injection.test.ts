@@ -98,6 +98,16 @@ interface RunOpts {
    * (AC3) and the observability hard-fail (AC5).
    */
   throwSeam?: { ref?: string; prefix: string };
+  /**
+   * TRANSIENT hard-throw: throw the underlying courier call for the seam whose
+   * label starts with `prefix` (and matches `ref` when set) the FIRST `times`
+   * times it is invoked, then let it succeed (return the normal stubbed result)
+   * on every subsequent call. Models a one-off courier hiccup that the retry
+   * loop can RECOVER from — distinct from `throwSeam`, which throws forever.
+   * Used by AC1 (a transient throw at a retryable read-only preflight seam must
+   * be retried and recovered so the run proceeds to claim + build).
+   */
+  throwSeamTimes?: { ref?: string; prefix: string; times: number };
   /** Refs that should drive the needs-human-decision path, → their verbatim question. */
   needsHuman?: Record<string, string>;
   /**
@@ -159,6 +169,10 @@ async function runRun(opts: RunOpts = {}): Promise<{
   const logs: string[] = [];
   const calls: AgentCall[] = [];
   const notifications: NotifyPayload[] = [];
+
+  // How many times the transient-throw seam (throwSeamTimes) has already thrown,
+  // so it can throw the first `times` invocations then recover.
+  let transientThrowCount = 0;
 
   // Map each claim index to the story it hands out (in queue order); past the
   // queue length the claim seam reports the genuine full-run outcome.
@@ -263,6 +277,21 @@ async function runRun(opts: RunOpts = {}): Promise<{
       labelForRef(label, opts.throwSeam.ref)
     ) {
       throw new Error(`courier hard-failed for ${label}`);
+    }
+
+    // TRANSIENT hard rejection (throwSeamTimes): throw the FIRST `times`
+    // invocations of the matching seam, then fall through so the seam succeeds.
+    // Models a one-off courier hiccup the retry loop recovers from.
+    if (
+      opts.throwSeamTimes &&
+      label.startsWith(opts.throwSeamTimes.prefix) &&
+      labelForRef(label, opts.throwSeamTimes.ref) &&
+      transientThrowCount < opts.throwSeamTimes.times
+    ) {
+      transientThrowCount += 1;
+      throw new Error(
+        `courier hiccup (transient ${transientThrowCount}/${opts.throwSeamTimes.times}) for ${label}`,
+      );
     }
 
     // A SEAM call carries `schema`; it must return { stdout: <json line> }.
@@ -743,4 +772,81 @@ describe("run fault-injection — honest reporting under misbehaving seams (nati
     // REF_A still landed in exactly one bucket (blocked, from the garbled verdict).
     expect(result.blocked.some((b: any) => b.ref === REF_A)).toBe(true);
   }, 5_000);
+
+  // ── native:01KVW2GDTB0FC64RJFSH34F47P — a one-off courier hiccup on a read-only ──
+  // ── setup step is RETRIED so the run no longer dies at the starting line ──────────
+  //
+  // The seam() helper advertises 3 attempts for a retryable seam, but a THROWN
+  // courier error (the courier emitted its StructuredOutput call as literal text
+  // → agent() throws) used to bypass the retry loop and re-throw on attempt #1.
+  // A read-only preflight seam (preflight:standards, retryable=true) therefore
+  // died on the first hiccup, aborting the WHOLE run before any story was claimed.
+  // The fix treats a thrown courier error like a garbled relay: retry the
+  // remaining attempts for a retryable seam; a NON-retryable (mutating) seam
+  // still throws on the FIRST failure (no double-apply).
+
+  it("AC1: a TRANSIENT courier hiccup at a read-only preflight check is retried and recovers — the run proceeds to claim + build, never aborts pre-claim", async () => {
+    const queue = [{ ref: REF_A, title: "Story A (built after preflight recovers)" }];
+    // The retryable read-only preflight:standards seam throws ONCE then succeeds.
+    // Old code: re-throws on attempt #1 → the whole run aborts at startup before
+    // any story is claimed. New code: retries, the second attempt returns the
+    // stubbed standards result, and the run carries on to claim + build REF_A.
+    const { result, thrown, logs, calls } = await runRun({
+      queue,
+      maxConcurrency: 1,
+      throwSeamTimes: { prefix: "preflight:standards", times: 1 },
+    });
+
+    // The run did NOT abort pre-claim: it finished on its own with a run reason.
+    expect(thrown).toBeUndefined();
+    expect(result.runReason).toBe("queue-emptied");
+    expect(result.queueEmptied).toBe(true);
+
+    // The story was actually CLAIMED and processed — the run reached past the
+    // preflight gate (a claim seam ran, and the story landed in a terminal bucket).
+    expect(calls.some((c) => (c.opts.label ?? "").startsWith("claim:"))).toBe(true);
+    const reached =
+      result.completed.includes(REF_A) ||
+      result.merged.some((m: any) => m.ref === REF_A) ||
+      result.pausedForHuman.some((p: any) => p.ref === REF_A) ||
+      result.blocked.some((b: any) => b.ref === REF_A);
+    expect(reached, "REF_A should have reached a terminal outcome (run did not abort pre-claim)").toBe(true);
+
+    // The preflight courier was invoked TWICE (the throw + the recovering retry)
+    // and the retry was narrated — proving the retry loop, not a single attempt.
+    const preflightCalls = calls.filter((c) => (c.opts.label ?? "") === "preflight:standards");
+    expect(preflightCalls.length).toBe(2);
+    expect(logs.some((l) => /seam preflight:standards courier threw \(attempt 1\/3\) — retrying/.test(l))).toBe(true);
+
+    assertHonestyInvariant(result, thrown, [REF_A]);
+  });
+
+  it("AC2: the SAME hiccup at a STATE-CHANGING step (the mutating verdict seam) stops loudly on the FIRST failure — the seam is invoked exactly once, never retried", async () => {
+    const queue = [{ ref: REF_A, title: "Story A (mutating verdict throws once)" }];
+    // The mutating verdict seam (retryable=false → attempts=1) throws. Even a
+    // transient (throws-once) hiccup must NOT be retried on a state-changing step,
+    // so a mutation is never repeated. seam() re-throws on the FIRST failure,
+    // processStory propagates, and runWorker buckets it as worker-threw.
+    const { result, thrown, calls } = await runRun({
+      queue,
+      maxConcurrency: 1,
+      throwSeamTimes: { ref: REF_A, prefix: "verdict:", times: 1 },
+    });
+
+    expect(thrown).toBeUndefined();
+
+    // REF_A is blocked with worker-threw on the FIRST failure — no silent retry.
+    const a = result.blocked.find((b: any) => b.ref === REF_A);
+    expect(a, "story A should be blocked").toBeDefined();
+    expect(a.blocked_by).toBe("worker-threw");
+    expect(result.completed).not.toContain(REF_A);
+
+    // The verdict courier was invoked EXACTLY ONCE — the no-double-apply invariant:
+    // a state-changing step is never re-run after a thrown failure.
+    const verdictCalls = calls.filter((c) => (c.opts.label ?? "").startsWith("verdict:"));
+    expect(verdictCalls.length).toBe(1);
+
+    expect(result.runReason).toBe("queue-emptied");
+    assertHonestyInvariant(result, thrown, [REF_A]);
+  });
 });
