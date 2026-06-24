@@ -3,9 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths:
-      - "plugins/flow/**"
-      - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "plugins/flow/**"
