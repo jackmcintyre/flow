@@ -194,11 +194,26 @@ const seam = async (cmd, label, retryable = false, swallow = false, modelOverrid
         { schema: RawSchema, label, phase: 'run', model: modelOverride || (retryable ? 'haiku' : 'sonnet') },
       )
     } catch (e) {
-      // HARD rejection of the courier call. For an observability seam we degrade
-      // exactly as for a garble (no line, keep going); for any other (mutating)
-      // seam we re-throw so the failure stays loud and reaches its bucket.
-      if (!swallow) throw e
+      // HARD rejection of the courier call (e.g. the courier emitted its
+      // StructuredOutput call as literal text and never returned a structured
+      // result → agent() throws "subagent completed without calling
+      // StructuredOutput"). Treat this exactly like a garbled-but-returned relay:
+      // for a RETRYABLE seam with attempts remaining, record the sentinel and
+      // RETRY the remaining attempts before giving up. This is SAFE because
+      // `retryable` is set ONLY on read-only / idempotent seams (e.g. the
+      // preflight getStatus check) — re-invoking one cannot double-apply a
+      // mutation. A NON-retryable (mutating) seam has attempts=1, so the
+      // `a < attempts - 1` guard is false on the first attempt and it re-throws
+      // on the FIRST failure with NO retry — the no-double-apply invariant. An
+      // observability seam (swallow=true) degrades to no line as before once
+      // attempts are exhausted.
       parsed = { _parseError: `seam-threw: ${String(e)}` }
+      if (a < attempts - 1) {
+        log(`seam ${label} courier threw (attempt ${a + 1}/${attempts}) — retrying`)
+        continue
+      }
+      // Attempts exhausted (or attempts=1 for a NON-retryable/mutating seam → no retry).
+      if (!swallow) throw e
       log(`seam ${label} hard-failed (observability, swallowed) — no progress line, continuing`)
       return parsed
     }
