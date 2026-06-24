@@ -54,6 +54,10 @@ import { reviewerResultFilePath } from "../lib/read-reviewer-result-file.js";
 import { DuplicateStandardsCriterionIdError, StandardsDocMissingError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
+import {
+  installWorktreeDependencies,
+  type WorktreeInstallResult,
+} from "../lib/prepare-review-worktree.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { emitFriction } from "../lib/emit-friction.js";
 import type { SourceStory } from "../adapters/adapter.js";
@@ -624,6 +628,60 @@ function isAdditiveOnlyDiff(diff: string): boolean {
   return sections.every((section) => /^new file mode /m.test(section));
 }
 
+/**
+ * Persist a `setup-error` reviewer-result file and return the minimal sentinel
+ * `ReviewerSessionResult`.
+ *
+ * A setup-error means the review COULD NOT RUN because a prerequisite was missing
+ * (the standards doc is absent, or — Story native:01KVWMCK — the PR worktree's
+ * dependencies could not be installed). It is NEVER a quality judgment about the
+ * PR. Writing a present, distinctly-marked result file lets
+ * `processReviewerTranscript` return the `review-could-not-run` variant rather
+ * than the generic file-absent `ReviewerFirstCallSkippedError`, so the operator
+ * sees a re-runnable setup problem instead of a false quality failure.
+ *
+ * Shared by every setup-error path so the file projection and sentinel shape stay
+ * identical no matter which prerequisite failed.
+ */
+async function writeSetupErrorResult(opts: {
+  targetRepoRoot: string;
+  sessionUlid: string;
+  ref: string;
+  prNumber: number;
+  setupError: string;
+}): Promise<ReviewerSessionResult> {
+  const { targetRepoRoot, sessionUlid, ref, prNumber, setupError } = opts;
+  const setupResultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+  await fs.mkdir(path.dirname(setupResultFilePath), { recursive: true });
+  const setupFileProjection: ReviewerResultFileShape = {
+    sessionUlid,
+    ref,
+    recommendedVerdict: "setup-error",
+    acResults: {},
+    standardsByCriterionId: {},
+    sourceStoryRef: ref,
+    prNumber,
+    standardsVersion: "",
+    setupError,
+  };
+  await atomicWriteFile(setupResultFilePath, JSON.stringify(setupFileProjection, null, 2));
+  // The rich ReviewerSessionResult fields (sourceStory, prDiff, standards) are not
+  // available — return a minimal sentinel so the caller knows the review could not
+  // run, while processReviewerTranscript handles the routing via the persisted file.
+  return {
+    sessionUlid,
+    ref,
+    prNumber,
+    sourceStory: { ref, raw_path: "" } as ReviewerSessionResult["sourceStory"],
+    sourceStoryRef: ref,
+    prDiff: "",
+    standards: ({ version: "", updated: "", criteria: [], sourcePath: "" } as unknown) as ReviewerSessionResult["standards"],
+    standardsByCriterionId: {},
+    acResults: {},
+    recommendedVerdict: "setup-error",
+  };
+}
+
 export async function runReviewerSession(
   opts: RunReviewerSessionOptions,
 ): Promise<ReviewerSessionResult> {
@@ -677,39 +735,17 @@ export async function runReviewerSession(
     standards = await lookupStandards(targetRepoRoot);
   } catch (err) {
     if (err instanceof StandardsDocMissingError) {
-      // Persist the setup-error marker so processReviewerTranscript can return a
-      // distinct "review-could-not-run" variant (AC1). The file must be present and
-      // distinctly marked — NOT the generic file-absent path.
-      const setupResultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
-      await fs.mkdir(path.dirname(setupResultFilePath), { recursive: true });
-      const setupFileProjection: ReviewerResultFileShape = {
+      // The review could not run: docs/standards.md is absent. Persist a present,
+      // distinctly-marked setup-error result (NOT the generic file-absent path) so
+      // processReviewerTranscript returns the "review-could-not-run" variant (AC1).
+      // No quality verdict is implied.
+      return await writeSetupErrorResult({
+        targetRepoRoot,
         sessionUlid,
         ref,
-        recommendedVerdict: "setup-error",
-        acResults: {},
-        standardsByCriterionId: {},
-        sourceStoryRef: ref,
         prNumber,
-        standardsVersion: "",
         setupError: err.message,
-      };
-      await atomicWriteFile(setupResultFilePath, JSON.stringify(setupFileProjection, null, 2));
-      // Return early: the review could not run. No quality verdict is implied.
-      // The rich ReviewerSessionResult fields (sourceStory, prDiff, standards) are
-      // not available — return a minimal sentinel so the caller knows what happened
-      // while processReviewerTranscript handles the routing via the persisted file.
-      return {
-        sessionUlid,
-        ref,
-        prNumber,
-        sourceStory: { ref, raw_path: "" } as ReviewerSessionResult["sourceStory"],
-        sourceStoryRef: ref,
-        prDiff: "",
-        standards: ({ version: "", updated: "", criteria: [], sourcePath: "" } as unknown) as ReviewerSessionResult["standards"],
-        standardsByCriterionId: {},
-        acResults: {},
-        recommendedVerdict: "setup-error",
-      };
+      });
     }
     // All other errors (StandardsDocMalformedError etc.) propagate uncaught.
     throw err;
@@ -757,6 +793,49 @@ export async function runReviewerSession(
     pluginRootOverride: pluginRoot,
     permissionsOverride: permissions,
   });
+
+  // -------------------------------------------------------------------------
+  // Install the worktree's dependencies ONCE, before the AC walk (Story
+  // native:01KVWMCK).
+  //
+  // A fresh `git worktree add` carries NO node_modules. Without this, the vitest
+  // runner runs against an un-installed tree, every dependency-importing suite
+  // fails on UNRESOLVED_IMPORT, and a genuinely-green PR is mislabelled
+  // NEEDS CHANGES → rework-exhausted. The install runs EXACTLY ONCE here — as
+  // part of preparing the worktree, BEFORE the per-AC loop — using the same
+  // structural toolchain resolver the dev pre-PR gate uses, a clean frozen install
+  // at the lockfile's workspace root, gated on lockfile presence.
+  //
+  // If the environment cannot be prepared, the review COULD NOT RUN: surface a
+  // setup-error (re-runnable) rather than a quality verdict, so the story is not
+  // dead-ended in doomed rework. Clean up the worktree first (mirrors the AC-walk
+  // finally block), since we return before reaching it.
+  // -------------------------------------------------------------------------
+  let installResult: WorktreeInstallResult;
+  try {
+    installResult = await installWorktreeDependencies({ worktreeRoot: worktreePath, execaImpl });
+  } catch (err) {
+    installResult = {
+      ran: true,
+      ok: false,
+      stderr: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  if (!installResult.ok) {
+    await cleanup();
+    const detail =
+      (installResult.timedOut
+        ? "dependency install timed out"
+        : `dependency install failed (exit ${installResult.exitCode ?? "unknown"})`) +
+      (installResult.commandLine ? ` running \`${installResult.commandLine}\`` : "") +
+      (installResult.installRoot ? ` in ${installResult.installRoot}` : "") +
+      ". The review could not run because the PR worktree's dependencies could not be " +
+      "installed — this is a setup problem, not a quality failure. Re-run the review; if it " +
+      "persists, confirm the lockfile is committed and installs cleanly." +
+      (installResult.stderr ? `\n\n${installResult.stderr.slice(0, 2000)}` : "");
+    return await writeSetupErrorResult({ targetRepoRoot, sessionUlid, ref, prNumber, setupError: detail });
+  }
 
   // Execute serially in numeric-index order (spec §2f), wrapped in try/finally
   // so the worktree is always removed (AC5).
