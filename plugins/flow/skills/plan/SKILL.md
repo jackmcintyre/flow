@@ -16,7 +16,7 @@ Opens a planning conversation. For `adapter: native` repos, this skill spawns th
 
 # Fast path — one-shot authoring (`/flow:plan <feature>`)
 
-When the operator invokes this skill with a plain-language **feature description** as the argument, draft a single story from it directly — no planning conversation, no multi-story elicitation. This is the lean "propose one feature" seam (Epic 9, gate 1); it spawns a lean **author** subagent (distinct from the conversational planner) that produces exactly one draft.
+When the operator invokes this skill with a plain-language **feature description** as the argument, draft a single story from it directly — no planning conversation, no multi-story elicitation. This is the lean "propose one feature" seam (Epic 9 — the readiness review); it spawns a lean **author** subagent (distinct from the conversational planner) that produces exactly one draft.
 
 The drafted story is never auto-ready: it is written **parked not-ready** behind the readiness brake (Story 9.1). To grade and approve it, the operator runs `/flow:ready <ref>` (which runs the judge panel as part of approving). Nothing the fast path drafts can be built until it is graded and approved — that is the gate working.
 

@@ -63,7 +63,7 @@ const seam = async (cmd, label, retryable = false) => {
 // Session id: prefer the launcher-minted id; fall back to minting one via the CLI.
 const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
-log(`gate-1 session=${SU} repo=${REPO} ref=${REF}`)
+log(`readiness review session=${SU} repo=${REPO} ref=${REF}`)
 
 // ---------------------------------------------------------------------------
 // Read the draft spec text and manifest so we can pass it to the judges.
@@ -266,7 +266,7 @@ const riskLabel = riskTier || 'medium (fallback)'
 const judgeSharedPrefix =
   `${judgePersona}\n\n` +
   `## Your task: grade a draft story against ONE lens\n\n` +
-  `You are a lens judge for the gate-1 panel. ` +
+  `You are a lens judge for the readiness review panel. ` +
   `Your ONLY job is to grade the draft below against your assigned lens, ` +
   `then call the CLI tool to record your verdict. ` +
   `You MUST call writeLensVerdict exactly once and then stop — do NOT edit any files, do NOT run any other commands.\n\n` +
@@ -379,7 +379,7 @@ if (decision === 'ready') {
 } else if (decision === 'escalate') {
   const reason = adjudicateResult.verdict?.escalation_reason || adjudicateResult.verdict?.rationale || 'see verdict'
   const failedLenses = aggregateResult.verdict?.lenses?.filter((l) => !l.pass).map((l) => `[${l.lens}] ${l.missed}`).join('; ')
-  log(`ref=${REF} ESCALATED — one or more lenses failed (k=1, round=1 → immediate escalate). Failed lenses: ${failedLenses}. Operator: revise the draft and re-run gate-1.`)
+  log(`ref=${REF} ESCALATED — one or more lenses failed (k=1, round=1 → immediate escalate). Failed lenses: ${failedLenses}. Operator: the readiness review did not pass — revise the draft and re-run /flow:ready <ref> to grade it again.`)
   log(`Escalation reason: ${reason}`)
 } else {
   log(`ref=${REF} unexpected decision=${decision} — this workflow always uses round=1 k=1, so rework should never occur.`)
