@@ -101,6 +101,14 @@ interface RunOpts {
   /** Refs that should drive the needs-human-decision path, → their verbatim question. */
   needsHuman?: Record<string, string>;
   /**
+   * Override the `verdict:` seam's `next` value PER REF. Lets a case drive a
+   * GENUINE reviewer verdict (e.g. `done-blocked-reviewer-blocked`) through the
+   * real run.workflow.js verdict-classification branch, distinct from a garbled
+   * relay (which yields a _parseError, not a recognised `next`). Refs absent from
+   * the map use the default `done-ready-for-merge`.
+   */
+  verdictNext?: Record<string, string>;
+  /**
    * What the `claim:` seam returns once the queue is exhausted. Default
    * `"queue-emptied"` (the happy terminal). Set `"waiting-on-in-progress"` to
    * simulate a manifest WEDGED in in-progress/ with no live owner — the
@@ -205,7 +213,11 @@ async function runRun(opts: RunOpts = {}): Promise<{
         reviewerPrompt: "REV-PERSONA",
       };
     }
-    if (label.startsWith("verdict:")) return { next: "done-ready-for-merge" };
+    if (label.startsWith("verdict:")) {
+      const ref = refOfLabel(label);
+      const overridden = ref ? (opts.verdictNext ?? {})[ref] : undefined;
+      return { next: overridden ?? "done-ready-for-merge" };
+    }
     if (label.startsWith("gate:")) {
       return { decision: "pause-needs-human", reason: "no-agreement-history" };
     }
@@ -465,6 +477,91 @@ describe("run fault-injection — honest reporting under misbehaving seams (nati
     expect(result.pausedForHuman.some((p: any) => p.ref === REF_B)).toBe(true);
 
     // And the run emptied.
+    expect(result.runReason).toBe("queue-emptied");
+    assertHonestyInvariant(result, thrown, [REF_A, REF_B]);
+  });
+
+  // ── native:01KVVJNMHDWZZS366S1BY188CG — verdict-step error vs genuine quality block ──
+  //
+  // A green, FINISHED story whose VERDICT STEP errors or returns an unreadable /
+  // unrecognised result must be surfaced as a re-runnable SETUP problem
+  // (`verdict-could-not-run`), NEVER dumped in the blocked pile as a false
+  // `verdict-failed`. A GENUINE reviewer block (`done-blocked-reviewer-blocked`)
+  // must still be held back as a real quality decision (`reviewer-verdict-blocked`),
+  // exactly as today. These two pin BOTH directions in the real run.workflow.js body.
+
+  it("AC1/AC3: a verdict step that returns an UNREADABLE result on a green story routes to 'verdict-could-not-run' (a re-runnable setup problem) — never 'verdict-failed'", async () => {
+    // The injected garble feeds the verdict seam a non-JSON relay, so seam() yields
+    // a _parseError and the workflow's `v` (verdict.next) is undefined — exactly the
+    // shape processReviewerTranscript produces when readReviewerResultFile throws
+    // ReviewerResultFileMalformedError (an unrecognised recommendedVerdict token or a
+    // non-JSON reviewer-result file) and surfaces as an MCP isError with no `next`.
+    const queue = [
+      { ref: REF_A, title: "Story A (green; verdict step returns unreadable result)" },
+      { ref: REF_B, title: "Story B (clean sibling)" },
+    ];
+    const { result, thrown } = await runRun({
+      queue,
+      maxConcurrency: 2,
+      garble: { ref: REF_A, prefix: "verdict:" },
+    });
+
+    expect(thrown).toBeUndefined();
+
+    // A is surfaced as a re-runnable SETUP problem naming the VERDICT step — NOT the
+    // false-failure 'verdict-failed', and distinct from 'review-could-not-run' (AC3).
+    const a = result.blocked.find((b: any) => b.ref === REF_A);
+    expect(a, "story A should be surfaced as a setup problem").toBeDefined();
+    expect(a.blocked_by).toBe("verdict-could-not-run");
+    expect(a.blocked_by).not.toBe("verdict-failed");
+    expect(a.blocked_by).not.toBe("review-could-not-run");
+    // It never reached the green-verdict completion / merge path.
+    expect(result.completed).not.toContain(REF_A);
+    expect(result.merged.some((m: any) => m.ref === REF_A)).toBe(false);
+
+    // The blockStory give-up move stamped the SAME setup reason on the manifest move
+    // (the block-story seam fires with that label/reason), confirming the manifest is
+    // pulled out of in-progress/ as a setup problem, not silently swallowed.
+    // (A green sibling still finishes normally below.)
+    expect(result.pausedForHuman.some((p: any) => p.ref === REF_A)).toBe(false);
+
+    // The run kept going and finished the OTHER story cleanly.
+    expect(result.completed).toContain(REF_B);
+    expect(result.pausedForHuman.some((p: any) => p.ref === REF_B)).toBe(true);
+
+    expect(result.runReason).toBe("queue-emptied");
+    assertHonestyInvariant(result, thrown, [REF_A, REF_B]);
+  });
+
+  it("AC2: a GENUINE reviewer BLOCK verdict still lands as the real quality decision 'reviewer-verdict-blocked' (setup-problem handling does NOT apply)", async () => {
+    // The verdict seam returns a recognised `done-blocked-reviewer-blocked` — a real
+    // quality verdict the reviewer made (recommendedVerdict === BLOCKED). This must be
+    // held back EXACTLY as today; the new verdict-could-not-run handling applies ONLY
+    // when NO real verdict could be produced.
+    const queue = [
+      { ref: REF_A, title: "Story A (reviewer genuinely BLOCKS)" },
+      { ref: REF_B, title: "Story B (clean sibling)" },
+    ];
+    const { result, thrown } = await runRun({
+      queue,
+      maxConcurrency: 2,
+      verdictNext: { [REF_A]: "done-blocked-reviewer-blocked" },
+    });
+
+    expect(thrown).toBeUndefined();
+
+    // A is held back as a REAL quality block — its existing reason, NOT the new
+    // setup-problem reason.
+    const a = result.blocked.find((b: any) => b.ref === REF_A);
+    expect(a, "story A should be held back as a quality block").toBeDefined();
+    expect(a.blocked_by).toBe("reviewer-verdict-blocked");
+    expect(a.blocked_by).not.toBe("verdict-could-not-run");
+    expect(result.completed).not.toContain(REF_A);
+    expect(result.merged.some((m: any) => m.ref === REF_A)).toBe(false);
+
+    // The sibling still finishes normally.
+    expect(result.completed).toContain(REF_B);
+
     expect(result.runReason).toBe("queue-emptied");
     assertHonestyInvariant(result, thrown, [REF_A, REF_B]);
   });

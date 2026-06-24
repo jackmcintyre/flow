@@ -185,7 +185,13 @@ async function runRun(opts: {
     if (label.startsWith("verdict:")) {
       const ref = refFromLabel(label, "verdict:");
       const o = outcomes[ref]!;
-      if (o.kind === "verdict-blocked") return { next: "blocked-something" };
+      // A GENUINE reviewer block (recommendedVerdict === BLOCKED). The run
+      // classifies this recognised verdict to the real `reviewer-verdict-blocked`
+      // quality-block reason (native:01KVVJNMHDWZZS366S1BY188CG split the verdict
+      // catch-all). Previously this harness used a stand-in `blocked-something`;
+      // that token is now (correctly) reclassified as a verdict-step setup error,
+      // so we inject the real verdict value the production code recognises.
+      if (o.kind === "verdict-blocked") return { next: "done-blocked-reviewer-blocked" };
       if (o.kind === "needs-changes-then-merge") {
         const round = (verdictRound[ref] ??= 0);
         verdictRound[ref] = round + 1;
@@ -360,7 +366,7 @@ describe("run concurrent dispatch (Story 8.22)", () => {
     // Each blocked entry preserved its reason verbatim.
     const block4 = n.blocked.find((b: any) => b.ref === "s:4");
     const block5 = n.blocked.find((b: any) => b.ref === "s:5");
-    expect(block4.blocked_by).toBe("blocked-something");
+    expect(block4.blocked_by).toBe("reviewer-verdict-blocked");
     expect(block5.blocked_by).toBe("dev-no-handoff");
   });
 
