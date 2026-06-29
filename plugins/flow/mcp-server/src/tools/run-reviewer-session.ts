@@ -60,6 +60,7 @@ import {
 } from "../lib/prepare-review-worktree.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { emitFriction } from "../lib/emit-friction.js";
+import { deriveBmadAcVerification } from "../adapters/bmad/derive-bmad-ac-verification.js";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
 import type { RiskTierBlock } from "./classify-risk-tier.js";
@@ -226,6 +227,30 @@ function classifyAc(bodyLines: string[]): {
   }
 
   return { applicability: "manual-check-required" };
+}
+
+/**
+ * BMad source-story filename shape (`<epic>-<story>-<slug>.md`), kept identical
+ * to the BMad parser's pattern. Used to recover the epic/story/slug for the
+ * implementation-artifact convention when deriving a verification marker at
+ * review time (Story native:01KW5W081X3TJPQBCYF3WAK9RZ).
+ */
+const BMAD_FILENAME_RE = /^(\d+)-(\d+)-([a-z0-9-]+)\.md$/;
+
+/**
+ * Recover `{ epic, story, slug }` from a BMad story's source path, or `null` when
+ * the active adapter is not BMad or the filename does not match. Native stories
+ * carry inline `vitest:`/`artifact:` markers and never reach the manual branch, so
+ * derivation is gated to the BMad adapter to leave the native path untouched.
+ */
+function deriveBmadFilenameParts(
+  adapterName: string,
+  rawPath: string,
+): { epic: string; story: string; slug: string } | null {
+  if (adapterName !== "bmad") return null;
+  const m = BMAD_FILENAME_RE.exec(path.basename(rawPath));
+  if (!m) return null;
+  return { epic: m[1]!, story: m[2]!, slug: m[3]! };
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +869,12 @@ export async function runReviewerSession(
   const acResults: Record<number, AcResult> = {};
   let riskTierBlock: RiskTierBlock | undefined;
 
+  // Story native:01KW5W081X3TJPQBCYF3WAK9RZ — arm BMad per-AC verification
+  // derivation. BMad source ACs carry no inline marker, so without this every one
+  // classifies manual-check-required and the verdict stalls. `null` for non-BMad
+  // adapters (native ACs carry inline markers and never reach the manual branch).
+  const bmadDerivation = deriveBmadFilenameParts(workspace.activeAdapter.name, sourceStory.raw_path);
+
   try {
     for (const ac of acEntries) {
       const classification = classifyAc(ac.body);
@@ -879,13 +910,52 @@ export async function runReviewerSession(
           execaImpl,
         );
       } else {
-        // manual-check-required (spec §2c)
-        acResults[ac.index] = {
-          index: ac.index,
-          tag: ac.tag,
-          applicability: "manual-check-required",
-          reason: "AC body has no `artifact:` or `vitest:` marker — manual check required before merge",
-        };
+        // No inline `artifact:`/`vitest:` marker in the spec body. For a BMad
+        // source story — which never carries inline markers — attempt to DERIVE
+        // one from the story's own signals (Story
+        // native:01KW5W081X3TJPQBCYF3WAK9RZ), resolving the candidate against the
+        // PR-branch worktree the checks actually run in. The derivation's
+        // resolvability guard means a derived marker can only upgrade this AC from
+        // manual to a runnable check when its target genuinely exists on the
+        // worktree — it can never turn a benign marker gap into a hard failure
+        // (the #422-mirror risk).
+        const derived = bmadDerivation
+          ? deriveBmadAcVerification({
+              kind: ac.tag === "integration" || ac.tag === "user-surface" ? "integration" : "unit",
+              acBodyText: ac.body.join("\n"),
+              implementationNotes: sourceStory.implementation_notes,
+              epic: bmadDerivation.epic,
+              story: bmadDerivation.story,
+              slug: bmadDerivation.slug,
+              exists: (relPath) => existsSync(path.join(worktreePath, relPath)),
+            })
+          : undefined;
+
+        if (derived?.type === "artifact") {
+          acResults[ac.index] = await runArtifactCheck(
+            ac.index,
+            ac.tag,
+            derived.target,
+            worktreePath, // checkRoot — AC2
+          );
+        } else if (derived?.type === "vitest") {
+          acResults[ac.index] = await runVitestCheck(
+            ac.index,
+            ac.tag,
+            derived.target,
+            derived.target,
+            worktreePath, // checkRoot — AC2
+            execaImpl,
+          );
+        } else {
+          // manual-check-required (spec §2c)
+          acResults[ac.index] = {
+            index: ac.index,
+            tag: ac.tag,
+            applicability: "manual-check-required",
+            reason: "AC body has no `artifact:` or `vitest:` marker — manual check required before merge",
+          };
+        }
       }
     }
 

@@ -225,7 +225,10 @@ export const BmadAdapter: PlanningAdapter = {
     const parsed: SourceStory[] = [];
     for (const file of files) {
       const contents = await fs.readFile(file, "utf8");
-      const story = parseBmadStory(file, contents);
+      // Pass the bound target repo so per-AC verification markers are derived and
+      // resolved against the working tree at scan time (Story
+      // native:01KW5W081X3TJPQBCYF3WAK9RZ).
+      const story = parseBmadStory(file, contents, { repoRoot: ctx.targetRepo });
       const status = story.raw_frontmatter["status"] as BmadStatus;
       if (status === "optional") continue;
       parsed.push(story);
@@ -253,7 +256,7 @@ export const BmadAdapter: PlanningAdapter = {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
     }
     const contents = await fs.readFile(file, "utf8");
-    return parseBmadStory(file, contents);
+    return parseBmadStory(file, contents, { repoRoot: ctx.targetRepo });
   },
 
   resolveSourcePath(ref: string): string {

@@ -10,8 +10,12 @@
  * en-dash (U+2013), or double-hyphen.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import * as os from "node:os";
+import * as nodePath from "node:path";
 import { parseBmadStory } from "../parse-bmad-story.js";
+import { atomicWriteFile } from "../../../lib/managed-fs.js";
 import { MalformedBmadStoryError } from "../../../errors.js";
 
 /** Minimal valid story file skeleton. Accepts a replacement AC section body. */
@@ -191,5 +195,248 @@ describe("parseBmadStory — AC heading shapes (Story 5.17 AC1)", () => {
     for (const ac of result.acceptance_criteria) {
       expect(ac.verification).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KW5W081X3TJPQBCYF3WAK9RZ — per-AC verification derivation.
+//
+// When `parseBmadStory` is given a `repoRoot`, each AC for which a real test or
+// artifact target can be derived from the story's own signals carries that
+// derived marker (AC1); an AC whose candidate target does NOT resolve on disk
+// falls back to manual verification (verification undefined) rather than emitting
+// a non-existent path (AC2).
+// ---------------------------------------------------------------------------
+
+describe("parseBmadStory — derived per-AC verification (Story native:01KW5W081X3TJPQBCYF3WAK9RZ)", () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      const dir = tmpDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeRepoRoot(): string {
+    const dir = mkdtempSync(nodePath.join(os.tmpdir(), "bmad-derive-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  /** Write a file (creating parent dirs) under `repoRoot` at repo-relative `rel`. */
+  async function writeRepoFile(repoRoot: string, rel: string, contents = "x"): Promise<void> {
+    const abs = nodePath.join(repoRoot, rel);
+    mkdirSync(nodePath.dirname(abs), { recursive: true });
+    await atomicWriteFile(abs, contents);
+  }
+
+  /** Build a 1.3 story whose AC section and Dev Notes are supplied by the caller. */
+  function makeStory13(acSection: string, devNotes: string): string {
+    return [
+      "# Story 1.3: Derive markers",
+      "",
+      "Status: ready-for-dev",
+      "",
+      "## Story",
+      "",
+      "As a user, I want something, so that I get value.",
+      "",
+      "## Acceptance Criteria",
+      "",
+      acSection,
+      "",
+      "## Dev Notes",
+      "",
+      devNotes,
+      "",
+    ].join("\n");
+  }
+
+  const STORY_13_PATH = "/repo/_bmad-output/planning-artifacts/stories/1-3-derive-markers.md";
+
+  it("AC1: a unit AC whose Dev Notes cite an existing test file derives a vitest marker", async () => {
+    const repoRoot = makeRepoRoot();
+    const testRel = "plugins/flow/mcp-server/src/foo/__tests__/foo.test.ts";
+    await writeRepoFile(repoRoot, testRel);
+
+    const content = makeStory13(
+      [
+        "**AC1:**",
+        "**Given** a repo,",
+        "**When** the user runs the command,",
+        "**Then** the build passes.",
+      ].join("\n"),
+      `Add coverage in \`${testRel}\` for the new branch.`,
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria).toHaveLength(1);
+    expect(result.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: testRel,
+    });
+  });
+
+  it("AC1: a test path cited in the AC prose itself is derived as a vitest marker", async () => {
+    const repoRoot = makeRepoRoot();
+    const testRel = "plugins/flow/mcp-server/src/bar/bar.spec.ts";
+    await writeRepoFile(repoRoot, testRel);
+
+    const content = makeStory13(
+      [
+        "**AC1:**",
+        "**Given** a repo,",
+        `**When** \`${testRel}\` runs,`,
+        "**Then** it passes.",
+      ].join("\n"),
+      "No extra notes.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: testRel,
+    });
+  });
+
+  it("AC1: an integration AC with no test reference derives an artifact marker from the implementation-artifact convention", async () => {
+    const repoRoot = makeRepoRoot();
+    const artifactRel = "_bmad-output/implementation-artifacts/1-3-derive-markers.md";
+    await writeRepoFile(repoRoot, artifactRel, "# impl doc");
+
+    const content = makeStory13(
+      [
+        "**AC1 (integration):**",
+        "**Given** a live MCP server,",
+        "**When** the adapter scans stories,",
+        "**Then** the manifest is populated.",
+      ].join("\n"),
+      "No test references here.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.kind).toBe("integration");
+    expect(result.acceptance_criteria[0]!.verification).toEqual({
+      type: "artifact",
+      target: artifactRel,
+    });
+  });
+
+  it("AC2: a cited test path that does NOT resolve on disk falls back to manual (verification undefined)", () => {
+    const repoRoot = makeRepoRoot();
+    // Deliberately do NOT create the referenced file.
+    const content = makeStory13(
+      [
+        "**AC1:**",
+        "**Given** a repo,",
+        "**When** the user runs the command,",
+        "**Then** the build passes.",
+      ].join("\n"),
+      "Add coverage in `plugins/flow/mcp-server/src/ghost/__tests__/ghost.test.ts`.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toBeUndefined();
+  });
+
+  it("AC2: an AC with no derivable signal at all falls back to manual (verification undefined)", () => {
+    const repoRoot = makeRepoRoot();
+    const content = makeStory13(
+      [
+        "**AC1:**",
+        "**Given** a repo,",
+        "**When** the user runs the command,",
+        "**Then** the build passes.",
+      ].join("\n"),
+      "Nothing mechanical to check here.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toBeUndefined();
+  });
+
+  it("AC2: an integration AC whose implementation-artifact doc is absent falls back to manual", () => {
+    const repoRoot = makeRepoRoot();
+    // No implementation-artifact doc written and no test reference.
+    const content = makeStory13(
+      [
+        "**AC1 (integration):**",
+        "**Given** a live MCP server,",
+        "**When** the adapter scans stories,",
+        "**Then** the manifest is populated.",
+      ].join("\n"),
+      "No test references here.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toBeUndefined();
+  });
+
+  it("does not derive a marker (verification undefined) when no repoRoot is supplied — pure mode", () => {
+    // The referenced test file would resolve under cwd, but without repoRoot the
+    // parser must not perform any I/O or derivation.
+    const content = makeStory13(
+      [
+        "**AC1:**",
+        "**Given** a repo,",
+        "**When** the user runs the command,",
+        "**Then** the build passes.",
+      ].join("\n"),
+      "Add coverage in `plugins/flow/mcp-server/src/foo/__tests__/foo.test.ts`.",
+    );
+    const result = parseBmadStory(STORY_13_PATH, content);
+    expect(result.acceptance_criteria[0]!.verification).toBeUndefined();
+  });
+
+  it("prefers a test cited in the integration AC's own prose over the artifact convention", async () => {
+    const repoRoot = makeRepoRoot();
+    const testRel = "plugins/flow/mcp-server/src/baz/__tests__/baz.integration.test.ts";
+    await writeRepoFile(repoRoot, testRel);
+    await writeRepoFile(repoRoot, "_bmad-output/implementation-artifacts/1-3-derive-markers.md", "# doc");
+
+    // The test path is cited in the integration AC's OWN body — the precise,
+    // per-AC signal — so it wins over the artifact-doc convention fallback.
+    const content = makeStory13(
+      [
+        "**AC1 (integration):**",
+        "**Given** a live system,",
+        `**When** \`${testRel}\` runs,`,
+        "**Then** results are produced.",
+      ].join("\n"),
+      "No notes here.",
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toEqual({
+      type: "vitest",
+      target: testRel,
+    });
+  });
+
+  it("an integration AC does NOT borrow a notes-only test reference (notes apply to unit ACs)", async () => {
+    const repoRoot = makeRepoRoot();
+    const testRel = "plugins/flow/mcp-server/src/qux/__tests__/qux.test.ts";
+    await writeRepoFile(repoRoot, testRel);
+    const artifactRel = "_bmad-output/implementation-artifacts/1-3-derive-markers.md";
+    await writeRepoFile(repoRoot, artifactRel, "# doc");
+
+    // The only test reference is in the notes; an integration AC must fall through
+    // to the artifact convention rather than spraying the notes test onto it.
+    const content = makeStory13(
+      [
+        "**AC1 (integration):**",
+        "**Given** a live system,",
+        "**When** integration runs,",
+        "**Then** results are produced.",
+      ].join("\n"),
+      `All coverage lives in \`${testRel}\`.`,
+    );
+
+    const result = parseBmadStory(STORY_13_PATH, content, { repoRoot });
+    expect(result.acceptance_criteria[0]!.verification).toEqual({
+      type: "artifact",
+      target: artifactRel,
+    });
   });
 });
