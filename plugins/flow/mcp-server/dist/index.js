@@ -39310,6 +39310,21 @@ var SharedSkillPromotionProposalSchema = ProposalBase.extend({
   proposed_skill_path: PathInsideRepoSchema,
   skill_description: external_exports.string().min(1)
 }).strict();
+var RETRO_PROPOSAL_TYPES = [
+  "rule",
+  "rule-retirement",
+  "skill-create",
+  "skill-revise",
+  "skill-supersede",
+  "skill-retire",
+  "team-change",
+  "persona-append",
+  "promote-lesson-to-skill",
+  "build-story",
+  "lesson-consolidation",
+  "lesson-retirement",
+  "shared-skill-promotion"
+];
 var RetroProposalSchema = external_exports.discriminatedUnion("type", [
   RuleProposalSchema,
   RuleRetirementProposalSchema,
@@ -39440,6 +39455,7 @@ function ulid3(seedTime, prng) {
 }
 
 // src/tools/write-retro-proposal.ts
+var WRITE_RETRO_PROPOSAL_DESCRIPTION = `Write a single immutable retro-proposal markdown file under <target-repo>/.flow/retro-proposals/<isoTimestamp>.md. The file carries a YAML frontmatter block (validated via RetroProposalFileSchema; source of truth for Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are immutable). Refuses malformed payloads with MalformedRetroProposalError \u2014 closed discriminated union over ${RETRO_PROPOSAL_TYPES.length} types (${RETRO_PROPOSAL_TYPES.join(", ")}). Story 6.3 (FR58, FR59).`;
 async function writeRetroProposal(opts) {
   const {
     targetRepoRoot,
@@ -60173,7 +60189,7 @@ function registerAllTools(server) {
   });
   server.registerTool({
     name: "writeRetroProposal",
-    description: "Write a single immutable retro-proposal markdown file under <target-repo>/.flow/retro-proposals/<isoTimestamp>.md. The file carries a YAML frontmatter block (validated via RetroProposalFileSchema; source of truth for Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are immutable). Refuses malformed payloads with MalformedRetroProposalError \u2014 closed discriminated union over seven types (rule, rule-retirement, skill-create, skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
+    description: WRITE_RETRO_PROPOSAL_DESCRIPTION,
     inputSchema: writeRetroProposalInputSchema,
     handler: async (args) => {
       try {

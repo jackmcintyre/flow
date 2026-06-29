@@ -47,7 +47,11 @@
  * frontmatter, not the body.
  *
  * FR58 — single proposal markdown file under `<target-repo>/.flow/retro-proposals/<ISO>.md`.
- * FR59 — seven typed proposal variants.
+ * FR59 — the typed proposal variants enumerated in `RETRO_PROPOSAL_TYPES`
+ *   (schemas/retro-proposal.ts). The contract grew past the original seven
+ *   (it now covers persona-append, lesson-consolidation, shared-skill-promotion,
+ *   and more); the tool description is derived from that constant rather than a
+ *   hardcoded count so it can never drift out of step with the schema again.
  */
 
 import { promises as fs } from "node:fs";
@@ -57,12 +61,31 @@ import { RetroProposalAlreadyExistsError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import {
   parseRetroProposalFile,
+  RETRO_PROPOSAL_TYPES,
   type DurabilityRecommendation,
   type DurabilityRoutingContext,
   type RetroProposal,
   type RetroProposalFile,
 } from "../schemas/retro-proposal.js";
 import { ulid } from "ulid";
+
+/**
+ * The MCP tool description for `writeRetroProposal`, derived from
+ * `RETRO_PROPOSAL_TYPES` so the enumerated list (and its count) can never drift
+ * out of step with the schema's accepted variants. The contract has already
+ * grown 7 → 11 → 13; hardcoding either the list or the number guarantees a stale
+ * description, so both are interpolated from the constant (Story
+ * native:01KW5W173M53FMZG7DAWPR121Q — AC1).
+ */
+export const WRITE_RETRO_PROPOSAL_DESCRIPTION =
+  "Write a single immutable retro-proposal markdown file under " +
+  "<target-repo>/.flow/retro-proposals/<isoTimestamp>.md. The file carries a YAML " +
+  "frontmatter block (validated via RetroProposalFileSchema; source of truth for " +
+  "Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per " +
+  "proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are " +
+  "immutable). Refuses malformed payloads with MalformedRetroProposalError — closed " +
+  `discriminated union over ${RETRO_PROPOSAL_TYPES.length} types ` +
+  `(${RETRO_PROPOSAL_TYPES.join(", ")}). Story 6.3 (FR58, FR59).`;
 
 /**
  * Options accepted by `writeRetroProposal`.
@@ -143,9 +166,9 @@ export async function writeRetroProposal(
   // validates `iso_timestamp` (defends against path-traversal in the
   // filename component) AND each proposal in `proposals` via the
   // discriminated union — a single Zod pass covers both AC1's "validate
-  // before path-form" and AC2's "discriminated union over seven
-  // literals." `parseRetroProposalFile` throws MalformedRetroProposalError
-  // on failure.
+  // before path-form" and AC2's "discriminated union over the
+  // RETRO_PROPOSAL_TYPES literals." `parseRetroProposalFile` throws
+  // MalformedRetroProposalError on failure.
   let fileShape: RetroProposalFile = parseRetroProposalFile({
     iso_timestamp: isoTimestamp,
     cycle_window: cycleWindow,

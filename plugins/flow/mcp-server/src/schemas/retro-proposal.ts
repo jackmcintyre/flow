@@ -89,7 +89,7 @@ const PathInsideRepoSchema = z
   );
 
 // ---------------------------------------------------------------------------
-// Per-variant schemas (seven discriminator literals)
+// Per-variant schemas (one per literal in RETRO_PROPOSAL_TYPES)
 // ---------------------------------------------------------------------------
 
 /**
@@ -519,10 +519,13 @@ const SharedSkillPromotionProposalSchema = ProposalBase.extend({
 // ---------------------------------------------------------------------------
 
 /**
- * The closed set of twelve proposal-type literals. Exported as a tuple so
+ * The closed set of proposal-type literals. Exported as a tuple so
  * tests can iterate over it and assert the surface has not silently
- * grown (the AC2 invariant). Adding a thirteenth variant requires a
- * coordinated schema-change story.
+ * grown (the AC2 invariant). Adding a new variant requires a
+ * coordinated schema-change story. Consumers that enumerate the accepted
+ * types (e.g. the `writeRetroProposal` tool description) MUST derive from
+ * this constant rather than hardcoding a count — it has already grown
+ * 7 → 11 → 13.
  *
  * `build-story` (added Story native:01KV76P2DW42BPBPT4ZQ0FS63Y) is the
  * engine-safety output: the retro writer emits it in place of a `skill-*`
