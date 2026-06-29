@@ -26304,8 +26304,53 @@ function validateStoryAgainstDiscipline(story, opts) {
 
 // src/adapters/bmad/parse-bmad-story.ts
 import { createHash } from "node:crypto";
+import { existsSync as existsSync2 } from "node:fs";
 import * as path4 from "node:path";
-function parseBmadStory(absPath, fileContents) {
+
+// src/adapters/bmad/derive-bmad-ac-verification.ts
+var TEST_FILE_RE = /([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:test|spec)\.tsx?)/g;
+function normaliseCandidate(raw) {
+  return raw.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/^\.\//, "");
+}
+function collectTestFileCandidates(blob) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const m of blob.matchAll(TEST_FILE_RE)) {
+    const candidate = normaliseCandidate(m[1]);
+    if (candidate.length === 0 || seen.has(candidate)) continue;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
+function firstResolvableTest(blob, exists) {
+  for (const candidate of collectTestFileCandidates(blob)) {
+    if (exists(candidate)) return candidate;
+  }
+  return void 0;
+}
+function deriveBmadAcVerification(args) {
+  const { kind, acBodyText, implementationNotes, epic, story, slug, exists } = args;
+  const ownTest = firstResolvableTest(acBodyText, exists);
+  if (ownTest) {
+    return { type: "vitest", target: ownTest };
+  }
+  if (kind === "integration") {
+    const artifactTarget = `_bmad-output/implementation-artifacts/${epic}-${story}-${slug}.md`;
+    if (exists(artifactTarget)) {
+      return { type: "artifact", target: artifactTarget };
+    }
+    return void 0;
+  }
+  const notesTest = firstResolvableTest(implementationNotes ?? "", exists);
+  if (notesTest) {
+    return { type: "vitest", target: notesTest };
+  }
+  return void 0;
+}
+
+// src/adapters/bmad/parse-bmad-story.ts
+function parseBmadStory(absPath, fileContents, opts = {}) {
   const filename = path4.basename(absPath);
   const filenameMatch = /^(\d+)-(\d+)-([a-z0-9-]+)\.md$/.exec(filename);
   if (!filenameMatch) {
@@ -26376,12 +26421,18 @@ function parseBmadStory(absPath, fileContents) {
   const sections = splitTopLevelSections(lines, h1Idx + 1);
   const storySection = sections.get("Story");
   const narrative = storySection ? extractNarrativeFromStorySection(storySection) : "";
-  const acSection = sections.get("Acceptance Criteria");
-  const acceptance_criteria = acSection ? parseAcceptanceCriteria(acSection, absPath) : [];
-  const depSection = sections.get("Dependencies");
-  const depends_on = depSection ? parseDependencies(depSection) : [];
   const implSection = sections.get("Dev Notes") ?? sections.get("Implementation Notes");
   const implementation_notes = implSection ? implSection.bodyLines.join("\n").trim() || void 0 : void 0;
+  const acSection = sections.get("Acceptance Criteria");
+  const acceptance_criteria = acSection ? parseAcceptanceCriteria(acSection, absPath, {
+    implementationNotes: implementation_notes,
+    epic: epicFromName,
+    story: storyFromName,
+    slug,
+    repoRoot: opts.repoRoot
+  }) : [];
+  const depSection = sections.get("Dependencies");
+  const depends_on = depSection ? parseDependencies(depSection) : [];
   let shipGate;
   for (let i2 = h1Idx + 1; i2 < lines.length; i2++) {
     const line = lines[i2];
@@ -26442,7 +26493,7 @@ function extractNarrativeFromStorySection(section) {
   }
   return out.join("\n").trim();
 }
-function parseAcceptanceCriteria(section, absPath) {
+function parseAcceptanceCriteria(section, absPath, derivation) {
   const headingRe = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
   const acs = [];
   let current = null;
@@ -26466,7 +26517,20 @@ function parseAcceptanceCriteria(section, absPath) {
     const text = ac.body.join("\n").replace(/<!--[\s\S]*?-->/g, "").split("\n").map((l) => l.replace(/\s+$/, "")).join("\n").trim();
     const tag = (ac.tag ?? "").toLowerCase();
     const kind = tag === "integration" || tag === "user-surface" ? "integration" : "unit";
-    return { text, kind };
+    const repoRoot = derivation.repoRoot;
+    if (repoRoot === void 0) {
+      return { text, kind };
+    }
+    const verification = deriveBmadAcVerification({
+      kind,
+      acBodyText: text,
+      implementationNotes: derivation.implementationNotes,
+      epic: derivation.epic,
+      story: derivation.story,
+      slug: derivation.slug,
+      exists: (relPath) => existsSync2(path4.join(repoRoot, relPath))
+    });
+    return verification ? { text, kind, verification } : { text, kind };
   });
 }
 function parseDependencies(section) {
@@ -26635,7 +26699,7 @@ var BmadAdapter = {
     const parsed = [];
     for (const file2 of files) {
       const contents = await fs4.readFile(file2, "utf8");
-      const story = parseBmadStory(file2, contents);
+      const story = parseBmadStory(file2, contents, { repoRoot: ctx.targetRepo });
       const status = story.raw_frontmatter["status"];
       if (status === "optional") continue;
       parsed.push(story);
@@ -26662,7 +26726,7 @@ var BmadAdapter = {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
     }
     const contents = await fs4.readFile(file2, "utf8");
-    return parseBmadStory(file2, contents);
+    return parseBmadStory(file2, contents, { repoRoot: ctx.targetRepo });
   },
   resolveSourcePath(ref) {
     const ctx = requireContext();
@@ -28694,7 +28758,7 @@ async function computeSkillEffectiveness(opts) {
 
 // src/tools/write-native-story.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 import * as path19 from "node:path";
 
 // src/validators/discipline-resolvability.ts
@@ -29151,14 +29215,14 @@ var DEP_BUMP_BASENAMES = /* @__PURE__ */ new Set([
 ]);
 function classifyPath(filePath) {
   const types = [];
-  const basename4 = path15.basename(filePath);
+  const basename5 = path15.basename(filePath);
   if (isMigrationPath(filePath)) {
     types.push("migration");
   }
   if (isSchemaPath(filePath)) {
     types.push("schema");
   }
-  if (DEP_BUMP_BASENAMES.has(basename4)) {
+  if (DEP_BUMP_BASENAMES.has(basename5)) {
     types.push("dep-bump");
   }
   return types;
@@ -30420,7 +30484,7 @@ function resolveDefaultDefinitionOfDone(targetRepoRoot, execSyncImpl, existsImpl
     }
     return PROJECT_AGNOSTIC_DEFINITION_OF_DONE;
   }
-  const checkExists = existsImpl ?? existsSync2;
+  const checkExists = existsImpl ?? existsSync3;
   const sentinelPath = path19.join(targetRepoRoot, FLOW_REPO_DISK_SENTINEL);
   if (checkExists(sentinelPath)) {
     return FLOW_DEFINITION_OF_DONE;
@@ -30695,13 +30759,13 @@ async function readBacklogInventory(rawInput) {
     }
     for (const filename of nativeFiles) {
       if (!filename.endsWith(".md")) continue;
-      const basename4 = filename.slice(0, -3);
-      if (!ULID_PATTERN.test(basename4)) continue;
-      const ref = `native:${basename4}`;
+      const basename5 = filename.slice(0, -3);
+      if (!ULID_PATTERN.test(basename5)) continue;
+      const ref = `native:${basename5}`;
       if (seenRefs.has(ref)) continue;
       const absPath = path20.join(nativeStoriesDir2, filename);
       const content = await fs14.readFile(absPath, "utf8");
-      const title = extractH1Title(content, basename4);
+      const title = extractH1Title(content, basename5);
       const entry = {
         ref,
         title,
@@ -41676,7 +41740,7 @@ async function loadRolePermissions(opts) {
 var import_yaml23 = __toESM(require_dist(), 1);
 import * as path50 from "node:path";
 import {
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   readFileSync as readFileSync5,
   readdirSync as readdirSync3
 } from "node:fs";
@@ -41734,14 +41798,14 @@ function splitCommand(cmd) {
 }
 function detectPackageManagerAt(cwd) {
   for (const [lockfile, pm2] of LOCKFILE_TO_PACKAGE_MANAGER) {
-    if (existsSync3(path50.join(cwd, lockfile))) {
+    if (existsSync4(path50.join(cwd, lockfile))) {
       return { pm: pm2, assumed: false };
     }
   }
   return { pm: "npm", assumed: true };
 }
 function hasKnipConfig(cwd) {
-  return KNIP_CONFIG_FILENAMES.some((name) => existsSync3(path50.join(cwd, name)));
+  return KNIP_CONFIG_FILENAMES.some((name) => existsSync4(path50.join(cwd, name)));
 }
 function findWorkspaceMemberWithBuild(workspaceDir) {
   let packages;
@@ -41803,7 +41867,7 @@ function findWorkspaceYamlDir(root, maxDepth) {
   for (let depth = 0; depth <= maxDepth; depth++) {
     const next = [];
     for (const dir of frontier) {
-      if (existsSync3(path50.join(dir, "pnpm-workspace.yaml"))) return dir;
+      if (existsSync4(path50.join(dir, "pnpm-workspace.yaml"))) return dir;
       let entries;
       try {
         entries = readdirSync3(dir, { withFileTypes: true });
@@ -42313,7 +42377,7 @@ async function runDevTerminalAction(opts) {
 // src/tools/run-reviewer-session.ts
 import * as path54 from "node:path";
 import * as fs37 from "node:fs/promises";
-import { existsSync as existsSync5 } from "node:fs";
+import { existsSync as existsSync6 } from "node:fs";
 
 // src/lib/slugify-standards-criterion.ts
 function slugifyStandardsCriterion(name) {
@@ -42489,7 +42553,7 @@ async function materialisePrBranchWorktree(opts) {
 
 // src/lib/prepare-review-worktree.ts
 import * as path53 from "node:path";
-import { existsSync as existsSync4 } from "node:fs";
+import { existsSync as existsSync5 } from "node:fs";
 var DEFAULT_INSTALL_TIMEOUT_MS = 10 * 60 * 1e3;
 function frozenInstallInvocation(pm2) {
   switch (pm2) {
@@ -42513,7 +42577,7 @@ function resolveWorktreeInstallPlan(worktreeRoot) {
   }
   while (dir === stop || dir.startsWith(stop + path53.sep)) {
     for (const [lockfile, pm2] of LOCKFILE_TO_PACKAGE_MANAGER) {
-      if (existsSync4(path53.join(dir, lockfile))) {
+      if (existsSync5(path53.join(dir, lockfile))) {
         const { command, args } = frozenInstallInvocation(pm2);
         return { installRoot: dir, packageManager: pm2, command, args };
       }
@@ -42576,6 +42640,13 @@ function classifyAc(bodyLines) {
   }
   return { applicability: "manual-check-required" };
 }
+var BMAD_FILENAME_RE2 = /^(\d+)-(\d+)-([a-z0-9-]+)\.md$/;
+function deriveBmadFilenameParts(adapterName, rawPath) {
+  if (adapterName !== "bmad") return null;
+  const m = BMAD_FILENAME_RE2.exec(path54.basename(rawPath));
+  if (!m) return null;
+  return { epic: m[1], story: m[2], slug: m[3] };
+}
 async function runArtifactCheck(index, tag, artifactPath, checkRoot) {
   const resolved = path54.resolve(checkRoot, artifactPath);
   try {
@@ -42625,7 +42696,7 @@ function countExecutedTests(output) {
 }
 function resolveVitestInvocation(packageRoot) {
   const localBin = path54.join(packageRoot, "node_modules", ".bin", "vitest");
-  if (existsSync5(localBin)) {
+  if (existsSync6(localBin)) {
     return { command: localBin, args: [] };
   }
   const pm2 = resolveProjectToolchain({ targetRepoRoot: packageRoot }).packageManager;
@@ -42875,6 +42946,7 @@ ${installResult.stderr.slice(0, 2e3)}` : "");
   }
   const acResults = {};
   let riskTierBlock;
+  const bmadDerivation = deriveBmadFilenameParts(workspace.activeAdapter.name, sourceStory.raw_path);
   try {
     for (const ac of acEntries) {
       const classification = classifyAc(ac.body);
@@ -42910,12 +42982,41 @@ ${installResult.stderr.slice(0, 2e3)}` : "");
           execaImpl
         );
       } else {
-        acResults[ac.index] = {
-          index: ac.index,
-          tag: ac.tag,
-          applicability: "manual-check-required",
-          reason: "AC body has no `artifact:` or `vitest:` marker \u2014 manual check required before merge"
-        };
+        const derived = bmadDerivation ? deriveBmadAcVerification({
+          kind: ac.tag === "integration" || ac.tag === "user-surface" ? "integration" : "unit",
+          acBodyText: ac.body.join("\n"),
+          implementationNotes: sourceStory.implementation_notes,
+          epic: bmadDerivation.epic,
+          story: bmadDerivation.story,
+          slug: bmadDerivation.slug,
+          exists: (relPath) => existsSync6(path54.join(worktreePath, relPath))
+        }) : void 0;
+        if (derived?.type === "artifact") {
+          acResults[ac.index] = await runArtifactCheck(
+            ac.index,
+            ac.tag,
+            derived.target,
+            worktreePath
+            // checkRoot — AC2
+          );
+        } else if (derived?.type === "vitest") {
+          acResults[ac.index] = await runVitestCheck(
+            ac.index,
+            ac.tag,
+            derived.target,
+            derived.target,
+            worktreePath,
+            // checkRoot — AC2
+            execaImpl
+          );
+        } else {
+          acResults[ac.index] = {
+            index: ac.index,
+            tag: ac.tag,
+            applicability: "manual-check-required",
+            reason: "AC body has no `artifact:` or `vitest:` marker \u2014 manual check required before merge"
+          };
+        }
       }
     }
     try {

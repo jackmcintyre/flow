@@ -27,6 +27,8 @@ import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { runReviewerSession } from "../run-reviewer-session.js";
+import { scanSources } from "../scan-sources.js";
+import { resetBmadAdapter } from "../../adapters/bmad/index.js";
 import {
   DuplicateStandardsCriterionIdError,
   GhRecoverableError,
@@ -1345,5 +1347,225 @@ describe("worktree dependency install — AC2: a failed install is a setup-error
     await fs.rm(path.join(tmpRoot, "hello-a.txt"));
     const result = await callSession();
     expect(result.recommendedVerdict).toBe("NEEDS CHANGES");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story native:01KW5W081X3TJPQBCYF3WAK9RZ AC3 — derived BMad markers reach the
+// reviewer's classifier through the manifest-to-reviewer data flow.
+//
+// A BMad source story carries NO inline `vitest:`/`artifact:` markers, so before
+// this story every BMad AC classified manual-check-required and the verdict
+// stalled. This integration test builds a real BMad workspace, scans it (so the
+// manifest carries the derived markers — AC1), and runs `runReviewerSession`
+// against it, asserting each derived-marker AC classifies runnable-artifact /
+// runnable-vitest (NOT manual-check-required), while a genuinely markerless AC
+// still falls back to manual.
+// ---------------------------------------------------------------------------
+
+describe("Story native:01KW5W081X3TJPQBCYF3WAK9RZ AC3 — BMad derived markers reach the reviewer", () => {
+  const BMAD_REF = "bmad:1.3";
+  const STORIES_ROOT = "_bmad-output/planning-artifacts/stories";
+  const ARTIFACT_REL = "_bmad-output/implementation-artifacts/1-3-derive-markers.md";
+  const TEST_REL = "src/derive/__tests__/derived.test.ts";
+
+  // Integration AC1 (no test reference → artifact convention), unit AC2 (its own
+  // prose cites a real test → vitest), unit AC3 (no signal anywhere → stays manual).
+  // The Dev Notes deliberately carry NO test path, so AC3 cannot borrow one.
+  const BMAD_STORY = [
+    "# Story 1.3: Derive markers",
+    "",
+    "Status: ready-for-dev",
+    "",
+    "## Story",
+    "",
+    "As an operator, I want derived markers, so that the reviewer does not stall.",
+    "",
+    "## Acceptance Criteria",
+    "",
+    "**AC1 (integration):**",
+    "**Given** a live MCP server,",
+    "**When** the adapter scans stories,",
+    "**Then** the manifest is populated.",
+    "",
+    "**AC2:**",
+    "**Given** a repo,",
+    `**When** \`${TEST_REL}\` runs,`,
+    "**Then** the new branch is covered.",
+    "",
+    "**AC3:**",
+    "**Given** a subjective design call,",
+    "**When** the reviewer reads it,",
+    "**Then** a human must judge it.",
+    "",
+    "## Dev Notes",
+    "",
+    "AC1 is verified by its implementation-artifact doc. AC3 has no mechanical check.",
+    "",
+  ].join("\n");
+
+  const TEST_FILE_CONTENTS = [
+    'import { describe, it, expect } from "vitest";',
+    'describe("derived", () => {',
+    '  it("derived passing test", () => {',
+    "    expect(true).toBe(true);",
+    "  });",
+    "});",
+  ].join("\n");
+
+  let bmadRoot: string;
+
+  beforeEach(async () => {
+    bmadRoot = mkdtempSync(path.join(os.tmpdir(), "flow-bmad-derive-"));
+
+    // .flow/config.yaml — BMad adapter.
+    await fs.mkdir(path.join(bmadRoot, ".flow"), { recursive: true });
+    await atomicWriteFile(
+      path.join(bmadRoot, ".flow", "config.yaml"),
+      `adapter: bmad\nadapter_config:\n  stories_root: ${STORIES_ROOT}\n`,
+    );
+
+    // BMad source story.
+    await fs.mkdir(path.join(bmadRoot, STORIES_ROOT), { recursive: true });
+    await atomicWriteFile(
+      path.join(bmadRoot, STORIES_ROOT, "1-3-derive-markers.md"),
+      BMAD_STORY,
+    );
+
+    // The two derivation targets, present on the dev tree so scan-time resolution
+    // succeeds: the implementation-artifact doc (AC1) and the unit test (AC2).
+    await fs.mkdir(path.join(bmadRoot, path.dirname(ARTIFACT_REL)), { recursive: true });
+    await atomicWriteFile(path.join(bmadRoot, ARTIFACT_REL), "# impl doc\n");
+    await fs.mkdir(path.join(bmadRoot, path.dirname(TEST_REL)), { recursive: true });
+    await atomicWriteFile(path.join(bmadRoot, TEST_REL), TEST_FILE_CONTENTS);
+
+    // docs/standards.md
+    await fs.mkdir(path.join(bmadRoot, "docs"), { recursive: true });
+    await atomicWriteFile(path.join(bmadRoot, "docs", "standards.md"), FIXTURE_STANDARDS);
+
+    __resetGhErrorMapCacheForTests();
+    resetBmadAdapter();
+  });
+
+  afterEach(() => {
+    rmSync(bmadRoot, { recursive: true, force: true });
+    resetBmadAdapter();
+  });
+
+  const FAKE_BMAD_DIFF = `diff --git a/${TEST_REL} b/${TEST_REL}
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/${TEST_REL}
+@@ -0,0 +1 @@
++test
+`;
+
+  /**
+   * Stub that materialises a worktree containing the derived targets directly (the
+   * artifact doc, the unit test, and a package.json + lockfile so the vitest runner
+   * resolves a package root and the install runs). Avoids recursive copy so the
+   * worktree, which lives under bmadRoot, cannot copy itself.
+   */
+  function makeBmadStub() {
+    return vi.fn().mockImplementation(
+      async (cmd: string, args: string[]) => {
+        const argv = args as string[];
+
+        // Worktree dependency install (lockfile present) → succeed.
+        if (cmd === "pnpm" && argv[0] === "install") {
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        if (cmd === "gh") {
+          if (argv.includes("diff")) {
+            return { stdout: FAKE_BMAD_DIFF, stderr: "", exitCode: 0, timedOut: false };
+          }
+          if (argv.includes("headRefName,headRefOid")) {
+            return {
+              stdout: JSON.stringify({
+                headRefName: "pr-head",
+                headRefOid: "aabbccddaabbccddaabbccddaabbccddaabbccdd",
+              }),
+              stderr: "",
+              exitCode: 0,
+              timedOut: false,
+            };
+          }
+          // pr-view --json commits (risk-tier) and any other gh call.
+          return { stdout: '["feat: derive markers"]', stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        if (cmd === "git") {
+          if (argv[0] === "worktree" && argv[1] === "add") {
+            const worktreePath = argv[2]!;
+            await fs.mkdir(path.join(worktreePath, path.dirname(ARTIFACT_REL)), { recursive: true });
+            await fs.writeFile(path.join(worktreePath, ARTIFACT_REL), "# impl doc\n");
+            await fs.mkdir(path.join(worktreePath, path.dirname(TEST_REL)), { recursive: true });
+            await fs.writeFile(path.join(worktreePath, TEST_REL), TEST_FILE_CONTENTS);
+            await fs.writeFile(
+              path.join(worktreePath, "package.json"),
+              JSON.stringify({ name: "bmad-fixture", version: "0.0.0", private: true }),
+            );
+            await fs.writeFile(path.join(worktreePath, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+            return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+          }
+          if (argv[0] === "worktree" && argv[1] === "remove") {
+            const removePath = argv[2];
+            if (removePath) {
+              await fs.rm(removePath, { recursive: true, force: true }).catch(() => {});
+            }
+            return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+
+        if (cmd === "pnpm") {
+          // vitest run — a realistic passing summary so the zero-executed guard is satisfied.
+          return {
+            stdout: "\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n",
+            stderr: "",
+            exitCode: 0,
+            timedOut: false,
+          };
+        }
+
+        return { stdout: "", stderr: `unexpected command: ${cmd}`, exitCode: 1, timedOut: false };
+      },
+    ) as unknown as typeof import("execa").execa;
+  }
+
+  it("scan persists derived markers and the reviewer classifies them runnable (artifact + vitest), not manual", async () => {
+    // --- AC1: scan persists the derived markers into the to-do manifest. ---
+    await scanSources({ targetRepoRoot: bmadRoot });
+    const manifestPath = path.join(bmadRoot, ".flow", "state", "to-do", `${BMAD_REF}.yaml`);
+    const manifestText = await fs.readFile(manifestPath, "utf8");
+    // AC1 integration → artifact convention; AC2 unit → vitest from the cited test.
+    expect(manifestText).toContain(`type: artifact`);
+    expect(manifestText).toContain(ARTIFACT_REL);
+    expect(manifestText).toContain(`type: vitest`);
+    expect(manifestText).toContain(TEST_REL);
+
+    // --- AC3: the reviewer classifies derived markers as runnable, not manual. ---
+    const result = await runReviewerSession({
+      targetRepoRoot: bmadRoot,
+      sessionUlid: "01HZSESSION0000000000BMADREV",
+      ref: BMAD_REF,
+      prNumber: 7,
+      execaImpl: makeBmadStub(),
+    });
+
+    const ac1 = result.acResults[1]!;
+    expect(ac1.applicability).toBe("runnable-artifact-check");
+    if (ac1.applicability === "runnable-artifact-check") {
+      expect(ac1.status).toBe("pass");
+    }
+    const ac2 = result.acResults[2]!;
+    expect(ac2.applicability).toBe("runnable-vitest");
+    if (ac2.applicability === "runnable-vitest") {
+      expect(ac2.status).toBe("pass");
+    }
+    // AC3 had no derivable signal → it must still fall back to manual verification.
+    expect(result.acResults[3]!.applicability).toBe("manual-check-required");
   });
 });

@@ -1,18 +1,39 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { MalformedBmadStoryError } from "../../errors.js";
 import type { AC, SourceStory } from "../adapter.js";
 import type { BmadStatus } from "./map-bmad-status.js";
+import { deriveBmadAcVerification } from "./derive-bmad-ac-verification.js";
 
 /**
- * Pure BMad story parser — no I/O. The caller (the adapter's
- * `listSourceStories`/`readSourceStory`) is responsible for reading the
- * file and passing the bytes in.
+ * Optional inputs to {@link parseBmadStory}.
+ *
+ * `repoRoot` (Story native:01KW5W081X3TJPQBCYF3WAK9RZ) arms per-AC verification
+ * derivation: when present, each AC for which a real test or artifact target can
+ * be derived from the story's own signals carries that marker, resolved against
+ * `repoRoot` on disk. When absent the parser stays the original pure, no-I/O
+ * function and every AC's `verification` is left `undefined`. The adapter passes
+ * its bound `targetRepo`; tests that exercise pure parsing omit it.
+ */
+export interface ParseBmadStoryOptions {
+  repoRoot?: string;
+}
+
+/**
+ * BMad story parser. Pure (no I/O) UNLESS `opts.repoRoot` is supplied, in which
+ * case per-AC verification markers are derived and resolved against that tree
+ * (Story native:01KW5W081X3TJPQBCYF3WAK9RZ). The caller (the adapter's
+ * `listSourceStories`/`readSourceStory`) reads the file and passes the bytes in.
  *
  * See {@link plugins/flow/docs/spikes/bmad-format.md} for the source
  * shape this parser handles.
  */
-export function parseBmadStory(absPath: string, fileContents: string): SourceStory {
+export function parseBmadStory(
+  absPath: string,
+  fileContents: string,
+  opts: ParseBmadStoryOptions = {},
+): SourceStory {
   const filename = path.basename(absPath);
   const filenameMatch = /^(\d+)-(\d+)-([a-z0-9-]+)\.md$/.exec(filename);
   if (!filenameMatch) {
@@ -98,19 +119,29 @@ export function parseBmadStory(absPath: string, fileContents: string): SourceSto
   const storySection = sections.get("Story");
   const narrative = storySection ? extractNarrativeFromStorySection(storySection) : "";
 
-  // Acceptance criteria.
-  const acSection = sections.get("Acceptance Criteria");
-  const acceptance_criteria = acSection ? parseAcceptanceCriteria(acSection, absPath) : [];
-
-  // Dependencies.
-  const depSection = sections.get("Dependencies");
-  const depends_on = depSection ? parseDependencies(depSection) : [];
-
-  // Implementation notes.
+  // Implementation notes — extracted BEFORE the acceptance criteria so they can
+  // be mined for per-AC verification derivation (Story native:01KW5W081X3TJPQBCYF3WAK9RZ).
   const implSection = sections.get("Dev Notes") ?? sections.get("Implementation Notes");
   const implementation_notes = implSection
     ? implSection.bodyLines.join("\n").trim() || undefined
     : undefined;
+
+  // Acceptance criteria. When `opts.repoRoot` is supplied, derive a per-AC
+  // verification marker (resolved against that tree); otherwise leave it undefined.
+  const acSection = sections.get("Acceptance Criteria");
+  const acceptance_criteria = acSection
+    ? parseAcceptanceCriteria(acSection, absPath, {
+        implementationNotes: implementation_notes,
+        epic: epicFromName,
+        story: storyFromName,
+        slug,
+        repoRoot: opts.repoRoot,
+      })
+    : [];
+
+  // Dependencies.
+  const depSection = sections.get("Dependencies");
+  const depends_on = depSection ? parseDependencies(depSection) : [];
 
   // Ship-gate detection (Story 3.5 Task 4.1).
   // BMad stories can be tagged as ship-gate via a `tags:` frontmatter line
@@ -205,7 +236,24 @@ function extractNarrativeFromStorySection(section: Section): string {
   return out.join("\n").trim();
 }
 
-function parseAcceptanceCriteria(section: Section, absPath: string): AC[] {
+/**
+ * Per-AC verification derivation context (Story native:01KW5W081X3TJPQBCYF3WAK9RZ).
+ * `repoRoot` undefined → no derivation (pure mode); every AC's verification stays
+ * `undefined`.
+ */
+interface AcDerivationContext {
+  implementationNotes: string | undefined;
+  epic: string;
+  story: string;
+  slug: string;
+  repoRoot: string | undefined;
+}
+
+function parseAcceptanceCriteria(
+  section: Section,
+  absPath: string,
+  derivation: AcDerivationContext,
+): AC[] {
   // AC headings look like `**AC1:**`, `**AC2 (user-surface):**`, or
   // `**AC3 — descriptive title:**` (the descriptive token between em-dashes is
   // documentation only and is discarded by this parser).
@@ -242,7 +290,26 @@ function parseAcceptanceCriteria(section: Section, absPath: string): AC[] {
       .trim();
     const tag = (ac.tag ?? "").toLowerCase();
     const kind: AC["kind"] = tag === "integration" || tag === "user-surface" ? "integration" : "unit";
-    return { text, kind };
+
+    // Story native:01KW5W081X3TJPQBCYF3WAK9RZ — derive a verification marker from
+    // the story's own signals, but ONLY when a repoRoot is supplied (the adapter
+    // path) AND the derived target resolves on disk. A non-resolving (or absent)
+    // derivation leaves `verification` undefined → the reviewer falls back to
+    // manual verification rather than chasing a fabricated path.
+    const repoRoot = derivation.repoRoot;
+    if (repoRoot === undefined) {
+      return { text, kind };
+    }
+    const verification = deriveBmadAcVerification({
+      kind,
+      acBodyText: text,
+      implementationNotes: derivation.implementationNotes,
+      epic: derivation.epic,
+      story: derivation.story,
+      slug: derivation.slug,
+      exists: (relPath) => existsSync(path.join(repoRoot, relPath)),
+    });
+    return verification ? { text, kind, verification } : { text, kind };
   });
 }
 
