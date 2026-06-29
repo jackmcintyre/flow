@@ -101,13 +101,18 @@ describe("AC1 — gatherRetroInputs includes skillEffectiveness.per_skill with c
 
     // flow:plan invoked twice in story S1; the story reaches READY FOR MERGE
     //   after both invocations → both are useful fires → ratio 1.
-    // flow:author invoked once in story S2 whose verdict is NEEDS CHANGES →
+    // flow:run invoked once in story S2 whose verdict is NEEDS CHANGES →
     //   not a useful fire → ratio 0.
+    //
+    // NOTE: both skills must be currently installed (exist at the plugin root)
+    // because gatherRetroInputs now passes existsImpl: existsSync to the scorer.
+    // flow:plan and flow:run are live skills; retired commands like flow:author
+    // would be filtered out by the installed-check and excluded from per_skill.
     const lines = [
       makeSkillInvokeLine({ skill_name: "flow:plan", session_id: "01KSESSAAAAAAAAAAAAAAAAAA1", story_id: "native:01KSTORY00000000000000001", ts: "2026-06-01T10:00:00.000Z" }),
       makeSkillInvokeLine({ skill_name: "flow:plan", session_id: "01KSESSAAAAAAAAAAAAAAAAAA1", story_id: "native:01KSTORY00000000000000001", ts: "2026-06-01T10:01:00.000Z" }),
       makeVerdictLine({ session_id: "01KSESSAAAAAAAAAAAAAAAAAA1", story_id: "native:01KSTORY00000000000000001", verdict: "READY FOR MERGE", pr_number: 101, ts: "2026-06-01T10:05:00.000Z" }),
-      makeSkillInvokeLine({ skill_name: "flow:author", session_id: "01KSESSBBBBBBBBBBBBBBBBBB2", story_id: "native:01KSTORY00000000000000002", ts: "2026-06-01T11:00:00.000Z" }),
+      makeSkillInvokeLine({ skill_name: "flow:run", session_id: "01KSESSBBBBBBBBBBBBBBBBBB2", story_id: "native:01KSTORY00000000000000002", ts: "2026-06-01T11:00:00.000Z" }),
       makeVerdictLine({ session_id: "01KSESSBBBBBBBBBBBBBBBBBB2", story_id: "native:01KSTORY00000000000000002", verdict: "NEEDS CHANGES", pr_number: 102, ts: "2026-06-01T11:05:00.000Z" }),
     ];
     await fs.writeFile(
@@ -130,9 +135,8 @@ describe("AC1 — gatherRetroInputs includes skillEffectiveness.per_skill with c
       skill_tier: "planning",
     });
 
-    // flow:author — execution tier (not in tier table); 1 invocation, no READY
-    // FOR MERGE → ratio 0 (never NaN).
-    expect(perSkill["flow:author"]).toEqual({
+    // flow:run — execution tier; 1 invocation with NEEDS CHANGES → ratio 0 (never NaN).
+    expect(perSkill["flow:run"]).toEqual({
       invoke_count: 1,
       useful_fire_count: 0,
       effectiveness_ratio: 0,
@@ -144,14 +148,18 @@ describe("AC1 — gatherRetroInputs includes skillEffectiveness.per_skill with c
     const telemetryDir = path.join(tmpRoot, ".flow", "telemetry");
     await fs.mkdir(telemetryDir, { recursive: true });
 
-    // flow:judge fired 3 times; only 1 invocation is followed by a READY FOR
+    // flow:run fired 3 times; only 1 invocation is followed by a READY FOR
     // MERGE in its own story flow → useful_fire_count 1 / invoke_count 3.
+    //
+    // NOTE: flow:run must be a currently-installed skill (live at the plugin root)
+    // because gatherRetroInputs now passes existsImpl: existsSync to the scorer.
+    // Retired commands like flow:judge would be excluded by the installed-check.
     const lines = [
-      makeSkillInvokeLine({ skill_name: "flow:judge", session_id: "01KSESSCCCCCCCCCCCCCCCCCC1", story_id: "native:01KSTORY00000000000000010", ts: "2026-06-02T09:00:00.000Z" }),
+      makeSkillInvokeLine({ skill_name: "flow:run", session_id: "01KSESSCCCCCCCCCCCCCCCCCC1", story_id: "native:01KSTORY00000000000000010", ts: "2026-06-02T09:00:00.000Z" }),
       makeVerdictLine({ session_id: "01KSESSCCCCCCCCCCCCCCCCCC1", story_id: "native:01KSTORY00000000000000010", verdict: "READY FOR MERGE", pr_number: 201, ts: "2026-06-02T09:10:00.000Z" }),
-      makeSkillInvokeLine({ skill_name: "flow:judge", session_id: "01KSESSDDDDDDDDDDDDDDDDDD2", story_id: "native:01KSTORY00000000000000011", ts: "2026-06-02T10:00:00.000Z" }),
+      makeSkillInvokeLine({ skill_name: "flow:run", session_id: "01KSESSDDDDDDDDDDDDDDDDDD2", story_id: "native:01KSTORY00000000000000011", ts: "2026-06-02T10:00:00.000Z" }),
       makeVerdictLine({ session_id: "01KSESSDDDDDDDDDDDDDDDDDD2", story_id: "native:01KSTORY00000000000000011", verdict: "NEEDS CHANGES", pr_number: 202, ts: "2026-06-02T10:10:00.000Z" }),
-      makeSkillInvokeLine({ skill_name: "flow:judge", session_id: "01KSESSEEEEEEEEEEEEEEEEEE3", story_id: "native:01KSTORY00000000000000012", ts: "2026-06-02T11:00:00.000Z" }),
+      makeSkillInvokeLine({ skill_name: "flow:run", session_id: "01KSESSEEEEEEEEEEEEEEEEEE3", story_id: "native:01KSTORY00000000000000012", ts: "2026-06-02T11:00:00.000Z" }),
       // No verdict for the third invocation's story → not useful.
     ];
     await fs.writeFile(
@@ -161,9 +169,9 @@ describe("AC1 — gatherRetroInputs includes skillEffectiveness.per_skill with c
     );
 
     const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
-    const entry = bundle.skillEffectiveness.per_skill["flow:judge"];
+    const entry = bundle.skillEffectiveness.per_skill["flow:run"];
 
-    // The analyst can write: "flow:judge fired 3 times (invoke_count) with an
+    // The analyst can write: "flow:run fired 3 times (invoke_count) with an
     // effectiveness_ratio of 0.333 — a candidate to revise."
     expect(entry).toBeDefined();
     expect(entry!.invoke_count).toBe(3);

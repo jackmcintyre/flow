@@ -49373,7 +49373,7 @@ function dedupePaths(paths) {
 
 // src/tools/gather-retro-inputs.ts
 var import_yaml26 = __toESM(require_dist2(), 1);
-import { promises as fs41 } from "node:fs";
+import { promises as fs41, existsSync as existsSync4 } from "node:fs";
 import * as path52 from "node:path";
 
 // src/schemas/cycle-state.ts
@@ -49525,8 +49525,33 @@ var SkillEffectivenessResultSchema = external_exports.object({
    */
   attribution: SkillEffectivenessAttribution
 }).strict();
+function extractSkillCommand(skillPath) {
+  const match = skillPath.match(/[/\\]skills[/\\]([^/\\]+)[/\\]SKILL\.md$/i);
+  return match ? match[1] ?? null : null;
+}
+function checkInstalled(skillPath, targetRepoRoot, pluginRoot, existsImpl) {
+  const command = extractSkillCommand(skillPath);
+  if (command === null) {
+    return true;
+  }
+  const candidate1 = path39.join(targetRepoRoot, "plugins", "flow", "skills", command, "SKILL.md");
+  if (existsImpl(candidate1)) return true;
+  if (pluginRoot) {
+    const candidate2 = path39.join(pluginRoot, "skills", command, "SKILL.md");
+    if (existsImpl(candidate2)) return true;
+  }
+  return false;
+}
 async function computeSkillEffectiveness(opts) {
-  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl, readDoneRefsImpl } = opts;
+  const {
+    targetRepoRoot,
+    window: rawWindow,
+    readTelemetryDirImpl,
+    readFileImpl,
+    readDoneRefsImpl,
+    existsImpl,
+    pluginRoot
+  } = opts;
   const window2 = rawWindow ?? DEFAULT_SKILL_EFFECTIVENESS_WINDOW;
   if (!Number.isFinite(window2) || !Number.isInteger(window2) || window2 <= 0) {
     throw new SkillEffectivenessWindowInvalidError({
@@ -49640,6 +49665,12 @@ async function computeSkillEffectiveness(opts) {
   const tally = /* @__PURE__ */ new Map();
   let anyNonExecutionInvoke = false;
   for (const inv of windowedInvokes) {
+    if (existsImpl !== void 0) {
+      const installed = checkInstalled(inv.data.skill_path, targetRepoRoot, pluginRoot, existsImpl);
+      if (!installed) {
+        continue;
+      }
+    }
     const skill = inv.data.skill_name;
     const tier = getSkillTier(skill);
     const entry = tally.get(skill) ?? { invoke: 0, useful: 0, tier };
@@ -52806,7 +52837,17 @@ async function gatherRetroInputs(opts) {
     };
   }
   const recurringFriction = computeRecurringFriction(telemetrySummary.events);
-  const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
+  let retroPluginRoot;
+  try {
+    retroPluginRoot = getPluginRoot();
+  } catch {
+    retroPluginRoot = void 0;
+  }
+  const skillEffectiveness = await computeSkillEffectiveness({
+    targetRepoRoot,
+    existsImpl: (p) => existsSync4(p),
+    pluginRoot: retroPluginRoot
+  });
   const threshold = opts.mechanicalFailureThreshold ?? MECHANICAL_FAILURE_THRESHOLD;
   const mechanicalFailuresDrafted = await draftHardeningStories(
     targetRepoRoot,
@@ -55908,7 +55949,7 @@ async function loadRolePermissions(opts) {
 var import_yaml35 = __toESM(require_dist2(), 1);
 import * as path73 from "node:path";
 import {
-  existsSync as existsSync4,
+  existsSync as existsSync5,
   readFileSync as readFileSync5,
   readdirSync as readdirSync3
 } from "node:fs";
@@ -55966,14 +56007,14 @@ function splitCommand(cmd) {
 }
 function detectPackageManagerAt(cwd) {
   for (const [lockfile, pm2] of LOCKFILE_TO_PACKAGE_MANAGER) {
-    if (existsSync4(path73.join(cwd, lockfile))) {
+    if (existsSync5(path73.join(cwd, lockfile))) {
       return { pm: pm2, assumed: false };
     }
   }
   return { pm: "npm", assumed: true };
 }
 function hasKnipConfig(cwd) {
-  return KNIP_CONFIG_FILENAMES.some((name) => existsSync4(path73.join(cwd, name)));
+  return KNIP_CONFIG_FILENAMES.some((name) => existsSync5(path73.join(cwd, name)));
 }
 function findWorkspaceMemberWithBuild(workspaceDir) {
   let packages;
@@ -56035,7 +56076,7 @@ function findWorkspaceYamlDir(root, maxDepth) {
   for (let depth = 0; depth <= maxDepth; depth++) {
     const next = [];
     for (const dir of frontier) {
-      if (existsSync4(path73.join(dir, "pnpm-workspace.yaml"))) return dir;
+      if (existsSync5(path73.join(dir, "pnpm-workspace.yaml"))) return dir;
       let entries;
       try {
         entries = readdirSync3(dir, { withFileTypes: true });
@@ -56545,7 +56586,7 @@ async function runDevTerminalAction(opts) {
 // src/tools/run-reviewer-session.ts
 import * as path77 from "node:path";
 import * as fs58 from "node:fs/promises";
-import { existsSync as existsSync6 } from "node:fs";
+import { existsSync as existsSync7 } from "node:fs";
 
 // src/lib/materialise-pr-branch-worktree.ts
 import * as path75 from "node:path";
@@ -56716,7 +56757,7 @@ async function materialisePrBranchWorktree(opts) {
 
 // src/lib/prepare-review-worktree.ts
 import * as path76 from "node:path";
-import { existsSync as existsSync5 } from "node:fs";
+import { existsSync as existsSync6 } from "node:fs";
 var DEFAULT_INSTALL_TIMEOUT_MS = 10 * 60 * 1e3;
 function frozenInstallInvocation(pm2) {
   switch (pm2) {
@@ -56740,7 +56781,7 @@ function resolveWorktreeInstallPlan(worktreeRoot) {
   }
   while (dir === stop || dir.startsWith(stop + path76.sep)) {
     for (const [lockfile, pm2] of LOCKFILE_TO_PACKAGE_MANAGER) {
-      if (existsSync5(path76.join(dir, lockfile))) {
+      if (existsSync6(path76.join(dir, lockfile))) {
         const { command, args } = frozenInstallInvocation(pm2);
         return { installRoot: dir, packageManager: pm2, command, args };
       }
@@ -56859,7 +56900,7 @@ function countExecutedTests(output) {
 }
 function resolveVitestInvocation(packageRoot) {
   const localBin = path77.join(packageRoot, "node_modules", ".bin", "vitest");
-  if (existsSync6(localBin)) {
+  if (existsSync7(localBin)) {
     return { command: localBin, args: [] };
   }
   const pm2 = resolveProjectToolchain({ targetRepoRoot: packageRoot }).packageManager;
@@ -57152,7 +57193,7 @@ ${installResult.stderr.slice(0, 2e3)}` : "");
           epic: bmadDerivation.epic,
           story: bmadDerivation.story,
           slug: bmadDerivation.slug,
-          exists: (relPath) => existsSync6(path77.join(worktreePath, relPath))
+          exists: (relPath) => existsSync7(path77.join(worktreePath, relPath))
         }) : void 0;
         if (derived?.type === "artifact") {
           acResults[ac.index] = await runArtifactCheck(

@@ -237,11 +237,115 @@ export interface ComputeSkillEffectivenessOptions {
    * operator merge, etc.).
    */
   readDoneRefsImpl?: (doneDir: string) => Promise<Set<string>>;
+  /**
+   * Test seam / production installed-check: inject a function that returns
+   * whether an absolute path exists on disk (Story native:01KW5WPDPJY5DK6JV810307E0J).
+   *
+   * When provided, the helper re-roots each `skill.invoke`'s captured `skill_path`
+   * against candidate dirs derived from `targetRepoRoot` and `pluginRoot`, then
+   * calls `existsImpl` to determine if the skill is still installed. Invocations
+   * from skills that fail all candidate checks are excluded from the scored set —
+   * retiring skills that were already deleted, without wrongly filtering live skills
+   * whose install path changed.
+   *
+   * When absent (the default), all skills are treated as installed — backward-
+   * compatible with callers that do not need installed-check filtering.
+   *
+   * Raw fs is forbidden inside this helper — callers supply this seam for the
+   * installed-check to be active. Production callers pass `(p) => existsSync(p)`;
+   * tests pass a fake that returns `true`/`false` for known paths without touching
+   * the real filesystem (AC2 of Story native:01KW5WPDPJY5DK6JV810307E0J).
+   */
+  existsImpl?: (absolutePath: string) => boolean;
+  /**
+   * Optional current plugin root (absolute path) for the re-rooted installed-check
+   * (Story native:01KW5WPDPJY5DK6JV810307E0J).
+   *
+   * When `existsImpl` is provided and a `skill_path` matches the canonical pattern
+   * (`…/skills/{command}/SKILL.md`), the helper checks two candidate paths:
+   *
+   *   1. `{targetRepoRoot}/plugins/flow/skills/{command}/SKILL.md` — covers the
+   *      dev/mono-repo case where the plugin source lives inside the target repo.
+   *   2. `{pluginRoot}/skills/{command}/SKILL.md` — covers the installed-plugin
+   *      case where skills live at the current plugin installation root.
+   *
+   * If either candidate exists (per `existsImpl`), the skill is treated as
+   * installed. Providing `pluginRoot` (typically `getPluginRoot()`) makes the
+   * check correct for external users whose projects do NOT contain the plugin
+   * source. When omitted, only candidate 1 is checked.
+   *
+   * Production callers pass `pluginRoot: getPluginRoot()`; tests typically omit
+   * it (their fake `existsImpl` already returns `true`/`false` for candidate-1
+   * shaped paths).
+   */
+  pluginRoot?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Installed-check helpers (Story native:01KW5WPDPJY5DK6JV810307E0J)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the skill command name from an absolute `skill_path` using the
+ * canonical pattern `…/skills/{command}/SKILL.md`. Returns `null` for paths
+ * that do not match (other-plugin paths, relative paths, bare skill names) —
+ * the caller treats `null` as "ambiguous" and defaults to installed (AC4).
+ *
+ * Raw fs is never called here — this is pure string parsing.
+ */
+function extractSkillCommand(skillPath: string): string | null {
+  const match = skillPath.match(/[/\\]skills[/\\]([^/\\]+)[/\\]SKILL\.md$/i);
+  return match ? (match[1] ?? null) : null;
+}
+
+/**
+ * Determine whether a skill is currently installed, using two re-rooted
+ * candidate paths and the injected `existsImpl` seam.
+ *
+ * Returns `true` (installed) when:
+ * - The `skill_path` is ambiguous (no canonical `…/skills/{cmd}/SKILL.md`
+ *   pattern match) — default-kept so no live skill is wrongly dropped (AC4).
+ * - `existsImpl` confirms at least one candidate path exists.
+ *
+ * Candidate 1 — re-rooted under `{targetRepoRoot}/plugins/flow/skills/`:
+ *   Covers the dev/mono-repo case where the plugin source lives inside the
+ *   target repo (the flow plugin is at `plugins/flow/` within the repo).
+ *
+ * Candidate 2 — re-rooted under `{pluginRoot}/skills/` (when provided):
+ *   Covers the installed-plugin case where skills live at the current plugin
+ *   installation root (e.g. `~/.claude/plugins/cache/flow/0.1.0/skills/`).
+ *   This is the path `getPluginRoot()` resolves.
+ *
+ * Returns `false` (retired) only when the path matches the pattern AND
+ * `existsImpl` returns `false` for ALL candidate paths.
+ */
+function checkInstalled(
+  skillPath: string,
+  targetRepoRoot: string,
+  pluginRoot: string | undefined,
+  existsImpl: (absolutePath: string) => boolean,
+): boolean {
+  const command = extractSkillCommand(skillPath);
+  if (command === null) {
+    return true; // ambiguous path — default to installed (AC4)
+  }
+
+  // Candidate 1: re-root under targetRepoRoot/plugins/flow/skills/ (dev/mono-repo case).
+  const candidate1 = path.join(targetRepoRoot, "plugins", "flow", "skills", command, "SKILL.md");
+  if (existsImpl(candidate1)) return true;
+
+  // Candidate 2: re-root under pluginRoot/skills/ (installed-plugin case).
+  if (pluginRoot) {
+    const candidate2 = path.join(pluginRoot, "skills", command, "SKILL.md");
+    if (existsImpl(candidate2)) return true;
+  }
+
+  return false; // skill is genuinely not installed — excluded from the scored set
+}
 
 /**
  * Compute per-skill effectiveness from `skill.invoke` events joined to
@@ -256,7 +360,15 @@ export interface ComputeSkillEffectivenessOptions {
 export async function computeSkillEffectiveness(
   opts: ComputeSkillEffectivenessOptions,
 ): Promise<SkillEffectivenessResult> {
-  const { targetRepoRoot, window: rawWindow, readTelemetryDirImpl, readFileImpl, readDoneRefsImpl } = opts;
+  const {
+    targetRepoRoot,
+    window: rawWindow,
+    readTelemetryDirImpl,
+    readFileImpl,
+    readDoneRefsImpl,
+    existsImpl,
+    pluginRoot,
+  } = opts;
 
   // ------------------------------------------------------------------
   // Step 1: Validate window (mirrors computeAgreement's AC2c guard).
@@ -467,6 +579,20 @@ export async function computeSkillEffectiveness(
   let anyNonExecutionInvoke = false;
 
   for (const inv of windowedInvokes) {
+    // Installed-check (Story native:01KW5WPDPJY5DK6JV810307E0J — AC1/AC2/AC3/AC4).
+    // Only active when existsImpl is injected; when absent, all skills are treated
+    // as installed for backward-compatibility. Re-roots the telemetry's absolute
+    // skill_path against candidate dirs, calls existsImpl, and skips invocations
+    // from skills that are genuinely not installed (retired/removed commands).
+    // Ambiguous paths (no canonical /skills/{cmd}/SKILL.md pattern) default to
+    // installed so no live skill is ever wrongly excluded (AC4).
+    if (existsImpl !== undefined) {
+      const installed = checkInstalled(inv.data.skill_path, targetRepoRoot, pluginRoot, existsImpl);
+      if (!installed) {
+        continue; // skip this invocation — skill is retired/not installed
+      }
+    }
+
     const skill = inv.data.skill_name;
     const tier = getSkillTier(skill);
     const entry = tally.get(skill) ?? { invoke: 0, useful: 0, tier };
