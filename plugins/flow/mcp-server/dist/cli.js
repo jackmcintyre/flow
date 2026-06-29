@@ -30369,6 +30369,34 @@ function resolveGhRepoIdentity(execSyncImpl) {
     return null;
   }
 }
+function resolvePluginRepoIdentity(readPkgJsonImpl) {
+  try {
+    const readImpl = readPkgJsonImpl ?? (() => {
+      const { readFileSync: readFileSync6 } = __require("node:fs");
+      const { fileURLToPath: fileURLToPath4 } = __require("node:url");
+      const nodePath = __require("node:path");
+      const here = nodePath.dirname(fileURLToPath4(import.meta.url));
+      const pkgPath = nodePath.resolve(here, "..", "package.json");
+      return readFileSync6(pkgPath, "utf-8");
+    });
+    const raw = readImpl();
+    if (raw === null) return null;
+    const pkg = JSON.parse(raw);
+    const repoField = pkg.repository;
+    if (!repoField) return null;
+    const urlStr = typeof repoField === "string" ? repoField : repoField.url ?? "";
+    if (!urlStr) return null;
+    const match = urlStr.match(
+      /github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?(?:\/)?$/
+    );
+    if (!match) return null;
+    const [, owner, repo] = match;
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
 
 // src/tools/write-native-story.ts
 var WriteNativeStoryInputSchema = external_exports.object({
@@ -31448,7 +31476,7 @@ async function recordMaintainerFeedback(opts) {
   let issueUrl;
   let issueTitle;
   let issueBody;
-  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  const repoIdentity = resolvePluginRepoIdentity(opts.readPluginPkgJsonImpl);
   if (repoIdentity !== null) {
     issueTitle = composeFeedbackIssueTitle(validated);
     issueBody = composeFeedbackIssueBody(validated);
@@ -45137,7 +45165,7 @@ async function reviewMaintainerInbox(opts) {
   if (filenames.length === 0) {
     return { ok: true, emptyInbox: true, items: [], malformedCount: 0 };
   }
-  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  const repoIdentity = resolvePluginRepoIdentity(opts.readPluginPkgJsonImpl);
   const items = [];
   let malformedCount = 0;
   for (const filename of filenames) {

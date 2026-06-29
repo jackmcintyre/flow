@@ -269,3 +269,89 @@ export function resolveGhRepoIdentity(
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Plugin-repo identity resolver (reads from the plugin's own package.json)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the Flow plugin's own GitHub repo identity from its package.json
+ * `repository` field.
+ *
+ * This is the correct source for maintainer-feedback GitHub links: feedback
+ * items are Flow bugs by construction and must always land in the Flow repo,
+ * not whatever cwd project the operator happens to be running Flow inside.
+ * Using `resolveGhRepoIdentity` (which runs `gh repo view` against the cwd)
+ * would file issues in the wrong tracker when the operator is in a different
+ * project.
+ *
+ * Reads the standard npm `repository` field. Handles the object form
+ * `{ type: "git", url: "..." }` and the shorthand string form. Recognised
+ * GitHub URL shapes:
+ *   - `"https://github.com/owner/repo"`
+ *   - `"https://github.com/owner/repo.git"`
+ *   - `"git+https://github.com/owner/repo.git"`
+ *   - `"git://github.com/owner/repo.git"`
+ *
+ * Fails soft: returns `null` when the field is absent, the package.json
+ * cannot be read, or the URL is not a recognisable GitHub URL. Callers
+ * degrade to no-link rather than falling back to the cwd gh origin.
+ *
+ * @param readPkgJsonImpl — Test seam: inject a function that returns the
+ *   raw package.json content as a string (or `null` to simulate absence /
+ *   read failure). Production callers omit this; the real package.json is
+ *   located relative to the bundle entrypoint via `import.meta.url`.
+ */
+export function resolvePluginRepoIdentity(
+  readPkgJsonImpl?: () => string | null,
+): { owner: string; repo: string } | null {
+  try {
+    const readImpl =
+      readPkgJsonImpl ??
+      (() => {
+        // In the bundled dist/ output import.meta.url resolves to the bundle
+        // file (e.g. dist/index.js), so ../package.json is the mcp-server
+        // package.json that carries the `repository` field.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { readFileSync } = require("node:fs") as {
+          readFileSync: (path: string, encoding: "utf-8") => string;
+        };
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { fileURLToPath } = require("node:url") as {
+          fileURLToPath: (url: string | URL) => string;
+        };
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const nodePath = require("node:path") as typeof import("node:path");
+        const here = nodePath.dirname(fileURLToPath(import.meta.url));
+        const pkgPath = nodePath.resolve(here, "..", "package.json");
+        return readFileSync(pkgPath, "utf-8");
+      });
+
+    const raw = readImpl();
+    if (raw === null) return null;
+
+    const pkg = JSON.parse(raw) as {
+      repository?: string | { type?: string; url?: string };
+    };
+    const repoField = pkg.repository;
+    if (!repoField) return null;
+
+    // Normalise to a URL string (handle both object and shorthand forms).
+    const urlStr =
+      typeof repoField === "string" ? repoField : (repoField.url ?? "");
+    if (!urlStr) return null;
+
+    // Extract owner/repo from a GitHub URL.
+    // Matches: github.com/owner/repo, github.com/owner/repo.git, etc.
+    const match = urlStr.match(
+      /github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?(?:\/)?$/,
+    );
+    if (!match) return null;
+
+    const [, owner, repo] = match;
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
