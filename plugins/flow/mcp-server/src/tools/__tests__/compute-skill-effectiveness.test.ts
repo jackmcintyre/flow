@@ -682,3 +682,181 @@ describe("computeSkillEffectiveness — tier-aware scoring", () => {
     expect(result.attribution).toBe("attributed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Retired-skill installed-check — Story native:01KW5WPDPJY5DK6JV810307E0J
+// AC1: re-rooted path, retired excluded, moved/renamed live skill kept.
+// AC2: injected IO seam (no raw fs — fake ROOT=/abs/repo never touched).
+// AC3: live skill counts unaffected by the filter.
+// AC4: ambiguous path (matches neither candidate dir) defaults to installed.
+// ---------------------------------------------------------------------------
+
+describe("computeSkillEffectiveness — retired-skill installed-check (native:01KW5WPDPJY5DK6JV810307E0J)", () => {
+  /**
+   * Commands that are "currently installed" in this test suite.
+   * Corresponds to the flow plugin's current skill palette.
+   * Any command NOT in this set is treated as retired.
+   */
+  const liveCommands = new Set([
+    "run", "plan", "retro", "ready", "hire", "ask", "dashboard", "help", "init",
+  ]);
+
+  /**
+   * Build a fake existsImpl that examines the re-rooted candidate-1 path
+   * ({ROOT}/plugins/flow/skills/{command}/SKILL.md) and returns true only when
+   * the extracted command is in `liveCommands`.
+   *
+   * ROOT = "/abs/repo" is non-existent on disk — this seam ensures NO real fs
+   * access happens inside the helper, which is the whole point of AC2.
+   *
+   * @param onCheck  Optional spy callback fired on every existsImpl call.
+   */
+  function makeExistsImpl(
+    onCheck?: (path: string) => void,
+  ): (filePath: string) => boolean {
+    return (filePath: string): boolean => {
+      onCheck?.(filePath);
+      const m = filePath.match(/[/\\]skills[/\\]([^/\\]+)[/\\]SKILL\.md$/i);
+      if (!m) return false;
+      return liveCommands.has(m[1] ?? "");
+    };
+  }
+
+  it("AC1: retired skill is excluded; live skill whose path was captured at an old install location is NOT misclassified", async () => {
+    // flow:run is live → kept in per_skill with its READY FOR MERGE verdict counted.
+    // flow:author is retired (removed from the plugin) → excluded from per_skill.
+    // The skill_paths are captured at an OLD install location (/abs/plugins/flow/...)
+    // that no longer matches the current install — but the re-rooting logic extracts
+    // the command and checks the candidate dir, so a live skill is never wrong excluded.
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-ret-1", skill_name: "flow:run", story_id: "native:01RET001" }),
+      makeInvoke({ ts: makeTs(2000), session_id: "s-ret-1", skill_name: "flow:author", story_id: "native:01RET002" }),
+      makeVerdict({ ts: makeTs(3000), session_id: "run-ret-1", pr_number: 1, verdict: "READY FOR MERGE", story_id: "native:01RET001" }),
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+      existsImpl: makeExistsImpl(),
+    });
+
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+    // flow:run is live → present in per_skill with its verdict-joined useful fire.
+    expect(result.per_skill).toHaveProperty("flow:run");
+    expect(result.per_skill["flow:run"]).toMatchObject({
+      invoke_count: 1,
+      useful_fire_count: 1,
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+    // flow:author is retired → excluded from the scored set (zero-ratio active set).
+    expect(result.per_skill).not.toHaveProperty("flow:author");
+  });
+
+  it("AC2: installed-check routes through the injected IO seam; no raw fs is used", async () => {
+    // ROOT = "/abs/repo" does not exist on disk. If the helper called raw existsSync
+    // internally, the check would always return false (no skills dir at /abs/repo) and
+    // every skill would be wrongly filtered. The injected seam is the ONLY IO for the
+    // installed-check — this test is a structural proof that raw fs is forbidden.
+    let seamCallCount = 0;
+    const trackingExistsImpl = (p: string): boolean => {
+      seamCallCount++;
+      return makeExistsImpl()(p);
+    };
+
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-seam-1", skill_name: "flow:run", story_id: "native:01SEAM001" }),
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+      existsImpl: trackingExistsImpl,
+    });
+
+    // The seam was called — confirming the installed-check executed.
+    expect(seamCallCount).toBeGreaterThanOrEqual(1);
+    // flow:run is live (seam returned true for its candidate) → in per_skill.
+    expect(result.per_skill).toHaveProperty("flow:run");
+    // Because ROOT is a fake non-existent path, only the injected seam can return
+    // true here. If the test passes, the helper did NOT fall back to raw fs.
+  });
+
+  it("AC3: a skill still installed on disk is unaffected — invoke_count and effectiveness_ratio unchanged by the filter", async () => {
+    // flow:plan is a live planning-tier skill. With existsImpl active, the
+    // installed-check must NOT alter its invoke_count or effectiveness_ratio.
+    // Planning tier is presence-scored → every invocation is a useful fire → ratio 1.
+    const events = [
+      makeInvoke({ ts: makeTs(1000), session_id: "s-live-1", skill_name: "flow:plan", story_id: "native:01LIVE001" }),
+      makeInvoke({ ts: makeTs(2000), session_id: "s-live-1", skill_name: "flow:plan", story_id: "native:01LIVE001" }),
+    ].map(assertValid);
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": events }),
+      existsImpl: makeExistsImpl(),
+    });
+
+    // Both invocations are kept — the installed-check does NOT skip live skills.
+    expect(result.per_skill["flow:plan"]).toEqual({
+      invoke_count: 2,
+      useful_fire_count: 2,
+      effectiveness_ratio: 1,
+      skill_tier: "planning",
+    });
+  });
+
+  it("AC4 (integration): retired skill excluded; ambiguous other-plugin path defaults to installed and is never wrongly dropped", async () => {
+    // Scenario verbatim from the story AC4:
+    // - flow:author is retired (skill_path matches the canonical /skills/{cmd}/SKILL.md
+    //   pattern, existsImpl returns false for its candidate) → excluded from per_skill.
+    // - "flow:relpath" has a skill_path that matches NEITHER candidate dir (no
+    //   /skills/{command}/SKILL.md suffix at all) → ambiguous → treated as installed,
+    //   so it is NOT filtered out even though it is not in liveCommands.
+    //
+    // The READY FOR MERGE verdict for the ambiguous skill confirms it is correctly
+    // scored (execution tier, verdict join) — the retro sees a real signal, not a
+    // silently-dropped skill that still exists in some other plugin or configuration.
+    const ambiguousPath = "other-plugin/relpath/something.md"; // no /skills/{cmd}/SKILL.md
+
+    const eventsRaw = [
+      // Retired skill in the window.
+      assertValid(makeInvoke({ ts: makeTs(1000), session_id: "s-ac4-ret", skill_name: "flow:author", story_id: "native:01AC4RET" })),
+      // Ambiguous-path skill: manually override skill_path to a non-canonical value.
+      assertValid({
+        ts: makeTs(2000),
+        session_id: "s-ac4-amb",
+        agent: "user",
+        story_id: "native:01AC4AMB",
+        type: "skill.invoke",
+        data: {
+          skill_name: "flow:relpath",
+          skill_path: ambiguousPath,
+          skill_version: "0.1.0",
+          skill_scope: "plugin" as const,
+          invocation_source: "user-slash-command" as const,
+        },
+      }),
+      // Verdict for the ambiguous skill → it IS a useful fire.
+      assertValid(makeVerdict({ ts: makeTs(3000), session_id: "run-ac4-amb", pr_number: 1, verdict: "READY FOR MERGE", story_id: "native:01AC4AMB" })),
+    ];
+
+    const result = await computeSkillEffectiveness({
+      targetRepoRoot: ROOT,
+      ...seams({ "2026-05.jsonl": eventsRaw }),
+      existsImpl: makeExistsImpl(),
+    });
+
+    expect(SkillEffectivenessResultSchema.safeParse(result).success).toBe(true);
+    // Retired skill: excluded — does not appear as a 0-ratio active skill.
+    expect(result.per_skill).not.toHaveProperty("flow:author");
+    // Ambiguous skill: treated as installed — never wrongly dropped.
+    expect(result.per_skill).toHaveProperty("flow:relpath");
+    expect(result.per_skill["flow:relpath"]).toEqual({
+      invoke_count: 1,
+      useful_fire_count: 1,
+      effectiveness_ratio: 1,
+      skill_tier: "execution",
+    });
+  });
+});

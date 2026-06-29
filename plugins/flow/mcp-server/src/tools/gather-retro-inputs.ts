@@ -59,7 +59,7 @@
  * All other reads are side-effect-free. No network. No unguarded clock dependency.
  */
 
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { readCycleState, type CycleState } from "../schemas/cycle-state.js";
@@ -100,6 +100,7 @@ import { parsePersonaFile } from "../lib/persona-file.js";
 import { recordMaintainerFeedback } from "./record-maintainer-feedback.js";
 import { MaintainerFeedbackItemSchema } from "../schemas/maintainer-feedback.js";
 import { analyzeTeamFit, type AnalyzeTeamFitResult } from "./analyze-team-fit.js";
+import { getPluginRoot } from "../lib/plugin-root.js";
 
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
@@ -438,7 +439,25 @@ export async function gatherRetroInputs(
   // to a downstream READY FOR MERGE verdict. It always returns a safe shape
   // (an empty per_skill map when no telemetry exists), so no null-guard is
   // needed and the retro never fails on an absent signal.
-  const skillEffectiveness = await computeSkillEffectiveness({ targetRepoRoot });
+  //
+  // Story native:01KW5WPDPJY5DK6JV810307E0J: pass the existsImpl seam +
+  // pluginRoot so the helper re-roots each skill's captured absolute path and
+  // excludes skills that are no longer installed (retired/removed commands),
+  // stopping the retro from proposing to retire already-deleted skills.
+  // getPluginRoot() is wrapped in a try/catch — if the plugin root cannot be
+  // located (edge-case: detached test environment) we fall back to `undefined`
+  // and only candidate-1 (targetRepoRoot-based) is checked.
+  let retroPluginRoot: string | undefined;
+  try {
+    retroPluginRoot = getPluginRoot();
+  } catch {
+    retroPluginRoot = undefined;
+  }
+  const skillEffectiveness = await computeSkillEffectiveness({
+    targetRepoRoot,
+    existsImpl: (p) => existsSync(p),
+    pluginRoot: retroPluginRoot,
+  });
 
   // Draft hardening stories for recurring mechanical failures
   // (Story native:01KT6RHTE3YME1ZAD5VRQAKDSW). This is a write side-effect of
