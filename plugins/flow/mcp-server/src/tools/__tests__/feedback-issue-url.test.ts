@@ -41,6 +41,17 @@ import {
 let scratch: string;
 let root: string;
 
+/** Stub plugin package.json — returns a recognisable plugin repo identity. */
+const STUB_READ_PLUGIN_PKG_JSON = (): string =>
+  JSON.stringify({
+    name: "flow",
+    repository: { type: "git", url: "https://github.com/test-plugin-owner/test-plugin-repo" },
+  });
+
+/** Simulates the repository field being absent / the package.json unreadable. */
+const FAILING_READ_PLUGIN_PKG_JSON = (): string | null => null;
+
+// Keep STUB_EXEC_SYNC for resolveGhRepoIdentity unit tests (non-retargeted path).
 const STUB_EXEC_SYNC = (cmd: string, _opts: { encoding: "utf-8" }): string => {
   if (cmd === "gh repo view --json owner,name") {
     return JSON.stringify({ owner: { login: "test-owner" }, name: "test-repo" });
@@ -352,7 +363,7 @@ describe("renderFeedbackLinkBlock (AC1/AC3)", () => {
 // ---------------------------------------------------------------------------
 
 describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
-  it("returns issueUrl when gh stub succeeds (AC1)", async () => {
+  it("returns issueUrl targeting the plugin repo when plugin pkg.json stub succeeds (AC1)", async () => {
     const result = await recordMaintainerFeedback({
       targetRepoRoot: root,
       item: {
@@ -361,13 +372,13 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
         trigger: "retro-analyst / cycle-end retro, story native:01TESTXYZ",
         suggested_direction: "Add a recordMaintainerFeedback seam.",
       },
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);
     expect(result.issueUrl).toBeDefined();
     expect(result.issueUrl).toMatch(
-      /^https:\/\/github\.com\/test-owner\/test-repo\/issues\/new\?/,
+      /^https:\/\/github\.com\/test-plugin-owner\/test-plugin-repo\/issues\/new\?/,
     );
     expect(result.issueUrl).toContain("title=");
     expect(result.issueUrl).toContain("body=");
@@ -381,7 +392,7 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
         tool_area: "test-area",
         trigger: "generalist-dev / story native:01TEST",
       },
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.issueUrl ?? "";
@@ -394,7 +405,7 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
     expect(url).toContain("?title=");
   });
 
-  it("issueUrl is absent (not null, just missing) when gh is unavailable — inbox still written (AC2/fail-soft)", async () => {
+  it("issueUrl is absent (not null, just missing) when plugin pkg.json field absent — inbox still written (AC2/fail-soft)", async () => {
     const result = await recordMaintainerFeedback({
       targetRepoRoot: root,
       item: {
@@ -402,7 +413,7 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
         tool_area: "test-area",
         trigger: "generalist-dev / story native:01TEST",
       },
-      execSyncImpl: FAILING_EXEC_SYNC,
+      readPluginPkgJsonImpl: FAILING_READ_PLUGIN_PKG_JSON,
     });
 
     // Inbox write must still succeed.
@@ -425,7 +436,7 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
         trigger: "sentinel-trigger-text",
         suggested_direction: "sentinel-suggested-direction",
       },
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.issueUrl ?? "";
@@ -445,7 +456,7 @@ describe("recordMaintainerFeedback → issueUrl (AC1/AC2)", () => {
         tool_area: "some-tool",
         trigger: "some-trigger",
       },
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);

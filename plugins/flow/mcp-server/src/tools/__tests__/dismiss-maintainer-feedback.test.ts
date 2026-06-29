@@ -29,12 +29,11 @@ import type { MaintainerFeedbackItem } from "../../schemas/maintainer-feedback.j
 let scratch: string;
 let root: string;
 
-const STUB_EXEC_SYNC = (cmd: string, _opts: { encoding: "utf-8" }): string => {
-  if (cmd === "gh repo view --json owner,name") {
-    return JSON.stringify({ owner: { login: "test-owner" }, name: "test-repo" });
-  }
-  throw new Error(`Unexpected command: ${cmd}`);
-};
+const STUB_READ_PLUGIN_PKG_JSON = (): string =>
+  JSON.stringify({
+    name: "flow",
+    repository: { type: "git", url: "https://github.com/test-plugin-owner/test-plugin-repo" },
+  });
 
 const INBOX_REL = path.join(".flow", "maintainer-inbox");
 
@@ -121,7 +120,7 @@ describe("dismissMaintainerFeedback (b) — reviewMaintainerInbox ignores dismis
     // Sanity: both present before dismiss.
     const before = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
     expect(before.items.map((i) => i.id).sort()).toEqual([ITEM_A.id, ITEM_B.id].sort());
 
@@ -129,7 +128,7 @@ describe("dismissMaintainerFeedback (b) — reviewMaintainerInbox ignores dismis
 
     const after = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
     expect(after.items).toHaveLength(1);
     expect(after.items[0]!.id).toBe(ITEM_B.id);
@@ -142,7 +141,7 @@ describe("dismissMaintainerFeedback (b) — reviewMaintainerInbox ignores dismis
 
     const after = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
     expect(after.emptyInbox).toBe(true);
     expect(after.items).toHaveLength(0);

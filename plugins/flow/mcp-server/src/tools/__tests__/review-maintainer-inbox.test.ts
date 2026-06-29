@@ -36,16 +36,18 @@ import type { MaintainerFeedbackItem } from "../../schemas/maintainer-feedback.j
 let scratch: string;
 let root: string;
 
-const STUB_EXEC_SYNC = (cmd: string, _opts: { encoding: "utf-8" }): string => {
-  if (cmd === "gh repo view --json owner,name") {
-    return JSON.stringify({ owner: { login: "test-owner" }, name: "test-repo" });
-  }
-  throw new Error(`Unexpected command: ${cmd}`);
-};
+/** Stub for the plugin's own package.json — returns a recognisable plugin repo identity. */
+const STUB_READ_PLUGIN_PKG_JSON = (): string =>
+  JSON.stringify({
+    name: "flow",
+    repository: {
+      type: "git",
+      url: "https://github.com/test-plugin-owner/test-plugin-repo",
+    },
+  });
 
-const FAILING_EXEC_SYNC = (_cmd: string, _opts: { encoding: "utf-8" }): string => {
-  throw new Error("gh not available");
-};
+/** Simulates the `repository` field being absent / the package.json unreadable. */
+const FAILING_READ_PLUGIN_PKG_JSON = (): string | null => null;
 
 /** Write a single inbox item as JSON (simulating what `recordMaintainerFeedback` does). */
 async function writeInboxItem(
@@ -237,7 +239,7 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);
@@ -251,7 +253,7 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const item = result.items[0]!;
@@ -267,7 +269,7 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items[0]!.suggested_direction).toBe(SAMPLE_ITEM.suggested_direction);
@@ -278,7 +280,7 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items[0]!.suggested_direction).toBeUndefined();
@@ -291,7 +293,7 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     // Items should be in filename-alphabetical (chronological) order.
@@ -305,17 +307,17 @@ describe("reviewMaintainerInbox (AC1) — items are surfaced clearly", () => {
 // ---------------------------------------------------------------------------
 
 describe("reviewMaintainerInbox (AC2) — pre-filled GitHub issue URL", () => {
-  it("each item includes a pre-filled GitHub new-issue URL when gh stub succeeds", async () => {
+  it("each item includes a pre-filled GitHub new-issue URL when plugin pkg.json stub succeeds", async () => {
     await writeInboxItem(root, SAMPLE_ITEM);
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items[0]!.issueUrl).toBeDefined();
     expect(result.items[0]!.issueUrl).toMatch(
-      /^https:\/\/github\.com\/test-owner\/test-repo\/issues\/new\?/,
+      /^https:\/\/github\.com\/test-plugin-owner\/test-plugin-repo\/issues\/new\?/,
     );
   });
 
@@ -324,7 +326,7 @@ describe("reviewMaintainerInbox (AC2) — pre-filled GitHub issue URL", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.items[0]!.issueUrl ?? "";
@@ -339,7 +341,7 @@ describe("reviewMaintainerInbox (AC2) — pre-filled GitHub issue URL", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.items[0]!.issueUrl ?? "";
@@ -353,7 +355,7 @@ describe("reviewMaintainerInbox (AC2) — pre-filled GitHub issue URL", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.items[0]!.issueUrl ?? "";
@@ -372,7 +374,7 @@ describe("reviewMaintainerInbox (AC3) — plain web URL, no gh CLI in the link",
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.items[0]!.issueUrl ?? "";
@@ -383,12 +385,12 @@ describe("reviewMaintainerInbox (AC3) — plain web URL, no gh CLI in the link",
     expect(url).not.toContain("--repo");
   });
 
-  it("items are still listed (without issueUrl) when gh is unavailable (AC3 — fail-soft)", async () => {
+  it("items are still listed (without issueUrl) when plugin pkg.json has no repository field (AC3 — fail-soft)", async () => {
     await writeInboxItem(root, SAMPLE_ITEM);
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: FAILING_EXEC_SYNC,
+      readPluginPkgJsonImpl: FAILING_READ_PLUGIN_PKG_JSON,
     });
 
     // The item should still be returned.
@@ -404,7 +406,7 @@ describe("reviewMaintainerInbox (AC3) — plain web URL, no gh CLI in the link",
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const url = result.items[0]!.issueUrl ?? "";
@@ -427,7 +429,7 @@ describe("reviewMaintainerInbox (AC4) — empty inbox handling", () => {
     // No inbox directory created.
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);
@@ -442,7 +444,7 @@ describe("reviewMaintainerInbox (AC4) — empty inbox handling", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);
@@ -453,7 +455,7 @@ describe("reviewMaintainerInbox (AC4) — empty inbox handling", () => {
   it("emits no link when the inbox is empty (AC4)", async () => {
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     // No items means no links — cannot produce a blank or malformed URL.
@@ -469,7 +471,7 @@ describe("reviewMaintainerInbox (AC4) — empty inbox handling", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.emptyInbox).toBe(false);
@@ -491,7 +493,7 @@ describe("reviewMaintainerInbox — resilience (malformed files skipped)", () =>
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.ok).toBe(true);
@@ -510,7 +512,7 @@ describe("reviewMaintainerInbox — resilience (malformed files skipped)", () =>
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(1);
@@ -525,7 +527,7 @@ describe("reviewMaintainerInbox — resilience (malformed files skipped)", () =>
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(1);
@@ -549,7 +551,7 @@ describe("reviewMaintainerInbox — three-element link block (AC2)", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(1);
@@ -577,7 +579,7 @@ describe("reviewMaintainerInbox — three-element link block (AC2)", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     const item = result.items[0]!;
@@ -597,7 +599,7 @@ describe("reviewMaintainerInbox — three-element link block (AC2)", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(2);
@@ -615,17 +617,17 @@ describe("reviewMaintainerInbox — three-element link block (AC2)", () => {
     }
   });
 
-  it("when gh is unavailable, renderFeedbackLinkBlock returns null — no link block emitted (AC3)", async () => {
+  it("when plugin pkg.json has no repository field, renderFeedbackLinkBlock returns null — no link block emitted (AC3)", async () => {
     await writeInboxItem(root, SAMPLE_ITEM);
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: FAILING_EXEC_SYNC,
+      readPluginPkgJsonImpl: FAILING_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(1);
     const item = result.items[0]!;
-    // No issueUrl when gh is unavailable.
+    // No issueUrl when plugin pkg.json has no repository field (fail-soft).
     expect(item.issueUrl).toBeUndefined();
 
     // Attempting to build a link block with no URL should return null cleanly.
@@ -653,12 +655,140 @@ describe("reviewMaintainerInbox — URL length guard", () => {
 
     const result = await reviewMaintainerInbox({
       targetRepoRoot: root,
-      execSyncImpl: STUB_EXEC_SYNC,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
     });
 
     expect(result.items).toHaveLength(1);
     const url = result.items[0]!.issueUrl ?? "";
     expect(Buffer.byteLength(url, "utf8")).toBeLessThanOrEqual(8192);
     expect(result.items[0]!.bodyShortened).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (story native:01KW5WMS33XC463QM60AXDGK81)
+// reviewMaintainerInbox — issue URL targets the plugin's own repo, not cwd's
+// ---------------------------------------------------------------------------
+
+describe("reviewMaintainerInbox (AC1) — issue URL targets plugin repo, not cwd gh origin", () => {
+  it("URL uses the plugin repo owner/name from the plugin package.json, not the cwd project repo", async () => {
+    // The readPluginPkgJsonImpl stub represents the plugin's own package.json.
+    // The URL must point to the plugin repo regardless of what cwd project
+    // the operator is running Flow inside.
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.items).toHaveLength(1);
+    const url = result.items[0]!.issueUrl ?? "";
+    // Must target the plugin repo (test-plugin-owner/test-plugin-repo).
+    expect(url).toContain("test-plugin-owner/test-plugin-repo");
+    // Must NOT target a different cwd-bound repo identity.
+    expect(url).not.toContain("test-owner/test-repo");
+  });
+
+  it("URL is a valid GitHub new-issue link targeting the plugin repo", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    const url = result.items[0]!.issueUrl ?? "";
+    expect(url).toMatch(
+      /^https:\/\/github\.com\/test-plugin-owner\/test-plugin-repo\/issues\/new\?/,
+    );
+  });
+
+  it("issueUrl is absent when the plugin package.json repository field is absent (fail-soft)", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: () =>
+        JSON.stringify({ name: "flow" /* no repository field */ }),
+    });
+
+    // Fail-soft: item is still returned, just without an issueUrl.
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.issueUrl).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3 (story native:01KW5WMS33XC463QM60AXDGK81)
+// reviewMaintainerInbox — plugin package.json `repository` field as the identity source
+// ---------------------------------------------------------------------------
+
+describe("reviewMaintainerInbox (AC3) — plugin package.json repository field", () => {
+  it("reads owner/repo from a url object-form repository field", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: () =>
+        JSON.stringify({
+          name: "flow",
+          repository: { type: "git", url: "https://github.com/pkg-owner/pkg-repo" },
+        }),
+    });
+
+    const url = result.items[0]!.issueUrl ?? "";
+    expect(url).toContain("pkg-owner/pkg-repo");
+  });
+
+  it("reads owner/repo from a shorthand string repository field", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: () =>
+        JSON.stringify({
+          name: "flow",
+          repository: "https://github.com/string-owner/string-repo",
+        }),
+    });
+
+    const url = result.items[0]!.issueUrl ?? "";
+    expect(url).toContain("string-owner/string-repo");
+  });
+
+  it("fails soft to no-link when the repository field is absent", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: () => JSON.stringify({ name: "flow" }),
+    });
+
+    expect(result.items[0]!.issueUrl).toBeUndefined();
+  });
+
+  it("fails soft to no-link when readPluginPkgJsonImpl returns null", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: FAILING_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.items[0]!.issueUrl).toBeUndefined();
+  });
+
+  it("items are still returned even when issueUrl is absent (fail-soft — no-link, not no-item)", async () => {
+    await writeInboxItem(root, SAMPLE_ITEM);
+
+    const result = await reviewMaintainerInbox({
+      targetRepoRoot: root,
+      readPluginPkgJsonImpl: FAILING_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.problem).toBe(SAMPLE_ITEM.problem);
   });
 });

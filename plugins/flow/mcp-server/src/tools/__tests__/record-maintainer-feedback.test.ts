@@ -412,3 +412,127 @@ describe("maintainerInboxItemPath helper", () => {
     expect(path.basename(p)).not.toContain(":");
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC2 (story native:01KW5WMS33XC463QM60AXDGK81)
+// recordMaintainerFeedback — live-session issueUrl targets the plugin's own repo
+// ---------------------------------------------------------------------------
+
+/** Stub plugin package.json returning a recognisable plugin repo identity. */
+const STUB_READ_PLUGIN_PKG_JSON = (): string =>
+  JSON.stringify({
+    name: "flow",
+    repository: {
+      type: "git",
+      url: "https://github.com/test-plugin-owner/test-plugin-repo",
+    },
+  });
+
+describe("recordMaintainerFeedback (AC2) — live-session issueUrl targets plugin repo", () => {
+  it("issueUrl is present and targets the plugin repo when readPluginPkgJsonImpl succeeds", async () => {
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: {
+        problem: "The run seam cannot route a structural finding.",
+        tool_area: "run-dev-terminal-action",
+        trigger: "generalist-dev / story native:01TESTAC2",
+      },
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.issueUrl).toBeDefined();
+    // Must target the plugin repo, not whatever cwd project is active.
+    expect(result.issueUrl).toContain("test-plugin-owner/test-plugin-repo");
+    expect(result.issueUrl).not.toContain("my-cwd-owner");
+  });
+
+  it("issueUrl is a valid pre-filled GitHub new-issue URL (not an API or auto-file endpoint)", async () => {
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: {
+        problem: "Issue URL shape check.",
+        tool_area: "record-maintainer-feedback",
+        trigger: "generalist-dev / story native:01TESTAC2B",
+      },
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.issueUrl).toMatch(
+      /^https:\/\/github\.com\/test-plugin-owner\/test-plugin-repo\/issues\/new\?/,
+    );
+    expect(result.issueUrl).not.toContain("api/v3");
+    expect(result.issueUrl).not.toContain("/issues/create");
+  });
+
+  it("issueUrl body includes the problem and trigger fields", async () => {
+    const problem = "The reviewer cannot flag a structural engine defect.";
+    const trigger = "generalist-reviewer / story native:01TESTAC2C";
+
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: { problem, tool_area: "run-reviewer-session", trigger },
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    const url = result.issueUrl ?? "";
+    const bodyParam = new URL(url).searchParams.get("body") ?? "";
+    expect(bodyParam).toContain(problem);
+    expect(bodyParam).toContain(trigger);
+  });
+
+  it("issueUrl is absent when readPluginPkgJsonImpl returns null (fail-soft)", async () => {
+    // When the plugin package.json is unreadable, the inbox write still
+    // succeeds — only the URL bonus is suppressed (fail-soft).
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: {
+        problem: "Fail-soft check — inbox write must still succeed.",
+        tool_area: "managed-fs",
+        trigger: "generalist-dev / story native:01TESTAC2D",
+      },
+      readPluginPkgJsonImpl: () => null,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(result.issueUrl).toBeUndefined();
+
+    // The inbox file must still have been written.
+    const stat = await import("node:fs").then((m) => m.promises.stat(result.absPath));
+    expect(stat.isFile()).toBe(true);
+  });
+
+  it("issueUrl is absent when the repository field is absent in the plugin package.json (fail-soft)", async () => {
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: {
+        problem: "Repository field absent check.",
+        tool_area: "build-feedback-issue-url",
+        trigger: "generalist-dev / story native:01TESTAC2E",
+      },
+      readPluginPkgJsonImpl: () => JSON.stringify({ name: "flow" }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.issueUrl).toBeUndefined();
+  });
+
+  it("also returns issueTitle and issueBody when issueUrl is present", async () => {
+    const result = await recordMaintainerFeedback({
+      targetRepoRoot: root,
+      item: {
+        problem: "Title and body fields check.",
+        tool_area: "review-maintainer-inbox",
+        trigger: "generalist-dev / story native:01TESTAC2F",
+      },
+      readPluginPkgJsonImpl: STUB_READ_PLUGIN_PKG_JSON,
+    });
+
+    expect(result.issueUrl).toBeDefined();
+    expect(result.issueTitle).toBeDefined();
+    expect(result.issueBody).toBeDefined();
+    expect(result.issueTitle).toContain("review-maintainer-inbox");
+    expect(result.issueBody).toContain("Title and body fields check.");
+  });
+});

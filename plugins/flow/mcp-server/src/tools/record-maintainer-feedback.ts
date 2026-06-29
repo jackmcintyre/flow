@@ -56,7 +56,7 @@ import {
   buildFeedbackIssueUrl,
   composeFeedbackIssueTitle,
   composeFeedbackIssueBody,
-  resolveGhRepoIdentity,
+  resolvePluginRepoIdentity,
 } from "./build-feedback-issue-url.js";
 
 export interface RecordMaintainerFeedbackOptions {
@@ -69,11 +69,13 @@ export interface RecordMaintainerFeedbackOptions {
    */
   item: unknown;
   /**
-   * Test seam: inject a stub for `execSync("gh repo view ...")` so tests
-   * can control the owner/name without spawning a real `gh` process.
-   * Production callers omit this; the real `execSync` is used.
+   * Test seam: inject a function that returns the raw content of the plugin's
+   * own `package.json` (or `null` to simulate the field being absent / the
+   * file being unreadable). Used to resolve the plugin's repo identity for the
+   * pre-filled GitHub issue URL. Production callers omit this; the real
+   * `mcp-server/package.json` is located automatically via `import.meta.url`.
    */
-  execSyncImpl?: (cmd: string, opts: { encoding: "utf-8" }) => string;
+  readPluginPkgJsonImpl?: () => string | null;
 }
 
 export interface RecordMaintainerFeedbackResult {
@@ -193,7 +195,11 @@ export async function recordMaintainerFeedback(
   let issueUrl: string | undefined;
   let issueTitle: string | undefined;
   let issueBody: string | undefined;
-  const repoIdentity = resolveGhRepoIdentity(opts.execSyncImpl);
+  // Resolve the plugin's own repo identity from its package.json `repository`
+  // field. Maintainer-feedback items are Flow bugs — they must always link to
+  // the Flow plugin's repo, not whatever cwd project the operator is running
+  // Flow inside (Story native:01KW5WMS33XC463QM60AXDGK81).
+  const repoIdentity = resolvePluginRepoIdentity(opts.readPluginPkgJsonImpl);
   if (repoIdentity !== null) {
     issueTitle = composeFeedbackIssueTitle(validated);
     issueBody = composeFeedbackIssueBody(validated);
