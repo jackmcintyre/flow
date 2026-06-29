@@ -26,12 +26,16 @@ import {
   MalformedRetroProposalError,
   RetroProposalAlreadyExistsError,
 } from "../../errors.js";
-import { parseRetroProposalFile } from "../../schemas/retro-proposal.js";
+import {
+  parseRetroProposalFile,
+  RETRO_PROPOSAL_TYPES,
+} from "../../schemas/retro-proposal.js";
 import {
   writeRetroProposal,
   routeDurability,
   DURABILITY_REASONS,
   classifySkillChangeTarget,
+  WRITE_RETRO_PROPOSAL_DESCRIPTION,
 } from "../write-retro-proposal.js";
 
 // ---------------------------------------------------------------------------
@@ -1283,5 +1287,217 @@ describe("renderRetroRecommendationsBlock — integration with summariseRetroPro
     expect(block).toContain("nothing to review");
     expect(block).not.toContain("/flow:retro");
     expect(block).not.toMatch(/\d+\.\s+\[/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool description ↔ schema parity
+// (Story native:01KW5W173M53FMZG7DAWPR121Q — AC1)
+// The writeRetroProposal tool description must enumerate exactly the types in
+// RETRO_PROPOSAL_TYPES, derived from the constant rather than a hardcoded count
+// (the contract has already drifted 7 → 11 → 13).
+// ---------------------------------------------------------------------------
+
+describe("WRITE_RETRO_PROPOSAL_DESCRIPTION — AC1: enumerates exactly RETRO_PROPOSAL_TYPES", () => {
+  it("lists every accepted proposal type, derived from the constant", () => {
+    for (const type of RETRO_PROPOSAL_TYPES) {
+      expect(WRITE_RETRO_PROPOSAL_DESCRIPTION).toContain(type);
+    }
+  });
+
+  it("states the type count derived from the constant, not a hardcoded number", () => {
+    // The count must equal RETRO_PROPOSAL_TYPES.length, so it can never drift.
+    expect(WRITE_RETRO_PROPOSAL_DESCRIPTION).toContain(
+      `${RETRO_PROPOSAL_TYPES.length} types`,
+    );
+    // The stale hardcoded count from the original seven-variant era must be gone.
+    expect(WRITE_RETRO_PROPOSAL_DESCRIPTION).not.toContain("seven types");
+  });
+
+  it("does not enumerate any type that is not in RETRO_PROPOSAL_TYPES", () => {
+    // Extract the parenthesised "(a, b, c)" type list that follows "N types".
+    const match = WRITE_RETRO_PROPOSAL_DESCRIPTION.match(
+      /\d+ types \(([^)]+)\)/,
+    );
+    expect(match).not.toBeNull();
+    const listed = match![1]!.split(",").map((s) => s.trim());
+    // The listed set equals RETRO_PROPOSAL_TYPES exactly — order-preserving,
+    // no extras, no omissions.
+    expect(listed).toEqual([...RETRO_PROPOSAL_TYPES]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every proposal type round-trips through the schema validator
+// (Story native:01KW5W173M53FMZG7DAWPR121Q — AC2)
+// Each type in RETRO_PROPOSAL_TYPES — including the ones added since the
+// original seven — must validate cleanly through parseRetroProposalFile.
+// ---------------------------------------------------------------------------
+
+describe("RETRO_PROPOSAL_TYPES — AC2: every type round-trips through the schema validator", () => {
+  const ISO_RT = "2026-06-29T12:00:00.000Z";
+  const RT_ID = "01HZRETR00000000000000RT01";
+  const RT_RULE_ID = "01HZRETR00000000000000RT02";
+
+  // One minimal valid fixture per accepted proposal type. Keyed by the
+  // discriminator literal so the test can assert full coverage of
+  // RETRO_PROPOSAL_TYPES below.
+  const FIXTURES: Record<(typeof RETRO_PROPOSAL_TYPES)[number], unknown> = {
+    rule: {
+      type: "rule",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "A rule rationale.",
+      text: "A rule.",
+      target_failure_class: "some-class",
+      recommended_promotion_level: "must",
+    },
+    "rule-retirement": {
+      type: "rule-retirement",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Rule never fires.",
+      target_rule_id: RT_RULE_ID,
+      fire_count_over_window: 0,
+      recommended_action: "retire",
+    },
+    "skill-create": {
+      type: "skill-create",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Operators need a wrapper.",
+      proposed_path: ".flow/skills/do-x.md",
+      frontmatter_description: "Skill that helps do X.",
+      body: "# Do X\n\nBody.\n",
+    },
+    "skill-revise": {
+      type: "skill-revise",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Tighten the skill.",
+      target_skill_path: ".flow/skills/do-x.md",
+      revised_body: "# Do X (revised)\n\nShorter.\n",
+      version_bump: "patch",
+    },
+    "skill-supersede": {
+      type: "skill-supersede",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Replace the skill wholesale.",
+      superseded_skill_path: ".flow/skills/old.md",
+      replacement: {
+        proposed_path: ".flow/skills/new.md",
+        frontmatter_description: "Replacement skill.",
+        body: "# New\n\nBody.\n",
+      },
+    },
+    "skill-retire": {
+      type: "skill-retire",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Skill never fired.",
+      target_skill_path: ".flow/skills/dead.md",
+      last_invoked_at: null,
+    },
+    "team-change": {
+      type: "team-change",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Security verdicts keep surfacing.",
+      action: "hire",
+      target_role: "security-reviewer",
+      justification: "12 fires in 10 cycles.",
+      predicted_impact: { affected_failure_classes: ["security-audit"] },
+    },
+    "persona-append": {
+      type: "persona-append",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Dev forgot the locked phrase.",
+      target_role: "generalist-dev",
+      lesson: "Always emit the locked handoff phrase last.",
+    },
+    "promote-lesson-to-skill": {
+      type: "promote-lesson-to-skill",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Lesson is reusable across roles.",
+      target_role: "generalist-dev",
+      lesson_id: RT_RULE_ID,
+      proposed_skill_path: ".flow/skills/pre-flight.md",
+      skill_description: "Pre-flight checklist skill.",
+      skill_body: "# Pre-flight\n\nSteps.\n",
+      when_to_use: "Run before every story claim.",
+    },
+    "build-story": {
+      type: "build-story",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Engine-targeted skill change needs a build story.",
+      suggested_title: "Revise core skill via build-and-review",
+      skill_change_context:
+        "skill-revise targeting plugins/flow/catalogue/retro-analyst.md",
+    },
+    "lesson-consolidation": {
+      type: "lesson-consolidation",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Two near-duplicate lessons.",
+      target_role: "generalist-dev",
+      lesson_a_id: RT_RULE_ID,
+      lesson_b_id: RT_ID,
+      lesson_a_text: "Lesson A text.",
+      lesson_b_text: "Lesson B text.",
+      merged_lesson: "Merged sharper lesson.",
+    },
+    "lesson-retirement": {
+      type: "lesson-retirement",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "These lessons never earned keep.",
+      target_role: "generalist-dev",
+      lesson_retirements: [{ id: RT_RULE_ID, reason: "Never fired." }],
+    },
+    "shared-skill-promotion": {
+      type: "shared-skill-promotion",
+      id: RT_ID,
+      created_at: ISO_RT,
+      rationale: "Two roles share the same lesson.",
+      sharing_roles: ["generalist-dev", "generalist-reviewer"],
+      shared_lesson_text: "Shared lesson text.",
+      representative_lesson_id: RT_RULE_ID,
+      proposed_skill_path: ".flow/skills/shared.md",
+      skill_description: "Shared skill.",
+    },
+  };
+
+  it("has a fixture for every type in RETRO_PROPOSAL_TYPES (no type left untested)", () => {
+    expect(Object.keys(FIXTURES).sort()).toEqual(
+      [...RETRO_PROPOSAL_TYPES].sort(),
+    );
+  });
+
+  it.each([...RETRO_PROPOSAL_TYPES])(
+    "round-trips a '%s' proposal through parseRetroProposalFile",
+    (type) => {
+      const file = parseRetroProposalFile({
+        iso_timestamp: ISO_RT,
+        cycle_window: null,
+        proposals: [FIXTURES[type]],
+      });
+      expect(file.proposals).toHaveLength(1);
+      expect(file.proposals[0]!.type).toBe(type);
+    },
+  );
+
+  it("validates all types together in a single file", () => {
+    const file = parseRetroProposalFile({
+      iso_timestamp: ISO_RT,
+      cycle_window: null,
+      proposals: RETRO_PROPOSAL_TYPES.map((t) => FIXTURES[t]),
+    });
+    expect(file.proposals.map((p) => p.type)).toEqual([
+      ...RETRO_PROPOSAL_TYPES,
+    ]);
   });
 });

@@ -75,7 +75,10 @@ import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
 import { recordReviewerLesson } from "./record-reviewer-lesson.js";
-import { writeRetroProposal } from "./write-retro-proposal.js";
+import {
+  writeRetroProposal,
+  WRITE_RETRO_PROPOSAL_DESCRIPTION,
+} from "./write-retro-proposal.js";
 import { acceptProposal } from "./accept-proposal.js";
 import { gatherRetroInputs } from "./gather-retro-inputs.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
@@ -899,15 +902,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
   // timestamp. FR58, FR59.
   server.registerTool({
     name: "writeRetroProposal",
-    description:
-      "Write a single immutable retro-proposal markdown file under " +
-      "<target-repo>/.flow/retro-proposals/<isoTimestamp>.md. The file carries a YAML " +
-      "frontmatter block (validated via RetroProposalFileSchema; source of truth for " +
-      "Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per " +
-      "proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are " +
-      "immutable). Refuses malformed payloads with MalformedRetroProposalError — closed " +
-      "discriminated union over seven types (rule, rule-retirement, skill-create, " +
-      "skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
+    description: WRITE_RETRO_PROPOSAL_DESCRIPTION,
     inputSchema: writeRetroProposalInputSchema,
     handler: async (args) => {
       try {
